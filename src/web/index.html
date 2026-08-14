@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-commander</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🛰</text></svg>" />
+  </head>
+  <body>
+    <header class="topbar">
+      <h1>agent<span>-commander</span></h1>
+      <div class="filters" id="filters" role="group" aria-label="Filter by status"></div>
+      <div class="conn" id="conn" data-state="connecting">connecting…</div>
+    </header>
+
+    <main class="layout">
+      <section class="fleet-col" aria-label="Agents">
+        <div class="searchbar">
+          <input
+            id="search"
+            type="search"
+            placeholder="Filter agents…"
+            aria-label="Filter agents by name, folder, branch or activity"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <kbd class="slash-hint" id="slash-hint">/</kbd>
+        </div>
+        <div class="fleet" id="fleet"></div>
+      </section>
+      <section class="detail" id="detail" hidden aria-label="Agent detail"></section>
+    </main>
+
+    <div class="toast" id="toast" hidden role="status"></div>
+    <div class="sr-only" id="live-region" role="status" aria-live="polite"></div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
