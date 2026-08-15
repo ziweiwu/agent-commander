@@ -1,10 +1,34 @@
 /** Tests for the guardrails: what may bind, and what may reach a live agent. */
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { DEV_PORT, defaultWebRoot, parseArgs, PROD_PORT } from '../src/server/cli.ts'
 import { capture, key, meta, paste, PaneError } from '../src/server/pane.ts'
 import { ALLOWED_KEYS, DESTRUCTIVE_KEYS } from '../src/shared/types.ts'
+
+/**
+ * npm installs `bin` as a symlink, so argv[1] is `<prefix>/bin/agent-commander`
+ * while import.meta.url is the real dist/server/cli.js. 0.1.0 through 0.1.3
+ * compared those as strings, decided it had been imported rather than run, and
+ * shipped a binary that started a process which did nothing at all -- no
+ * output, no port, no error. A unit test cannot see that, so this runs the
+ * built CLI through a symlink the way npm would.
+ */
+describe('the installed binary actually runs', () => {
+  it('starts when invoked through a bin symlink', async () => {
+    const built = resolve('dist/server/cli.js')
+    if (!existsSync(built)) return // needs `npm run build`; covered in CI, which builds first
+    const dir = mkdtempSync(join(tmpdir(), 'ac-bin-'))
+    const link = join(dir, 'agent-commander')
+    symlinkSync(built, link)
+    const out = execFileSync(process.execPath, [link, '--help'], { encoding: 'utf8' })
+    expect(out).toContain('Usage: agent-commander')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
 
 describe('parseArgs', () => {
   it('defaults to loopback', () => {

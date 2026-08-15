@@ -8,7 +8,7 @@
  * the network.
  */
 import { randomBytes } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -355,9 +355,27 @@ async function main(): Promise<void> {
   process.on('SIGTERM', shutdown)
 }
 
+/**
+ * Whether this file was run as the program, rather than imported by a test.
+ *
+ * Compared through `realpathSync`, because npm installs the `bin` as a symlink:
+ * argv[1] is `<prefix>/bin/agent-commander` while `import.meta.url` is the real
+ * `dist/server/cli.js` it points at. A plain string compare says those differ,
+ * `main()` never runs, and the published binary starts a process that does
+ * absolutely nothing -- no output, no port, no error. That is exactly what
+ * shipped in 0.1.0 through 0.1.3.
+ */
+function sameFile(a: string, b: string): boolean {
+  try {
+    return realpathSync(a) === realpathSync(b)
+  } catch {
+    return false
+  }
+}
+
 const invokedDirectly =
   process.argv[1] !== undefined &&
-  (resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url)) ||
+  (sameFile(process.argv[1], fileURLToPath(import.meta.url)) ||
     resolve(process.argv[1]) === join(HERE, 'cli.ts'))
 
 if (invokedDirectly) void main()
