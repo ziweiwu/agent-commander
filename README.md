@@ -292,8 +292,28 @@ React 19 + Vite for the browser bundle, a dependency-free Node server, and
 Vitest in two projects — node for logic and server, jsdom for components.
 Node >= 20.
 
+**Ports are split so development can never masquerade as production.** 4317
+serves real agents and nothing in development binds it: `--mock` on 4317 is
+refused outright, because a fixture fleet at the address your real one lives at
+is indistinguishable from your real one having vanished — and the composer on
+that page would be typing into nothing.
+
+| Port | What runs there |
+|---|---|
+| 4317 | Production. Real agents. `npm start`, `npm run serve`, the installed binary. |
+| 4400 | Development. `npm run dev`, `npm run mock`, and what the audit scripts target by default. |
+| 4500 | `qa-sweep.sh`, which refuses 4317 for the same reason. |
+
+Any of it moves with `-p` / `--port`, including past an npm script's own
+default, since the last one given wins:
+
 ```
-npm run mock       # fixture agents — safe to iterate against
+agent-commander -p 5000
+npm run mock -- -p 4501
+```
+
+```
+npm run mock       # fixture agents on 4400 — safe to iterate against
 npm test           # 377 tests: pure logic, server, and React components
 npm run typecheck
 npm run lint

@@ -29,6 +29,19 @@ import type { GoalState } from '../shared/types.ts'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1'])
 
+/**
+ * The production port, and the only one that ever serves real agents.
+ *
+ * Nothing in development binds it: `npm run dev` and `npm run mock` pass
+ * DEV_PORT explicitly, `qa-sweep.sh` refuses it outright, and the audits
+ * default elsewhere. Keeping the two apart is what stops a fixture fleet from
+ * appearing at the address the real one lives at.
+ */
+export const PROD_PORT = 4317
+
+/** Where development serves instead. Also what the audit scripts target. */
+export const DEV_PORT = 4400
+
 interface Options {
   port: number
   host: string
@@ -53,7 +66,7 @@ export function defaultWebRoot(here = HERE): string {
 
 export function parseArgs(argv: string[]): Options {
   const opts: Options = {
-    port: 4317,
+    port: PROD_PORT,
     host: '127.0.0.1',
     mock: false,
     mockTransitions: false,
@@ -108,6 +121,19 @@ export function parseArgs(argv: string[]): Options {
   }
   if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535) {
     throw new Error(`invalid port: ${opts.port}`)
+  }
+  /*
+   * Fixtures must never be served at the address the real fleet lives at.
+   * Someone who opens 4317 out of habit and finds nine invented agents has no
+   * way to tell that from their own having vanished -- and the composer on that
+   * page would then be typing into nothing. qa-sweep.sh already refuses this
+   * port for the same reason; this closes the same hole one level down.
+   */
+  if (opts.mock && opts.port === PROD_PORT) {
+    throw new Error(
+      `refusing to serve mock fixtures on ${PROD_PORT} -- that is the production port.\n` +
+        `Use --port ${DEV_PORT} for development.`,
+    )
   }
   if (opts.token === 'auto') opts.token = randomBytes(16).toString('hex')
   // INV-3
@@ -184,7 +210,7 @@ function printHelp(): void {
       '',
       'Usage: agent-commander [options]',
       '',
-      '  -p, --port <n>     port to listen on (default 4317)',
+      `  -p, --port <n>     port to listen on (default ${PROD_PORT})`,
       '      --host <addr>  bind address (default 127.0.0.1; requires --token if not loopback)',
       '      --token <s>    require this token; "auto" generates one',
       '      --mock         serve fixture agents, touching nothing real',

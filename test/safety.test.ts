@@ -2,7 +2,7 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { defaultWebRoot, parseArgs } from '../src/server/cli.ts'
+import { DEV_PORT, defaultWebRoot, parseArgs, PROD_PORT } from '../src/server/cli.ts'
 import { capture, key, meta, paste, PaneError } from '../src/server/pane.ts'
 import { ALLOWED_KEYS, DESTRUCTIVE_KEYS } from '../src/shared/types.ts'
 
@@ -27,6 +27,28 @@ describe('parseArgs', () => {
     for (const host of ['127.0.0.1', 'localhost', '::1']) {
       expect(() => parseArgs(['--host', host])).not.toThrow()
     }
+  })
+
+  /*
+   * Fixtures at the production address are indistinguishable, to the person
+   * looking at them, from their real fleet having disappeared -- and the
+   * composer on that page would be typing into nothing.
+   */
+  it('refuses to serve mock fixtures on the production port', () => {
+    expect(() => parseArgs(['--mock'])).toThrow(/production port/)
+    expect(() => parseArgs(['--mock', '--port', String(PROD_PORT)])).toThrow(/production port/)
+    expect(() => parseArgs(['--mock-transitions'])).toThrow(/production port/)
+  })
+
+  it('serves mock fixtures anywhere else, and real agents on the production port', () => {
+    expect(parseArgs(['--mock', '--port', String(DEV_PORT)]).port).toBe(DEV_PORT)
+    expect(parseArgs([]).port).toBe(PROD_PORT)
+    expect(parseArgs([]).mock).toBe(false)
+  })
+
+  /** The npm scripts pass a dev port; an explicit one after it must still win. */
+  it('lets a later --port override an earlier one', () => {
+    expect(parseArgs(['--mock', '--port', String(DEV_PORT), '--port', '4501']).port).toBe(4501)
   })
 
   it('generates a token for --token auto', () => {
