@@ -1,0 +1,67 @@
+.wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--faint);
+  flex: none;
+}
+
+.select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--text-base);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+@media (pointer: coarse) {
+  .select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
+.dir {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
+  min-height: 40px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dir:hover {
+  border-color: var(--focus);
+  color: var(--text);
+}
+
+@media (pointer: coarse) {
+  .dir {
+    min-height: 44px;
+  }
+}
+
+/* On a narrow column the arrow alone carries it; the word is the tooltip. */
+@media (max-width: 420px) {
+  .senseLabel {
+    display: none;
+  }
+}

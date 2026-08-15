@@ -1,0 +1,269 @@
+import { useEffect, useRef } from 'react'
+import { Outlet, useNavigate, useParams, useLocation } from 'react-router-dom'
+import { useStore } from '../store/store.ts'
+import { focusAgent, setAttached } from '../store/transport.ts'
+import { countByGroup, type StatusFilter } from '../lib/filter.ts'
+import { useIsNarrow } from '../hooks/useMediaQuery.ts'
+import { useTranslate } from '../hooks/useTranslate.ts'
+import { FleetList } from './FleetList.tsx'
+import { AgentDetail } from './AgentDetail.tsx'
+import { NewAgentDialog } from './NewAgentDialog.tsx'
+import { SettingsMenu } from './SettingsMenu.tsx'
+import { Button, Chip } from './ui/Button.tsx'
+import { UsageChips } from './UsageChips.tsx'
+import styles from './App.module.css'
+
+/** Shell: topbar, layout, global keyboard. Routes render through `Outlet`. */
+export function App() {
+  const t = useTranslate()
+  const navigate = useNavigate()
+  const location = useLocation()
+  const narrow = useIsNarrow()
+
+  const mock = useStore((s) => s.mock)
+  const conn = useStore((s) => s.conn)
+  const toast = useStore((s) => s.toast)
+  const selected = useStore((s) => s.selected)
+  const fullscreen = useStore((s) => s.fullscreen)
+  const newAgentOpen = useStore((s) => s.newAgentOpen)
+  const setNewAgentOpen = useStore((s) => s.setNewAgentOpen)
+  const setFullscreen = useStore((s) => s.setFullscreen)
+  const setQuery = useStore((s) => s.setQuery)
+
+  const searchRef = useRef<HTMLInputElement>(null)
+  const isHelp = location.pathname.startsWith('/help')
+  const sheetMode = narrow && selected !== null && !isHelp
+
+  // Modals and the mobile sheet own the screen; the page behind must not scroll.
+  useEffect(() => {
+    document.body.classList.toggle('no-scroll', sheetMode || newAgentOpen || fullscreen)
+  }, [sheetMode, newAgentOpen, fullscreen])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null
+      const typing =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.closest('[data-testid="term-wrap"]') !== null
+
+      if (e.key === '/' && !typing) {
+        e.preventDefault()
+        searchRef.current?.focus()
+        searchRef.current?.select()
+        return
+      }
+
+      // Shift+Escape steps back one level rather than leaving outright. From
+      // full screen that means the panel, not the list: jumping straight to the
+      // list threw away two levels at once and left focus on <body>, and from
+      // the terminal — where plain Escape belongs to the agent — this is the
+      // only way out, so it has to be the predictable one.
+      if (e.key === 'Escape' && e.shiftKey && selected) {
+        e.preventDefault()
+        if (fullscreen) setFullscreen(false)
+        else navigate('/')
+        return
+      }
+
+      if (e.key === 'Escape') {
+        if (newAgentOpen) {
+          e.preventDefault()
+          setNewAgentOpen(false)
+          return
+        }
+        // Checked before full screen, not after. Plain Escape inside the
+        // terminal interrupts the agent (INV-6 guards it with a confirmation),
+        // and it must not also collapse the view out from under that dialog —
+        // which is what answering the confirmation used to do.
+        if (target?.closest('[data-testid="term-wrap"]')) return
+        if (fullscreen) {
+          e.preventDefault()
+          setFullscreen(false)
+          return
+        }
+        if (target === searchRef.current && searchRef.current?.value) {
+          setQuery('')
+          return
+        }
+        if (selected) {
+          e.preventDefault()
+          navigate('/')
+        }
+        return
+      }
+
+      if (typing && target !== searchRef.current) return
+
+      if (e.key === 'ArrowDown' || e.key === 'j') {
+        e.preventDefault()
+        moveCardFocus(1)
+      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+        e.preventDefault()
+        moveCardFocus(-1)
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [selected, newAgentOpen, fullscreen, navigate, setNewAgentOpen, setFullscreen, setQuery])
+
+  return (
+    <div className={`${styles.app} ${sheetMode ? styles.sheetMode : ''}`}>
+      {mock && (
+        <div className={styles.mockBanner}>mock mode — fixtures, nothing real is touched</div>
+      )}
+
+      <header className={styles.topbar}>
+        <h1 className={styles.title}>
+          agent<span>-commander</span>
+        </h1>
+        {isHelp ? <span className={styles.spacer} /> : <Filters />}
+        <UsageChips />
+        <Button
+          variant="icon"
+          data-testid="help-button"
+          title={t('help')}
+          aria-label={t('help')}
+          aria-pressed={isHelp}
+          onClick={() => navigate(isHelp ? '/' : '/help')}
+        >
+          ?
+        </Button>
+        <SettingsMenu />
+        <div className={styles.conn} data-testid="connection-status" data-state={conn}>
+          {t(conn === 'open' ? 'connLive' : conn === 'closed' ? 'connReconnecting' : 'connConnecting')}
+        </div>
+      </header>
+
+      <Outlet context={{ searchRef, narrow }} />
+
+      <NewAgentDialog />
+      {toast && (
+        <div className={styles.toast} role="status" data-testid="toast">
+          {toast}
+        </div>
+      )}
+      <div className="sr-only" id="live-region" role="status" aria-live="polite" />
+    </div>
+  )
+}
+
+function Filters() {
+  const t = useTranslate()
+  const agents = useStore((s) => s.agents)
+  const filter = useStore((s) => s.fleet.filter)
+  const setFilter = useStore((s) => s.setFilter)
+  const counts = countByGroup(agents)
+
+  const chip = (key: StatusFilter, label: string, count: number) => (
+    <Chip
+      key={key}
+      data-testid="filter-chip"
+      data-key={key}
+      aria-pressed={filter === key}
+      onClick={() => setFilter(filter === key ? 'all' : key)}
+    >
+      {/*
+        * A glyph, not just the fill colour. The filter now survives a reload,
+        * so the common case is arriving at a dashboard that is already filtered
+        * without having just clicked anything — and "8 agents are hidden" read
+        * only from a hue difference is how this app comes to look like agents
+        * vanished. aria-hidden because aria-pressed already says it.
+        */}
+      {filter === key && key !== 'all' && (
+        <span className={styles.chipMark} aria-hidden="true">
+          ✓
+        </span>
+      )}
+      <b>{count}</b> {label}
+    </Chip>
+  )
+
+  return (
+    <div className={styles.filters}>
+      {chip('all', t('filterAll'), agents.length)}
+      {counts.waiting > 0 && chip('waiting', t('filterWaiting'), counts.waiting)}
+      {counts.busy > 0 && chip('busy', t('filterBusy'), counts.busy)}
+      {counts.idle > 0 && chip('idle', t('filterIdle'), counts.idle)}
+    </div>
+  )
+}
+
+function moveCardFocus(delta: number): void {
+  const list = [...document.querySelectorAll<HTMLElement>('[data-testid="agent-card"]')]
+  if (list.length === 0) return
+  const active = (document.activeElement as HTMLElement | null)?.closest<HTMLElement>(
+    '[data-testid="agent-card"]',
+  )
+  const index = active ? list.indexOf(active) : -1
+  const next = list[Math.max(0, Math.min(list.length - 1, index + delta))] ?? list[0]
+  next?.focus()
+}
+
+/**
+ * The fleet route. The URL owns which agent is open; this keeps the transport's
+ * idea of "focused" in step with it, including on a reload straight into
+ * /agent/:sessionId.
+ */
+export function FleetRoute() {
+  const navigate = useNavigate()
+  const narrow = useIsNarrow()
+  const { sessionId } = useParams()
+  const location = useLocation()
+  const agents = useStore((s) => s.agents)
+  const selected = useStore((s) => s.selected)
+  const tab = useStore((s) => s.tab)
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  const wantTab = location.pathname.endsWith('/term') ? 'attach' : 'chat'
+  const agent = agents.find((a) => a.sessionId === sessionId)
+
+  useEffect(() => {
+    focusAgent(sessionId ?? null)
+  }, [sessionId])
+
+  // A blocked agent is opened to answer its dialog, which only the terminal can
+  // do, so redirect to the terminal tab rather than making the user find it.
+  useEffect(() => {
+    if (!agent) return
+    if (wantTab === 'chat' && agent.status === 'waiting' && agent.paneId) {
+      navigate(`/agent/${agent.sessionId}/term`, { replace: true })
+    }
+  }, [agent?.sessionId, agent?.status, agent?.paneId, wantTab, navigate, agent])
+
+  useEffect(() => {
+    if (!sessionId) return
+    setAttached(wantTab === 'attach')
+  }, [sessionId, wantTab])
+
+  // The agent ended while it was open.
+  useEffect(() => {
+    if (sessionId && agents.length > 0 && !agent) navigate('/', { replace: true })
+  }, [sessionId, agent, agents.length, navigate])
+
+  const showDetail = Boolean(agent)
+
+  return (
+    <main className={`${styles.layout} ${showDetail ? '' : styles.solo}`}>
+      {!(narrow && showDetail) && (
+        <FleetList
+          tiled={!showDetail}
+          selected={selected}
+          searchRef={searchRef}
+          onSelect={(id) => navigate(`/agent/${id}`)}
+        />
+      )}
+      {agent && (
+        <AgentDetail
+          agent={agent}
+          tab={tab}
+          sheet={narrow}
+          onTab={(next) =>
+            navigate(next === 'attach' ? `/agent/${agent.sessionId}/term` : `/agent/${agent.sessionId}`)
+          }
+          onClose={() => navigate('/')}
+        />
+      )}
+    </main>
+  )
+}

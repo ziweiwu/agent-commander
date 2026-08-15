@@ -7,7 +7,7 @@
  * as separate utterances, and consecutive messages from the same speaker
  * grouped under one header.
  */
-import type { TimelineEvent } from '../shared/types.ts'
+import type { TimelineEvent } from '../../shared/types.ts'
 
 export type Role = 'you' | 'agent'
 
@@ -117,9 +117,19 @@ export interface Span {
   text: string
 }
 
-// Order matters: code first so backticks win over emphasis inside them, and
-// **bold** before *italic* so the double marker is not eaten as two italics.
-const INLINE = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|(?:\*|_)([^*_\n]+)(?:\*|_)/g
+/*
+ * Order matters: code first so backticks win over emphasis inside them, and
+ * **bold** before *italic* so the double marker is not eaten as two italics.
+ *
+ * The two emphasis forms are separate rules, each requiring its own delimiter
+ * on both sides. A single combined `(?:\*|_)…(?:\*|_)` let `*` close with `_`,
+ * and matched underscores inside a word — so `__init__.py` rendered as
+ * `_init_.py` and `react_hig_datepicker` lost its underscores. Underscore
+ * emphasis therefore also requires a non-word character on each side, which is
+ * how CommonMark avoids exactly this.
+ */
+const INLINE =
+  /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(?<![A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])/g
 
 /**
  * Parse the small subset of markdown agents actually use in prose.
@@ -137,8 +147,28 @@ export function parseInline(text: string): Span[] {
     if (m[1] !== undefined) spans.push({ kind: 'code', text: m[1] })
     else if (m[2] !== undefined) spans.push({ kind: 'bold', text: m[2] })
     else if (m[3] !== undefined) spans.push({ kind: 'italic', text: m[3] })
+    else if (m[4] !== undefined) spans.push({ kind: 'italic', text: m[4] })
     last = m.index + m[0].length
   }
   if (last < text.length) spans.push({ kind: 'text', text: text.slice(last) })
   return spans.length > 0 ? spans : [{ kind: 'text', text }]
+}
+
+/**
+ * Render inline markdown as plain text, for somewhere that cannot show it.
+ *
+ * The card's activity line is a single row of text, so `**bold**` and
+ * `` `code` `` would otherwise show their markers.
+ *
+ * Only *matched* markers are removed — the same ones `parseInline` recognises.
+ * A blanket strip was tried and reverted: it deleted every literal `*`, `_` and
+ * backtick, turning "5 * 3 = 15" into "5  3 = 15" and "__init__.py" into
+ * "init.py". An unpaired marker left visible is a cosmetic blemish; silently
+ * corrupting a filename or a sum is a lie about what the agent said.
+ */
+export function plainText(text: string): string {
+  return parseInline(text)
+    .map((span) => span.text)
+    .join('')
+    .trim()
 }

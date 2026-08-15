@@ -1,0 +1,71 @@
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-sm);
+  color: var(--faint);
+  flex: none;
+}
+
+.select {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  min-height: 34px;
+  cursor: pointer;
+  max-width: 170px;
+}
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+.close:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+@media (pointer: coarse) {
+  .select {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 560px) {
+  .controls {
+    padding: 8px 12px;
+    gap: 6px;
+  }
+  .select {
+    max-width: 130px;
+  }
+}
+
+@media (max-height: 520px) and (pointer: coarse) {
+  .controls {
+    padding: 4px 12px;
+  }
+}

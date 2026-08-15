@@ -1,0 +1,110 @@
+.btn {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  min-height: 40px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-base);
+  height: fit-content;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--focus);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.primary {
+  border-color: color-mix(in srgb, var(--focus) 55%, transparent);
+  background: color-mix(in srgb, var(--focus) 16%, transparent);
+}
+
+.compact {
+  padding: 6px 11px;
+  min-height: 36px;
+  font-size: var(--text-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  min-height: 34px;
+  font-size: var(--text-lg);
+  border-radius: var(--radius-md);
+}
+
+.chip {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  padding: 4px 11px;
+  min-height: 30px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.chip b {
+  color: var(--text);
+  font-weight: 650;
+}
+.chip:hover {
+  border-color: var(--focus);
+}
+.chip[aria-pressed='true'] {
+  border-color: var(--focus);
+  color: var(--text);
+  background: color-mix(in srgb, var(--focus) 15%, transparent);
+}
+
+@media (pointer: coarse) {
+  .btn {
+    min-height: 44px;
+  }
+  .compact {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .icon {
+    min-height: 44px;
+    width: 44px;
+    min-width: 44px;
+  }
+  .chip {
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+}
+
+/* Sized by width as well as pointer type, so a narrowed desktop window gets the
+   same comfortable targets as a phone. */
+@media (max-width: 560px) {
+  .chip {
+    min-height: 40px;
+    padding: 7px 13px;
+  }
+  .icon {
+    min-height: 40px;
+    width: 40px;
+    min-width: 40px;
+  }
+  .compact {
+    min-height: 40px;
+    min-width: 40px;
+  }
+}

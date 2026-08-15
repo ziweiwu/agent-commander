@@ -1,0 +1,97 @@
+/**
+ * Design tokens.
+ *
+ * Three theme states have to work: an explicit light or dark choice, written as
+ * `data-theme` on <html>, and "system", which removes the attribute entirely so
+ * the media query decides. Dark is the base; light is layered over it, once for
+ * the system preference and once for the explicit choice.
+ */
+
+:root {
+  --bg: #0e1116;
+  --panel: #161b22;
+  --panel-2: #1c2230;
+  /* Decorative rules and separators. WCAG 1.4.11 exempts these. */
+  --line: #262d3a;
+  /* The edge of an interactive control. The surfaces themselves differ by only
+     ~1.09:1, so this border is the only thing telling you where a card, input
+     or select begins — 1.4.11 requires 3:1 for exactly that. */
+  --line-strong: #656c79;
+  --text: #e6edf3;
+  --dim: #97a3b4;
+  --faint: #7f8b9a;
+  --busy: #4ea8ff;
+  --waiting: #ffb648;
+  --idle: #7f8b9a;
+  --accent: #7ee787;
+  --danger: #ff6b6b;
+  --focus: #4ea8ff;
+
+  /* Type scale. Six steps; anything between them was drift. */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-base: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 17px;
+  /* 16px is not a scale step but a requirement: iOS zooms a focused field
+     under it. Used verbatim in the coarse-pointer rules. */
+
+  /* Radius scale. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-pill: 999px;
+
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* The light palette, applied from two places: an explicit choice, and the
+   system preference when no choice has been made. */
+:root[data-theme='light'] {
+  --bg: #f6f7f9;
+  --panel: #ffffff;
+  --panel-2: #eef1f5;
+  --line: #dfe3e8;
+  --line-strong: #878b90;
+  --text: #1b2430;
+  --dim: #55606d;
+  --faint: #636e7c;
+  --busy: #0b6dcc;
+  --waiting: #9a5800;
+  --idle: #636e7c;
+  --accent: #1a7d36;
+  --danger: #c62828;
+  --focus: #0b6fd0;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+/* "System" leaves no attribute, so the media query is what decides. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #eef1f5;
+    --line: #dfe3e8;
+    --line-strong: #878b90;
+    --text: #1b2430;
+    --dim: #55606d;
+    --faint: #636e7c;
+    --busy: #0b6dcc;
+    --waiting: #9a5800;
+    --idle: #636e7c;
+    --accent: #1a7d36;
+    --danger: #c62828;
+    --focus: #0b6fd0;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+/* An explicit dark choice must win over a light system preference. */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}

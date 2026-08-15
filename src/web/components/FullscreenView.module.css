@@ -1,0 +1,107 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  /* The overlay is the viewport; nothing inside it may widen the page. */
+  overflow: hidden;
+  z-index: 100;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
+    max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  gap: 8px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+  min-width: 0;
+}
+
+.title {
+  font-weight: 650;
+  font-size: var(--text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+
+.tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  padding: 8px 12px;
+  min-height: 40px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-base);
+}
+.tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--focus);
+}
+.tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The view fills what is left; chat and terminal each manage their own scroll. */
+.body {
+  flex: 1;
+  min-height: 0;
+  /* Vertical centring only. Horizontal centring happens inside the terminal's
+     own host, which must keep its full width so the pane can be measured. */
+  justify-content: center;
+  /* Without this a wide child (the terminal before it is scaled) pushes the
+     column wider than the screen instead of scrolling inside it. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+
+@media (pointer: coarse) {
+  .tab {
+    min-height: 44px;
+  }
+}
+
+/* Portrait phones: the title can wrap to its own row rather than crushing tabs. */
+@media (max-width: 560px) {
+  .head {
+    gap: 8px;
+  }
+  .title {
+    font-size: var(--text-sm);
+  }
+  .tab {
+    padding: 8px 10px;
+  }
+}
+
+/* Landscape phones have ~380px of height, so every fixed row must earn it. */
+@media (max-height: 520px) and (pointer: coarse) {
+  .overlay {
+    gap: 4px;
+    padding-top: max(4px, env(safe-area-inset-top));
+    padding-bottom: max(4px, env(safe-area-inset-bottom));
+  }
+  .tab {
+    min-height: 44px;
+    padding: 6px 12px;
+  }
+  .title {
+    font-size: var(--text-sm);
+  }
+}

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { buildMessages, parseInline, pendingMessage, reconcile } from '../src/web/chat.ts'
-import { dayLabel } from '../src/web/format.ts'
+import { buildMessages, parseInline, pendingMessage, plainText, reconcile } from '../src/web/lib/chat.ts'
+import { dayMark } from '../src/web/lib/format.ts'
+import { translate } from '../src/web/lib/i18n.ts'
+import { formatDay } from '../src/web/lib/i18n.ts'
 import type { TimelineEvent } from '../src/shared/types.ts'
 
 let seq = 0
@@ -122,16 +124,22 @@ describe('reconcile', () => {
   })
 })
 
-describe('dayLabel', () => {
+describe('day separators', () => {
   const now = new Date(2026, 7, 14, 12, 0, 0).getTime()
+  const en = (at: number) => formatDay('en', dayMark(at, now))
 
   it('names today and yesterday', () => {
-    expect(dayLabel(new Date(2026, 7, 14, 9, 0).getTime(), now)).toBe('Today')
-    expect(dayLabel(new Date(2026, 7, 13, 23, 0).getTime(), now)).toBe('Yesterday')
+    expect(en(new Date(2026, 7, 14, 9, 0).getTime())).toBe('Today')
+    expect(en(new Date(2026, 7, 13, 23, 0).getTime())).toBe('Yesterday')
   })
 
   it('falls back to a date further back', () => {
-    expect(dayLabel(new Date(2026, 7, 1).getTime(), now)).toMatch(/Aug/)
+    expect(en(new Date(2026, 7, 1).getTime())).toMatch(/Aug/)
+  })
+
+  it('localises to Chinese', () => {
+    expect(formatDay('zh-CN', dayMark(new Date(2026, 7, 14, 9, 0).getTime(), now))).toBe('今天')
+    expect(formatDay('zh-CN', dayMark(new Date(2026, 7, 13, 9, 0).getTime(), now))).toBe('昨天')
   })
 })
 
@@ -177,5 +185,86 @@ describe('parseInline', () => {
     const first = render('**a**')
     expect(render('**a**')).toBe(first)
     expect(first).toBe('<bold>a</bold>')
+  })
+})
+
+describe('interpolated values', () => {
+  // These come from user input and server errors, so they have no length bound.
+  it('caps a long substituted value rather than echoing it whole', () => {
+    const out = translate('en', 'emptyFilterQuery', { query: 'x'.repeat(500) })
+    expect(out.length).toBeLessThan(120)
+    expect(out).toContain('…')
+  })
+
+  it('leaves a short value untouched', () => {
+    expect(translate('en', 'emptyFilterQuery', { query: 'lego' })).toContain('lego')
+  })
+
+  it('leaves an unknown placeholder in place rather than printing undefined', () => {
+    expect(translate('en', 'emptyFilterQuery', {})).toContain('{query}')
+  })
+})
+
+describe('plainText', () => {
+  // The card's activity line is one row of plain text; matched markdown markers
+  // there are noise the reader has to look past.
+  it('renders matched markdown as its text', () => {
+    expect(plainText('Repo is back to normal. `main` and `skills-find` both build.')).toBe(
+      'Repo is back to normal. main and skills-find both build.',
+    )
+    expect(plainText('**Bug 7** was the best find')).toBe('Bug 7 was the best find')
+  })
+
+  it('leaves ordinary prose untouched', () => {
+    expect(plainText('Rerun the exhaustive sweep')).toBe('Rerun the exhaustive sweep')
+  })
+
+  /*
+   * These are the cases a blanket marker-strip corrupted. Deleting every `*`,
+   * `_` and backtick made "5 * 3 = 15" read "5  3 = 15" and "__init__.py" read
+   * "init.py" — the preview then misrepresents what the agent actually said.
+   * An unpaired marker surviving is the lesser evil, and is asserted below.
+   */
+  it('never alters text that only looks like markdown', () => {
+    expect(plainText('5 * 3 = 15')).toBe('5 * 3 = 15')
+    expect(plainText('renamed __init__.py')).toBe('renamed __init__.py')
+    expect(plainText('react_hig_datepicker downloads')).toBe('react_hig_datepicker downloads')
+    expect(plainText('2 * 3 = 6')).toBe('2 * 3 = 6')
+  })
+
+  it('leaves an unpaired marker visible rather than guessing', () => {
+    expect(plainText('**`react-hig-datepicker`, with 6,306 downloads')).toBe(
+      '**react-hig-datepicker, with 6,306 downloads',
+    )
+  })
+})
+
+describe('parseInline: text that only looks like markdown', () => {
+  const render = (t: string): string =>
+    parseInline(t)
+      .map((s) => (s.kind === 'text' ? s.text : `<${s.kind}>${s.text}</${s.kind}>`))
+      .join('')
+
+  /*
+   * A single combined emphasis rule let `*` close with `_` and matched
+   * underscores inside words, so an agent saying it renamed `__init__.py`
+   * rendered "_init_.py" — the app misquoting the agent.
+   */
+  it('leaves intraword underscores alone', () => {
+    expect(render('renamed __init__.py')).toBe('renamed __init__.py')
+    expect(render('react_hig_datepicker downloads')).toBe('react_hig_datepicker downloads')
+    expect(render('SCREAMING_SNAKE_CASE')).toBe('SCREAMING_SNAKE_CASE')
+  })
+
+  it('still emphasises a properly delimited underscore pair', () => {
+    expect(render('an _emphatic_ point')).toBe('an <italic>emphatic</italic> point')
+  })
+
+  it('does not let one marker close with another', () => {
+    expect(render('*mismatched_')).toBe('*mismatched_')
+  })
+
+  it('leaves lone asterisks in arithmetic alone', () => {
+    expect(render('5 * 3 = 15')).toBe('5 * 3 = 15')
   })
 })

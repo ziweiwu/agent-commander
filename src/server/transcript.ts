@@ -7,8 +7,8 @@
  */
 import { open, readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
-import type { Agent, TimelineEvent } from '../shared/types.ts'
+import { dirname, join } from 'node:path'
+import type { Agent, GoalState, TimelineEvent } from '../shared/types.ts'
 
 const PROJECTS_DIR = join(homedir(), '.claude', 'projects')
 
@@ -19,14 +19,18 @@ const BACKFILL_BYTES = 256 * 1024
 const META_TYPES = new Set([
   'attachment',
   'mode',
-  'permission-mode',
-  'ai-title',
-  'last-prompt',
   'file-history-delta',
   'file-history-snapshot',
   'summary',
   'system',
 ])
+
+/**
+ * Records that are not conversation, but do carry session state the fleet view
+ * needs: which permission mode the agent is in, and the title it generated for
+ * itself — far more use than an auto-derived name like `ziweiwu-35`.
+ */
+const STATE_TYPES = new Set(['permission-mode', 'ai-title', 'last-prompt'])
 
 interface Block {
   type?: string
@@ -42,7 +46,25 @@ interface Record_ {
   isSidechain?: boolean
   gitBranch?: string
   cwd?: string
-  message?: { content?: string | Block[]; usage?: { output_tokens?: number } }
+  permissionMode?: string
+  aiTitle?: string
+  lastPrompt?: string
+  message?: { content?: string | Block[]; usage?: { output_tokens?: number }; model?: string }
+  attachment?: GoalAttachment
+}
+
+/**
+ * The `goal_status` attachment Claude Code writes for `/goal`.
+ *
+ * `sentinel` marks the record written when the goal is set, before anything has
+ * evaluated it; the later records carry the evaluator's `reason` instead.
+ */
+interface GoalAttachment {
+  type?: string
+  met?: boolean
+  sentinel?: boolean
+  condition?: string
+  reason?: string
 }
 
 /**
@@ -71,6 +93,45 @@ export async function findTranscript(
     }
   }
   return null
+}
+
+/**
+ * When a subagent of this session last wrote, or null if none is running.
+ *
+ * A delegated run writes to `<project>/<sessionId>/subagents/*.jsonl` while the
+ * session's own transcript sits still, so this is the only evidence that the
+ * agent is working rather than stuck.
+ *
+ * The directory is stat-ed before it is read: most agents never delegate, and
+ * that keeps the common case at one syscall per poll (INV-4).
+ */
+export async function subagentActivityAt(
+  transcriptPath: string,
+  sessionId: string,
+): Promise<number | null> {
+  const dir = join(dirname(transcriptPath), sessionId, 'subagents')
+  try {
+    await stat(dir)
+  } catch {
+    return null
+  }
+  let names: string[]
+  try {
+    names = await readdir(dir)
+  } catch {
+    return null
+  }
+  let newest = 0
+  for (const name of names) {
+    if (!name.endsWith('.jsonl')) continue
+    try {
+      const info = await stat(join(dir, name))
+      if (info.mtimeMs > newest) newest = info.mtimeMs
+    } catch {
+      // Vanished between readdir and stat; nothing to learn from it.
+    }
+  }
+  return newest > 0 ? newest : null
 }
 
 /** One-line description of a tool call, chosen per tool. */
@@ -108,6 +169,32 @@ export function summarizeTool(name: string, input: Record<string, unknown> | und
 /** Tools that mean this agent has delegated work to subagents. */
 const SUBAGENT_TOOLS = new Set(['Task', 'Agent', 'Workflow'])
 
+/**
+ * Read a goal record, if this line is one.
+ *
+ * Returned rather than assigned so both the tailer and the one-shot reader
+ * below agree on what a `goal_status` record means, down to the timestamp.
+ */
+export function goalFromRecord(rec: {
+  type?: string
+  timestamp?: string
+  attachment?: GoalAttachment
+}): GoalState | null {
+  const att = rec.attachment
+  if (rec.type !== 'attachment' || att?.type !== 'goal_status') return null
+  const condition = typeof att.condition === 'string' ? att.condition : ''
+  if (condition.length === 0) return null
+  const at = rec.timestamp ? Date.parse(rec.timestamp) : Number.NaN
+  const goal: GoalState = {
+    condition,
+    met: att.met === true,
+    at: Number.isFinite(at) ? at : Date.now(),
+  }
+  if (typeof att.reason === 'string' && att.reason.length > 0) goal.reason = att.reason
+  if (att.sentinel === true) goal.fresh = true
+  return goal
+}
+
 export interface ParseResult {
   events: TimelineEvent[]
   patch: Partial<Agent>
@@ -129,6 +216,20 @@ export function parseLines(lines: string[], seq: () => string): ParseResult {
       continue // a torn final line; the tailer will re-read it once complete
     }
     const type = rec.type ?? ''
+
+    if (STATE_TYPES.has(type)) {
+      // Last write wins: these are emitted repeatedly and the newest is current.
+      if (rec.permissionMode) patch.permissionMode = rec.permissionMode
+      if (rec.aiTitle) patch.aiTitle = rec.aiTitle
+      if (rec.lastPrompt) patch.lastPrompt = rec.lastPrompt
+      continue
+    }
+    // Attachments carry no timeline meaning, but this one carries session
+    // state: the goal the session is working towards. Last write wins, the
+    // same way permission mode does.
+    const goal = goalFromRecord(rec)
+    if (goal) patch.goal = goal
+
     if (META_TYPES.has(type)) continue
 
     const at = rec.timestamp ? Date.parse(rec.timestamp) : Number.NaN
@@ -140,6 +241,8 @@ export function parseLines(lines: string[], seq: () => string): ParseResult {
 
     const usage = rec.message?.usage
     if (usage?.output_tokens) tokens += usage.output_tokens
+    // The model can change mid-session via /model, so the latest wins.
+    if (rec.message?.model) patch.model = rec.message.model
 
     const content = rec.message?.content
     const sidechain = rec.isSidechain === true
@@ -210,6 +313,8 @@ export function describe(event: TimelineEvent): string {
 /** Incremental byte-offset tailer for one transcript file. */
 export class TranscriptTail {
   #path: string | null = null
+  /** When this agent itself last wrote, as opposed to a subagent of it. */
+  #lastEventAt = 0
   #offset = 0
   #partial = ''
   #counter = 0
@@ -220,6 +325,21 @@ export class TranscriptTail {
 
   get path(): string | null {
     return this.#path
+  }
+
+  /**
+   * Whether a subagent is working while this agent waits, and a last-activity
+   * time that says so.
+   *
+   * Without this the clock freezes at the moment work was handed off, so a
+   * healthy delegated run reads as "18m ago" and looks exactly like an agent
+   * that has silently died — the one thing this dashboard exists to catch.
+   */
+  async #delegation(): Promise<Partial<Agent>> {
+    if (!this.#path) return {}
+    const at = await subagentActivityAt(this.#path, this.sessionId)
+    if (at === null || at <= this.#lastEventAt) return { delegating: false }
+    return { delegating: true, lastActivityAt: at }
   }
 
   /**
@@ -248,7 +368,9 @@ export class TranscriptTail {
       this.#offset = 0
       this.#partial = ''
     }
-    if (size === this.#offset) return { events: [], patch: {}, first }
+    // Checked even when the transcript has not grown by a byte: that silence is
+    // exactly what a delegated run looks like from here.
+    if (size === this.#offset) return { events: [], patch: await this.#delegation(), first }
 
     const length = size - this.#offset
     const buf = Buffer.allocUnsafe(length)
@@ -273,6 +395,88 @@ export class TranscriptTail {
     this.#totalSubagents += result.patch.subagents ?? 0
     if (this.#totalTokens > 0) result.patch.tokens = this.#totalTokens
     if (this.#totalSubagents > 0) result.patch.subagents = this.#totalSubagents
+    if (result.patch.lastActivityAt !== undefined) this.#lastEventAt = result.patch.lastActivityAt
+    Object.assign(result.patch, await this.#delegation())
     return { ...result, first }
   }
+}
+
+/** Bytes of the transcript tail scanned when reading current session state. */
+const STATE_TAIL_BYTES = 128 * 1024
+
+/**
+ * Read the permission mode a session reports right now.
+ *
+ * Used to verify a mode switch landed, so it reads the file directly rather
+ * than waiting for the 5s enrichment tick. Only the tail is scanned: these
+ * records are written on every turn, so the newest is always near the end.
+ */
+async function readStateTail(sessionId: string, root: string): Promise<string[]> {
+  const path = await findTranscript(sessionId, root)
+  if (!path) return []
+
+  let size: number
+  try {
+    size = (await stat(path)).size
+  } catch {
+    return []
+  }
+
+  const start = Math.max(0, size - STATE_TAIL_BYTES)
+  const length = size - start
+  if (length <= 0) return []
+
+  const buf = Buffer.allocUnsafe(length)
+  const handle = await open(path, 'r')
+  try {
+    await handle.read(buf, 0, length, start)
+  } finally {
+    await handle.close()
+  }
+  return buf.toString('utf8').split('\n')
+}
+
+export async function readPermissionMode(
+  sessionId: string,
+  root = PROJECTS_DIR,
+): Promise<string | undefined> {
+  const lines = await readStateTail(sessionId, root)
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]
+    if (!line || !line.includes('"permission-mode"')) continue
+    try {
+      const rec = JSON.parse(line) as { type?: string; permissionMode?: string }
+      if (rec.type === 'permission-mode' && rec.permissionMode) return rec.permissionMode
+    } catch {
+      // A torn line at the head of the window; keep looking backwards.
+    }
+  }
+  return undefined
+}
+
+/**
+ * Read the goal a session reports right now.
+ *
+ * Used to verify that a `/goal` actually landed, so — like the mode reader —
+ * it goes to the file rather than waiting for the 5s enrichment tick. Only
+ * `goal_status` records are parsed, and only the newest one counts: it is
+ * either the set-sentinel, the latest rejection, or the verdict that ended the
+ * goal.
+ */
+export async function readGoal(
+  sessionId: string,
+  root = PROJECTS_DIR,
+): Promise<GoalState | undefined> {
+  const lines = await readStateTail(sessionId, root)
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i]
+    if (!line || !line.includes('"goal_status"')) continue
+    try {
+      const goal = goalFromRecord(JSON.parse(line) as Record_)
+      if (goal) return goal
+    } catch {
+      // A torn line at the head of the window; keep looking backwards.
+    }
+  }
+  return undefined
 }

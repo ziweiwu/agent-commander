@@ -1,0 +1,197 @@
+/*
+ * One row, directly above the message box. It sits outside the composer's
+ * <form> on purpose: the goal field takes Enter, and a nested form is both
+ * invalid HTML and a way to send a chat message by accident.
+ */
+/*
+ * `flex: none` is load-bearing. Inside the strip's horizontal scroller a
+ * growable, shrinkable child is allowed to shrink below its own content, and
+ * the toggle's content then rendered *underneath* the quick-prompt chips, which
+ * took the clicks meant for it: an active goal with a long condition could not
+ * be turned off at all. In a scroller the right answer is to keep the
+ * intrinsic width and let the strip scroll.
+ */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  min-width: 0;
+}
+
+.label {
+  font-size: var(--text-xs);
+  color: var(--faint);
+  flex: none;
+}
+
+.select {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  min-height: 30px;
+  cursor: pointer;
+  max-width: 150px;
+}
+.select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.goal {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  padding: 4px 11px;
+  min-height: 30px;
+  cursor: pointer;
+}
+.toggle:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.toggle[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* State is carried by the text as well; the dot is a second, faster read of
+   the same fact, never the only one. */
+.dot {
+  inline-size: 7px;
+  block-size: 7px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  flex: none;
+}
+.dot[data-on='true'] {
+  background: var(--accent);
+}
+
+.goalLabel {
+  flex: none;
+}
+
+/* Goal conditions are sentences. The chip shows as much as fits and the whole
+   thing lives in the title, rather than the row growing to hold it. */
+.condition {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+
+.note {
+  font-size: var(--text-xs);
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+.goalForm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.input {
+  /* Sized rather than flexed, for the same reason as .controls: this sits in a
+     scroller, where "fill the remaining space" has no stable meaning. */
+  inline-size: min(280px, 52vw);
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 5px 9px;
+  min-height: 30px;
+}
+.input:focus {
+  outline: 2px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  outline-offset: -1px;
+}
+
+/* iOS zooms the page when a focused field renders under 16px, and 44px is the
+   tap target this app holds everywhere else. */
+@media (pointer: coarse) {
+  .select,
+  .toggle,
+  .input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+}
+
+/*
+ * On a narrow screen the mode label and the goal's own text are the first
+ * things to go: the select still says which mode it is in, and the toggle
+ * still says whether a goal is running.
+ */
+@media (max-width: 560px) {
+  .label {
+    display: none;
+  }
+  .condition {
+    max-width: 12ch;
+  }
+  .note {
+    display: none;
+  }
+  /*
+   * 44px by width as well as by pointer type. A phone-sized viewport in a
+   * desktop browser reports `pointer: fine`, and the tap target is a property
+   * of the screen it will be used on, not of the pointer the audit happens to
+   * emulate. The strip is already this tall for the chips beside it, so this
+   * costs no height.
+   */
+  .select,
+  .toggle,
+  .input {
+    min-height: 44px;
+  }
+}
+
+/*
+ * A landscape phone has ~380px of height. The quick-prompt row hides itself
+ * there; this one does not, because full screen is where that phone reads a
+ * conversation and the panel's own control row does not exist in it — hiding
+ * this would leave no way to change mode or goal at all. It shrinks instead.
+ */
+@media (max-height: 420px) {
+  .controls {
+    gap: 6px;
+  }
+  .select,
+  .toggle,
+  .input {
+    min-height: 34px;
+  }
+}

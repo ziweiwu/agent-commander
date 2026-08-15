@@ -1,0 +1,172 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.mockBanner {
+  /* The amber wash is the signal; the text rides on it in the normal body
+     colour. Amber on its own 18% wash measured 4.04:1 in light — and it cannot
+     be rescued by thinning the wash, which tops out at 4.54:1 while making the
+     banner harder to notice. Keeping the tint and darkening the text gets
+     11.35:1 without touching the design intent. */
+  background: color-mix(in srgb, var(--waiting) 18%, transparent);
+  color: var(--text);
+  text-align: center;
+  font-size: var(--text-sm);
+  padding: 5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: none;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 18px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: max(18px, env(safe-area-inset-left));
+  padding-right: max(18px, env(safe-area-inset-right));
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  flex-wrap: wrap;
+  flex: none;
+}
+.title {
+  font-size: var(--text-lg);
+  font-weight: 650;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.title span {
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.filters {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+/* Marks the active filter with something other than a hue change. */
+.chipMark {
+  margin-right: 3px;
+  font-size: var(--text-xs);
+}
+
+.spacer {
+  margin-left: auto;
+}
+
+.conn {
+  font-size: var(--text-sm);
+  color: var(--dim);
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+}
+.conn[data-state='open'] {
+  color: var(--accent);
+}
+.conn[data-state='closed'] {
+  color: var(--danger);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 430px) 1fr;
+  gap: 16px;
+  padding: 16px;
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  align-items: start;
+  max-width: 1800px;
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+}
+.solo {
+  grid-template-columns: 1fr;
+}
+
+.toast {
+  position: fixed;
+  overflow-wrap: anywhere;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel-2);
+  border: 1px solid var(--danger);
+  color: var(--text);
+  padding: 9px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  z-index: 80;
+  max-width: 70vw;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  /* The detail owns the screen on a phone, so the shell must not scroll behind it. */
+  .sheetMode {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .sheetMode .layout {
+    padding-bottom: 0;
+    min-height: 0;
+  }
+  /* The filters act on the list, which the sheet is covering. */
+  .sheetMode .filters {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .topbar {
+    padding: 10px 12px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    gap: 8px;
+    row-gap: 8px;
+  }
+  .title {
+    font-size: var(--text-md);
+  }
+  .filters {
+    width: 100%;
+    margin-left: 0;
+    order: 3;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
+  }
+  .conn {
+    margin-left: auto;
+  }
+}
+
+@media (max-height: 520px) and (pointer: coarse) {
+  .topbar {
+    padding-top: max(6px, env(safe-area-inset-top));
+    padding-bottom: 6px;
+  }
+  .mockBanner {
+    padding: 2px;
+    font-size: var(--text-xs);
+  }
+  .sheetMode .filters {
+    display: none;
+  }
+}

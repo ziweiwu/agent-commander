@@ -31,7 +31,126 @@ export interface Agent {
   tokens?: number
   /** Number of subagent (sidechain) events seen recently. */
   subagents?: number
+  /**
+   * The agent has handed work to a subagent and is doing nothing itself until
+   * it returns.
+   *
+   * Worth its own field because it is indistinguishable from "stalled" on the
+   * evidence the card otherwise has: the main transcript stops growing the
+   * moment the work is delegated, so the last-activity clock ticks up and the
+   * card reads as an agent that has quietly died. The subagent's own transcript
+   * is the thing still moving.
+   */
+  delegating?: boolean
+  /** Title the agent generated for its own conversation; beats a derived name. */
+  aiTitle?: string
+  /** The most recent thing the user asked it, used when there is no title yet. */
+  lastPrompt?: string
+  /** True when Claude Code invented the name (`nameSource: "derived"`). */
+  derivedName?: boolean
+  /** Permission mode the session is currently running in. */
+  permissionMode?: string
+  /** Model id the session most recently used, e.g. "claude-opus-5". */
+  model?: string
+  /** The session goal set with `/goal`, as last recorded in the transcript. */
+  goal?: GoalState
 }
+
+/**
+ * A Claude Code session goal.
+ *
+ * `/goal <condition>` installs a Stop hook: the session keeps working until a
+ * separate evaluator agrees the condition is met. Claude Code writes each
+ * verdict into the transcript as a `goal_status` attachment, which is the only
+ * place this state is observable from outside the session — the session file
+ * does not carry it and neither does the statusLine payload.
+ *
+ * Three record shapes exist, and the newest one is the current state:
+ *   - `sentinel`, `met: false` — written the moment the goal is set
+ *   - `met: false` with a reason — evaluated and rejected; still running
+ *   - `met: true` with a reason — achieved, and the goal is over
+ *
+ * Clearing a goal writes nothing at all, which is why the server drops its own
+ * copy when it sends `/goal clear` rather than waiting for evidence that will
+ * never arrive.
+ */
+export interface GoalState {
+  /** The condition the session is working towards, as the user typed it. */
+  condition: string
+  /** True once the evaluator confirmed it. A met goal is finished, not running. */
+  met: boolean
+  /** Epoch ms of the record this was read from. */
+  at: number
+  /** The evaluator's reasoning, when it has ruled at all. */
+  reason?: string
+  /** True when this is the set-record, so nothing has evaluated it yet. */
+  fresh?: boolean
+}
+
+/** One quota window, as a percentage used and when it refills. */
+export interface UsageWindow {
+  /** 0-100. */
+  pct: number
+  /** Epoch ms when the window resets. Absent when Claude Code did not report it. */
+  resetsAt?: number
+}
+
+/**
+ * Account-level subscription usage, bridged out of Claude Code's statusLine by
+ * `scripts/statusline-bridge.mjs`.
+ *
+ * This does not come from the transcripts. `~/.claude/projects/*.jsonl` carries
+ * per-request token counts only; the 5-hour and 7-day windows exist nowhere on
+ * disk until a statusLine command writes them down.
+ */
+export interface RateLimits {
+  fiveHour?: UsageWindow
+  sevenDay?: UsageWindow
+  /** Epoch ms the bridge last wrote. The UI dims the meters once this is old. */
+  at: number
+}
+
+/** Facts about the host machine, used by the help page. */
+export interface ServerEnv {
+  tailscale: {
+    cliPath: string
+    dnsName: string
+    ip: string
+    running: boolean
+  } | null
+  /** False when no tmux server is reachable, which disables attach and spawning. */
+  tmux: boolean
+  port: number
+  platform: string
+}
+
+export interface NewAgentRequest {
+  cwd: string
+  name?: string
+  model?: string
+  permissionMode?: string
+}
+
+export interface DirEntryDto {
+  name: string
+  path: string
+  hidden: boolean
+}
+
+export interface DirListing {
+  path: string
+  parent: string | null
+  root: string
+  entries: DirEntryDto[]
+}
+
+export type ControlResponse =
+  | { ok: true; detail?: string }
+  | { ok: false; error: string }
+
+export type NewAgentResponse =
+  | { ok: true; tmuxSession: string; cwd: string }
+  | { ok: false; error: string }
 
 export type TimelineKind =
   | 'user'
@@ -77,6 +196,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: 'fleet'; agents: Agent[]; mock: boolean }
+  | { type: 'limits'; limits: RateLimits | null }
   | { type: 'timeline'; sessionId: string; events: TimelineEvent[]; reset: boolean }
   | { type: 'frame'; frame: Frame }
   | { type: 'error'; sessionId?: string; message: string }

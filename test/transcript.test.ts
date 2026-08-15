@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { describe as summarize, parseLines, summarizeTool } from '../src/server/transcript.ts'
+import {
+  describe as summarize,
+  goalFromRecord,
+  parseLines,
+  summarizeTool,
+} from '../src/server/transcript.ts'
 
 const seq = (): (() => string) => {
   let n = 0
@@ -144,5 +149,66 @@ describe('git branch', () => {
       seq(),
     )
     expect(patch.gitBranch).toBeUndefined()
+  })
+})
+
+/**
+ * `/goal` state is observable from outside the session in exactly one place:
+ * the `goal_status` attachments Claude Code writes into the transcript. Three
+ * shapes exist and only the newest one is the current state.
+ */
+describe('goal records', () => {
+  const goalLine = (att: Record<string, unknown>, at = '2026-08-15T03:42:57.797Z'): string =>
+    line({ type: 'attachment', timestamp: at, attachment: { type: 'goal_status', ...att } })
+
+  it('reads the record written when a goal is set', () => {
+    const { patch } = parseLines(
+      [goalLine({ met: false, sentinel: true, condition: 'the tests pass' })],
+      seq(),
+    )
+    expect(patch.goal).toMatchObject({ condition: 'the tests pass', met: false, fresh: true })
+  })
+
+  it('reads an evaluation that rejected the goal', () => {
+    const { patch } = parseLines(
+      [goalLine({ met: false, condition: 'the tests pass', reason: 'Two still fail.' })],
+      seq(),
+    )
+    expect(patch.goal).toMatchObject({ met: false, reason: 'Two still fail.' })
+    expect(patch.goal?.fresh).toBeUndefined()
+  })
+
+  // A met goal is finished, not running: the UI has to be able to tell those
+  // apart, because one of them means the session is still working.
+  it('reads the verdict that ended the goal', () => {
+    const { patch } = parseLines([goalLine({ met: true, condition: 'ship it' })], seq())
+    expect(patch.goal).toMatchObject({ met: true, condition: 'ship it' })
+  })
+
+  it('keeps the newest record when several are in one batch', () => {
+    const { patch } = parseLines(
+      [
+        goalLine({ met: false, sentinel: true, condition: 'ship it' }, '2026-08-15T01:00:00.000Z'),
+        goalLine({ met: true, condition: 'ship it' }, '2026-08-15T02:00:00.000Z'),
+      ],
+      seq(),
+    )
+    expect(patch.goal).toMatchObject({ met: true })
+  })
+
+  it('leaves the timeline alone — a goal record is not a message', () => {
+    const { events } = parseLines([goalLine({ met: true, condition: 'ship it' })], seq())
+    expect(events).toHaveLength(0)
+  })
+
+  // INV-5: other attachment types share the envelope and must not be read as goals.
+  it('ignores other attachments', () => {
+    const rec = { type: 'attachment', attachment: { type: 'hook_success', condition: 'x' } }
+    expect(goalFromRecord(rec)).toBeNull()
+  })
+
+  it('ignores a goal record with no condition', () => {
+    expect(goalFromRecord({ type: 'attachment', attachment: { type: 'goal_status', met: true } }))
+      .toBeNull()
   })
 })

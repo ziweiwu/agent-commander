@@ -1,0 +1,129 @@
+.column {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.searchbar {
+  position: relative;
+  display: flex;
+}
+.searchbar input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: var(--text-md);
+  padding: 9px 34px 9px 12px;
+  min-height: 40px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+}
+.searchbar input::placeholder {
+  color: var(--faint);
+}
+.slashHint {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font: 11px ui-monospace, Menlo, monospace;
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 0 5px;
+  pointer-events: none;
+}
+.searchbar input:focus + .slashHint {
+  display: none;
+}
+
+.newAgent {
+  width: 100%;
+  justify-content: center;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 2px 8px;
+  font-size: var(--text-sm);
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.groupHead:first-child {
+  margin-top: 0;
+}
+.groupCount {
+  font-size: var(--text-xs);
+  color: var(--dim);
+  background: var(--panel-2);
+  border-radius: var(--radius-pill);
+  padding: 0 7px;
+  letter-spacing: 0;
+}
+.waitingTitle {
+  color: var(--waiting);
+}
+
+.groupList {
+  display: grid;
+  gap: 10px;
+}
+
+/* With no agent open the column is full width, so cards tile rather than
+   stretching to 1400px, which would strand the status pill from the name. */
+.tiled .groupList {
+  grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+}
+/* A blocked agent is the one thing needing action, so it gets a wider track
+   instead of ending up the smallest card on screen. */
+.tiled .waitingGroup {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
+}
+
+.empty {
+  color: var(--dim);
+  overflow-wrap: anywhere;
+  padding: 34px 16px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-lg);
+}
+.emptyTitle {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-weight: 600;
+}
+.emptyBody {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--text-base);
+}
+
+
+/* iOS zooms the page when a focused field renders under 16px. This lives here
+   as well as in the global layer because a module selector outranks it. */
+@media (pointer: coarse) {
+  .searchbar input {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 900px) {
+  .tiled .groupList,
+  .tiled .waitingGroup {
+    grid-template-columns: 1fr;
+  }
+}

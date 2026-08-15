@@ -1,0 +1,184 @@
+.msg {
+  padding: 5px 10px;
+  border-radius: var(--radius-md);
+  min-width: 0;
+  position: relative;
+}
+.msg + .msg {
+  margin-top: 2px;
+}
+.ungrouped {
+  margin-top: 12px;
+}
+.you {
+  background: color-mix(in srgb, var(--busy) 10%, transparent);
+}
+.pending {
+  opacity: 0.6;
+}
+
+/* An unconfirmed message is still readable at full strength — it has to be,
+   since the user may want to copy it and send it again by hand. It is the
+   marker that carries the state, not a dimming of the text. */
+.failed {
+  opacity: 1;
+}
+
+.failedState {
+  color: var(--danger);
+  font-style: normal;
+}
+
+.gutter {
+  position: absolute;
+  left: -46px;
+  top: 6px;
+  width: 42px;
+  text-align: right;
+  font: 10.5px ui-monospace, Menlo, monospace;
+  color: var(--faint);
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+.msg:hover .gutter {
+  opacity: 1;
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+.who {
+  font-weight: 650;
+  font-size: var(--text-sm);
+}
+.whoYou {
+  color: var(--busy);
+}
+.whoAgent {
+  color: var(--accent);
+}
+.time {
+  color: var(--faint);
+  font: 11px ui-monospace, Menlo, monospace;
+}
+.state {
+  color: var(--faint);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
+.text {
+  font-size: var(--text-base);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.text code {
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  padding: 0 4px;
+  overflow-wrap: anywhere;
+}
+.text strong {
+  font-weight: 650;
+}
+.text em {
+  font-style: italic;
+  color: var(--dim);
+}
+
+/* What the agent did, as opposed to what it said. */
+.tools {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 5px;
+}
+.tool {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font: 11.8px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dim);
+  padding: 1px 0 1px 10px;
+  border-left: 2px solid var(--line);
+  min-width: 0;
+}
+.toolName {
+  color: var(--busy);
+  flex: none;
+}
+.subagent {
+  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.subagent .toolName {
+  color: var(--accent);
+}
+.toolArg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.toggle {
+  background: none;
+  border: 0;
+  color: var(--dim);
+  font: 11.8px ui-monospace, Menlo, monospace;
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--line);
+  cursor: pointer;
+  text-align: left;
+}
+.toggle:hover {
+  color: var(--text);
+}
+
+.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+.dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: blink 1.2s infinite;
+}
+.dots i:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.dots i:nth-child(3) {
+  animation-delay: 0.36s;
+}
+@keyframes blink {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 900px) {
+  .gutter {
+    display: none;
+  }
+  .ungrouped {
+    margin-top: 8px;
+  }
+}

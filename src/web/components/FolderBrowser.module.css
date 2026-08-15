@@ -1,0 +1,102 @@
+.browser {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.path {
+  font: 12px ui-monospace, Menlo, monospace;
+  color: var(--dim);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.hidden {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.list {
+  overflow-y: auto;
+  max-height: 40dvh;
+  min-height: 120px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-base);
+  padding: 8px 9px;
+  min-height: 38px;
+  cursor: pointer;
+}
+.entry:hover {
+  background: var(--panel-2);
+}
+.icon {
+  color: var(--faint);
+  flex: none;
+}
+.entryHidden .icon {
+  opacity: 0.55;
+}
+
+.empty {
+  color: var(--faint);
+  font-size: var(--text-sm);
+  padding: 18px 10px;
+  text-align: center;
+}
+
+.error {
+  color: var(--danger);
+  font-size: var(--text-sm);
+  padding: 10px;
+}
+
+@media (pointer: coarse) {
+  .entry {
+    min-height: 44px;
+  }
+}
+
+@media (max-height: 520px) and (pointer: coarse) {
+  .list {
+    max-height: 30dvh;
+    min-height: 80px;
+  }
+}

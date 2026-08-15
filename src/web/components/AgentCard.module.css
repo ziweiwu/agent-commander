@@ -1,0 +1,125 @@
+.card {
+  text-align: left;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--idle);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  padding: 11px 13px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  display: grid;
+  gap: 6px;
+  transition:
+    border-color 0.12s,
+    background 0.12s;
+}
+.card:hover {
+  background: var(--panel-2);
+}
+.card[data-status='busy'] {
+  border-left-color: var(--busy);
+}
+.card[data-status='waiting'] {
+  border-left-color: var(--waiting);
+}
+.card[aria-current='true'] {
+  border-color: var(--focus);
+  background: var(--panel-2);
+}
+
+.top {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name {
+  font-weight: 600;
+  font-size: var(--text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.pill {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--text-xs);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.pill[data-status='busy'] {
+  color: var(--busy);
+  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
+}
+.pill[data-status='waiting'] {
+  color: var(--waiting);
+  border-color: color-mix(in srgb, var(--waiting) 50%, transparent);
+  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+}
+
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 9px;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  min-width: 0;
+}
+.folder {
+  color: var(--text);
+  font-weight: 550;
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* The auto-generated session name, kept as a hint once the AI title leads. */
+.derived {
+  color: var(--faint);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+}
+.branch {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-sm);
+}
+.warn {
+  color: var(--waiting);
+}
+
+.activity {
+  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.activityMuted {
+  color: var(--faint);
+  font-style: italic;
+  font-family: inherit;
+  font-size: var(--text-sm);
+}
+
+@media (pointer: coarse) {
+  .card {
+    padding: 13px;
+  }
+  .card:hover {
+    background: var(--panel);
+  }
+}

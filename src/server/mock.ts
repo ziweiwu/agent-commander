@@ -5,8 +5,8 @@
  * at real, working agents — the same reason terminal-system-monitor ships a mock
  * mode. `npm run mock` never touches tmux or the filesystem.
  */
-import type { Agent, TimelineEvent } from '../shared/types.ts'
-import type { AgentSource, PaneApi, TailApi } from './sources.ts'
+import type { Agent, RateLimits, TimelineEvent } from '../shared/types.ts'
+import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
 import type { PaneMeta } from './pane.ts'
 
 const START = 1786600000000
@@ -24,8 +24,11 @@ const FIXTURES: Agent[] = [
     sessionId: 'mock-waiting',
     pid: 28707,
     name: 'ziweiwu-ee',
-    cwd: '/Users/demo',
-    folder: 'demo',
+    // Auto-named in a project directory with no title or prompt: the folder is
+    // the last resort in the chain.
+    derivedName: true,
+    cwd: '/Users/demo/Projects/kb-vault',
+    folder: 'kb-vault',
     status: 'waiting',
     waitingFor: 'dialog open',
     kind: 'interactive',
@@ -54,6 +57,16 @@ const FIXTURES: Agent[] = [
     lastActivityAt: START - 12_000,
     tokens: 111_800,
     subagents: 3,
+    // Working towards a goal that has already been evaluated once and rejected:
+    // the state the goal control has to render well, since it is the one that
+    // lasts. A condition long enough to need truncating, because they are.
+    goal: {
+      condition:
+        'every test passes and the locale sweep reports no layout breakage at 80 columns',
+      met: false,
+      at: START - 300_000,
+      reason: 'Two locale snapshots still differ at 80 columns.',
+    },
   },
   {
     sessionId: 'mock-busy-2',
@@ -68,8 +81,13 @@ const FIXTURES: Agent[] = [
     gitBranch: 'main',
     paneId: '%75',
     tmuxSession: 'claude-mock-c',
-    activity: 'Bash: Test headless Chrome screenshot pipeline',
-    lastActivityAt: START - 40_000,
+    // Parked on a subagent: the awkward case the fleet card has to survive.
+    // Its own transcript has been silent for eleven minutes and only the
+    // subagent is writing, so without `delegating` this reads as a dead agent.
+    activity: 'Task → Audit the theme tokens across both themes',
+    lastActivityAt: START - 12_000,
+    delegating: true,
+    subagents: 2,
     tokens: 67_500,
   },
   {
@@ -111,6 +129,9 @@ const FIXTURES: Agent[] = [
     sessionId: 'mock-idle-ce',
     pid: 50893,
     name: 'ziweiwu-ce',
+    // Auto-named, but the agent titled its own conversation.
+    derivedName: true,
+    aiTitle: 'Find an alternative markdown editor to Obsidian',
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
@@ -127,6 +148,9 @@ const FIXTURES: Agent[] = [
     sessionId: 'mock-idle-db',
     pid: 53848,
     name: 'ziweiwu-db',
+    // Auto-named with no title yet, so the last prompt is the best label.
+    derivedName: true,
+    lastPrompt: 'check the npm download numbers for react-hig-datepicker',
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
@@ -143,6 +167,9 @@ const FIXTURES: Agent[] = [
     sessionId: 'mock-fresh',
     pid: 2330,
     name: 'ziweiwu-35',
+    // Auto-named, never prompted, and running in the home directory: there is
+    // genuinely nothing better to call it, so it keeps its own name.
+    derivedName: true,
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
@@ -182,6 +209,30 @@ const MOCK_TIMELINE: Array<Omit<TimelineEvent, 'id'>> = [
   },
   { at: START - 240_000, kind: 'tool', tool: 'Bash', text: 'rm -rf dist && rebuild' },
 ]
+
+/**
+ * Messages sent from the browser, echoed back as transcript events.
+ *
+ * A real agent writes the prompt it was handed into its own transcript, and
+ * that echo is what lets the chat drop its local "sending…" copy. The mock's
+ * paste was a no-op, so in mock mode every message sent sat pending for ever —
+ * which made the send flow the one thing that could not be exercised without
+ * pointing at a live agent.
+ *
+ * Append-only, read through a per-reader cursor, because there is never just
+ * one reader: the focused viewer polls its own tail every second and the fleet
+ * enricher polls a second, independent tail for every agent every five. A queue
+ * that each `read()` drained gave the message to whichever polled first — and
+ * the enricher discards the events it reads, so when it won, the message was
+ * gone for good and the chat marked it "not delivered" although the server had
+ * accepted it. This mirrors how `TranscriptTail` already works: each reader
+ * holds its own offset into a log nobody consumes.
+ */
+const echoes = new Map<string, Array<{ at: number; text: string }>>()
+
+const SESSION_BY_PANE = new Map(
+  FIXTURES.filter((a) => a.paneId !== undefined).map((a) => [a.paneId as string, a.sessionId]),
+)
 
 export class MockSource implements AgentSource {
   #agents = new Map(FIXTURES.map((a) => [a.sessionId, structuredClone(a)]))
@@ -240,6 +291,70 @@ export class MockSource implements AgentSource {
   }
 }
 
+/**
+ * Quota readings for mock mode.
+ *
+ * The steps are chosen to walk the meter through every branch the UI has --
+ * ok, warn, critical -- and one reading with `sevenDay` missing, because a
+ * session that has not yet touched the weekly window reports exactly that and
+ * a component that assumes both windows exist will throw on it. The numbers are
+ * deliberately un-round so a hardcoded fallback cannot masquerade as real data.
+ */
+const LIMIT_STEPS: RateLimits[] = [
+  { fiveHour: { pct: 12.4 }, sevenDay: { pct: 31.8 }, at: 0 },
+  { fiveHour: { pct: 61.4 }, sevenDay: { pct: 47.2 }, at: 0 },
+  { fiveHour: { pct: 83.6 }, at: 0 },
+  { fiveHour: { pct: 96.1 }, sevenDay: { pct: 88.3 }, at: 0 },
+]
+
+export class MockLimits implements LimitsApi {
+  #step = 0
+  #limits: RateLimits | null = null
+  #listeners = new Set<(limits: RateLimits | null) => void>()
+  #timer: NodeJS.Timeout | null = null
+
+  constructor(private readonly transitions = false) {}
+
+  current(): RateLimits | null {
+    return this.#limits
+  }
+
+  onChange(fn: (limits: RateLimits | null) => void): () => void {
+    this.#listeners.add(fn)
+    return () => this.#listeners.delete(fn)
+  }
+
+  start(): void {
+    this.#emit()
+    if (!this.transitions) return
+    this.#timer = setInterval(() => {
+      this.#step = (this.#step + 1) % LIMIT_STEPS.length
+      this.#emit()
+    }, 4000)
+    this.#timer.unref?.()
+  }
+
+  stop(): void {
+    if (this.#timer) clearInterval(this.#timer)
+    this.#timer = null
+    this.#listeners.clear()
+  }
+
+  /**
+   * Reset times are stamped relative to now rather than baked into the steps,
+   * so the countdown reads sensibly however long the mock server has been up.
+   */
+  #emit(): void {
+    const base = LIMIT_STEPS[this.#step] as RateLimits
+    const now = Date.now()
+    const next: RateLimits = { at: now }
+    if (base.fiveHour) next.fiveHour = { ...base.fiveHour, resetsAt: now + 2 * 3600_000 }
+    if (base.sevenDay) next.sevenDay = { ...base.sevenDay, resetsAt: now + 3 * 86_400_000 }
+    this.#limits = next
+    for (const fn of this.#listeners) fn(next)
+  }
+}
+
 export class MockPanes implements PaneApi {
   async meta(): Promise<PaneMeta> {
     return { cols: 96, rows: 24, cursorX: 2, cursorY: 21, alternate: true, dead: false }
@@ -265,18 +380,42 @@ export class MockPanes implements PaneApi {
     return lines.slice(0, rows)
   }
 
-  async paste(): Promise<void> {}
+  async paste(paneId: string, text: string, submit: boolean): Promise<void> {
+    // Only a submitted message becomes a transcript entry; loose keystrokes
+    // sent by the terminal view do not.
+    if (!submit) return
+    const sessionId = SESSION_BY_PANE.get(paneId)
+    if (sessionId === undefined) return
+    echoes.set(sessionId, [...(echoes.get(sessionId) ?? []), { at: Date.now(), text }])
+  }
 
   async key(): Promise<void> {}
 }
 
 export class MockTail implements TailApi {
   #sent = false
+  #echoCursor = 0
 
   constructor(private readonly sessionId: string) {}
 
   async read(): Promise<{ events: TimelineEvent[]; patch: Partial<Agent>; first: boolean }> {
-    if (this.#sent) return { events: [], patch: {}, first: false }
+    if (this.#sent) {
+      const log = echoes.get(this.sessionId) ?? []
+      if (this.#echoCursor >= log.length) return { events: [], patch: {}, first: false }
+      const fresh = log.slice(this.#echoCursor)
+      const events = fresh.map((entry, i) => ({
+        // Stable across readers: the same entry gets the same id whoever reads
+        // it, so two tails cannot introduce the same message twice.
+        id: `${this.sessionId}:echo:${this.#echoCursor + i}`,
+        // Stamped when it was sent, not when it happened to be read — a later
+        // reader replaying the log must not restamp the conversation as "now".
+        at: entry.at,
+        kind: 'user' as const,
+        text: entry.text,
+      }))
+      this.#echoCursor = log.length
+      return { events, patch: {}, first: false }
+    }
     this.#sent = true
     const events = MOCK_TIMELINE.map((e, i) => ({ ...e, id: `${this.sessionId}:${i}` }))
     return { events, patch: {}, first: true }

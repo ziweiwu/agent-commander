@@ -14,7 +14,19 @@ import type { AgentSource, TailApi } from './sources.ts'
 const TICK_MS = 5000
 
 /** Fields the fleet card needs; anything else the tail reports is ignored here. */
-const CARD_FIELDS = ['activity', 'lastActivityAt', 'tokens', 'subagents', 'gitBranch'] as const
+const CARD_FIELDS = [
+  'activity',
+  'lastActivityAt',
+  'tokens',
+  'subagents',
+  'delegating',
+  'gitBranch',
+  'aiTitle',
+  'lastPrompt',
+  'permissionMode',
+  'model',
+  'goal',
+] as const
 
 export class FleetEnricher {
   #tails = new Map<string, TailApi>()
@@ -87,5 +99,13 @@ function pickCardFields(patch: Partial<Agent>): Partial<Agent> | null {
 }
 
 function differs(agent: Agent, patch: Partial<Agent>): boolean {
-  return CARD_FIELDS.some((field) => patch[field] !== undefined && patch[field] !== agent[field])
+  return CARD_FIELDS.some((field) => {
+    const next = patch[field]
+    if (next === undefined) return false
+    // `goal` is the one field here that is an object. A fresh parse builds a
+    // new one every tick, so identity would report a change on every read and
+    // rebroadcast the whole fleet for nothing.
+    if (typeof next === 'object') return JSON.stringify(next) !== JSON.stringify(agent[field])
+    return next !== agent[field]
+  })
 }

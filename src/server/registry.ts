@@ -17,6 +17,7 @@ import { watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { Agent, AgentStatus } from '../shared/types.ts'
+import type { PendingStore } from './pending.ts'
 
 const SESSIONS_DIR = join(homedir(), '.claude', 'sessions')
 const RECONCILE_MS = 30_000
@@ -24,6 +25,7 @@ const TICK_MS = 2_000
 
 interface SessionFile {
   pid?: number
+  nameSource?: string
   sessionId?: string
   cwd?: string
   startedAt?: number
@@ -76,6 +78,9 @@ export function toAgent(file: SessionFile): Agent | null {
     startedAt: file.startedAt ?? 0,
   }
   if (file.version) agent.version = file.version
+  // Claude Code records this itself, so the app never has to guess whether a
+  // name was chosen or invented.
+  if (file.nameSource === 'derived') agent.derivedName = true
   if (file.waitingFor) agent.waitingFor = file.waitingFor
   if (session) agent.tmuxSession = session
   if (pane) {
@@ -150,7 +155,10 @@ export class Registry {
   #refreshing = false
   #known: Set<string> | null = null
 
-  constructor(private readonly dir = SESSIONS_DIR) {}
+  constructor(
+    private readonly dir = SESSIONS_DIR,
+    private readonly pending?: PendingStore,
+  ) {}
 
   list(): Agent[] {
     return sortAgents([...this.#agents.values()])
@@ -209,11 +217,16 @@ export class Registry {
     if (this.#refreshing) return
     this.#refreshing = true
     try {
-      const found = await readSessionFiles(this.dir)
+      const real = await readSessionFiles(this.dir)
+      // Sessions started from this app appear immediately, before they have
+      // registered themselves, so a trust prompt can be answered.
+      const found = this.pending ? await this.pending.merge(real) : real
       const next = new Map<string, Agent>()
       for (const agent of found) {
         // A pid can be reused; the CLI is the authority on what is really live.
-        if (this.#known && !this.#known.has(agent.sessionId)) continue
+        // Pending entries are ours, not the CLI's, so they are exempt.
+        const isPending = agent.sessionId.startsWith('pending:')
+        if (!isPending && this.#known && !this.#known.has(agent.sessionId)) continue
         const prev = this.#agents.get(agent.sessionId)
         next.set(agent.sessionId, prev ? { ...prev, ...agent } : agent)
       }

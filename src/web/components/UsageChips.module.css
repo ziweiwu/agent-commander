@@ -1,0 +1,120 @@
+/*
+ * Sized and shaped to sit flush with the filter chips next door. Those are
+ * `Chip` from ui/Button.tsx, which renders a <button> — these are not
+ * interactive, so they borrow the look rather than the component.
+ */
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  font-size: var(--text-sm);
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.label,
+.labelShort {
+  color: var(--faint);
+}
+.labelShort {
+  display: none;
+}
+
+.track {
+  display: block;
+  inline-size: 44px;
+  block-size: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  overflow: hidden;
+}
+
+.fill {
+  display: block;
+  block-size: 100%;
+  background: var(--accent);
+  transition: inline-size 200ms ease;
+}
+.fill[data-level='high'] {
+  background: var(--waiting);
+}
+.fill[data-level='critical'] {
+  background: var(--danger);
+}
+
+.reset {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.value {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-inline-size: 3ch;
+  text-align: right;
+}
+
+/*
+ * Stale: the reading is the best we have but nobody has refreshed it, so it is
+ * shown drained of colour rather than hidden. A bar frozen at 61% for three
+ * hours is a lie; "61%, read 3h ago" is true.
+ */
+.chips[data-stale='true'] .fill,
+.chips[data-stale='true'] .fill[data-level='high'],
+.chips[data-stale='true'] .fill[data-level='critical'] {
+  background: var(--faint);
+}
+.chips[data-stale='true'] .value {
+  color: var(--dim);
+}
+
+@media (max-width: 560px) {
+  /*
+   * Wraps onto the filters' row rather than forcing the topbar wider. It must
+   * also be allowed to wrap *within* itself: at 320px the two chips together
+   * are a pixel wider than the viewport, and `flex-shrink: 0` turned that into
+   * a horizontally scrolling page.
+   */
+  .chips {
+    order: 4;
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    max-inline-size: 100%;
+  }
+  .label {
+    display: none;
+  }
+  .labelShort {
+    display: inline;
+  }
+  /*
+   * Tightened so both chips plus their countdowns stay on ONE row at 320px.
+   * They wrapped to two before, and the topbar is competing for height with the
+   * conversation pane on a 568px-tall phone -- the audit catches that as a
+   * conversation pane too short to be worth reading.
+   */
+  .chips {
+    gap: 6px;
+  }
+  .chip {
+    gap: 4px;
+    padding: 3px 7px;
+  }
+  .track {
+    inline-size: 22px;
+  }
+  .value {
+    min-inline-size: 0;
+  }
+}

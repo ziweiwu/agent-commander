@@ -1,5 +1,5 @@
-/** The two capability interfaces the server talks to, so mock mode can stand in. */
-import type { Agent, TimelineEvent } from '../shared/types.ts'
+/** The capability interfaces the server talks to, so mock mode can stand in. */
+import type { Agent, RateLimits, TimelineEvent } from '../shared/types.ts'
 import type { PaneMeta } from './pane.ts'
 
 export interface AgentSource {
@@ -22,4 +22,13 @@ export interface PaneApi {
 
 export interface TailApi {
   read(): Promise<{ events: TimelineEvent[]; patch: Partial<Agent>; first: boolean }>
+}
+
+/** Account-level quota, watched from the file the statusLine bridge writes. */
+export interface LimitsApi {
+  /** Last good reading, or null when nothing has been written yet. */
+  current(): RateLimits | null
+  onChange(fn: (limits: RateLimits | null) => void): () => void
+  start(): void
+  stop(): void
 }

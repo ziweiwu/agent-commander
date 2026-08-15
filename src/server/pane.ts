@@ -113,6 +113,17 @@ export async function key(paneId: string, keyName: string): Promise<void> {
   await run(['send-keys', '-t', paneId, keyName])
 }
 
+/**
+ * End a whole tmux session. Used only as the forced fallback when an agent has
+ * ignored `/exit`; this creates no client, so INV-1 is unaffected.
+ */
+export async function killSession(session: string): Promise<void> {
+  if (!/^[A-Za-z0-9_.-]+$/.test(session)) {
+    throw new PaneError(`refusing to use malformed session name: ${session}`)
+  }
+  await run(['kill-session', '-t', session])
+}
+
 /** True when a tmux server is reachable at all. */
 export async function available(): Promise<boolean> {
   try {

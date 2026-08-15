@@ -1,0 +1,195 @@
+.detail {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  position: sticky;
+  top: 72px;
+  min-width: 0;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.head h2 {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 650;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.path {
+  font: 12px ui-monospace, Menlo, monospace;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+.pill {
+  flex: none;
+  font-size: var(--text-xs);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.pill[data-status='busy'] {
+  color: var(--busy);
+  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
+}
+.pill[data-status='waiting'] {
+  color: var(--waiting);
+  border-color: color-mix(in srgb, var(--waiting) 50%, transparent);
+  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+}
+.close {
+  margin-left: auto;
+}
+.back {
+  display: none;
+  flex: none;
+  min-height: 40px;
+}
+
+.tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The tab row has spare width where the header has none, so on a phone the
+   icon buttons live here and the agent's name gets the header to itself. */
+.tabActions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  padding-bottom: 4px;
+}
+.tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--dim);
+  padding: 9px 12px;
+  min-height: 40px;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-base);
+}
+.tab[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: var(--focus);
+}
+.tab:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.pane {
+  padding: 12px 14px;
+  min-width: 0;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.blocked {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--waiting) 45%, transparent);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: var(--text-base);
+  flex: none;
+}
+.blockedText {
+  flex: 1;
+  overflow-wrap: anywhere;
+  min-width: 220px;
+}
+.blocked strong {
+  color: var(--waiting);
+}
+.cta {
+  border-color: color-mix(in srgb, var(--waiting) 55%, transparent);
+}
+
+/* On a narrow screen the detail is the whole screen, not a column beside one. */
+.sheet {
+  position: static;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+}
+.sheet .head {
+  gap: 8px;
+  padding: 8px 12px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+.sheet .head h2 {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet .back {
+  display: inline-flex;
+}
+
+@media (max-width: 400px) {
+  .sheet .backLabel {
+    display: none;
+  }
+}
+.sheet .close,
+.sheet .path {
+  display: none;
+}
+
+.sheet .pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+@media (pointer: coarse) {
+  .tab {
+    min-height: 44px;
+    padding: 10px 14px;
+  }
+  .back {
+    min-height: 44px;
+  }
+}
+
+@media (max-height: 520px) and (pointer: coarse) {
+  .sheet .head {
+    padding: 5px 12px;
+  }
+  .sheet .tabs {
+    padding-top: 0;
+  }
+  .sheet .pane {
+    padding: 4px 12px;
+  }
+  .tab {
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+}

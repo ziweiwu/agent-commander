@@ -8,15 +8,23 @@
  * the network.
  */
 import { randomBytes } from 'node:crypto'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Registry } from './registry.ts'
 import { TranscriptTail } from './transcript.ts'
 import * as panes from './pane.ts'
-import { MockPanes, MockSource, MockTail } from './mock.ts'
+import { MockLimits, MockPanes, MockSource, MockTail } from './mock.ts'
+import { RateLimitWatcher } from './limits.ts'
 import { createAppServer } from './routes.ts'
 import { FleetEnricher } from './enrich.ts'
-import type { AgentSource, PaneApi, TailApi } from './sources.ts'
+import { probeEnv } from './env.ts'
+import { validateDir } from './spawn.ts'
+import { PendingStore } from './pending.ts'
+import { MODE_CYCLE } from './options.ts'
+import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
+import type { GoalState } from '../shared/types.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1'])
@@ -27,7 +35,9 @@ interface Options {
   token?: string | undefined
   mock: boolean
   mockTransitions: boolean
+  installStatusline: boolean
   webRoot: string
+  browseRoot?: string | undefined
 }
 
 /**
@@ -47,6 +57,7 @@ export function parseArgs(argv: string[]): Options {
     host: '127.0.0.1',
     mock: false,
     mockTransitions: false,
+    installStatusline: false,
     webRoot: defaultWebRoot(),
   }
   for (let i = 0; i < argv.length; i += 1) {
@@ -60,6 +71,9 @@ export function parseArgs(argv: string[]): Options {
     switch (flag) {
       case '--mock':
         opts.mock = true
+        break
+      case '--browse-root':
+        opts.browseRoot = resolve(value())
         break
       case '--mock-transitions':
         opts.mock = true
@@ -77,6 +91,9 @@ export function parseArgs(argv: string[]): Options {
         break
       case '--web-root':
         opts.webRoot = resolve(value())
+        break
+      case '--install-statusline':
+        opts.installStatusline = true
         break
       case '--dev':
         break
@@ -109,6 +126,57 @@ function splitOnce(input: string, sep: string): [string, string] {
   return [input.slice(0, at), input.slice(at + 1)]
 }
 
+/**
+ * Wire the quota bridge into Claude Code.
+ *
+ * The 5-hour and 7-day windows are not in any transcript -- Claude Code hands
+ * them to a statusLine command and nowhere else -- so the dashboard cannot show
+ * quota until `scripts/statusline-bridge.mjs` is running as that command. This
+ * does the edit rather than leaving the user to hand-merge JSON.
+ *
+ * It never overwrites an existing statusLine. Someone who already has one has
+ * put work into it, and silently replacing it would be the worst possible
+ * outcome of a flag whose name promises only an addition.
+ */
+function installStatusline(): boolean {
+  const settingsPath = join(homedir(), '.claude', 'settings.json')
+  const bridge = resolve(HERE, '..', '..', 'scripts', 'statusline-bridge.mjs')
+  const snippet = { type: 'command', command: `node ${bridge}` }
+
+  if (!existsSync(bridge)) {
+    process.stderr.write(`cannot find the bridge script at ${bridge}\n`)
+    return false
+  }
+
+  let settings: Record<string, unknown> = {}
+  if (existsSync(settingsPath)) {
+    try {
+      settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as Record<string, unknown>
+    } catch {
+      process.stderr.write(`${settingsPath} is not valid JSON — fix it, or add this by hand:\n`)
+      process.stderr.write(`${JSON.stringify({ statusLine: snippet }, null, 2)}\n`)
+      return false
+    }
+  }
+
+  if (settings.statusLine) {
+    process.stdout.write(
+      `${settingsPath} already has a statusLine, which this will not overwrite.\n` +
+        `To bridge quota from it, have your command also run:\n  node ${bridge}\n`,
+    )
+    return false
+  }
+
+  if (existsSync(settingsPath)) copyFileSync(settingsPath, `${settingsPath}.bak`)
+  mkdirSync(dirname(settingsPath), { recursive: true })
+  writeFileSync(settingsPath, `${JSON.stringify({ ...settings, statusLine: snippet }, null, 2)}\n`)
+  process.stdout.write(
+    `added statusLine to ${settingsPath} (backup at ${settingsPath}.bak).\n` +
+      'Start a new Claude Code session and send one prompt; quota appears once it has an API response.\n',
+  )
+  return true
+}
+
 function printHelp(): void {
   process.stdout.write(
     [
@@ -121,6 +189,8 @@ function printHelp(): void {
       '      --token <s>    require this token; "auto" generates one',
       '      --mock         serve fixture agents, touching nothing real',
       '      --mock-transitions  like --mock, but statuses change on a timer',
+      '      --browse-root <d>  root the folder picker is confined to (default: home)',
+      '      --install-statusline  add the quota bridge to ~/.claude/settings.json and exit',
       '      --web-root <d> directory of built web assets',
       '  -h, --help         show this help',
       '',
@@ -138,18 +208,31 @@ async function main(): Promise<void> {
     return
   }
 
+  if (opts.installStatusline) {
+    process.exit(installStatusline() ? 0 : 1)
+    return
+  }
+
+  const pending = new PendingStore()
+  // Mock mode reports whatever mode was last asked for, so the UI round-trips.
+  let mockMode: string = 'auto'
+  let mockGoal: GoalState | undefined
+
   let source: AgentSource
   let paneApi: PaneApi
   let makeTail: (sessionId: string) => TailApi
+  let limits: LimitsApi
 
   if (opts.mock) {
     source = new MockSource(opts.mockTransitions)
     paneApi = new MockPanes()
     makeTail = (id) => new MockTail(id)
+    limits = new MockLimits(opts.mockTransitions)
   } else {
-    source = new Registry()
+    source = new Registry(undefined, pending)
     paneApi = panes
     makeTail = (id) => new TranscriptTail(id)
+    limits = new RateLimitWatcher()
     if (!(await panes.available())) {
       process.stderr.write(
         'warning: no tmux server reachable — agents will list but cannot be attached to.\n',
@@ -158,10 +241,13 @@ async function main(): Promise<void> {
   }
 
   await source.start()
+  limits.start()
 
   // Keeps the activity line on every card current, not just the open one.
   const enricher = new FleetEnricher(source, makeTail)
   enricher.start()
+
+  const env = await probeEnv(opts.port)
 
   const server = createAppServer({
     source,
@@ -170,6 +256,48 @@ async function main(): Promise<void> {
     mock: opts.mock,
     webRoot: opts.webRoot,
     token: opts.token,
+    env,
+    pending,
+    limits,
+    ...(opts.browseRoot ? { browseRoot: opts.browseRoot } : {}),
+    // Mock mode advertises the flow but must never start a real process. It
+    // still runs the same directory validation, so the error path a user hits
+    // in mock mode is the one they would hit for real.
+    ...(opts.mock
+      ? {
+          spawn: async (req) => ({
+            tmuxSession: 'mock-session',
+            cwd: await validateDir(req.cwd),
+          }),
+          // Same guards and the same closed-loop shape, but nothing is typed
+          // anywhere: the fake pane advances through the real cycle so the UI
+          // round-trip can be exercised end to end.
+          control: {
+            paste: async (_paneId: string, text: string) => {
+              // The goal toggle is the one control whose state the fake pane
+              // has to hold: without it the UI would set a goal and read back
+              // nothing, which is the failure path, not the happy one.
+              if (text === '/goal clear') {
+                mockGoal = undefined
+                return
+              }
+              const set = /^\/goal (.+)$/.exec(text)
+              if (set) {
+                mockGoal = { condition: set[1] as string, met: false, at: Date.now(), fresh: true }
+              }
+            },
+            key: async () => {
+              const i = MODE_CYCLE.indexOf(mockMode as (typeof MODE_CYCLE)[number])
+              mockMode = MODE_CYCLE[(i + 1) % MODE_CYCLE.length] as string
+            },
+            readMode: async () => mockMode,
+            readGoal: async () => mockGoal,
+            paneAlive: async () => false,
+            killSession: async () => {},
+            wait: async () => {},
+          },
+        }
+      : {}),
   })
 
   server.on('error', (err: NodeJS.ErrnoException) => {
@@ -192,6 +320,7 @@ async function main(): Promise<void> {
 
   const shutdown = (): void => {
     enricher.stop()
+    limits.stop()
     source.stop()
     server.close(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
