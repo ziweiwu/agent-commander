@@ -306,18 +306,20 @@ Pushing a `v*` tag triggers `.github/workflows/npm-publish.yml`, which refuses
 to run if the tag and `package.json` disagree — a mismatch means the thing
 published is not the thing the tag names, and npm versions are immutable once
 they land. It then runs typecheck, lint, the test suite and a full build before
-publishing with provenance, so the npm page carries a signed link back to the
-commit it was built from.
+publishing. Provenance comes with trusted publishing, so the npm page carries a
+signed link back to the commit it was built from.
 
 ```
 npm version patch          # or minor / major
 git push --follow-tags
 ```
 
-It needs an npm **granular access token** with read/write on this package,
-stored as the `NPM_TOKEN` repo secret. A granular token publishes from CI
-without a one-time password; a classic token on an account that enforces 2FA
-for writes does not.
+Authentication is npm **trusted publishing**: the job mints a short-lived
+OIDC token and npm exchanges it for publish rights, matched against the trusted
+publisher configured for this package on npmjs.com. There is no `NPM_TOKEN` in
+repo secrets to leak, rotate or forget, and no one-time password to type. It
+also means the runner needs npm >= 11.5.1, which `ubuntu-latest` does not ship,
+hence the `npm install -g npm@latest` step.
 
 The browser audits stay out of the release path on purpose. They need a running
 server and a real Chromium, and font rendering differs enough between macOS and

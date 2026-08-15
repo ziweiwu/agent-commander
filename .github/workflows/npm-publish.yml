@@ -16,9 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      # Lets npm record signed provenance tying the tarball to this repo and
-      # commit. That link is what makes the npm page show a verified "built
-      # from source" badge back to GitHub.
+      # The whole authentication story. npm trusted publishing exchanges this
+      # short-lived OIDC token for publish rights, so there is no NPM_TOKEN in
+      # repo secrets to leak, rotate or forget. It also gets provenance for
+      # free: the npm page carries a signed link back to this commit.
       id-token: write
 
     steps:
@@ -29,6 +30,11 @@ jobs:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
+
+      # ubuntu-latest ships an npm too old to know about trusted publishing,
+      # which arrived in 11.5.1. Without this the publish step falls back to
+      # looking for a token and fails.
+      - run: npm install -g npm@latest
 
       - run: npm ci
 
@@ -52,7 +58,7 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # No token: rights come from the OIDC exchange above, which npm matches
+      # against the trusted publisher configured for this package.
       - name: Publish
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
