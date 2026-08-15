@@ -1,6 +1,6 @@
 {
   "name": "@ziweiwu/agent-commander",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "See every Claude Code agent on your machine at a glance — status, folder, progress — and drop into any one of them from the browser.",
   "license": "MIT",
   "author": "Ziwei Wu <ziweiwu@gmail.com>",
