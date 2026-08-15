@@ -8,12 +8,28 @@ Built for the case where you have a dozen `claude` sessions running across
 different projects and one of them has been sitting on a permission dialog for
 twenty minutes without you noticing.
 
+![The fleet view: nine agents grouped Needs you, Working and Idle, with Claude quota meters in the topbar](https://raw.githubusercontent.com/ziweiwu/agent-commander/main/assets/fleet-dark.png)
+
 ```
 npx @ziweiwu/agent-commander        # run it
 
 npm install                         # or from a clone
 npm start          # builds the web bundle, then serves on http://127.0.0.1:4317
 ```
+
+A blocked agent opens straight onto the terminal that can answer it, and the
+whole thing works from a phone over Tailscale:
+
+| Answering a blocked agent | On a phone |
+|---|---|
+| <img src="https://raw.githubusercontent.com/ziweiwu/agent-commander/main/assets/agent-detail.png" alt="An agent waiting on a permission dialog, opened on the Attach tab with a banner naming what it is waiting for" width="100%"> | <img src="https://raw.githubusercontent.com/ziweiwu/agent-commander/main/assets/phone.png" alt="The fleet view on a phone: a single column of agent cards with the filter chips and quota meters stacked in the header" width="240"> |
+
+<details>
+<summary>Light theme</summary>
+
+![The same fleet view in the light theme](https://raw.githubusercontent.com/ziweiwu/agent-commander/main/assets/fleet-light.png)
+
+</details>
 
 ## What it shows
 
