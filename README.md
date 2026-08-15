@@ -1,5 +1,11 @@
 # agent-commander
 
+[![npm](https://img.shields.io/npm/v/@ziweiwu/agent-commander?color=cb3837&logo=npm)](https://www.npmjs.com/package/@ziweiwu/agent-commander)
+[![Publish](https://github.com/ziweiwu/agent-commander/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/ziweiwu/agent-commander/actions/workflows/npm-publish.yml)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![node](https://img.shields.io/node/v/@ziweiwu/agent-commander)](https://nodejs.org)
+[![sponsor](https://img.shields.io/github/sponsors/ziweiwu?logo=githubsponsors&color=ea4aaa)](https://github.com/sponsors/ziweiwu)
+
 See every Claude Code agent on your machine at a glance — status, folder, git
 branch, what it's doing right now — and drop into any one of them from the
 browser.
