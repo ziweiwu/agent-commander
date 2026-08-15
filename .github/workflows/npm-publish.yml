@@ -1,0 +1,58 @@
+# Publish to npm when a v* tag is pushed.
+#
+# The tag is the trigger and the source of truth for the version: the job
+# refuses to run if the tag and package.json disagree, because a mismatch means
+# whatever gets published is not the thing the tag names, and npm versions are
+# immutable once they land.
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Lets npm record signed provenance tying the tarball to this repo and
+      # commit. That link is what makes the npm page show a verified "built
+      # from source" badge back to GitHub.
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - run: npm ci
+
+      - name: Tag must match package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $GITHUB_REF_NAME says $tag, package.json says $pkg" >&2
+            exit 1
+          fi
+          echo "publishing $pkg"
+
+      # The deterministic gates. The browser audits (contrast, a11y, ux, mobile)
+      # deliberately stay out of the release path: they need a running server
+      # and a real Chromium, and font rendering differs enough between macOS and
+      # ubuntu-latest that a layout finding here would block a release for a
+      # reason that has nothing to do with the release.
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      - name: Publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

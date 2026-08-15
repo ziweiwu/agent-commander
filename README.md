@@ -284,6 +284,30 @@ npm run lint
 npm run verify:inv1   # asserts attaching never resizes a real pane (server must be running)
 ```
 
+### Releasing
+
+Pushing a `v*` tag triggers `.github/workflows/npm-publish.yml`, which refuses
+to run if the tag and `package.json` disagree — a mismatch means the thing
+published is not the thing the tag names, and npm versions are immutable once
+they land. It then runs typecheck, lint, the test suite and a full build before
+publishing with provenance, so the npm page carries a signed link back to the
+commit it was built from.
+
+```
+npm version patch          # or minor / major
+git push --follow-tags
+```
+
+It needs an npm **granular access token** with read/write on this package,
+stored as the `NPM_TOKEN` repo secret. A granular token publishes from CI
+without a one-time password; a classic token on an account that enforces 2FA
+for writes does not.
+
+The browser audits stay out of the release path on purpose. They need a running
+server and a real Chromium, and font rendering differs enough between macOS and
+`ubuntu-latest` that a layout finding there would block a release for a reason
+that has nothing to do with the release. Run them locally before tagging.
+
 ### Review agents
 
 Two subagents do the verification. `ux-bar-raiser` ships with the repo in
