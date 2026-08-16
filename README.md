@@ -256,7 +256,9 @@ name, model and permission mode, and starts `claude` there in a fresh detached
 tmux session. It appears in the list within a
 couple of seconds, because the new process registers itself the same way every
 other session does. Directories from running agents are offered as shortcuts.
-The server validates the directory before spawning — see INV-7.
+The server validates the directory before spawning, and checks the model and
+permission mode against fixed allow-lists so an unrecognised value is refused
+rather than becoming a flag — see INV-7.
 
 ## How it works
 
@@ -279,6 +281,7 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
 -p, --port <n>      port to listen on (default 4317)
     --host <addr>   bind address (default 127.0.0.1)
     --token <s>     require this token; "auto" generates one
+    --browse-root <d>  root the folder picker is confined to (default: home)
     --mock          serve fixture agents, touching nothing real
     --install-statusline
                     add the quota bridge to ~/.claude/settings.json and exit
@@ -286,11 +289,28 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
 
 `--host` is refused without `--token`. This app can type into live agents and
 approve their permission prompts, so it will not expose itself to the network
-unauthenticated. For access from your phone, run it behind Tailscale:
+unauthenticated. On loopback it also refuses requests that do not come from
+localhost's own origin, because a page in another browser tab is not a stranger
+on the network — see INV-3.
+
+For access from your phone, put Tailscale in front of it rather than binding
+another address at all:
 
 ```
-npm run serve -- --host 0.0.0.0 --token auto
+tailscale serve --bg 4317
 ```
+
+Then open `https://<your-machine>.<tailnet>.ts.net/` on the phone. If you would
+rather bind the tailnet address directly, name it — do **not** use
+`--host 0.0.0.0`, which also publishes the app on whatever Wi-Fi you are
+currently joined to:
+
+```
+npm run serve -- --host 100.x.y.z --token auto
+```
+
+Never `tailscale funnel` this: that publishes to the public internet, and
+anyone who reached it could drive your agents.
 
 ## Development
 
@@ -320,7 +340,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 377 tests: pure logic, server, and React components
+npm test           # 431 tests: pure logic, server, and React components
 npm run typecheck
 npm run lint
 npm run verify:inv1   # asserts attaching never resizes a real pane (server must be running)

@@ -28,7 +28,7 @@ import {
   setMode,
   setModel,
 } from './control.ts'
-import { BrowseError, listDirs } from './browse.ts'
+import { BrowseError, isInside, listDirs } from './browse.ts'
 import { readGoal, readPermissionMode } from './transcript.ts'
 import type { PendingStore } from './pending.ts'
 import type {
@@ -82,6 +82,65 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB)
 }
 
+/** Pull the hostname out of an Origin or a Host header, brackets stripped. */
+function hostnameOf(value: string | undefined): string | null {
+  if (!value) return null
+  try {
+    const url = new URL(value.includes('://') ? value : `http://${value}`)
+    return url.hostname.replace(/^\[|\]$/g, '')
+  } catch {
+    return null
+  }
+}
+
+/** The only names a tokenless server can legitimately be reached at (INV-3). */
+function isLoopbackName(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname === '::1') return true
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+}
+
+/**
+ * INV-3's other half: a browser is not a stranger on the network.
+ *
+ * Binding 127.0.0.1 keeps the network out, but it does nothing about the one
+ * program guaranteed to be running on this machine. WebSockets are exempt from
+ * CORS entirely, and a POST with a `text/plain` content type is a CORS "simple
+ * request" that is sent without a preflight -- so before this check, any page on
+ * any origin could open `ws://127.0.0.1:4317/ws`, read the whole fleet, and
+ * paste a command plus Enter into a live agent. That is arbitrary code
+ * execution by way of a visited web page.
+ *
+ * Two headers, because they answer different questions:
+ *
+ *   - `Origin` names the page making the request. Browsers always send it on a
+ *     WebSocket handshake and on any cross-origin request, and never let a page
+ *     forge it. Absent means a non-browser client (curl, a test, a native app),
+ *     which is not the threat this guards.
+ *   - `Host` names what the client asked for. Checking it too is what stops DNS
+ *     rebinding, where `evil.example` is re-pointed at 127.0.0.1 and the origin
+ *     then matches the host perfectly -- both say `evil.example`, and only the
+ *     fact that it is not a loopback name gives it away.
+ *
+ * Only tokenless servers are gated. A configured token is already proof of
+ * intent that neither a cross-origin page nor a rebound name can produce: it
+ * lives in the URL of the real origin, and an attacker who cannot read that
+ * origin cannot supply it. That is also what keeps the Tailscale flow working,
+ * where the app is legitimately reached at a name that is not loopback and
+ * INV-3 already requires `--token`.
+ */
+function sameOriginRequest(req: IncomingMessage): boolean {
+  const origin = req.headers.origin
+  if (origin !== undefined) {
+    // A sandboxed iframe or a file:// page sends the literal "null". It parses
+    // as a hostname of that name, which is not a loopback one, so it is
+    // refused by the same line as anything else foreign.
+    const from = hostnameOf(origin)
+    if (from === null || !isLoopbackName(from)) return false
+  }
+  const asked = hostnameOf(req.headers.host)
+  return asked !== null && isLoopbackName(asked)
+}
+
 /** One browser tab's view state. */
 class Viewer {
   focused: string | null = null
@@ -101,10 +160,22 @@ class Viewer {
   }
 
   clearTimers(): void {
-    if (this.frameTimer) clearInterval(this.frameTimer)
+    this.clearFrameTimer()
     if (this.tailTimer) clearInterval(this.tailTimer)
-    this.frameTimer = null
     this.tailTimer = null
+  }
+
+  /**
+   * Stop polling the pane, and only the pane.
+   *
+   * The terminal and the conversation are independent: one reads tmux, the
+   * other reads a file on disk. A dead pane used to take the transcript timer
+   * down with it, so answering "pane has exited" left the chat frozen for that
+   * tab until the agent was re-opened -- and nothing said why.
+   */
+  clearFrameTimer(): void {
+    if (this.frameTimer) clearInterval(this.frameTimer)
+    this.frameTimer = null
   }
 
   resetPane(): void {
@@ -125,11 +196,22 @@ export function createAppServer(opts: ServeOptions): Server {
     return typeof supplied === 'string' && safeEqual(supplied, opts.token)
   }
 
+  /** True when this request may act at all: the token, or same-origin loopback. */
+  const permitted = (req: IncomingMessage): boolean => !!opts.token || sameOriginRequest(req)
+
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (!authorized(url, req)) {
       res.writeHead(401, { 'content-type': 'text/plain' })
       res.end('unauthorized: append ?token=... to the URL')
+      return
+    }
+    if (!permitted(req)) {
+      res.writeHead(403, { 'content-type': 'text/plain' })
+      res.end(
+        'forbidden: this server answers only same-origin requests from localhost.\n' +
+          'Reach it at http://127.0.0.1, or start it with --token to use another name.',
+      )
       return
     }
     if (url.pathname === '/api/agents' && req.method !== 'POST') {
@@ -164,6 +246,13 @@ export function createAppServer(opts: ServeOptions): Server {
     const url = new URL(req.url ?? '/', 'http://localhost')
     if (url.pathname !== '/ws' || !authorized(url, req)) {
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n')
+      socket.destroy()
+      return
+    }
+    // The socket is the whole control surface -- fleet contents out, pastes and
+    // keys in -- and CORS does not apply to it, so it gets the same gate.
+    if (!permitted(req)) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n')
       socket.destroy()
       return
     }
@@ -302,8 +391,10 @@ async function pumpFrame(viewer: Viewer, opts: ServeOptions): Promise<void> {
     const meta = await opts.panes.meta(agent.paneId)
     if (meta.dead) {
       viewer.send({ type: 'error', sessionId, message: 'pane has exited' })
+      // Frames stop; the conversation keeps arriving. The transcript is still
+      // on disk and is still the record of what this agent did.
       viewer.attached = false
-      viewer.clearTimers()
+      viewer.clearFrameTimer()
       return
     }
     const lines = await opts.panes.capture(agent.paneId, meta.rows)
@@ -314,8 +405,10 @@ async function pumpFrame(viewer: Viewer, opts: ServeOptions): Promise<void> {
     viewer.prevCursor = { x: meta.cursorX, y: meta.cursorY }
   } catch (err) {
     viewer.send({ type: 'error', sessionId, message: reason(err) })
+    // Same again: a tmux failure is not a reason to stop reading the file.
+    // Re-opening the terminal sends a fresh `attach`, which starts it back up.
     viewer.attached = false
-    viewer.clearTimers()
+    viewer.clearFrameTimer()
   } finally {
     viewer.frameBusy = false
   }
@@ -333,7 +426,13 @@ async function serveStatic(
 ): Promise<void> {
   const rel = normalize(pathname === '/' ? '/index.html' : pathname).replace(/^(\.\.[/\\])+/, '')
   const file = join(root, rel)
-  if (!file.startsWith(root)) {
+  /*
+   * A path-segment check, not a string prefix -- the same standard INV-9 holds
+   * the folder browser to. `startsWith` says `/app/dist/web-backup` is inside
+   * `/app/dist/web`, and a web root with a sibling that shares its name as a
+   * prefix is not an exotic arrangement.
+   */
+  if (!isInside(root, file)) {
     res.writeHead(403).end('forbidden')
     return
   }
@@ -418,12 +517,24 @@ async function handleNewAgent(
       return
     }
     const spawn = opts.spawn ?? startAgent
-    const result = await spawn({ cwd: body.cwd, name: body.name })
+    // Model and mode travel with the request. Dropping them here meant a user
+    // who chose "plan" and "opus" got a default agent with no error at all --
+    // and silently starting a session in a *different* permission mode than
+    // the one asked for is the wrong way round to be wrong.
+    const result = await spawn({
+      cwd: body.cwd,
+      name: body.name,
+      model: body.model,
+      permissionMode: body.permissionMode,
+    })
     opts.pending?.add({ ...result, name: body.name })
     reply(200, { ok: true, ...result })
   } catch (err) {
     const message = err instanceof SpawnError || err instanceof Error ? err.message : String(err)
-    reply(err instanceof SpawnError ? 400 : 500, { ok: false, error: message })
+    // A rejected model or mode is the caller's mistake, not the server's, and
+    // the dialog renders a 400 as a reason it can show next to the field.
+    const known = err instanceof SpawnError || err instanceof SpawnOptionError
+    reply(known ? 400 : 500, { ok: false, error: message })
   }
 }
 

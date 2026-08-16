@@ -6,6 +6,7 @@
  * it on every tick would be the single most expensive thing this app does.
  */
 import { open, readdir, stat } from 'node:fs/promises'
+import { StringDecoder } from 'node:string_decoder'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { Agent, GoalState, TimelineEvent } from '../shared/types.ts'
@@ -317,11 +318,35 @@ export class TranscriptTail {
   #lastEventAt = 0
   #offset = 0
   #partial = ''
+  /**
+   * Holds a multi-byte character that a read stopped in the middle of.
+   *
+   * The offset this tails by is a byte count, and the poll lands wherever the
+   * file happens to have got to — so a three-byte character can be split
+   * across two reads. Decoding each chunk as an independent string turned that
+   * into two U+FFFD replacements: "检查一下" came back as "��查一下"
+   * for any conversation not written in ASCII, which this app has a Chinese
+   * locale for. The decoder holds the incomplete bytes back until the rest of
+   * them arrive.
+   */
+  #decoder = new StringDecoder('utf8')
   #counter = 0
   #totalTokens = 0
   #totalSubagents = 0
+  /**
+   * Whether a full backfill has been handed over yet.
+   *
+   * `first` tells the client to replace what it has rather than append, so it
+   * must not be raised again by a transcript that has merely gone missing —
+   * that would blank a conversation the user is reading, once per poll.
+   */
+  #backfilled = false
 
-  constructor(private readonly sessionId: string) {}
+  constructor(
+    private readonly sessionId: string,
+    /** Where to look for the transcript; overridden by tests. */
+    private readonly root: string = PROJECTS_DIR,
+  ) {}
 
   get path(): string | null {
     return this.#path
@@ -348,29 +373,44 @@ export class TranscriptTail {
    */
   async read(): Promise<ParseResult & { first: boolean }> {
     if (!this.#path) {
-      this.#path = await findTranscript(this.sessionId)
-      if (!this.#path) return { events: [], patch: {}, first: true }
+      this.#path = await findTranscript(this.sessionId, this.root)
+      if (!this.#path) return { events: [], patch: {}, first: !this.#backfilled }
     }
 
     let size: number
     try {
       size = (await stat(this.#path)).size
     } catch {
+      /*
+       * The file moved, was rotated, or is briefly unreadable. The path was
+       * resolved once and cached, so holding on to it meant every later read
+       * failed the same way and that agent's timeline was dead for the life of
+       * the process. Dropping it costs one directory scan and lets the next
+       * read find where the transcript went.
+       */
+      this.#path = null
       return { events: [], patch: {}, first: false }
     }
 
-    const first = this.#offset === 0
+    let first = this.#offset === 0
     if (first && size > BACKFILL_BYTES) {
       this.#offset = size - BACKFILL_BYTES
     }
     if (size < this.#offset) {
       // File was truncated or replaced; start over rather than emit garbage.
+      // This is a replacement, not a continuation: without saying so, the
+      // client appends the whole file to the copy it already has.
       this.#offset = 0
       this.#partial = ''
+      this.#decoder = new StringDecoder('utf8')
+      first = true
     }
     // Checked even when the transcript has not grown by a byte: that silence is
     // exactly what a delegated run looks like from here.
-    if (size === this.#offset) return { events: [], patch: await this.#delegation(), first }
+    if (size === this.#offset) {
+      if (first) this.#backfilled = true
+      return { events: [], patch: await this.#delegation(), first }
+    }
 
     const length = size - this.#offset
     const buf = Buffer.allocUnsafe(length)
@@ -382,7 +422,9 @@ export class TranscriptTail {
     }
     this.#offset = size
 
-    const text = this.#partial + buf.toString('utf8')
+    // Decoded through the tailer's own decoder, so a character split across
+    // this read and the next survives it.
+    const text = this.#partial + this.#decoder.write(buf)
     const lines = text.split('\n')
     // The last element is either '' (clean boundary) or a torn record.
     this.#partial = lines.pop() ?? ''
@@ -397,6 +439,7 @@ export class TranscriptTail {
     if (this.#totalSubagents > 0) result.patch.subagents = this.#totalSubagents
     if (result.patch.lastActivityAt !== undefined) this.#lastEventAt = result.patch.lastActivityAt
     Object.assign(result.patch, await this.#delegation())
+    if (first) this.#backfilled = true
     return { ...result, first }
   }
 }

@@ -1,6 +1,6 @@
 /** Tests for the guardrails: what may bind, and what may reach a live agent. */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, rmSync, symlinkSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -18,16 +18,33 @@ import { ALLOWED_KEYS, DESTRUCTIVE_KEYS } from '../src/shared/types.ts'
  * built CLI through a symlink the way npm would.
  */
 describe('the installed binary actually runs', () => {
-  it('starts when invoked through a bin symlink', async () => {
-    const built = resolve('dist/server/cli.js')
-    if (!existsSync(built)) return // needs `npm run build`; covered in CI, which builds first
-    const dir = mkdtempSync(join(tmpdir(), 'ac-bin-'))
-    const link = join(dir, 'agent-commander')
-    symlinkSync(built, link)
-    const out = execFileSync(process.execPath, [link, '--help'], { encoding: 'utf8' })
-    expect(out).toContain('Usage: agent-commander')
-    rmSync(dir, { recursive: true, force: true })
-  })
+  it(
+    'starts when invoked through a bin symlink',
+    () => {
+      /*
+       * Compiled here rather than read out of dist/, which is gitignored and
+       * tied to nothing. Skipping when dist/ is absent made this pass silently
+       * everywhere it mattered -- CI tests before it builds -- and a dist/ left
+       * over from before a regression would vouch for source that has the bug.
+       */
+      execFileSync('npm', ['run', 'build:server'], { stdio: 'pipe', timeout: 180_000 })
+      const dir = mkdtempSync(join(tmpdir(), 'ac-bin-'))
+      try {
+        const link = join(dir, 'agent-commander')
+        symlinkSync(resolve('dist/server/cli.js'), link)
+        // Timed, because execFileSync blocks the worker: a CLI that stopped
+        // exiting on --help would otherwise hang the suite rather than fail it.
+        const out = execFileSync(process.execPath, [link, '--help'], {
+          encoding: 'utf8',
+          timeout: 20_000,
+        })
+        expect(out).toContain('Usage: agent-commander')
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    },
+    240_000,
+  )
 })
 
 describe('parseArgs', () => {

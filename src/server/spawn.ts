@@ -60,6 +60,28 @@ export async function validateDir(input: string, home = homedir()): Promise<stri
 }
 
 /**
+ * Everything checked before a process could be created: the directory exists,
+ * and the model and mode are on their allow-lists.
+ *
+ * Split out so mock mode can run the identical checks without spawning — INV-7
+ * promises that the failure a user sees in `--mock` is the failure they would
+ * get for real, and that only holds if it is the same code.
+ *
+ * Returns the resolved directory, because validating it and resolving it are
+ * the same operation and the caller needs the result.
+ */
+export async function checkSpawnRequest(req: SpawnRequest): Promise<string> {
+  const cwd = await validateDir(req.cwd)
+  if (req.model !== undefined && !isModelAlias(req.model)) {
+    throw new SpawnOptionError(`unknown model: ${req.model}`)
+  }
+  if (req.permissionMode !== undefined && !isPermissionMode(req.permissionMode)) {
+    throw new SpawnOptionError(`unknown permission mode: ${req.permissionMode}`)
+  }
+  return cwd
+}
+
+/**
  * Generated, not user-supplied. A tmux session name containing `:` or `.`
  * would collide with tmux's own target syntax.
  */
@@ -87,23 +109,15 @@ export async function startAgent(
   req: SpawnRequest,
   deps: { now: number; claudeBin?: string } = { now: Date.now() },
 ): Promise<SpawnResult> {
-  const cwd = await validateDir(req.cwd)
+  const cwd = await checkSpawnRequest(req)
   const session = sessionName(deps.now, req.name ?? '')
 
-  // INV-7: every value is its own argv entry, and model and mode are checked
-  // against fixed allow-lists so nothing free-text becomes a flag.
+  // INV-7: every value is its own argv entry, and model and mode were checked
+  // against fixed allow-lists above, so nothing free-text becomes a flag.
   const argv = [deps.claudeBin ?? 'claude']
   if (req.name?.trim()) argv.push('-n', req.name.trim())
-  if (req.model) {
-    if (!isModelAlias(req.model)) throw new SpawnOptionError(`unknown model: ${req.model}`)
-    argv.push('--model', req.model)
-  }
-  if (req.permissionMode) {
-    if (!isPermissionMode(req.permissionMode)) {
-      throw new SpawnOptionError(`unknown permission mode: ${req.permissionMode}`)
-    }
-    argv.push('--permission-mode', req.permissionMode)
-  }
+  if (req.model) argv.push('--model', req.model)
+  if (req.permissionMode) argv.push('--permission-mode', req.permissionMode)
 
   await tmux(['new-session', '-d', '-s', session, '-c', cwd, ...argv])
   return { tmuxSession: session, cwd }

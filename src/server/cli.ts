@@ -20,7 +20,7 @@ import { RateLimitWatcher } from './limits.ts'
 import { createAppServer } from './routes.ts'
 import { FleetEnricher } from './enrich.ts'
 import { probeEnv } from './env.ts'
-import { validateDir } from './spawn.ts'
+import { checkSpawnRequest } from './spawn.ts'
 import { PendingStore } from './pending.ts'
 import { MODE_CYCLE } from './options.ts'
 import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
@@ -293,7 +293,9 @@ async function main(): Promise<void> {
       ? {
           spawn: async (req) => ({
             tmuxSession: 'mock-session',
-            cwd: await validateDir(req.cwd),
+            // The same checks the real path runs — directory, model and mode —
+            // so an unknown alias fails here exactly as it would for real.
+            cwd: await checkSpawnRequest(req),
           }),
           // Same guards and the same closed-loop shape, but nothing is typed
           // anywhere: the fake pane advances through the real cycle so the UI
@@ -369,7 +371,11 @@ function sameFile(a: string, b: string): boolean {
   try {
     return realpathSync(a) === realpathSync(b)
   } catch {
-    return false
+    // realpath can fail for reasons that are not "different file" -- EACCES on
+    // an unreadable component of the install prefix, ENOENT/EPERM on some
+    // container and network mounts. Falling back to false would resurrect the
+    // silent no-op this function exists to prevent, so compare what we have.
+    return resolve(a) === resolve(b)
   }
 }
 

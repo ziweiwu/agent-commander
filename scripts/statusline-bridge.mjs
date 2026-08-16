@@ -20,9 +20,10 @@
  * Install with `agent-commander --install-statusline`, or by hand:
  *   "statusLine": { "type": "command", "command": "node <repo>/scripts/statusline-bridge.mjs" }
  */
-import { mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { mkdirSync, realpathSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 export const CACHE_DIR = join(homedir(), '.claude', 'agent-commander')
 export const CACHE_FILE = join(CACHE_DIR, 'rate-limits.json')
@@ -100,8 +101,43 @@ async function main() {
   process.stdout.write(render(snap))
 }
 
-/* Only run when invoked directly, so the tests can import the pieces. */
-if (process.argv[1] && import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * Was this file run as the program, rather than imported by a test?
+ *
+ * Not `import.meta.url === \`file://${process.argv[1]}\``, which is the same
+ * mistake that shipped a do-nothing binary in agent-commander 0.1.0 through
+ * 0.1.3. A file URL is percent-encoded, so a repo living in `~/My Projects`
+ * makes `import.meta.url` end in `My%20Projects` while argv[1] has a literal
+ * space — the two never match, `main` never runs, and the quota meters simply
+ * never appear. INV-10 says a bug in here must be invisible; that one is
+ * invisible in the wrong direction, because there is nothing to see either way.
+ */
+function invokedDirectly() {
+  const arg = process.argv[1]
+  if (!arg) return false
+  const here = fileURLToPath(import.meta.url)
+  if (resolve(arg) === here) return true
+  // A statusLine command reached through a dotfiles symlink is still this file.
+  try {
+    return realpathSync(arg) === realpathSync(here)
+  } catch {
+    return false
+  }
+}
+
+/*
+ * Even the question is asked inside a catch. This runs inside the render loop
+ * of every live Claude Code session, and INV-10's whole point is that nothing
+ * in here may put a stack trace in the footer of the user's working session.
+ */
+let direct = false
+try {
+  direct = invokedDirectly()
+} catch {
+  direct = false
+}
+
+if (direct) {
   /* A bad frame must never put a stack trace in the user's status line. */
   main().catch(() => {})
 }

@@ -42,6 +42,24 @@ re-submits. A message that is never confirmed is marked *not delivered* rather
 than being retried into a live agent — marking is the only response, because
 re-sending is the user's decision, not the app's.
 
+Exactly once is not enough on its own: it also has to be *that* text, to *that*
+agent, in the order it was typed. `paste` is two tmux calls with an await
+between them — load a buffer, then paste that buffer into a pane — and nothing
+serialises the socket messages driving them. One shared buffer name meant two
+overlapping pastes interleaved as load(A) → load(B) → paste(into A), and A's
+agent received B's text. Two tabs on two agents is the ordinary way to use
+this, and the Attach view sends one paste per keystroke, so the overlap was the
+common case. Every paste now loads a buffer of its own, and writes to one pane
+are queued behind each other so an Enter cannot overtake the text it submits.
+
+A local echo is matched to its confirmation by *count*, not by text alone. The
+quick prompts are "Continue" and "Go ahead", so matching on text reconciled the
+second one against the first an hour earlier: the echo vanished the moment it
+was drawn and took its delivery timer with it, which meant a message that never
+arrived was never marked undelivered either. Marking is the only honest
+response to a message that may not have landed, and it only works if the app
+can tell this copy from the last one.
+
 "Exactly once" cannot rest on React state. `draft` is read from a closure and
 `setDraft('')` does not land until React flushes, so three Enter keydowns
 delivered in one batch — key repeat, a double click on Send, input queued behind
@@ -52,19 +70,55 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
 
 - `test/ui/burst-send.test.tsx` — asserts one send from a burst of three, for
   Enter, for the Send button, and for a double-tapped chip
+- `test/pane-writes.test.ts` — two overlapping pastes never swap payloads, and
+  writes to one pane keep their order
+- `test/chat.test.ts` — a repeated message stays visible until the transcript
+  records *another* copy of it
 
-## INV-3 — Localhost by default
+## INV-3 — Localhost by default, and localhost is not the whole story
 
 Binds `127.0.0.1`. `--host` is accepted for Tailscale use but is refused without
 `--token`, because this app can type into live agents and answer their
 permission prompts. `--token auto` generates one.
+
+Binding loopback keeps the network out. It does nothing about the one program
+guaranteed to be running on this machine: the browser. WebSockets are exempt
+from CORS entirely, and a `POST` with a `text/plain` body is a CORS "simple
+request" that is sent with no preflight — so any page on any origin could open
+`ws://127.0.0.1:4317/ws`, read every agent's directory and prompts, and paste a
+command plus Enter into a live session. That is arbitrary code execution by way
+of a visited web page, and "we only bind loopback" is no defence against it.
+
+So a tokenless server answers only same-origin requests from loopback. Two
+headers, because they answer different questions:
+
+- `Origin` names the page. Browsers always send it on a WebSocket handshake and
+  on any cross-origin request, and never let a page forge it. Absent means a
+  non-browser client, which is not what this guards.
+- `Host` names what was asked for. Checking it too is what stops DNS rebinding,
+  where `evil.example` is re-pointed at 127.0.0.1 and the origin then matches
+  the host perfectly — both say `evil.example`, and only the fact that neither
+  is a loopback name gives it away.
+
+A configured token replaces that gate rather than adding to it: a token is
+proof of intent that neither a cross-origin page nor a rebound name can
+produce, since it lives in the URL of the real origin. That is also what keeps
+the Tailscale flow working, where the app is legitimately reached at a name
+that is not loopback — and which this invariant already requires a token for.
+
+- `test/origin.test.ts` — a cross-origin WebSocket and a cross-origin form POST
+  are refused, a rebound `Host` is refused down a raw socket, and every honest
+  spelling of loopback still serves
 
 ## INV-4 — Bounded polling cost
 
 - `capture-pane` runs only for the agent currently focused *and* attached.
 - Frames that changed no row and moved no cursor are not sent at all.
 - Transcript reads are incremental by byte offset; the file is never re-read.
-  A day-old transcript is already several MB.
+  A day-old transcript is already several MB. The offset is a byte count, so a
+  read can stop in the middle of a character — the tailer holds those bytes
+  back through a `StringDecoder` rather than decoding each chunk alone, which
+  turned any non-ASCII conversation into U+FFFD.
 - The session list refreshes from local file reads every 2s. The authoritative
   `claude agents --json` costs ~680ms per call, so it only runs every 30s as a
   reconcile.
@@ -91,8 +145,23 @@ result of handling it "correctly". "No reading" and "a stale reading" stay
 distinct all the way to the UI — hiding a non-subscriber's meter and hiding a
 meter nobody has refreshed in an hour are different claims.
 
+A transcript that moves is found again. The path is resolved once and cached,
+and holding on to a stale one meant every later read failed the same way and
+that agent's timeline was dead for the life of the process. A read that cannot
+stat its file drops the path so the next one looks again — and does not claim
+to be a fresh backfill while doing so, because `first` tells the browser to
+replace the conversation it is showing.
+
+The terminal and the conversation degrade separately. They read different
+things — one polls tmux, the other tails a file — but both timers used to hang
+off one call, so a pane that exited froze the chat for that tab as well.
+
 - `test/limits.test.ts` — truncated and junk documents parse to `null`; a
   deleted file keeps the last good value
+- `test/transcript-tail.test.ts` — a character split across two reads, a line
+  split across two reads, a transcript that moves, and one that is replaced
+- `test/frame-errors.test.ts` — a dead pane ends the frames and not the
+  conversation
 
 ## INV-6 — Guard destructive keys
 
@@ -121,8 +190,18 @@ becoming a flag.
 Mock mode runs the same validation and then does not spawn, so the failure a
 user sees in `--mock` is the failure they would get for real.
 
+The model and the mode are part of the request, not decoration on it: the
+dialog offered both and the route forwarded neither, so choosing "plan" and
+"opus" produced a default agent and nothing to say so. Both are now checked by
+`checkSpawnRequest`, which is the same function mock mode runs — that is what
+makes "the failure you see in `--mock` is the failure you would get for real"
+true rather than aspirational.
+
 - `test/spawn.test.ts` — path expansion, absolute-path requirement, refusal of
-  files and missing directories, and session-name sanitising
+  files and missing directories, session-name sanitising, and the model and
+  mode allow-lists
+- `test/new-agent.test.ts` — what the dialog chose is what reaches the spawn,
+  and an unrecognised alias is a 400 rather than a 500
 - `test/ui/NewAgentDialog.test.tsx` — a rejected directory surfaces the server's
   reason and leaves the dialog open
 
@@ -204,6 +283,14 @@ document however many sessions write at once.
 Nothing it does reaches an agent. It has no way to send input, which is why it
 is outside INV-2 rather than an exception to it.
 
+It also has to actually run. Deciding "was I invoked directly?" by comparing
+`import.meta.url` against `file://${process.argv[1]}` is the same mistake that
+shipped a do-nothing binary in 0.1.0 through 0.1.3: a file URL is
+percent-encoded, so a checkout under `~/My Projects` never matches its own
+argv, `main` never runs, and the meters simply never appear. The comparison is
+made on resolved paths, and even asking the question is wrapped in a catch.
+
 - `test/limits.test.ts` — asserts the entrypoint is wrapped in a catch, that an
-  absent `rate_limits` leaves an existing cache intact, and that the bridge and
-  `src/server/limits.ts` name the same file
+  absent `rate_limits` leaves an existing cache intact, that the bridge and
+  `src/server/limits.ts` name the same file, and that a copy of the bridge run
+  from a path containing a space still writes the cache

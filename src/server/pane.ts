@@ -10,7 +10,59 @@
 import { execFile } from 'node:child_process'
 
 const TMUX = 'tmux'
-const BUFFER = 'agent-commander'
+
+/**
+ * Prefix for the paste buffers this app creates. Never used on its own: see
+ * `bufferName` for why one shared name was a way to type into the wrong agent.
+ */
+const BUFFER_PREFIX = 'agent-commander'
+
+let bufferSeq = 0
+
+/**
+ * A fresh buffer name for every paste.
+ *
+ * `load-buffer` and `paste-buffer` are two separate tmux invocations with an
+ * await between them, and nothing serialises the WebSocket messages that drive
+ * them. With one shared buffer name, two overlapping pastes interleaved as
+ * load(A) → load(B) → paste(A's pane) → paste(B's pane), and the first paste
+ * put *B's text* into A's agent. Two browser tabs on two agents is the normal
+ * way to use this app, and the Attach view made it far likelier still by
+ * sending one paste per keystroke.
+ *
+ * The pid is in the name because a second agent-commander on the same machine
+ * shares the tmux server, and therefore its buffer namespace.
+ */
+function bufferName(): string {
+  bufferSeq += 1
+  return `${BUFFER_PREFIX}-${process.pid}-${bufferSeq}`
+}
+
+/**
+ * One in-flight tmux write per pane, in the order the user asked for them.
+ *
+ * Unique buffer names stop two pastes from swapping payloads, but they do not
+ * order them: typing in the Attach view sends a paste per character, and a
+ * `sendText` followed by `sendKey('Enter')` must not have the Enter overtake
+ * the text it submits. Reads (`meta`, `capture`) stay off this chain — they
+ * touch nothing and run ~7x a second.
+ */
+const writeQueues = new Map<string, Promise<void>>()
+
+function enqueue<T>(paneId: string, task: () => Promise<T>): Promise<T> {
+  const prior = writeQueues.get(paneId) ?? Promise.resolve()
+  const result = prior.then(task)
+  // A failed write must not poison the pane's queue for every later one.
+  const settled = result.then(
+    () => {},
+    () => {},
+  )
+  writeQueues.set(paneId, settled)
+  void settled.then(() => {
+    if (writeQueues.get(paneId) === settled) writeQueues.delete(paneId)
+  })
+  return result
+}
 
 /** tmux pane ids look like `%77`. Reject anything else before it reaches argv. */
 const PANE_RE = /^%\d+$/
@@ -98,19 +150,32 @@ export async function capture(paneId: string, rows: number): Promise<string[]> {
 export async function paste(paneId: string, text: string, submit: boolean): Promise<void> {
   assertPane(paneId)
   if (text.length === 0 && !submit) return
-  if (text.length > 0) {
-    await run(['load-buffer', '-b', BUFFER, '-'], text)
-    await run(['paste-buffer', '-b', BUFFER, '-t', paneId, '-p', '-d'])
-  }
-  if (submit) {
-    await run(['send-keys', '-t', paneId, 'Enter'])
-  }
+  await enqueue(paneId, async () => {
+    if (text.length > 0) {
+      const buffer = bufferName()
+      await run(['load-buffer', '-b', buffer, '-'], text)
+      try {
+        // `-d` deletes the buffer once it has been pasted.
+        await run(['paste-buffer', '-b', buffer, '-t', paneId, '-p', '-d'])
+      } catch (err) {
+        // A paste that never happened leaves its buffer behind, and these are
+        // per-call now, so they would accumulate for the life of the tmux
+        // server rather than being overwritten by the next one.
+        await run(['delete-buffer', '-b', buffer]).catch(() => {})
+        throw err
+      }
+    }
+    if (submit) {
+      await run(['send-keys', '-t', paneId, 'Enter'])
+    }
+  })
 }
 
 /** Send a single control key. The caller must have validated it against ALLOWED_KEYS. */
 export async function key(paneId: string, keyName: string): Promise<void> {
   assertPane(paneId)
-  await run(['send-keys', '-t', paneId, keyName])
+  // Same queue as paste: an Enter must not overtake the text it submits.
+  await enqueue(paneId, () => run(['send-keys', '-t', paneId, keyName]))
 }
 
 /**

@@ -37,12 +37,28 @@ function usePaneTerm(agent: Agent, onExit: () => void, fullscreen: boolean) {
     sendKey(key)
   }
 
+  /*
+   * The terminal is built once per pane, so anything handed to its constructor
+   * is frozen at that moment — and `guarded` closes over `t`. Switching
+   * language mid-session left the Ctrl-C confirmation, the one dialog here
+   * that can discard an agent's work, asking in the language the tab was
+   * opened in. Same for `onExit`, which is a prop and gets a new identity on
+   * every render. The ref is read at call time, so both stay current without
+   * rebuilding the terminal.
+   */
+  const handlers = useRef({ guarded, onExit })
+  handlers.current = { guarded, onExit }
+
   useEffect(() => {
     const wrap = wrapRef.current
     const scale = scaleRef.current
     if (!agent.paneId || !wrap || !scale) return
 
-    const term = new PaneTerm(guarded, sendText, onExit)
+    const term = new PaneTerm(
+      (key) => handlers.current.guarded(key),
+      sendText,
+      () => handlers.current.onExit(),
+    )
     term.onZoomChange(() => forceRender((n) => n + 1))
     termRef.current = term
 

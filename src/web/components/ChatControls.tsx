@@ -74,6 +74,11 @@ export function ChatControls({ agent }: { agent: Agent }) {
     })
 
   const onSetGoal = (): void => {
+    // Checked here rather than only on the button, because Enter in the field
+    // reaches this directly — so a busy agent could be sent a goal from a
+    // control the interface was drawing as unavailable, and the only sign of
+    // it was the server's refusal arriving as a toast (INV-8).
+    if (disabled) return
     const condition = draft.trim()
     if (condition.length === 0) return
     void run('goal', async () => {

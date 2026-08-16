@@ -8,7 +8,13 @@
  */
 import { create } from 'zustand'
 import type { Agent, Frame, NewAgentResponse, RateLimits, ServerEnv, TimelineEvent } from '../../shared/types.ts'
-import { buildMessages, pendingMessage, reconcile, type ChatMessage } from '../lib/chat.ts'
+import {
+  buildMessages,
+  countSaid,
+  pendingMessage,
+  reconcile,
+  type ChatMessage,
+} from '../lib/chat.ts'
 import type { FleetState, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
@@ -149,8 +155,13 @@ export const useStore = create<AppState>()((set, get) => ({
 
   /** Echo a sent message locally so sending feels instant. */
   addPending: (text) => {
-    const seq = get().pendingSeq
-    const echo = pendingMessage(text, Date.now(), seq)
+    const { pendingSeq: seq, messages } = get()
+    // How many copies of this text the conversation already holds, so the
+    // transcript confirming *this* one can be told from it having recorded an
+    // identical one earlier. `messages` is the right list to count: it holds
+    // the confirmed conversation plus any echo still in flight, which is
+    // exactly what this copy has to outnumber. See `reconcile`.
+    const echo = pendingMessage(text, Date.now(), seq, countSaid(messages, text))
     set((s) => ({ pending: [...s.pending, echo], pendingSeq: seq + 1 }))
     get().rebuildChat()
 

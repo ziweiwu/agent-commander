@@ -29,6 +29,12 @@ export interface ChatMessage {
   /** Sent from this browser but not yet echoed back by the transcript. */
   pending?: boolean
   failed?: boolean
+  /**
+   * How many copies of this exact text were already in the conversation when
+   * it was sent. See `reconcile` — this is what tells a fresh "Continue" apart
+   * from the four before it.
+   */
+  priorCopies?: number
 }
 
 /** Messages closer together than this from the same speaker share a header. */
@@ -81,22 +87,64 @@ export function buildMessages(events: TimelineEvent[]): ChatMessage[] {
 }
 
 /** A locally-echoed message, shown immediately so sending feels instant. */
-export function pendingMessage(text: string, at: number, seq: number): ChatMessage {
-  return { id: `pending-${seq}`, role: 'you', at, text, tools: [], grouped: false, pending: true }
+export function pendingMessage(
+  text: string,
+  at: number,
+  seq: number,
+  priorCopies = 0,
+): ChatMessage {
+  return {
+    id: `pending-${seq}`,
+    role: 'you',
+    at,
+    text,
+    tools: [],
+    grouped: false,
+    pending: true,
+    priorCopies,
+  }
+}
+
+/** How many times you have already said this, counting messages still in flight. */
+export function countSaid(messages: ChatMessage[], text: string): number {
+  const key = text.trim()
+  // A failed message is one the transcript never recorded, so it is not
+  // something the next copy of this text can be confirmed by.
+  return messages.filter(
+    (m) => m.role === 'you' && m.failed !== true && m.text.trim() === key,
+  ).length
 }
 
 /**
  * Drop local echoes the transcript has now confirmed.
  *
  * The agent writes the prompt into its own transcript, so the same text comes
- * back as a real event. Matching on text is enough here: a duplicate would only
- * occur if the user sent the identical message twice before the first was
- * echoed, and collapsing those is the friendlier failure.
+ * back as a real event. What identifies it is not the text alone but the text
+ * having appeared *once more* than it had when we sent it: the quick prompts
+ * are "Continue" and "Go ahead", so matching on text alone meant the second
+ * "Continue" was reconciled against the first one an hour earlier. The echo
+ * vanished the instant it was drawn, and — worse — the delivery timer was
+ * cancelled with it, so a message that never arrived was never marked
+ * undelivered either. INV-2 says an unconfirmed message is marked rather than
+ * retried; that only means anything if the app can tell it apart.
+ *
+ * Counting, not timestamps. The two clocks here are a phone's and this Mac's,
+ * and a comparison between them would leave every echo on a slightly fast
+ * phone looking older than its own confirmation.
+ *
+ * The baseline is taken when the message is sent, so the one case still not
+ * distinguished is a message sent in the second before the backfill for that
+ * agent arrives: the history it was measured against was empty, and the
+ * backfill may bring an older identical message with it. Re-baselining on the
+ * backfill was tried and is worse — it cannot tell "this backfill contains an
+ * older copy" from "this backfill contains mine", so a delivered message would
+ * be marked undelivered and the user would send it to a live agent twice.
  */
 export function reconcile(confirmed: ChatMessage[], pending: ChatMessage[]): ChatMessage[] {
   if (pending.length === 0) return confirmed
-  const seen = new Set(confirmed.filter((m) => m.role === 'you').map((m) => m.text.trim()))
-  const unconfirmed = pending.filter((m) => !seen.has(m.text.trim()))
+  const unconfirmed = pending.filter(
+    (m) => countSaid(confirmed, m.text) <= (m.priorCopies ?? 0),
+  )
   if (unconfirmed.length === 0) return confirmed
   const merged = [...confirmed, ...unconfirmed]
   // Re-derive grouping now that the tail has changed.

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { buildMessages, parseInline, pendingMessage, plainText, reconcile } from '../src/web/lib/chat.ts'
+import {
+  buildMessages,
+  countSaid,
+  parseInline,
+  pendingMessage,
+  plainText,
+  reconcile,
+} from '../src/web/lib/chat.ts'
 import { dayMark } from '../src/web/lib/format.ts'
 import { translate } from '../src/web/lib/i18n.ts'
 import { formatDay } from '../src/web/lib/i18n.ts'
@@ -266,5 +273,68 @@ describe('parseInline: text that only looks like markdown', () => {
 
   it('leaves lone asterisks in arithmetic alone', () => {
     expect(render('5 * 3 = 15')).toBe('5 * 3 = 15')
+  })
+})
+
+/**
+ * The quick prompts are "Continue" and "Go ahead", so the same text is sent
+ * over and over -- and matching a local echo on text alone reconciled the
+ * second one against the first, an hour earlier. The echo vanished the instant
+ * it was drawn, taking its delivery timer with it, so a message that never
+ * arrived was never marked undelivered either.
+ */
+describe('reconcile with a message that has been sent before', () => {
+  const said = (text: string, at: number) => ev({ kind: 'user', text, at })
+
+  it('keeps the second copy of a repeated message visible', () => {
+    const history = buildMessages([said('Continue', 1000)])
+    // Sent again now: one copy already in the conversation.
+    const local = pendingMessage('Continue', 5000, 0, 1)
+    const merged = reconcile(history, [local])
+    expect(merged).toHaveLength(2)
+    expect(merged[1]).toMatchObject({ text: 'Continue', pending: true })
+  })
+
+  it('drops it once the transcript records the second copy too', () => {
+    const history = buildMessages([said('Continue', 1000), said('Continue', 5000)])
+    const local = pendingMessage('Continue', 5000, 0, 1)
+    expect(reconcile(history, [local])).toHaveLength(2)
+    expect(reconcile(history, [local]).every((m) => m.pending !== true)).toBe(true)
+  })
+
+  it('confirms two echoes of the same text one at a time', () => {
+    const first = pendingMessage('Continue', 5000, 0, 0)
+    const second = pendingMessage('Continue', 5100, 1, 1)
+
+    const none = reconcile(buildMessages([]), [first, second])
+    expect(none.filter((m) => m.pending)).toHaveLength(2)
+
+    const one = reconcile(buildMessages([said('Continue', 5200)]), [first, second])
+    expect(one.filter((m) => m.pending)).toHaveLength(1)
+
+    const both = reconcile(buildMessages([said('Continue', 5200), said('Continue', 5300)]), [
+      first,
+      second,
+    ])
+    expect(both.filter((m) => m.pending)).toHaveLength(0)
+  })
+
+  /*
+   * A failed message is one the transcript never recorded. Counting it would
+   * make the *next* copy wait for a confirmation that can never come, and be
+   * marked undelivered in its turn.
+   */
+  it('does not count an undelivered message against the next attempt', () => {
+    const failed = { ...pendingMessage('Continue', 1000, 0, 0), pending: false, failed: true }
+    expect(countSaid([failed], 'Continue')).toBe(0)
+
+    const retry = pendingMessage('Continue', 5000, 1, countSaid([failed], 'Continue'))
+    const merged = reconcile(buildMessages([said('Continue', 5200)]), [retry])
+    expect(merged.filter((m) => m.pending)).toHaveLength(0)
+  })
+
+  it('counts an echo still in flight, so a burst does not collapse', () => {
+    const inFlight = pendingMessage('Continue', 1000, 0, 0)
+    expect(countSaid([inFlight], 'Continue')).toBe(1)
   })
 })

@@ -17,7 +17,40 @@ import type {
 } from '../../shared/types.ts'
 import { useStore } from './store.ts'
 
-const token = new URLSearchParams(location.search).get('token')
+const TOKEN_KEY = 'agent-commander.token'
+
+/**
+ * The token, from the URL that opened this tab or from the one that did.
+ *
+ * It arrives as `?token=…`, and the router does not carry a query string
+ * through `navigate('/agent/x')` — so opening an agent rewrote the URL without
+ * it. In memory that was invisible, because this module had already read it;
+ * the moment the page was reloaded or the URL was bookmarked, every request
+ * came back 401 with no way out but editing the address bar. That is precisely
+ * the phone-over-Tailscale flow the token exists for.
+ *
+ * sessionStorage rather than localStorage, for the same reason the fleet
+ * filter uses it: this is scoped to the tab that was handed the secret, and it
+ * should not outlive the browsing session or leak into every other tab. A
+ * token in the URL always wins, so rotating it is just a matter of opening the
+ * new link.
+ */
+function readToken(): string | null {
+  const fromUrl = new URLSearchParams(location.search).get('token')
+  try {
+    if (fromUrl) {
+      sessionStorage.setItem(TOKEN_KEY, fromUrl)
+      return fromUrl
+    }
+    return sessionStorage.getItem(TOKEN_KEY)
+  } catch {
+    // Safari private mode and some embedded webviews throw on access; the
+    // token still works for as long as the URL keeps it.
+    return fromUrl
+  }
+}
+
+const token = readToken()
 
 let socket: WebSocket | null = null
 let retry = 500

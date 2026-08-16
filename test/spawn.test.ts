@@ -3,7 +3,14 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { normalizeDir, sessionName, SpawnError, validateDir } from '../src/server/spawn.ts'
+import {
+  checkSpawnRequest,
+  normalizeDir,
+  sessionName,
+  SpawnError,
+  SpawnOptionError,
+  validateDir,
+} from '../src/server/spawn.ts'
 
 const HOME = '/Users/tester'
 
@@ -64,5 +71,41 @@ describe('sessionName', () => {
 
   it('bounds the length', () => {
     expect(sessionName(1000, 'x'.repeat(80))).toBe(`claude-1000-${'x'.repeat(24)}`)
+  })
+})
+
+describe('checkSpawnRequest', () => {
+  /*
+   * The dialog offers a model and a permission mode, and the server used to
+   * forward neither -- you picked "plan" and "opus" and got a default agent
+   * with no error. These are the checks that stand between that form and argv,
+   * and mock mode runs them too so its failures are the real ones (INV-7).
+   */
+  it('accepts the aliases the dialog offers', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ac-spawn-'))
+    for (const model of ['opus', 'sonnet', 'haiku', 'fable', 'opusplan']) {
+      expect(await checkSpawnRequest({ cwd: dir, model })).toBe(dir)
+    }
+    for (const permissionMode of ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto', 'dontAsk']) {
+      expect(await checkSpawnRequest({ cwd: dir, permissionMode })).toBe(dir)
+    }
+  })
+
+  it('refuses anything off the allow-list rather than making it a flag', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ac-spawn-'))
+    await expect(checkSpawnRequest({ cwd: dir, model: '--dangerously' })).rejects.toThrow(
+      SpawnOptionError,
+    )
+    await expect(checkSpawnRequest({ cwd: dir, permissionMode: 'yolo' })).rejects.toThrow(
+      SpawnOptionError,
+    )
+  })
+
+  // The directory is the first thing checked, so a bad path is reported as a
+  // bad path rather than as whatever the next check happens to dislike.
+  it('reports a missing directory before it looks at the options', async () => {
+    await expect(
+      checkSpawnRequest({ cwd: '/definitely/not/here', model: 'nonsense' }),
+    ).rejects.toThrow(/no such directory/)
   })
 })

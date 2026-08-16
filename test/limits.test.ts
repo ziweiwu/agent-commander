@@ -1,4 +1,6 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFile, mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -203,5 +205,76 @@ describe('RateLimitWatcher', () => {
     await new Promise((r) => setTimeout(r, 500))
     expect(w.current()).toEqual({ at: 1, fiveHour: { pct: 10 } })
     w.stop()
+  })
+})
+
+/**
+ * The bridge only does anything if it recognises that it was the program.
+ *
+ * `import.meta.url === `file://${process.argv[1]}`` is the same comparison that
+ * shipped a do-nothing binary in 0.1.0 through 0.1.3: a file URL is
+ * percent-encoded, so a checkout under `~/My Projects` never matched its own
+ * argv and the quota meters simply never appeared. Run for real from a path
+ * with a space in it, because that is the only way to see it.
+ */
+describe('the bridge runs when it is the program', () => {
+  const homes: string[] = []
+
+  afterEach(async () => {
+    await Promise.all(homes.splice(0).map((d) => rm(d, { recursive: true, force: true })))
+  })
+
+  /** Runs a copy of the bridge in `dir`, with HOME pointed somewhere disposable. */
+  async function runBridge(dir: string): Promise<string | null> {
+    const home = await mkdtemp(join(tmpdir(), 'ac-home-'))
+    homes.push(home)
+    await mkdir(dir, { recursive: true })
+    const script = join(dir, 'statusline-bridge.mjs')
+    await copyFile(new URL('../scripts/statusline-bridge.mjs', import.meta.url), script)
+
+    const payload = JSON.stringify({
+      rate_limits: { five_hour: { used_percentage: 42 }, seven_day: { used_percentage: 7 } },
+    })
+    execFileSync(process.execPath, [script], {
+      input: payload,
+      env: { ...process.env, HOME: home },
+      timeout: 20_000,
+      encoding: 'utf8',
+    })
+
+    try {
+      return await readFile(join(home, '.claude', 'agent-commander', 'rate-limits.json'), 'utf8')
+    } catch {
+      return null
+    }
+  }
+
+  it('writes the cache when its path contains a space', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'ac-bridge-'))
+    homes.push(base)
+    const written = await runBridge(join(base, 'My Projects', 'agent commander'))
+    expect(written).not.toBeNull()
+    expect(JSON.parse(written as string)).toMatchObject({ fiveHour: { pct: 42 } })
+  })
+
+  it('writes the cache from an ordinary path too', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'ac-bridge-'))
+    homes.push(base)
+    const written = await runBridge(join(base, 'plain'))
+    expect(JSON.parse(written as string)).toMatchObject({ sevenDay: { pct: 7 } })
+  })
+
+  // Importing it must still be silent, which is what the unit tests above rely on.
+  it('does nothing when it is merely imported', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'ac-home-'))
+    homes.push(home)
+    const url = new URL('../scripts/statusline-bridge.mjs', import.meta.url).href
+    execFileSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(url)})`], {
+      env: { ...process.env, HOME: home },
+      timeout: 20_000,
+    })
+    await expect(
+      readFile(join(home, '.claude', 'agent-commander', 'rate-limits.json'), 'utf8'),
+    ).rejects.toThrow()
   })
 })

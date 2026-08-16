@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router-dom'
 import { ChatControls } from '../../src/web/components/ChatControls.tsx'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
@@ -134,6 +135,37 @@ describe('goal toggle', () => {
   it('is refused while the agent is busy', () => {
     renderApp(<ChatControls agent={agent({ sessionId: 'a', status: 'busy', goal: GOAL })} />)
     expect((screen.getByTestId('goal-toggle') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  /*
+   * INV-8 through the other door. The toggle is disabled while an agent is
+   * busy, but the field opens before that and Enter in it reached the send
+   * directly -- so an agent that got busy while the condition was being typed
+   * could be sent a goal from a control the interface was drawing as
+   * unavailable, with the server's refusal arriving as a toast.
+   */
+  it('does not send on Enter if the agent went busy while the field was open', () => {
+    const { rerender } = renderApp(<ChatControls agent={agent({ sessionId: 'a' })} />)
+    act(() => {
+      screen.getByTestId('goal-toggle').click()
+    })
+    const input = screen.getByTestId('goal-input') as HTMLInputElement
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    act(() => {
+      setter?.call(input, 'ship it')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    // The agent picks up work while the condition is being typed.
+    rerender(
+      <MemoryRouter>
+        <ChatControls agent={agent({ sessionId: 'a', status: 'busy' })} />
+      </MemoryRouter>,
+    )
+    act(() => {
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    })
+    expect(setAgentGoal).not.toHaveBeenCalled()
   })
 
   /*

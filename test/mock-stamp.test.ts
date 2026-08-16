@@ -79,3 +79,33 @@ describe('mock stamping', () => {
     expect(html.trimEnd().endsWith('</html>')).toBe(true)
   })
 })
+
+/**
+ * The static root is a boundary like any other.
+ *
+ * INV-9 spells out why containment is a path-segment check rather than a
+ * string prefix -- `startsWith` reads `/app/dist/web-backup` as inside
+ * `/app/dist/web` -- and the same standard applies here.
+ */
+describe('serving files outside the web root', () => {
+  it('refuses traversal in every spelling', async () => {
+    const base = await serve(false)
+    for (const path of ['/../secrets.txt', '/..%2Fsecrets.txt', '/a/../../secrets.txt']) {
+      const res = await fetch(`${base}${path}`, { redirect: 'manual' })
+      expect(res.status).not.toBe(200)
+    }
+  })
+
+  /*
+   * The prefix-vs-segment difference is not reachable from here: an absolute
+   * request path cannot climb out of `join(root, ...)` once `normalize` has
+   * collapsed it, so both checks answer the same for every URL a client can
+   * send. It is written as a segment check anyway, because that is the
+   * standard INV-9 sets and the next person to move this code should not have
+   * to re-derive why the weaker one happened to be safe here.
+   */
+  it('serves what is genuinely inside the root', async () => {
+    const base = await serve(false)
+    expect((await fetch(`${base}/index.html`)).status).toBe(200)
+  })
+})
