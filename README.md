@@ -1,5 +1,12 @@
 # agent-commander
 
+> **This branch parks the Rust backend.** `rust/` holds a working, tested port
+> of `src/server` that is not part of the app and is not on `main`; the four
+> `scripts/ab-*` and `scripts/ws-load.mjs` tools exist only to compare the two.
+> See [rust/README.md](rust/README.md) for what it is and what it is behind.
+> Everything below describes the TypeScript app, which is what ships.
+
+
 [![npm](https://img.shields.io/npm/v/@ziweiwu/agent-commander?color=cb3837&logo=npm)](https://www.npmjs.com/package/@ziweiwu/agent-commander)
 [![Publish](https://github.com/ziweiwu/agent-commander/actions/workflows/npm-publish.yml/badge.svg)](https://github.com/ziweiwu/agent-commander/actions/workflows/npm-publish.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)

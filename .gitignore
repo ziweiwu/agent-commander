@@ -2,3 +2,7 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Rust build artefacts. `rust/target` is 849M of them; only the sources belong
+# in git.
+rust/target/

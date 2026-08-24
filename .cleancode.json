@@ -1,0 +1,21 @@
+{
+  "_why": [
+    "Read by the clean-code pre-commit hook (~/.config/git/hooks).",
+    "This branch exists to preserve the Rust backend unchanged, not to",
+    "maintain it. Its 15,800 lines predate the hook and the whole value of",
+    "the commit is that they are byte-for-byte what passed 374 tests --",
+    "reformatting them to satisfy a linter would destroy the only claim the",
+    "branch makes. Same category as the vendor/ directories the hook's own",
+    "defaults exclude: present, not worked on.",
+    "The ab-* comparison scripts go with it; they exist only to run it.",
+    "Nothing on main is excluded, and main does not carry this file."
+  ],
+  "exclude": [
+    "*/node_modules/*", "*/vendor/*", "*/dist/*", "*/build/*",
+    "*/.venv/*", "*/__pycache__/*", "*/migrations/*",
+    "*.min.js", "*.min.css", "*.lock", "*.generated.*", "*_pb2.py",
+    "*/rust/*", "rust/*",
+    "*/scripts/ab-*", "scripts/ab-*",
+    "*/scripts/ws-load.mjs", "scripts/ws-load.mjs"
+  ]
+}
