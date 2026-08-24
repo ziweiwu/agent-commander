@@ -445,8 +445,13 @@ once — the runner ships without one:
 npx playwright install chromium
 ```
 
+They need a running tmux server, which any machine using this app already has:
+`--mock` swaps the fixtures in but still probes the real host for `ServerEnv`,
+and the New Agent dialog correctly refuses to offer a form on a machine that
+cannot spawn anything. `tmux new-session -d -s anything` is enough.
+
 `playwright.config.ts` builds the web assets and starts a `--mock` server
-itself, so there is nothing to have running first — and because it is `--mock`,
+itself, so there is nothing else to have running first — and because it is `--mock`,
 a suite that types, sends and presses Ctrl-C in a loop cannot reach a real
 agent. It listens on 4599, not 4317, for the reason everything else in this repo
 avoids that port; set `E2E_PORT` if something else already has 4599.

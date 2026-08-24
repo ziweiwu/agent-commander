@@ -110,8 +110,16 @@ jobs:
       # New Agent dialog refuses to offer the form when tmux is absent — which
       # is correct, and which made two specs fail here and nowhere else. A
       # runner without tmux is not the machine this app is for.
+      #
+      # A *server*, not just the binary: `available()` asks tmux a question
+      # (`display-message -p ok`), and with nothing running there is nobody to
+      # answer it. The session is detached and does nothing; it exists so that
+      # the socket exists.
       - name: install tmux, which the New Agent flow requires
-        run: sudo apt-get update && sudo apt-get install -y tmux
+        run: |
+          sudo apt-get update && sudo apt-get install -y tmux
+          tmux new-session -d -s ci-keepalive
+          tmux display-message -p ok
 
       # Only Chromium, which is what `playwright.config.ts` pins all three
       # projects to. The suite drives three viewports through it — desktop,
