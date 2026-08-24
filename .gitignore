@@ -3,7 +3,9 @@ dist/
 *.log
 .DS_Store
 
-# Rust backend build artefacts
+# Rust build artefacts. The port itself lives on `experiment/rust-backend` and
+# not on this line; this entry is here so that checking that branch out,
+# building, and coming back does not leave 849M of untracked noise behind.
 rust/target/
 
 # Worktrees this repo's own agents check out into

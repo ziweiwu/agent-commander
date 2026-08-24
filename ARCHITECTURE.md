@@ -509,19 +509,24 @@ finding there would fail CI for a reason that has nothing to do with the change;
 `verify:inv1` drives a real attach against a live Claude Code agent on a live
 tmux server, which does not exist on a runner at all.
 
-## Not landed yet
+## The Rust port
 
-At the time of writing, much of what this document describes is in the working
-tree rather than in history. `src/server/tmux-client.ts`, `src/server/pane-hub.ts`
-and `src/server/poll.ts` are untracked, as are `e2e/`, `.github/workflows/ci.yml`,
-this file, and a dozen test files; a further thirty carry unstaged changes.
-Together they are the persistent control client, the shared pane poller, the
-keystroke flow-control path, the self-pacing loops, and the end-to-end suite. A
-clone that predates them will not have `PaneHub`, will poll once per tab, and
-will send one paste per keystroke.
+There was one, and it is not here. `experiment/rust-backend` carries a
+15,800-line port of this server — the same surface, the same five planes, the
+same invariants, 374 passing tests — along with the four `scripts/ab-*` and
+`scripts/ws-load.mjs` tools that compared the two backends by running both in
+`--mock` against a frozen clock.
 
-`rust/` is a separate question and a larger one: a 15,800-line port of this
-server with 374 passing tests, untracked, referenced by nothing in
-`package.json`, this document or the README. It either becomes the backend, or
-becomes an explicitly labelled experiment, or goes. Leaving it where it is means
-the repository has two servers and says so nowhere.
+It is on a branch rather than on main because it stopped being worked on while
+this server kept moving, and it is already behind by everything in "Fixed since
+this list was written": no `Poller`, no heartbeat, no viewer-count gating, and
+none of `PendingStore`'s distinction between a tmux that could not be reached
+and a session that has gone. Reviving it means starting from that list rather
+than from `cargo test`.
+
+It is on a branch rather than deleted because it has never been committed
+anywhere else, and a tested port is a poor thing to put through a one-way door.
+`rust/README.md` on that branch says the rest.
+
+Nothing on this line references it: not `package.json`, not the CI workflows,
+not this document beyond these four paragraphs.
