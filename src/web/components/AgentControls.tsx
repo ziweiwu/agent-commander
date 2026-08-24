@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { Agent } from '../../shared/types.ts'
+import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { closeAgent, setAgentMode, setAgentModel } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
@@ -9,7 +9,8 @@ import { Button } from './ui/Button.tsx'
 import { displayName } from '../lib/naming.ts'
 import styles from './AgentControls.module.css'
 
-const MODELS = ['default', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan'] as const
+/** The server's list, not a copy of it — see `shared/types.ts`. */
+const MODELS = MODEL_ALIASES
 
 /** `claude-opus-5` → `opus`, so the dropdown can show what is selected. */
 export function aliasOfModel(model: string | undefined): string {

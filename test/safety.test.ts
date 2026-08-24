@@ -130,17 +130,107 @@ describe('key allowlist', () => {
     expect(DESTRUCTIVE_KEYS.has('Enter')).toBe(false)
   })
 
+  /*
+   * The set is a shared constant, not a browser one. It was imported by
+   * `Terminal.tsx` and nothing else, which is how INV-6 came to be enforced
+   * only by the code most easily bypassed. `test/destructive-keys.test.ts`
+   * covers the behaviour; this covers the wiring, because deleting the server's
+   * use of it would leave that suite passing only if it also deleted the guard.
+   */
+  it('INV-6 is read by the server, not only by the browser', async () => {
+    const routes = await readFile(resolve('src/server/routes.ts'), 'utf8')
+    expect(routes).toMatch(/DESTRUCTIVE_KEYS/)
+  })
+
   it('every destructive key is itself an allowed key', () => {
     for (const k of DESTRUCTIVE_KEYS) expect(ALLOWED_KEYS).toContain(k)
   })
 })
 
 describe('INV-1 source guarantee', () => {
-  // The whole capture-based design exists so no tmux client is ever created.
-  it('INV-1 never references attach-session or new-session', async () => {
-    const source = await readFile(resolve('src/server/pane.ts'), 'utf8')
-    const code = source.replace(/^\s*\*.*$/gm, '').replace(/\/\/.*$/gm, '')
-    expect(code).not.toMatch(/attach-session|new-session|attach\b/)
+  /** Source with comments stripped, so prose about attaching is not evidence. */
+  async function codeOf(file: string): Promise<string> {
+    const source = await readFile(resolve(file), 'utf8')
+    return source.replace(/^\s*\*.*$/gm, '').replace(/\/\/.*$/gm, '')
+  }
+
+  // The capture-based design exists so that watching an agent never resizes it.
+  it('INV-1 never attaches or creates a session from the pane adapters', async () => {
+    expect(await codeOf('src/server/pane.ts')).not.toMatch(/attach-session|new-session|attach\b/)
+  })
+
+  /*
+   * The one amendment — and the property is not the flag.
+   *
+   * `ignore-size` was asserted here first and it was the wrong assertion. A
+   * controlled matrix on a fresh tmux server: a regular client attaching at
+   * 80x24 to a 200x50 window shrinks it to 80x21 with `-f ignore-size`, with
+   * `-r`, with `-f read-only,ignore-size`, and with no flags. All four. The
+   * flag governs how a client affects *other clients*, not whether the window
+   * follows it.
+   *
+   * What holds is that a CONTROL-MODE client has no size to impose — tmux
+   * reports its height as empty — and only acquires one by asking for it with
+   * `refresh-client -C`. Never sending that is the guarantee, so that is what
+   * is asserted. `ignore-size` stays as defence in depth, not as the promise.
+   */
+  it('INV-1 only ever attaches in control mode', async () => {
+    const code = await codeOf('src/server/tmux-client.ts')
+    for (const call of code.match(/spawn\([^)]*\)/gs) ?? []) {
+      if (call.includes("'attach'")) expect(call).toContain("'-C'")
+    }
+  })
+
+  it('INV-1 never asks tmux for a size', async () => {
+    // `refresh-client -C <width>x<height>` is the one way a control client can
+    // acquire a size, and therefore the one way this app could resize a pane.
+    for (const file of ['src/server/tmux-client.ts', 'src/server/pane.ts']) {
+      expect(await codeOf(file)).not.toMatch(/refresh-client[^\n]*-C\b/)
+    }
+  })
+
+  it('INV-1 never creates a session from the control client either', async () => {
+    expect(await codeOf('src/server/tmux-client.ts')).not.toMatch(/new-session/)
+  })
+})
+
+/*
+ * The lists that decide what may be typed into a live agent exist once.
+ *
+ * They existed three times each — `server/options.ts` validated, two
+ * components offered, `web/lib/modes.ts` labelled — and drift between those
+ * copies is asymmetric and silent in both directions: a model the server
+ * accepts but no UI offers is invisible, and one the UI offers but the server
+ * rejects is a click that becomes a toast. Behaviour cannot catch a re-added
+ * copy, because a fresh copy starts out identical; only the source can.
+ */
+describe('the model and mode allow-lists have one home', () => {
+  const OFFERS = [
+    'src/web/components/AgentControls.tsx',
+    'src/web/components/NewAgentDialog.tsx',
+    'src/web/lib/modes.ts',
+  ]
+
+  it('INV-7 keeps the values in shared/types.ts', async () => {
+    const shared = await readFile(resolve('src/shared/types.ts'), 'utf8')
+    expect(shared).toMatch(/MODEL_ALIASES\s*=/)
+    expect(shared).toMatch(/MODE_CYCLE\s*=/)
+    expect(shared).toMatch(/SPAWN_MODES\s*=/)
+  })
+
+  it('INV-7 has the server validate against the shared list, not its own', async () => {
+    const options = await readFile(resolve('src/server/options.ts'), 'utf8')
+    expect(options).toMatch(/from '\.\.\/shared\/types\.ts'/)
+    // A literal here would be a second list wearing the same name.
+    expect(options).not.toMatch(/=\s*\[\s*'default'/)
+  })
+
+  it('INV-7 leaves the browser with no list of its own', async () => {
+    for (const file of OFFERS) {
+      const source = await readFile(resolve(file), 'utf8')
+      expect(source, file).not.toMatch(/\[\s*'default',\s*'opus'/)
+      expect(source, file).not.toMatch(/\[\s*'default',\s*'acceptEdits'/)
+    }
   })
 })
 

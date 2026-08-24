@@ -19,13 +19,21 @@ import type { FleetState, SortDir, SortKey, StatusFilter } from '../lib/filter.t
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
   applyLang,
+  applyScheme,
   applyTheme,
+  loadDir,
   loadFilter,
   loadLang,
+  loadSort,
+  loadScheme,
   loadTheme,
+  saveDir,
   saveFilter,
   saveLang,
+  saveSort,
+  saveScheme,
   saveTheme,
+  type Scheme,
   type Theme,
 } from '../lib/prefs.ts'
 
@@ -35,6 +43,14 @@ export type Conn = 'connecting' | 'open' | 'closed'
 export interface AppState {
   /* server-driven */
   agents: Agent[]
+  /**
+   * When `agents` last arrived from the server.
+   *
+   * INV-11: while the socket is down the cards still hold the last values, and
+   * a card saying "waiting · dialog open" is a claim about *now*. This is what
+   * lets the view say when it stopped being able to make that claim.
+   */
+  fleetAt: number | null
   /** Account-level quota, or null when nothing has reported it. */
   limits: RateLimits | null
   env: ServerEnv | null
@@ -49,6 +65,7 @@ export interface AppState {
 
   fleet: FleetState
   theme: Theme
+  scheme: Scheme
   lang: Lang
 
   events: TimelineEvent[]
@@ -61,6 +78,7 @@ export interface AppState {
 
   /* actions */
   setTheme: (theme: Theme) => void
+  setScheme: (scheme: Scheme) => void
   setLang: (lang: Lang) => void
   setQuery: (query: string) => void
   setFilter: (filter: StatusFilter) => void
@@ -97,6 +115,7 @@ let toastTimer: number | undefined
 
 export const useStore = create<AppState>()((set, get) => ({
   agents: [],
+  fleetAt: null,
   limits: null,
   env: null,
   // Read from the document rather than waiting for the first WebSocket frame.
@@ -110,11 +129,14 @@ export const useStore = create<AppState>()((set, get) => ({
   fullscreen: false,
   newAgentOpen: false,
 
-  // Query is deliberately not restored: a filter is a lasting view of the
-  // fleet, a search term is a one-off lookup that would be baffling to come
-  // back to on a reload with no visible cause.
-  fleet: { query: '', filter: loadFilter(), sort: 'recent', dir: 'desc' },
+  // Filter, sort and direction are restored together: they are one arrangement
+  // of the fleet, and restoring half of it puts the user in a view they never
+  // chose. Query is deliberately *not* restored — an arrangement is a lasting
+  // view, a search term is a one-off lookup that would be baffling to come back
+  // to on a reload with no visible cause.
+  fleet: { query: '', filter: loadFilter(), sort: loadSort(), dir: loadDir() },
   theme: loadTheme(),
+  scheme: loadScheme(),
   lang: loadLang(),
 
   events: [],
@@ -131,6 +153,12 @@ export const useStore = create<AppState>()((set, get) => ({
     set({ theme })
   },
 
+  setScheme: (scheme) => {
+    saveScheme(scheme)
+    applyScheme(scheme)
+    set({ scheme })
+  },
+
   setLang: (lang) => {
     saveLang(lang)
     applyLang(lang)
@@ -142,8 +170,14 @@ export const useStore = create<AppState>()((set, get) => ({
     saveFilter(filter)
     set((s) => ({ fleet: { ...s.fleet, filter } }))
   },
-  setSort: (sort) => set((s) => ({ fleet: { ...s.fleet, sort } })),
-  setDir: (dir) => set((s) => ({ fleet: { ...s.fleet, dir } })),
+  setSort: (sort) => {
+    saveSort(sort)
+    set((s) => ({ fleet: { ...s.fleet, sort } }))
+  },
+  setDir: (dir) => {
+    saveDir(dir)
+    set((s) => ({ fleet: { ...s.fleet, dir } }))
+  },
   setFullscreen: (fullscreen) => set({ fullscreen }),
   setNewAgentOpen: (newAgentOpen) => set({ newAgentOpen }),
 
@@ -210,7 +244,10 @@ export const useStore = create<AppState>()((set, get) => ({
 
 /** Apply persisted preferences before the first paint. */
 export function initPreferences(): void {
-  const { theme, lang } = useStore.getState()
+  const { theme, scheme, lang } = useStore.getState()
+  // Scheme first: `applyTheme` reads `--bg` back off the document to colour the
+  // status bar, and before the scheme is on it would read the wrong palette's.
+  applyScheme(scheme)
   applyTheme(theme)
   applyLang(lang)
   if (typeof matchMedia === 'function') {

@@ -3,7 +3,7 @@ import type { Agent } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
 import { PaneTerm } from '../lib/term.ts'
 import { useStore } from '../store/store.ts'
-import { sendKey, sendText, setAttached } from '../store/transport.ts'
+import { sendConfirmedKey, sendKey, sendText, setAttached } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { Button } from './ui/Button.tsx'
@@ -29,10 +29,14 @@ function usePaneTerm(agent: Agent, onExit: () => void, fullscreen: boolean) {
   const frame = useStore((s) => s.frame)
 
   const guarded = (key: string): void => {
-    // INV-6: keys that can destroy work require a confirmation first.
+    // INV-6: keys that can destroy work require a confirmation first, and the
+    // server refuses them without one — so the answer is what is sent, not a
+    // flag set alongside it.
     if (DESTRUCTIVE_KEYS.has(key)) {
       const message = key === 'Escape' ? t('confirmInterrupt') : t('confirmKey', { key })
       if (!window.confirm(message)) return
+      sendConfirmedKey(key)
+      return
     }
     sendKey(key)
   }
@@ -118,6 +122,7 @@ export interface TerminalProps {
 export function Terminal({ agent, onExit }: TerminalProps) {
   const t = useTranslate()
   const fullscreen = useStore((s) => s.fullscreen)
+  const setFullscreen = useStore((s) => s.setFullscreen)
   const { wrapRef, scaleRef, term, guarded } = usePaneTerm(agent, onExit, fullscreen)
 
   if (!agent.paneId) {
@@ -158,17 +163,36 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       <Button variant="compact" onClick={() => guarded('C-c')}>
         Ctrl-C
       </Button>
-      {term && (term.overflowing || term.zoom === 'fit') && (
-        <Button
-          variant="compact"
-          data-testid="zoom-toggle"
-          onClick={() => {
-            term.setZoom(term.zoom === 'fit' ? 'readable' : 'fit')
-          }}
-        >
-          {t(term.zoom === 'fit' ? 'readable' : 'fitWidth')}
-        </Button>
-      )}
+      <div className={styles.view}>
+        {term && (term.overflowing || term.zoom === 'fit') && (
+          <Button
+            variant="compact"
+            data-testid="zoom-toggle"
+            onClick={() => {
+              term.setZoom(term.zoom === 'fit' ? 'readable' : 'fit')
+            }}
+          >
+            {t(term.zoom === 'fit' ? 'readable' : 'fitWidth')}
+          </Button>
+        )}
+        {/*
+         * Full screen, offered where the cramped view is rather than only from
+         * the panel header. On a phone the terminal is the one view that cannot
+         * be made to fit, so the control that fixes it should not be a bare ⤢
+         * two rows above it. Hidden once full screen is on: the overlay carries
+         * its own way out, and a button that does nothing reads as broken.
+         */}
+        {!fullscreen && (
+          <Button
+            variant="compact"
+            data-testid="term-fullscreen"
+            title={t('expand')}
+            onClick={() => setFullscreen(true)}
+          >
+            ⤢ {t('expand')}
+          </Button>
+        )}
+      </div>
       <span className={styles.hint}>{t('termHint')}</span>
     </div>
   )

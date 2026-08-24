@@ -69,3 +69,85 @@ describe('filter persistence', () => {
     expect(store.get('agent-commander.filter')).toBe('idle')
   })
 })
+
+/**
+ * Sort key and direction share the filter's scope, and for the same reason.
+ *
+ * They are restored *together* with the filter: "least tokens first, idle only"
+ * is one thought. Restoring the filter while resetting the sort left the user
+ * in an arrangement they never chose, and the half that survived made the half
+ * that did not look deliberate.
+ */
+describe('sort persistence', () => {
+  it('round-trips the sort key through sessionStorage', async () => {
+    const { loadSort, saveSort } = await import('../src/web/lib/prefs.ts')
+    expect(loadSort()).toBe('recent')
+    saveSort('tokens')
+    expect(loadSort()).toBe('tokens')
+  })
+
+  it('round-trips the direction through sessionStorage', async () => {
+    const { loadDir, saveDir } = await import('../src/web/lib/prefs.ts')
+    expect(loadDir()).toBe('desc')
+    saveDir('asc')
+    expect(loadDir()).toBe('asc')
+  })
+
+  it('accepts every sort key the UI can actually set', async () => {
+    const { loadSort, saveSort } = await import('../src/web/lib/prefs.ts')
+    for (const key of ['recent', 'tokens', 'duration', 'name'] as const) {
+      saveSort(key)
+      expect(loadSort()).toBe(key)
+    }
+  })
+
+  it('falls back to the defaults for values that are not a sort or a direction', async () => {
+    const { loadSort, loadDir } = await import('../src/web/lib/prefs.ts')
+    store.set('agent-commander.sort', 'cromulence')
+    store.set('agent-commander.dir', 'sideways')
+    expect(loadSort()).toBe('recent')
+    expect(loadDir()).toBe('desc')
+  })
+
+  /* Safari private mode and some embedded webviews throw on access. */
+  it('degrades to the defaults when storage is unavailable', async () => {
+    vi.stubGlobal('sessionStorage', {
+      getItem: () => {
+        throw new Error('denied')
+      },
+      setItem: () => {
+        throw new Error('denied')
+      },
+    })
+    const { loadSort, saveSort, loadDir, saveDir } = await import('../src/web/lib/prefs.ts')
+    expect(() => saveSort('name')).not.toThrow()
+    expect(() => saveDir('asc')).not.toThrow()
+    expect(loadSort()).toBe('recent')
+    expect(loadDir()).toBe('desc')
+  })
+
+  it('is what the store initialises from, and what the setters write back', async () => {
+    store.set('agent-commander.sort', 'duration')
+    store.set('agent-commander.dir', 'asc')
+    const { useStore } = await import('../src/web/store/store.ts')
+    expect(useStore.getState().fleet.sort).toBe('duration')
+    expect(useStore.getState().fleet.dir).toBe('asc')
+
+    useStore.getState().setSort('name')
+    useStore.getState().setDir('desc')
+    expect(store.get('agent-commander.sort')).toBe('name')
+    expect(store.get('agent-commander.dir')).toBe('desc')
+  })
+
+  it('restores the whole arrangement, not half of it', async () => {
+    store.set('agent-commander.filter', 'idle')
+    store.set('agent-commander.sort', 'tokens')
+    store.set('agent-commander.dir', 'asc')
+    const { useStore } = await import('../src/web/store/store.ts')
+    const { filter, sort, dir, query } = useStore.getState().fleet
+    expect({ filter, sort, dir }).toEqual({ filter: 'idle', sort: 'tokens', dir: 'asc' })
+    // The one thing that must NOT come back: a search term has no visible
+    // cause on a fresh load, so it reads as the app hiding agents at random.
+    expect(query).toBe('')
+  })
+})

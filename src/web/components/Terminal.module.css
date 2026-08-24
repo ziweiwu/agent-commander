@@ -56,6 +56,18 @@
   margin-top: 10px;
   align-items: center;
 }
+/*
+ * The controls that change how the pane is shown, rather than what is typed
+ * into it. Grouped so they wrap as a pair onto the same row instead of the
+ * zoom toggle ending a line and full screen starting the next one.
+ */
+.view {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
 .hint {
   color: var(--faint);
   font-size: var(--text-sm);
@@ -126,7 +138,8 @@
 }
 
 @media (max-width: 900px) {
-  .keybar {
+  .keybar,
+  .view {
     gap: 8px;
   }
   .hint {

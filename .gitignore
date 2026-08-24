@@ -2,3 +2,18 @@ node_modules/
 dist/
 *.log
 .DS_Store
+
+# Rust backend build artefacts
+rust/target/
+
+# Worktrees this repo's own agents check out into
+.claude/worktrees/
+
+# Playwright e2e output
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Python bytecode from the generator and the audit scripts
+__pycache__/

@@ -60,7 +60,7 @@ describe('statusline bridge', () => {
    * render and absent entirely for non-subscribers, so a bridge that wrote an
    * empty document would blank a good reading several times a minute.
    */
-  it('yields nothing when rate_limits is absent, leaving a good reading intact', () => {
+  it('INV-10 yields nothing when rate_limits is absent, leaving a good reading intact', () => {
     const file = join(dir, 'rate-limits.json')
     persist({ at: 1, fiveHour: { pct: 61 } }, dir, file)
 
@@ -71,7 +71,7 @@ describe('statusline bridge', () => {
     expect(JSON.parse(readFileSync(file, 'utf8'))).toEqual({ at: 1, fiveHour: { pct: 61 } })
   })
 
-  it('never throws on malformed stdin', () => {
+  it('INV-10 never throws on malformed stdin', () => {
     expect(() => snapshot('not json at all', 1000)).toThrow()
     // ...which is why the caller wraps it; the shipped entrypoint catches.
     const source = readFileSync(new URL('../scripts/statusline-bridge.mjs', import.meta.url), 'utf8')
@@ -123,7 +123,7 @@ describe('parseLimits', () => {
     })
   })
 
-  it('rejects junk rather than throwing', () => {
+  it('INV-10 rejects junk rather than throwing', () => {
     // A truncated read is the failure the atomic rename exists to prevent; if
     // it ever happens anyway it must degrade, not crash the server.
     expect(parseLimits('{"at":5,"fiveHo')).toBeNull()
@@ -196,7 +196,7 @@ describe('RateLimitWatcher', () => {
    * A transient ENOENT during the bridge's rename must not blank the meters —
    * that would make them flicker out several times a second while agents work.
    */
-  it('keeps the last good reading when the file disappears', async () => {
+  it('INV-10 keeps the last good reading when the file disappears', async () => {
     const file = join(dir, 'rate-limits.json')
     persist({ at: 1, fiveHour: { pct: 10 } }, dir, file)
     const w = new RateLimitWatcher(file)
@@ -217,7 +217,7 @@ describe('RateLimitWatcher', () => {
  * argv and the quota meters simply never appeared. Run for real from a path
  * with a space in it, because that is the only way to see it.
  */
-describe('the bridge runs when it is the program', () => {
+describe('INV-10 the bridge runs when it is the program', () => {
   const homes: string[] = []
 
   afterEach(async () => {
@@ -249,7 +249,7 @@ describe('the bridge runs when it is the program', () => {
     }
   }
 
-  it('writes the cache when its path contains a space', async () => {
+  it('INV-10 writes the cache when its path contains a space', async () => {
     const base = await mkdtemp(join(tmpdir(), 'ac-bridge-'))
     homes.push(base)
     const written = await runBridge(join(base, 'My Projects', 'agent commander'))
@@ -265,7 +265,7 @@ describe('the bridge runs when it is the program', () => {
   })
 
   // Importing it must still be silent, which is what the unit tests above rely on.
-  it('does nothing when it is merely imported', async () => {
+  it('INV-10 does nothing when it is merely imported', async () => {
     const home = await mkdtemp(join(tmpdir(), 'ac-home-'))
     homes.push(home)
     const url = new URL('../scripts/statusline-bridge.mjs', import.meta.url).href

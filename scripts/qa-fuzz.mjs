@@ -11,7 +11,7 @@
  * Always point it at a --mock server. It types into whatever it finds, and in
  * mock mode nothing it does can reach a real agent.
  */
-import { chromium, devices } from '/Users/ziweiwu/Projects/my-workout-tracker/node_modules/playwright/index.mjs'
+import { chromium, devices } from 'playwright'
 
 const args = new Map()
 for (let i = 2; i < process.argv.length; i += 2) {

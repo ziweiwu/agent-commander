@@ -40,9 +40,31 @@
   display: none;
 }
 
+/*
+ * New agent, and — when there is anything to prune — the prune button beside
+ * it. They share a row on a wide list and stack on a narrow one, so the phone
+ * never has two half-width buttons with a wrapped label in each.
+ */
+.actions {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.actions > * {
+  flex: 1;
+  justify-content: center;
+  white-space: nowrap;
+}
+
 .newAgent {
   width: 100%;
   justify-content: center;
+}
+
+@media (max-width: 520px) {
+  .actions {
+    flex-direction: column;
+  }
 }
 
 .list {
@@ -126,4 +148,29 @@
   .tiled .waitingGroup {
     grid-template-columns: 1fr;
   }
+}
+
+/*
+ * INV-11: the fleet is showing memories, not readings.
+ *
+ * Muted rather than hidden — the last known state is still the most useful
+ * thing on screen, it just must not read as current. The banner says so in
+ * words; this makes the cards look the part without making them unreadable,
+ * which matters because a disconnected dashboard is exactly when someone
+ * squints at it.
+ */
+.stale {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  /* --dim, not --faint: this is the one line explaining why everything below
+     it may be wrong, so it has to clear AA against --panel-2. */
+  color: var(--dim);
+  font-size: var(--text-md);
+}
+
+.list[data-stale='true'] {
+  opacity: 0.72;
 }

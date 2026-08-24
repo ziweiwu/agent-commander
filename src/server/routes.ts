@@ -13,6 +13,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
   ALLOWED_KEYS,
+  DESTRUCTIVE_KEYS,
   type Agent,
   type ClientMessage,
   type ServerMessage,
@@ -38,10 +39,97 @@ import type {
   ServerEnv,
 } from '../shared/types.ts'
 import { buildFrame, isNoop } from './frames.ts'
+import { PaneHub } from './pane-hub.ts'
+import { Poller } from './poll.ts'
 
-const FRAME_MS = 140
 const TIMELINE_MS = 1000
 const MAX_PASTE = 100_000
+
+/**
+ * How often each socket is pinged, and how long a silent one is kept.
+ *
+ * A tab that closes sends a close frame and everything it was driving stops.
+ * A phone that goes to sleep on the far side of Tailscale, or a laptop whose
+ * Wi-Fi drops, sends nothing at all: the TCP connection is half open, `ws`
+ * reports no `close`, and the `Viewer` lives on — still tailing that agent's
+ * transcript once a second, and if the terminal was open, still holding a
+ * `PaneHub` subscription that makes real tmux round trips. Nothing on this
+ * machine is watching any of it, which is precisely what INV-4's first rule
+ * forbids, and the connection can sit like that for as long as the OS keepalive
+ * takes to notice — hours.
+ *
+ * A ping answers that in the only way the protocol offers. Two missed rounds
+ * rather than one, because a phone that is merely busy for thirty seconds is
+ * not a phone that has gone away.
+ */
+const HEARTBEAT_MS = 30_000
+
+/**
+ * How many reads in a row may fail before the terminal gives up.
+ *
+ * It used to be one. A pane read fails for two very different reasons — the
+ * pane is gone, or this machine could not spare a process to ask about it —
+ * and treating them the same meant a transient `spawn tmux EAGAIN`, which is
+ * ordinary on a machine at its process cap, stopped the user's terminal until
+ * they thought to close and re-open it. A dead pane is still reported at once,
+ * because that is answered from the pane's own `dead` flag rather than from a
+ * failure.
+ */
+const FRAME_FAIL_LIMIT = 5
+
+/**
+ * The most a single WebSocket frame may be.
+ *
+ * `MAX_PASTE` already refuses oversized text, but it refuses it *after* `ws`
+ * has buffered and `JSON.parse` has built the whole message: a 5MB paste was
+ * accepted, parsed, and only then rejected, and `ws` defaults to allowing
+ * 100MB. Bounding the frame means the memory is never committed. Sized well
+ * above `MAX_PASTE` so the two limits cannot disagree about the same paste --
+ * this one is about memory, that one is about intent.
+ */
+const MAX_FRAME_BYTES = 1024 * 1024
+
+/**
+ * How much a single tab may ask of a live agent, and how fast.
+ *
+ * INV-12. INV-2 governs whether input is intentional; nothing governed how
+ * *much* of it there could be. Measured before this existed: 5,000 `key`
+ * messages sent in 1.5s were all accepted, with no error and no backpressure,
+ * and in a live fleet each one is a `send-keys` queued behind the last on that
+ * pane's write queue. A key-repeat storm, a loop in a client, or anything that
+ * got past the gate could bury a working agent in keystrokes.
+ *
+ * The bucket is sized for a person and not for a program. Sustained 30/s is
+ * far above human typing -- the Attach view coalesces to roughly one write per
+ * burst -- and the 120 burst absorbs a held-down arrow key without complaint.
+ */
+const WRITE_BURST = 120
+const WRITE_PER_SECOND = 30
+
+/** A token bucket, refilled continuously rather than on a timer. */
+class WriteBudget {
+  #tokens = WRITE_BURST
+  #last = Date.now()
+  /** Whether the client has already been told; telling it per message amplifies. */
+  #warned = false
+
+  /** True when this message may proceed. */
+  take(now = Date.now()): boolean {
+    this.#tokens = Math.min(WRITE_BURST, this.#tokens + ((now - this.#last) / 1000) * WRITE_PER_SECOND)
+    this.#last = now
+    if (this.#tokens < 1) return false
+    this.#tokens -= 1
+    this.#warned = false
+    return true
+  }
+
+  /** True the first time a refusal should be reported, false while it persists. */
+  shouldWarn(): boolean {
+    if (this.#warned) return false
+    this.#warned = true
+    return true
+  }
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -73,6 +161,19 @@ export interface ServeOptions {
   control?: import('./control.ts').ControlDeps
   /** Account-level quota. Absent in tests that only exercise the fleet. */
   limits?: LimitsApi
+  /**
+   * How many browser tabs are connected, reported whenever it changes.
+   *
+   * The server is the only thing that knows, and INV-4's first rule — nothing
+   * polls what nobody is watching — needs someone to know. `cli.ts` uses it to
+   * idle the fleet enricher while no tab is open.
+   */
+  onViewers?: (count: number) => void
+  /**
+   * How often to ping each socket. Shortened by the tests, because the thing
+   * being tested is a timeout and thirty seconds of it is thirty seconds.
+   */
+  heartbeatMs?: number
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -148,10 +249,29 @@ class Viewer {
   tail: TailApi | null = null
   prevLines: string[] | null = null
   prevCursor: { x: number; y: number } | null = null
-  frameTimer: NodeJS.Timeout | null = null
-  tailTimer: NodeJS.Timeout | null = null
-  frameBusy = false
+  /** Releases this tab's share of the pane poller; see `PaneHub`. */
+  unwatch: (() => void) | null = null
+  /**
+   * The transcript tail for this tab, self-pacing like every other loop.
+   *
+   * It was a `setInterval` with a `tailBusy` guard, which meant a transcript
+   * read slower than a second dropped ticks rather than slowing down — and it
+   * was the one server timer with no `unref`, so it also kept the process
+   * alive on behalf of a tab that might no longer be there.
+   */
+  tailLoop: Poller | null = null
   tailBusy = false
+  /** Consecutive failed reads, reset by any successful one. */
+  frameFails = 0
+  /**
+   * Answered the last heartbeat.
+   *
+   * Set by the socket's `pong`, cleared when a ping goes out. A viewer that is
+   * still false on the next sweep has missed two rounds and is dropped.
+   */
+  alive = true
+  /** INV-12: how much this tab may still ask of a live agent. */
+  readonly budget = new WriteBudget()
 
   constructor(readonly socket: WebSocket) {}
 
@@ -161,8 +281,8 @@ class Viewer {
 
   clearTimers(): void {
     this.clearFrameTimer()
-    if (this.tailTimer) clearInterval(this.tailTimer)
-    this.tailTimer = null
+    this.tailLoop?.stop()
+    this.tailLoop = null
   }
 
   /**
@@ -174,18 +294,21 @@ class Viewer {
    * tab until the agent was re-opened -- and nothing said why.
    */
   clearFrameTimer(): void {
-    if (this.frameTimer) clearInterval(this.frameTimer)
-    this.frameTimer = null
+    this.unwatch?.()
+    this.unwatch = null
   }
 
   resetPane(): void {
     this.prevLines = null
     this.prevCursor = null
+    this.frameFails = 0
   }
 }
 
 export function createAppServer(opts: ServeOptions): Server {
   const webRoot = resolve(opts.webRoot)
+  // One poller per pane for the whole server, not one per tab (INV-4).
+  const hub = new PaneHub(opts.panes)
 
   const authorized = (url: URL, req: IncomingMessage): boolean => {
     if (!opts.token) return true
@@ -240,7 +363,7 @@ export function createAppServer(opts: ServeOptions): Server {
     void serveStatic(webRoot, url.pathname, res, opts.mock)
   })
 
-  const wss = new WebSocketServer({ noServer: true })
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_FRAME_BYTES })
 
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
@@ -259,8 +382,40 @@ export function createAppServer(opts: ServeOptions): Server {
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
   })
 
+  /*
+   * Every live tab. Two jobs: the heartbeat sweeps it, and its size is what
+   * tells the fleet enricher whether anyone is watching (INV-4).
+   */
+  const viewers = new Set<Viewer>()
+  const announce = (): void => opts.onViewers?.(viewers.size)
+
+  const heartbeat = setInterval(() => {
+    for (const viewer of viewers) {
+      if (!viewer.alive) {
+        // Missed two rounds. `terminate` is the abrupt one on purpose: a close
+        // handshake needs an answer, and this socket has stopped giving any.
+        // Its `close` fires from here, which is what releases the timers.
+        viewer.socket.terminate()
+        continue
+      }
+      viewer.alive = false
+      try {
+        viewer.socket.ping()
+      } catch {
+        viewer.socket.terminate()
+      }
+    }
+  }, opts.heartbeatMs ?? HEARTBEAT_MS)
+  heartbeat.unref?.()
+  server.on('close', () => clearInterval(heartbeat))
+
   wss.on('connection', (ws) => {
     const viewer = new Viewer(ws)
+    viewers.add(viewer)
+    announce()
+    ws.on('pong', () => {
+      viewer.alive = true
+    })
     viewer.send({ type: 'fleet', agents: opts.source.list(), mock: opts.mock })
     const off = opts.source.onChange((agents: Agent[]) => {
       viewer.send({ type: 'fleet', agents, mock: opts.mock })
@@ -281,87 +436,187 @@ export function createAppServer(opts: ServeOptions): Server {
       } catch {
         return
       }
-      void handle(msg, viewer, opts)
+      void handle(msg, viewer, opts, hub)
     })
 
-    ws.on('close', () => {
+    const release = (): void => {
       off()
       offLimits()
       viewer.clearTimers()
-    })
-    ws.on('error', () => {
-      off()
-      offLimits()
-      viewer.clearTimers()
-    })
+      if (viewers.delete(viewer)) announce()
+    }
+    ws.on('close', release)
+    ws.on('error', release)
   })
 
   return server
 }
 
-async function handle(msg: ClientMessage, viewer: Viewer, opts: ServeOptions): Promise<void> {
+/**
+ * One message from one tab.
+ *
+ * A switch with the four bodies inline came to 108 lines and five levels deep,
+ * which is a poor shape for the one function in this server that decides
+ * whether something reaches a live agent. Each case is its own function now;
+ * the switch is the routing table and nothing else.
+ */
+async function handle(
+  msg: ClientMessage,
+  viewer: Viewer,
+  opts: ServeOptions,
+  hub: PaneHub,
+): Promise<void> {
   switch (msg.type) {
-    case 'focus': {
-      viewer.clearTimers()
-      viewer.attached = false
-      viewer.resetPane()
-      viewer.focused = msg.sessionId
-      viewer.tail = msg.sessionId ? opts.makeTail(msg.sessionId) : null
-      if (!msg.sessionId) return
-      await pumpTimeline(viewer, opts)
-      viewer.tailTimer = setInterval(() => void pumpTimeline(viewer, opts), TIMELINE_MS)
-      return
-    }
+    case 'focus':
+      return handleFocus(msg, viewer, opts)
+    case 'attach':
+      return handleAttach(msg, viewer, opts, hub)
+    case 'paste':
+      return handlePaste(msg, viewer, opts, hub)
+    case 'key':
+      return handleKey(msg, viewer, opts, hub)
+  }
+}
 
-    case 'attach': {
-      if (viewer.focused !== msg.sessionId) return
-      viewer.attached = msg.on
-      viewer.resetPane()
-      if (viewer.frameTimer) clearInterval(viewer.frameTimer)
-      viewer.frameTimer = null
-      if (!msg.on) return
-      await pumpFrame(viewer, opts)
-      viewer.frameTimer = setInterval(() => void pumpFrame(viewer, opts), FRAME_MS)
-      return
-    }
+/** Point this tab at an agent, and start tailing its transcript. */
+async function handleFocus(
+  msg: Extract<ClientMessage, { type: 'focus' }>,
+  viewer: Viewer,
+  opts: ServeOptions,
+): Promise<void> {
+  viewer.clearTimers()
+  viewer.attached = false
+  viewer.resetPane()
+  viewer.focused = msg.sessionId
+  viewer.tail = msg.sessionId ? opts.makeTail(msg.sessionId) : null
+  if (!msg.sessionId) return
+  await pumpTimeline(viewer, opts)
+  viewer.tailLoop = new Poller(TIMELINE_MS, () => pumpTimeline(viewer, opts))
+  viewer.tailLoop.start()
+}
 
-    case 'paste': {
-      const agent = opts.source.get(msg.sessionId)
-      if (!agent?.paneId) {
-        viewer.send({
-          type: 'error',
-          sessionId: msg.sessionId,
-          message: agent?.attachBlockedReason ?? 'agent is no longer available',
-        })
-        return
-      }
-      if (msg.text.length > MAX_PASTE) {
-        viewer.send({ type: 'error', sessionId: msg.sessionId, message: 'input too large' })
-        return
-      }
-      try {
-        await opts.panes.paste(agent.paneId, msg.text, msg.submit)
-      } catch (err) {
-        viewer.send({ type: 'error', sessionId: msg.sessionId, message: reason(err) })
-      }
-      return
-    }
+/** Open or close the terminal for the agent this tab is already focused on. */
+function handleAttach(
+  msg: Extract<ClientMessage, { type: 'attach' }>,
+  viewer: Viewer,
+  opts: ServeOptions,
+  hub: PaneHub,
+): void {
+  if (viewer.focused !== msg.sessionId) return
+  viewer.attached = msg.on
+  viewer.resetPane()
+  viewer.clearFrameTimer()
+  if (!msg.on) return
+  const agent = opts.source.get(msg.sessionId)
+  if (!agent?.paneId) return
+  watchPane(viewer, hub, agent.paneId, msg.sessionId)
+}
 
-    case 'key': {
-      const agent = opts.source.get(msg.sessionId)
-      if (!agent?.paneId) return
-      // INV-2: only keys on the allowlist ever reach a live agent.
-      if (!KEY_SET.has(msg.key)) {
-        viewer.send({ type: 'error', sessionId: msg.sessionId, message: `key not allowed: ${msg.key}` })
-        return
-      }
-      try {
-        await opts.panes.key(agent.paneId, msg.key)
-      } catch (err) {
-        viewer.send({ type: 'error', sessionId: msg.sessionId, message: reason(err) })
-      }
+/** Text typed at an agent. INV-2 and INV-12 both live on this path. */
+async function handlePaste(
+  msg: Extract<ClientMessage, { type: 'paste' }>,
+  viewer: Viewer,
+  opts: ServeOptions,
+  hub: PaneHub,
+): Promise<void> {
+  if (!afford(viewer, msg.sessionId)) return
+  const agent = opts.source.get(msg.sessionId)
+  if (!agent?.paneId) {
+    viewer.send({
+      type: 'error',
+      sessionId: msg.sessionId,
+      message: agent?.attachBlockedReason ?? 'agent is no longer available',
+    })
+    return
+  }
+  if (msg.text.length > MAX_PASTE) {
+    viewer.send({ type: 'error', sessionId: msg.sessionId, message: 'input too large' })
+    return
+  }
+  try {
+    await opts.panes.paste(agent.paneId, msg.text, msg.submit)
+  } catch (err) {
+    viewer.send({ type: 'error', sessionId: msg.sessionId, message: reason(err) })
+  } finally {
+    // Woken *after* the write, not before. tmux has the text now, so the
+    // read this starts is the one that can actually catch the echo --
+    // starting it beforehand only bought a read of the pane as it was, and
+    // an unchanged read is exactly what makes the loop decide to slow down.
+    hub.wake(agent.paneId)
+    // Acknowledged either way. The ack means "the write is over, send the
+    // next chunk", not "the write worked" -- a failed paste that never
+    // acked would wedge the Attach view's typing for good.
+    if (msg.seq !== undefined) {
+      viewer.send({ type: 'paste-ack', sessionId: msg.sessionId, seq: msg.seq })
     }
   }
+}
+
+/** A control key. INV-2's allowlist and INV-6's confirmation are both here. */
+async function handleKey(
+  msg: Extract<ClientMessage, { type: 'key' }>,
+  viewer: Viewer,
+  opts: ServeOptions,
+  hub: PaneHub,
+): Promise<void> {
+  if (!afford(viewer, msg.sessionId)) return
+  const agent = opts.source.get(msg.sessionId)
+  if (!agent?.paneId) return
+  // INV-2: only keys on the allowlist ever reach a live agent.
+  if (!KEY_SET.has(msg.key)) {
+    viewer.send({ type: 'error', sessionId: msg.sessionId, message: `key not allowed: ${msg.key}` })
+    return
+  }
+  /*
+   * INV-6, enforced here rather than only in the browser.
+   *
+   * `C-c`, `C-d` and `Escape` are on the allowlist because they are keys a
+   * user legitimately sends -- interrupting an agent is half the point of
+   * the Attach view. What made them different was a confirmation dialog in
+   * `Terminal.tsx`, and nothing else: the server forwarded them to a live
+   * agent for anyone who could open a WebSocket, discarding whatever that
+   * agent had in flight. That is the exact inversion of INV-2's posture,
+   * which says the client's allowlist is a convenience and not the
+   * boundary. The flag is not proof a human answered -- nothing on this
+   * wire can be -- but it makes sending one deliberate rather than
+   * incidental, and it puts the rule where the other rules are.
+   */
+  if (DESTRUCTIVE_KEYS.has(msg.key) && msg.confirmed !== true) {
+    viewer.send({
+      type: 'error',
+      sessionId: msg.sessionId,
+      message: `${msg.key} discards work in progress and needs confirmation`,
+    })
+    return
+  }
+  try {
+    await opts.panes.key(agent.paneId, msg.key)
+  } catch (err) {
+    viewer.send({ type: 'error', sessionId: msg.sessionId, message: reason(err) })
+  } finally {
+    hub.wake(agent.paneId)
+  }
+}
+
+/**
+ * INV-12: spend one unit of this tab's budget, or refuse.
+ *
+ * `focus` and `attach` are deliberately not charged. They cost this server
+ * work, but they do not reach the agent, and a tab switching views quickly is
+ * not the thing being guarded against.
+ */
+function afford(viewer: Viewer, sessionId: string): boolean {
+  if (viewer.budget.take()) return true
+  // Reported once per burst. An error per refused message would turn a flood
+  // into a flood in both directions.
+  if (viewer.budget.shouldWarn()) {
+    viewer.send({
+      type: 'error',
+      sessionId,
+      message: 'too much input at once — slowing down',
+    })
+  }
+  return false
 }
 
 async function pumpTimeline(viewer: Viewer, opts: ServeOptions): Promise<void> {
@@ -381,37 +636,44 @@ async function pumpTimeline(viewer: Viewer, opts: ServeOptions): Promise<void> {
   }
 }
 
-async function pumpFrame(viewer: Viewer, opts: ServeOptions): Promise<void> {
-  const sessionId = viewer.focused
-  if (!sessionId || !viewer.attached || viewer.frameBusy) return
-  const agent = opts.source.get(sessionId)
-  if (!agent?.paneId) return
-  viewer.frameBusy = true
-  try {
-    const meta = await opts.panes.meta(agent.paneId)
-    if (meta.dead) {
-      viewer.send({ type: 'error', sessionId, message: 'pane has exited' })
-      // Frames stop; the conversation keeps arriving. The transcript is still
-      // on disk and is still the record of what this agent did.
+/**
+ * Point this tab at a pane and turn shared reads into frames only it can use.
+ *
+ * The read is shared; the diff is not. `prevLines` is per-viewer because two
+ * tabs that attached at different moments have drawn different things, and a
+ * delta against rows this tab never drew is a delta against nothing.
+ */
+function watchPane(viewer: Viewer, hub: PaneHub, paneId: string, sessionId: string): void {
+  viewer.unwatch = hub.subscribe(paneId, (event) => {
+    if (!viewer.attached || viewer.focused !== sessionId) return
+
+    if (event.error) {
+      viewer.frameFails += 1
+      if (viewer.frameFails < FRAME_FAIL_LIMIT) return
+      viewer.send({ type: 'error', sessionId, message: reason(event.error) })
+      // Same as a dead pane: the frames stop, the conversation does not. The
+      // transcript is on disk and is still the record of what this agent did.
       viewer.attached = false
       viewer.clearFrameTimer()
       return
     }
-    const lines = await opts.panes.capture(agent.paneId, meta.rows)
-    const prev = viewer.prevLines && viewer.prevLines.length === lines.length ? viewer.prevLines : null
+
+    viewer.frameFails = 0
+    const { meta, lines } = event.sample
+    if (meta.dead) {
+      viewer.send({ type: 'error', sessionId, message: 'pane has exited' })
+      viewer.attached = false
+      viewer.clearFrameTimer()
+      return
+    }
+
+    const prev =
+      viewer.prevLines && viewer.prevLines.length === lines.length ? viewer.prevLines : null
     const frame = buildFrame(sessionId, prev, lines, meta)
     if (!isNoop(frame, viewer.prevCursor)) viewer.send({ type: 'frame', frame })
     viewer.prevLines = lines
     viewer.prevCursor = { x: meta.cursorX, y: meta.cursorY }
-  } catch (err) {
-    viewer.send({ type: 'error', sessionId, message: reason(err) })
-    // Same again: a tmux failure is not a reason to stop reading the file.
-    // Re-opening the terminal sends a fresh `attach`, which starts it back up.
-    viewer.attached = false
-    viewer.clearFrameTimer()
-  } finally {
-    viewer.frameBusy = false
-  }
+  })
 }
 
 function reason(err: unknown): string {
@@ -572,7 +834,7 @@ async function handleControl(
       opts.control ?? liveDeps(() => readPermissionMode(sessionId), () => readGoal(sessionId))
 
     if (action === 'close') {
-      const result = await closeAgent(agent as never, deps)
+      const result = await closeAgent(agent, deps)
       reply(200, { ok: true, detail: result.forced ? 'forced' : 'exited' })
       return
     }
@@ -583,7 +845,7 @@ async function handleControl(
     if (action === 'goal') {
       // An empty value is the toggle being turned off, not a malformed set.
       if (value.trim().length === 0) {
-        await clearGoal(agent as never, deps)
+        await clearGoal(agent, deps)
         // Nothing records a cleared goal, so this is the only place that knows
         // it happened — see clearGoal.
         opts.source.enrich(sessionId, { goal: undefined })
@@ -591,7 +853,7 @@ async function handleControl(
         reply(200, { ok: true, detail: 'cleared' })
         return
       }
-      const result = await setGoal(agent as never, value, deps)
+      const result = await setGoal(agent, value, deps)
       if (!result.ok) {
         reply(409, {
           ok: false,
@@ -610,12 +872,12 @@ async function handleControl(
     }
 
     if (action === 'model') {
-      await setModel(agent as never, value, deps)
+      await setModel(agent, value, deps)
       reply(200, { ok: true, detail: value })
       return
     }
 
-    const result = await setMode(agent as never, value, deps)
+    const result = await setMode(agent, value, deps)
     if (!result.ok) {
       reply(409, {
         ok: false,

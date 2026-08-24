@@ -23,6 +23,9 @@ from pathlib import Path
 
 TOKENS = Path(__file__).resolve().parent.parent / "src" / "web" / "styles" / "tokens.css"
 
+# How far back to look for the `@media` line that a nested block sits inside.
+MEDIA_QUERY_LOOKBACK = 60
+
 # fg token, bg token, required ratio, what it is
 PAIRS = [
     ("text", "bg", 4.5, "body text on the page"),
@@ -99,18 +102,41 @@ def ratio(fg: str, bg: str) -> float:
 
 
 def palettes(css: str) -> dict[str, dict[str, str]]:
-    """Pull the dark palette and the explicit light palette out of the file."""
+    """Every palette in the file: each scheme, in each mode.
 
-    def block(pattern: str) -> dict[str, str]:
-        match = re.search(pattern + r"\s*\{(.*?)\n\s*\}", css, re.S)
-        if not match:
-            return {}
-        return dict(re.findall(r"--([a-z0-9-]+):\s*(#[0-9a-fA-F]{3,8})", match.group(1)))
+    Found rather than listed. `tokens.css` is generated from
+    `scripts/gen-themes.py`, and a list of scheme names here would be a second
+    place to remember to update — so a scheme added there and forgotten here
+    would ship unaudited, which is the one outcome this script exists to
+    prevent. Anything that declares the token set is a palette and is measured.
 
-    return {
-        "dark": block(r":root(?!\[)"),
-        "light": block(r":root\[data-theme='light'\]"),
-    }
+    Two selectors are deliberately skipped. The `prefers-color-scheme` copies
+    are byte-identical to the explicit light blocks by construction, and the
+    `[data-theme='dark']` ones to the base blocks; auditing them would double
+    every line of output to say the same thing twice.
+    """
+    palettes: dict[str, dict[str, str]] = {}
+
+    # Each `<selector> { ... }` block at the top level, plus the ones nested one
+    # level inside a media query.
+    for match in re.finditer(r"(:root[^{]*)\{([^{}]*)\}", css):
+        selector = match.group(1).strip()
+        tokens = dict(re.findall(r"--([a-z0-9-]+):\s*(#[0-9a-fA-F]{3,8})", match.group(2)))
+        # A block that sets no colours is structure, not a palette.
+        if "bg" not in tokens or "text" not in tokens:
+            continue
+        lookback = match.start() - MEDIA_QUERY_LOOKBACK
+        if "prefers-color-scheme" in css[max(0, lookback) : match.start()]:
+            continue
+        if "[data-theme='dark']" in selector:
+            continue
+
+        scheme_match = re.search(r"\[data-scheme='([a-z0-9-]+)'\]", selector)
+        scheme = scheme_match.group(1) if scheme_match else "default"
+        mode = "light" if "[data-theme='light']" in selector else "dark"
+        palettes[f"{scheme} {mode}"] = tokens
+
+    return palettes
 
 
 def main() -> int:
@@ -122,8 +148,12 @@ def main() -> int:
         return 0 if value >= 4.5 else 1
 
     css = TOKENS.read_text()
+    found = palettes(css)
+    if len(found) < 2:
+        print(f"!! only {len(found)} palette(s) parsed from {TOKENS} — the file changed shape")
+        return 1
     failures = 0
-    for theme, tokens in palettes(css).items():
+    for theme, tokens in found.items():
         if not tokens:
             print(f"!! could not parse the {theme} palette from {TOKENS}")
             failures += 1
@@ -156,7 +186,7 @@ def main() -> int:
                 f"{label:36} {tokens[fg]} on {surface} (composited)"
             )
 
-    print(f"\n{failures} failing pair(s)")
+    print(f"\n{len(found)} palette(s) audited, {failures} failing pair(s)")
     return 1 if failures else 0
 
 

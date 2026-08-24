@@ -41,7 +41,16 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      const target = e.target as HTMLElement | null
+      /*
+       * Narrowed rather than asserted. `e.target` is an `EventTarget`, and the
+       * cast to `HTMLElement` was a promise the DOM does not make: an event
+       * dispatched at `document` has a target with no `closest`, so every
+       * branch below threw before it could run. A real keypress targets an
+       * element, so this was not something a user could reach by typing — but
+       * the handler's job is to answer "was this typed into a field", and
+       * "into something that is not an element" has an answer: no.
+       */
+      const target = e.target instanceof HTMLElement ? e.target : null
       const typing =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
@@ -108,7 +117,14 @@ export function App() {
   }, [selected, newAgentOpen, fullscreen, navigate, setNewAgentOpen, setFullscreen, setQuery])
 
   return (
-    <div className={`${styles.app} ${sheetMode ? styles.sheetMode : ''}`}>
+    // `data-sheet` as well as the class: CSS Modules hashes the class name, so
+    // another module's stylesheet cannot reach it, and `UsageChips` needs to
+    // know it is inside a sheet — that is where the height it costs is taken
+    // from the conversation.
+    <div
+      className={`${styles.app} ${sheetMode ? styles.sheetMode : ''}`}
+      data-sheet={sheetMode ? 'true' : undefined}
+    >
       {mock && (
         <div className={styles.mockBanner}>mock mode — fixtures, nothing real is touched</div>
       )}

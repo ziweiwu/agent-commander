@@ -9,6 +9,10 @@
  *   npx tsx scripts/verify-inv1.ts [--port 4317]
  */
 import { clientSnapshot } from '../src/server/pane.ts'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+
+const run = promisify(execFile)
 
 const portArg = process.argv.indexOf('--port')
 const PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : 4317
@@ -67,4 +71,55 @@ if (before !== after) {
   fail('INV-1 violated: tmux clients or pane geometry changed during attach')
 }
 
-process.stdout.write('PASS  INV-1: no tmux client created, no pane resized\n')
+/*
+ * The amended half of INV-1 — and the property is NOT `ignore-size`.
+ *
+ * I asserted `ignore-size` here first, on the strength of one test that had a
+ * hidden variable. A controlled matrix on a fresh server says otherwise: with
+ * `window-size latest`, a *regular* client attaching at 80x24 to a 200x50
+ * window shrinks it to 80x21 with `-f ignore-size`, with `-r`, with
+ * `-f read-only,ignore-size`, and with no flags at all. All four. The flag
+ * describes how a client affects *other clients*, not whether the window
+ * follows it, so asserting it was asserting a guarantee tmux does not make.
+ *
+ * What actually holds is narrower and stronger: a CONTROL-MODE client has no
+ * size to impose. tmux reports `client_height` as empty for it, and it only
+ * ever acquires one by asking, via `refresh-client -C`. This app never sends
+ * that (asserted in test/safety.test.ts), so its client cannot participate in
+ * sizing at all — by construction rather than by a flag.
+ *
+ * So: every client of ours must be control-mode with no height. Clients that
+ * are not ours are none of this app's business — the user's own terminals are
+ * attached to these sessions and are supposed to size them. Ours are the ones
+ * with no tty, which is what a control client on a pipe is.
+ */
+const clients = await run('tmux', [
+  'list-clients',
+  '-F',
+  '#{client_name}\t#{client_tty}\t#{client_height}\t#{client_flags}',
+])
+  .then((r) => r.stdout.trim())
+  .catch(() => '')
+
+const ours = clients
+  .split('\n')
+  .filter((line) => line.trim().length > 0)
+  .map((line) => line.split('\t'))
+  .filter(([, tty]) => tty === '' || tty === undefined)
+
+const offenders = ours.filter(
+  ([, , height, flags]) =>
+    !(flags ?? '').split(',').includes('control-mode') || (height ?? '').trim() !== '',
+)
+
+if (offenders.length > 0) {
+  process.stderr.write(`clients:\n${clients}\n`)
+  fail(
+    'INV-1 violated: a client of ours is not control-mode, or has acquired a height — ' +
+      'either way it can now resize the window',
+  )
+}
+
+process.stdout.write(
+  'PASS  INV-1: no pane resized, and every client of ours is control-mode with no size\n',
+)

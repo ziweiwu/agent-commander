@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url'
 import { Registry } from './registry.ts'
 import { TranscriptTail } from './transcript.ts'
 import * as panes from './pane.ts'
+import { tmuxControl } from './tmux-client.ts'
 import { MockLimits, MockPanes, MockSource, MockTail } from './mock.ts'
 import { RateLimitWatcher } from './limits.ts'
 import { createAppServer } from './routes.ts'
@@ -263,6 +264,19 @@ async function main(): Promise<void> {
       process.stderr.write(
         'warning: no tmux server reachable — agents will list but cannot be attached to.\n',
       )
+    } else {
+      /*
+       * Brought up in the background, never awaited. Once it answers, every
+       * pane read and write goes down one pipe instead of forking a fresh
+       * tmux client, which is the difference between p50 ~70ms and p50 ~20ms
+       * per round trip — and, on a machine at its process cap, the difference
+       * between working and `spawn tmux EAGAIN`. It is attached with
+       * `ignore-size`, so INV-1 holds; see tmux-client.ts.
+       */
+      tmuxControl.start()
+      // Clear staging directories left by runs that were killed rather than
+      // asked to stop. Nothing waits on this.
+      void panes.sweepStaleStaging()
     }
   }
 
@@ -271,7 +285,12 @@ async function main(): Promise<void> {
 
   // Keeps the activity line on every card current, not just the open one.
   const enricher = new FleetEnricher(source, makeTail)
+  // One pass now, so the first page load and `GET /api/agents` already carry
+  // activity lines, and then nothing until a browser actually connects: this
+  // is the most expensive loop in the app — one transcript tail per agent —
+  // and with no tab open there is nobody for it to feed (INV-4).
   enricher.start()
+  enricher.setWatched(false)
 
   const env = await probeEnv(opts.port)
 
@@ -285,6 +304,7 @@ async function main(): Promise<void> {
     env,
     pending,
     limits,
+    onViewers: (count) => enricher.setWatched(count > 0),
     ...(opts.browseRoot ? { browseRoot: opts.browseRoot } : {}),
     // Mock mode advertises the flow but must never start a real process. It
     // still runs the same directory validation, so the error path a user hits
@@ -350,6 +370,8 @@ async function main(): Promise<void> {
     enricher.stop()
     limits.stop()
     source.stop()
+    tmuxControl.stop()
+    void panes.cleanup()
     server.close(() => process.exit(0))
     setTimeout(() => process.exit(0), 500).unref()
   }

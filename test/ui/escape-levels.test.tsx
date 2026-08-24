@@ -116,3 +116,24 @@ describe('Escape levels', () => {
     expect(useStore.getState().fullscreen).toBe(true)
   })
 })
+
+describe('a key event that did not come from an element', () => {
+  /*
+   * `e.target` is an `EventTarget`, not an element. A keydown dispatched at
+   * `document` -- which is what an automated driver or a browser extension
+   * produces -- has a target with no `closest`, and the handler asserted its
+   * way past that rather than narrowing, so every branch below threw before it
+   * could run. Not reachable by typing, since a real keypress targets an
+   * element; but the handler is asking "was this typed into a field", and
+   * "into something that is not an element" has an answer.
+   */
+  it('does not throw, and still acts on the key', () => {
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], selected: 'a', fullscreen: true })
+    shell()
+
+    expect(() => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    }).not.toThrow()
+    expect(useStore.getState().fullscreen).toBe(false)
+  })
+})

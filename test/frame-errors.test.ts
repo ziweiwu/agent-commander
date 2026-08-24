@@ -53,12 +53,34 @@ function deadPanes(): PaneApi {
   }
 }
 
-async function open(): Promise<WebSocket> {
+/**
+ * Panes whose reads fail for a while and then recover.
+ *
+ * This is what a machine out of process slots looks like from here: `spawn
+ * tmux` returns EAGAIN, the read throws, and a moment later it works again.
+ * It is not a pane that has ended, and the two must not be treated alike.
+ */
+function flakyPanes(failures: number): PaneApi {
+  const real = new MockPanes()
+  let seen = 0
+  return {
+    meta: async (): Promise<PaneMeta> => {
+      seen += 1
+      if (seen <= failures) throw new Error('spawn tmux EAGAIN')
+      return real.meta()
+    },
+    capture: (paneId, rows) => real.capture(paneId, rows),
+    paste: (paneId, text, submit) => real.paste(paneId, text, submit),
+    key: () => real.key(),
+  }
+}
+
+async function open(panes: PaneApi = deadPanes()): Promise<WebSocket> {
   const webRoot = await mkdtemp(join(tmpdir(), 'ac-frame-'))
   dirs.push(webRoot)
   const server = createAppServer({
     source: new MockSource(),
-    panes: deadPanes(),
+    panes,
     makeTail: (id: string) => new MockTail(id),
     mock: true,
     webRoot,
@@ -126,5 +148,35 @@ describe('when the pane has exited', () => {
       (m) => m.type === 'timeline' && m.events.some((e) => e.text === 'still listening?'),
     )
     expect(timeline).toMatchObject({ type: 'timeline', sessionId: SESSION })
+  })
+})
+
+describe('when a read fails but the pane is alive', () => {
+  /*
+   * The read failing once used to end the terminal. On a machine at its
+   * process cap that is an ordinary event, so the Attach view would stop for
+   * good with a toast about EAGAIN and no way back but closing and re-opening
+   * it -- while the agent behind it was working perfectly well.
+   */
+  it('rides out a run of failures and then draws the pane', async () => {
+    const socket = await open(flakyPanes(3))
+    send(socket, { type: 'focus', sessionId: SESSION })
+    await next(socket, (m) => m.type === 'timeline')
+    send(socket, { type: 'attach', sessionId: SESSION, on: true })
+
+    const frame = await next(socket, (m) => m.type === 'frame')
+    expect(frame).toMatchObject({ type: 'frame' })
+  })
+
+  it('still gives up when the failures do not stop', async () => {
+    const socket = await open(flakyPanes(Number.MAX_SAFE_INTEGER))
+    send(socket, { type: 'focus', sessionId: SESSION })
+    await next(socket, (m) => m.type === 'timeline')
+    send(socket, { type: 'attach', sessionId: SESSION, on: true })
+
+    // Tolerating a blip is not the same as pretending forever. The reason the
+    // user is shown is the real one from tmux, not a guess.
+    const error = await next(socket, (m) => m.type === 'error')
+    expect(error).toMatchObject({ type: 'error', message: expect.stringMatching(/EAGAIN/) })
   })
 })

@@ -70,6 +70,8 @@ export function send(msg: ClientMessage): void {
 export function focusAgent(sessionId: string | null): void {
   const state = useStore.getState()
   if (state.selected === sessionId) return
+  // Whatever is half-typed belongs to the agent being left.
+  flushText()
   if (state.selected && state.tab === 'attach') {
     send({ type: 'attach', sessionId: state.selected, on: false })
   }
@@ -81,26 +83,135 @@ export function focusAgent(sessionId: string | null): void {
 export function setAttached(on: boolean): void {
   const { selected } = useStore.getState()
   if (!selected) return
+  flushText()
   useStore.setState({ tab: on ? 'attach' : 'chat' })
   if (!on) useStore.setState({ frame: null })
   send({ type: 'attach', sessionId: selected, on })
 }
 
+/**
+ * Keystrokes typed in the Attach view, waiting for the pipe to be free.
+ *
+ * The Attach view sent one `paste` per character, and a paste is a tmux write
+ * that measured p50 229ms on a busy machine. Typing at any ordinary speed
+ * produces a character every ~120ms, so the writes queued and the gap between
+ * pressing a key and seeing it grew for as long as the sentence lasted -- a
+ * 40-character line took about 11 seconds of tmux work to deliver.
+ *
+ * The fix is flow control rather than a fixed timer. A guessed debounce window
+ * is wrong at both ends: too short and it coalesces nothing on a slow machine,
+ * too long and it adds latency on a fast one. Instead exactly one paste is
+ * allowed to be in flight, and everything typed meanwhile accumulates into the
+ * next one -- so the chunk size is set by how fast tmux is actually draining,
+ * which is the only thing that knows. On an idle machine that is one character
+ * per paste and feels immediate; on a loaded one it is a whole word, and the
+ * whole word still lands sooner than its first character used to.
+ *
+ * INV-2 is untouched: nothing here is ever sent twice, nothing is synthesised,
+ * and the ack only gates text the user has already typed.
+ */
+interface Outbox {
+  sessionId: string
+  text: string
+}
+
+let outbox: Outbox | null = null
+let inFlight: number | null = null
+let seq = 0
+let stallTimer: number | undefined
+
+/**
+ * How long an unacknowledged paste blocks the next one.
+ *
+ * A dropped socket message or a server that never answers must not leave the
+ * user unable to type. This releases the gate; it never re-sends what was not
+ * acknowledged, which would be INV-2's exact prohibition.
+ */
+const ACK_TIMEOUT_MS = 2_000
+
+function transmit(entry: Outbox): void {
+  seq += 1
+  inFlight = seq
+  window.clearTimeout(stallTimer)
+  stallTimer = window.setTimeout(() => {
+    inFlight = null
+    pump()
+  }, ACK_TIMEOUT_MS)
+  send({ type: 'paste', sessionId: entry.sessionId, text: entry.text, submit: false, seq })
+}
+
+/** Send what is waiting, if the pipe is free. */
+function pump(): void {
+  if (inFlight !== null || !outbox) return
+  const entry = outbox
+  outbox = null
+  transmit(entry)
+}
+
+/**
+ * Push out anything buffered, in order, right now.
+ *
+ * Called before every other kind of write. A key or a submitted message that
+ * overtook the characters typed before it would reorder the user's input --
+ * Enter arriving ahead of the line it submits is the case that matters. The
+ * server queues writes per pane, so once both are on the wire their order is
+ * guaranteed; what has to happen here is only that they get on the wire in the
+ * order they were typed.
+ */
+export function flushText(): void {
+  const entry = outbox
+  outbox = null
+  if (entry && entry.text.length > 0) {
+    send({ type: 'paste', sessionId: entry.sessionId, text: entry.text, submit: false })
+  }
+}
+
+function acknowledge(ackSeq: number): void {
+  if (inFlight !== ackSeq) return
+  inFlight = null
+  window.clearTimeout(stallTimer)
+  pump()
+}
+
 export function sendMessage(text: string): void {
   const { selected, addPending } = useStore.getState()
   if (!selected || text.trim().length === 0) return
+  flushText()
   addPending(text)
   send({ type: 'paste', sessionId: selected, text, submit: true })
 }
 
+/** Send a control key that cannot destroy work. */
 export function sendKey(key: string): void {
   const { selected } = useStore.getState()
-  if (selected) send({ type: 'key', sessionId: selected, key })
+  if (!selected) return
+  flushText()
+  send({ type: 'key', sessionId: selected, key })
+}
+
+/**
+ * Send a key that can destroy work, saying the user was asked.
+ *
+ * Two functions rather than one with a flag, because they are two different
+ * acts: the server refuses `C-c`, `C-d` and `Escape` without the flag (INV-6),
+ * so calling this one is a claim that a human answered a dialog. A caller
+ * should have to say that on purpose, not by passing `true`.
+ */
+export function sendConfirmedKey(key: string): void {
+  const { selected } = useStore.getState()
+  if (!selected) return
+  flushText()
+  send({ type: 'key', sessionId: selected, key, confirmed: true })
 }
 
 export function sendText(text: string): void {
   const { selected } = useStore.getState()
-  if (selected) send({ type: 'paste', sessionId: selected, text, submit: false })
+  if (!selected) return
+  // Characters buffered while another agent was open were typed for that
+  // agent, and must not be delivered to this one.
+  if (outbox && outbox.sessionId !== selected) flushText()
+  outbox = { sessionId: selected, text: (outbox?.text ?? '') + text }
+  pump()
 }
 
 export async function loadEnv(): Promise<void> {
@@ -128,11 +239,21 @@ export async function startAgent(
   }
 }
 
-async function control(action: string, value?: string): Promise<ControlResponse> {
-  const { selected } = useStore.getState()
-  if (!selected) return { ok: false, error: 'no agent selected' }
+/**
+ * A control action against a named agent.
+ *
+ * Split out from `control` because pruning acts on sessions the user is *not*
+ * looking at, and every wrapper here used to read the selection instead of
+ * taking a subject. The server has always accepted any id on this route; it
+ * was only the client that could address one agent.
+ */
+async function controlAgent(
+  sessionId: string,
+  action: string,
+  value?: string,
+): Promise<ControlResponse> {
   try {
-    const res = await fetch(withToken(`/api/agents/${encodeURIComponent(selected)}/${action}`), {
+    const res = await fetch(withToken(`/api/agents/${encodeURIComponent(sessionId)}/${action}`), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       ...(value === undefined ? {} : { body: JSON.stringify({ value }) }),
@@ -143,9 +264,24 @@ async function control(action: string, value?: string): Promise<ControlResponse>
   }
 }
 
+/** The same, aimed at whichever agent is open. */
+async function control(action: string, value?: string): Promise<ControlResponse> {
+  const { selected } = useStore.getState()
+  if (!selected) return { ok: false, error: 'no agent selected' }
+  return controlAgent(selected, action, value)
+}
+
 export const setAgentMode = (mode: string): Promise<ControlResponse> => control('mode', mode)
 export const setAgentModel = (model: string): Promise<ControlResponse> => control('model', model)
 export const closeAgent = (): Promise<ControlResponse> => control('close')
+
+/**
+ * Close one named agent. Used by pruning, which closes sessions one at a time
+ * and in order, so a machine at its process cap is not asked for several tmux
+ * clients at once and a failure stops at the session it happened to.
+ */
+export const closeAgentById = (sessionId: string): Promise<ControlResponse> =>
+  controlAgent(sessionId, 'close')
 /** An empty condition is the toggle going off; the server reads it as a clear. */
 export const setAgentGoal = (condition: string): Promise<ControlResponse> =>
   control('goal', condition)
@@ -165,7 +301,7 @@ function handle(msg: ServerMessage): void {
   const state = useStore.getState()
   switch (msg.type) {
     case 'fleet': {
-      useStore.setState({ agents: msg.agents, mock: msg.mock })
+      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt: Date.now() })
       announceBlocked(msg.agents)
       return
     }
@@ -183,6 +319,10 @@ function handle(msg: ServerMessage): void {
       if (msg.frame.sessionId === state.selected && state.tab === 'attach') {
         useStore.setState({ frame: msg.frame })
       }
+      return
+    }
+    case 'paste-ack': {
+      acknowledge(msg.seq)
       return
     }
     case 'error':
@@ -228,6 +368,13 @@ export function connect(): void {
 
   ws.addEventListener('close', () => {
     socket = null
+    // The ack for anything outstanding is never coming. Release the gate so
+    // typing works again on reconnect; the unsent buffer is dropped rather
+    // than replayed, because replaying input into a live agent is INV-2's one
+    // prohibition.
+    inFlight = null
+    outbox = null
+    window.clearTimeout(stallTimer)
     useStore.setState({ conn: 'closed' })
     window.setTimeout(connect, retry)
     retry = Math.min(retry * 2, 10_000)

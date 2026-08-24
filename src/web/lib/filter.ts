@@ -44,6 +44,41 @@ export const IN_GROUP: Record<GroupKey, ReadonlySet<AgentStatus>> = {
   idle: new Set<AgentStatus>(['idle', 'unknown']),
 }
 
+/**
+ * A session that was opened and never used.
+ *
+ * The evidence is the same the card already draws "No prompts yet" from: no
+ * activity line, no token spend, no last-activity clock, and nothing the agent
+ * named for itself. A session that has been prompted has at least one of those,
+ * even after it goes quiet — so this cannot select work in progress, only
+ * shells that were started and forgotten.
+ *
+ * `idle` is required rather than merely "not busy": `unknown` means the status
+ * field was missing or unrecognised, which is not evidence of anything, and
+ * `waiting` is an agent asking a question. Neither may be pruned on a guess.
+ *
+ * A pane is required too, because closing is `/exit` typed into that pane. An
+ * agent this app cannot close is one it must not offer to prune — the button
+ * would promise something it has no way to do.
+ */
+export function isUnused(agent: Agent): boolean {
+  return (
+    agent.status === 'idle' &&
+    agent.paneId !== undefined &&
+    !agent.delegating &&
+    !agent.activity &&
+    !agent.lastActivityAt &&
+    !agent.tokens &&
+    !agent.aiTitle &&
+    !agent.lastPrompt
+  )
+}
+
+/** Every session that qualifies, in the order the list already shows them. */
+export function unusedAgents(agents: Agent[]): Agent[] {
+  return agents.filter(isUnused)
+}
+
 export function countByGroup(agents: Agent[]): Record<GroupKey, number> {
   return {
     waiting: agents.filter((a) => IN_GROUP.waiting.has(a.status)).length,

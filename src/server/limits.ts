@@ -11,6 +11,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { RateLimits, UsageWindow } from '../shared/types.ts'
 import type { LimitsApi } from './sources.ts'
+import { Poller } from './poll.ts'
 
 export const LIMITS_FILE = join(homedir(), '.claude', 'agent-commander', 'rate-limits.json')
 
@@ -78,13 +79,18 @@ export class RateLimitWatcher implements LimitsApi {
   #listeners = new Set<(limits: RateLimits | null) => void>()
   #watcher: FSWatcher | null = null
   #debounce: NodeJS.Timeout | null = null
-  #poll: NodeJS.Timeout | null = null
+  #poll: Poller
   #mtime = 0
 
   constructor(
     private readonly file: string = LIMITS_FILE,
-    private readonly pollMs: number = POLL_MS,
-  ) {}
+    pollMs: number = POLL_MS,
+  ) {
+    // Self-pacing like every other loop in this server (INV-4). The work here
+    // is one `stat` and is not plausibly slow, but a poller that is the
+    // exception is a poller nobody checks.
+    this.#poll = new Poller(pollMs, async () => this.#reload())
+  }
 
   current(): RateLimits | null {
     return this.#limits
@@ -108,8 +114,7 @@ export class RateLimitWatcher implements LimitsApi {
       // Directory does not exist yet: the bridge is not installed. The poll
       // below will pick it up if that changes.
     }
-    this.#poll = setInterval(() => this.#reload(), this.pollMs)
-    this.#poll.unref?.()
+    this.#poll.start()
   }
 
   stop(): void {
@@ -117,8 +122,7 @@ export class RateLimitWatcher implements LimitsApi {
     this.#watcher = null
     if (this.#debounce) clearTimeout(this.#debounce)
     this.#debounce = null
-    if (this.#poll) clearInterval(this.#poll)
-    this.#poll = null
+    this.#poll.stop()
     this.#listeners.clear()
   }
 

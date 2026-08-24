@@ -189,8 +189,19 @@ export interface Frame {
 export type ClientMessage =
   | { type: 'focus'; sessionId: string | null }
   | { type: 'attach'; sessionId: string; on: boolean }
-  | { type: 'paste'; sessionId: string; text: string; submit: boolean }
-  | { type: 'key'; sessionId: string; key: string }
+  /**
+   * `seq` is optional and is echoed back as a `paste-ack`. The Attach view
+   * uses it to keep exactly one paste in flight, so a burst of typing arrives
+   * as however many chunks tmux can actually absorb rather than as one write
+   * per character queueing up behind the last.
+   */
+  | { type: 'paste'; sessionId: string; text: string; submit: boolean; seq?: number }
+  /**
+   * `confirmed` is set only when the user answered a confirmation dialog for a
+   * key on `DESTRUCTIVE_KEYS`. The server refuses those keys without it, so the
+   * guard is a boundary rather than a UI convention (INV-6).
+   */
+  | { type: 'key'; sessionId: string; key: string; confirmed?: boolean }
 
 /* ---- server -> client ---- */
 
@@ -199,6 +210,12 @@ export type ServerMessage =
   | { type: 'limits'; limits: RateLimits | null }
   | { type: 'timeline'; sessionId: string; events: TimelineEvent[]; reset: boolean }
   | { type: 'frame'; frame: Frame }
+  /**
+   * A paste has finished being written to tmux, successfully or not. It is a
+   * flow-control signal and nothing else: it never causes anything to be sent
+   * again (INV-2), it only tells the client the pipe is free.
+   */
+  | { type: 'paste-ack'; sessionId: string; seq: number }
   | { type: 'error'; sessionId?: string; message: string }
 
 /** Control keys the server will forward. Anything else is rejected (INV-2). */
@@ -211,3 +228,32 @@ export const ALLOWED_KEYS = [
 
 /** Keys that can destroy work, so the UI must confirm before sending (INV-6). */
 export const DESTRUCTIVE_KEYS = new Set(['C-c', 'C-d', 'Escape'])
+
+/*
+ * The option lists, in the one module both sides import.
+ *
+ * These lived in three places each: `server/options.ts` validated them,
+ * `AgentControls.tsx` and `NewAgentDialog.tsx` offered them, and
+ * `web/lib/modes.ts` labelled them. Drift between those copies is asymmetric
+ * and both directions are bad — a model the server accepts but no UI offers is
+ * simply invisible, and one the UI offers but the server rejects is a click
+ * that turns into a toast. `ALLOWED_KEYS` above already proved the pattern.
+ *
+ * Only the values live here. How they are *labelled* stays in the web layer,
+ * which is where translation belongs.
+ */
+
+/** Model aliases the CLI accepts, and the only ones this app will pass on. */
+export const MODEL_ALIASES = ['default', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan'] as const
+export type ModelAlias = (typeof MODEL_ALIASES)[number]
+
+/**
+ * Permission modes in the order Shift+Tab cycles them, per the CLI's own
+ * documentation: `default → acceptEdits → plan → bypassPermissions → auto`,
+ * where the last two appear only when available in that session.
+ */
+export const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] as const
+export type PermissionMode = (typeof MODE_CYCLE)[number]
+
+/** Modes settable at spawn time. `dontAsk` is reachable by flag but never cycles. */
+export const SPAWN_MODES = [...MODE_CYCLE, 'dontAsk'] as const

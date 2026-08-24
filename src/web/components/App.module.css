@@ -132,6 +132,31 @@
   .sheetMode .filters {
     display: none;
   }
+
+  /*
+   * The topbar goes on a diet while the sheet owns the screen.
+   *
+   * Measured on an iPhone SE (320x568) with an agent open: the topbar was 121px
+   * of the 568, because at 320px wide the two usage chips wrap onto their own
+   * rows and the title takes a third. Below it the sheet's own header and tab
+   * row took another 112, and what was left for the conversation — the thing
+   * the screen is for — was 149px, 26% of the viewport. In landscape it was
+   * 76px of 380, a fifth.
+   *
+   * So the app title goes (the sheet's header already names what you are
+   * looking at, and the back button is right there), and the chips are held to
+   * one row instead of stacking. Nothing is removed that says anything about
+   * the agent on screen or about whether you can keep working.
+   */
+  .sheetMode .topbar {
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding-top: max(4px, env(safe-area-inset-top));
+    padding-bottom: 4px;
+  }
+  .sheetMode .title {
+    display: none;
+  }
 }
 
 @media (max-width: 560px) {

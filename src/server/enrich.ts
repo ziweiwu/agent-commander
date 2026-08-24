@@ -10,6 +10,7 @@
  */
 import type { Agent } from '../shared/types.ts'
 import type { AgentSource, TailApi } from './sources.ts'
+import { Poller } from './poll.ts'
 
 const TICK_MS = 5000
 
@@ -30,23 +31,55 @@ const CARD_FIELDS = [
 
 export class FleetEnricher {
   #tails = new Map<string, TailApi>()
-  #timer: NodeJS.Timeout | null = null
+  #poller: Poller
   #running = false
+  #watched = true
 
   constructor(
     private readonly source: AgentSource,
     private readonly makeTail: (sessionId: string) => TailApi,
-    private readonly intervalMs = TICK_MS,
-  ) {}
+    intervalMs = TICK_MS,
+  ) {
+    /*
+     * A `Poller`, not a `setInterval`.
+     *
+     * One tick tails every agent's transcript in turn, so its cost is a
+     * function of how many agents are running — the one number this app has no
+     * say over. On a fixed interval a fleet large enough to overrun 5s did not
+     * slow the loop down; it made the `#running` guard drop ticks silently,
+     * which is the failure INV-4 names and `pane-hub.ts` exists to have fixed
+     * for the pane loop. Re-arming after the work turns that into a cadence
+     * that backs itself off and can be reasoned about.
+     */
+    this.#poller = new Poller(intervalMs, () => this.tick())
+  }
 
   start(): void {
-    void this.tick()
-    this.#timer = setInterval(() => void this.tick(), this.intervalMs)
+    this.#poller.start(true)
+  }
+
+  /**
+   * Whether anyone is looking at this.
+   *
+   * INV-4 opens with "nothing polls what nobody is watching", and this loop was
+   * the one place that ignored it: with no browser connected at all it still
+   * tailed every transcript on the machine every five seconds, feeding cards
+   * nobody was going to see. The fleet list itself keeps refreshing — that is
+   * the Registry's job and it is cheap — so what pauses here is only the
+   * per-agent transcript read.
+   *
+   * Turning back on runs a pass immediately, because the tab that just
+   * connected is about to paint those cards.
+   */
+  setWatched(watched: boolean): void {
+    if (watched === this.#watched) return
+    this.#watched = watched
+    if (watched) this.#poller.start(true)
+    else this.#poller.stop()
   }
 
   stop(): void {
-    if (this.#timer) clearInterval(this.#timer)
-    this.#timer = null
+    this.#poller.stop()
     this.#tails.clear()
   }
 

@@ -63,6 +63,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
     .filter(Boolean)
     .join('  ·  ')
 
+  /** The server's own sentence where there is one; a generic one otherwise. */
+  const reasonNotAttachable = agent.attachBlockedReason ?? t('termNotAttachable')
+
   return (
     <section
       className={`${styles.detail} ${sheet ? styles.sheet : ''}`}
@@ -96,20 +99,28 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           {sheet ? shortStatus(agent) : statusText(agent)}
         </span>
         <span className={styles.path}>{subtitle}</span>
-        {!narrow && (
-          <Button
-            variant="compact"
-            data-testid="fullscreen-toggle"
-            title={t('expand')}
-            aria-label={t('expand')}
-            onClick={() => setFullscreen(true)}
-          >
-            ⤢
+        {/* One group, so the two buttons wrap together onto the same line.
+            Left as separate children, the wider labelled ⤢ pushed `close` onto
+            a row of its own and grew the header by a whole line. */}
+        <div className={styles.headActions}>
+          {!narrow && (
+            <Button
+              variant="compact"
+              data-testid="fullscreen-toggle"
+              title={t('expand')}
+              onClick={() => setFullscreen(true)}
+            >
+              {/* Named rather than a lone ⤢: the glyph is not a word anyone
+                  knows, and the header has the room that the tab row does not. */}
+              ⤢ {t('expand')}
+            </Button>
+          )}
+          {/* Keeps `.close`: the sheet hides this button, where `‹ Agents` is
+              the way back and a second one would be two answers to one question. */}
+          <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
+            {t('close')}
           </Button>
-        )}
-        <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
-          {t('close')}
-        </Button>
+        </div>
       </div>
 
       {showControls && <AgentControls agent={agent} />}
@@ -136,6 +147,22 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         >
           {t('tabAttach')}
         </button>
+        {/*
+          * Why the tab is greyed out, next to the tab.
+          *
+          * INV-5 says a degraded capability "renders a reason", and this one
+          * had the reason and no way to read it: `attachBlockedReason` was only
+          * shown inside the Attach view, which is precisely the view a
+          * non-attachable agent cannot open. A disabled control cannot carry a
+          * tooltip either — a browser fires no mouse events over it — so the
+          * only place the sentence can live is beside it. Elided rather than
+          * wrapped, so it can never add a row to the tab strip on a phone.
+          */}
+        {!agent.paneId && (
+          <span className={styles.tabNote} data-testid="attach-blocked-note" title={reasonNotAttachable}>
+            {reasonNotAttachable}
+          </span>
+        )}
 
         {narrow && (
           <div className={styles.tabActions}>
@@ -153,10 +180,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
               variant="compact"
               data-testid="fullscreen-toggle"
               title={t('expand')}
-              aria-label={t('expand')}
               onClick={() => setFullscreen(true)}
             >
-              ⤢
+              ⤢ <span className={styles.actionLabel}>{t('expand')}</span>
             </Button>
           </div>
         )}

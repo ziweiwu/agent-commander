@@ -16,6 +16,15 @@ export interface AgentSource {
 export interface PaneApi {
   meta(paneId: string): Promise<PaneMeta>
   capture(paneId: string, rows: number): Promise<string[]>
+  /**
+   * Geometry and content in one round trip, for adapters that can do it.
+   *
+   * Optional because the cost it saves is a tmux round trip, which the mocks
+   * and the tests that stand in their own pane API do not pay. `PaneHub` falls
+   * back to `meta` then `capture` when it is absent, so leaving it off changes
+   * nothing but the number of calls.
+   */
+  sample?(paneId: string): Promise<{ meta: PaneMeta; lines: string[] }>
   paste(paneId: string, text: string, submit: boolean): Promise<void>
   key(paneId: string, keyName: string): Promise<void>
 }

@@ -8,9 +8,9 @@
  * the user opened this app to avoid. So a spawned session is shown immediately,
  * attachable, until the real record replaces it.
  */
-import { execFile } from 'node:child_process'
 import { basename } from 'node:path'
 import type { Agent } from '../shared/types.ts'
+import { isMissingTarget, listPanes } from './pane.ts'
 
 /** How long to keep showing a session that never registered before giving up. */
 const EXPIRY_MS = 5 * 60_000
@@ -22,14 +22,18 @@ export interface PendingSession {
   startedAt: number
 }
 
-function tmux(args: string[]): Promise<string | null> {
-  return new Promise((resolve) => {
-    execFile('tmux', args, { timeout: 5000 }, (err, stdout) => resolve(err ? null : stdout))
-  })
+/** Injected so tests can drive the two answers apart without a tmux server. */
+export interface PendingDeps {
+  listPanes: (session: string) => Promise<string[]>
+  isMissingTarget: (err: unknown) => boolean
 }
+
+const liveDeps: PendingDeps = { listPanes, isMissingTarget }
 
 export class PendingStore {
   #sessions = new Map<string, PendingSession>()
+
+  constructor(private readonly deps: PendingDeps = liveDeps) {}
 
   add(session: Omit<PendingSession, 'startedAt' | 'name'> & { name?: string }): void {
     this.#sessions.set(session.tmuxSession, {
@@ -68,11 +72,35 @@ export class PendingStore {
         continue
       }
 
-      const pane = (await tmux(['list-panes', '-t', session.tmuxSession, '-F', '#{pane_id}']))
-        ?.trim()
-        .split('\n')[0]
+      /*
+       * "Could not ask" is not "it is gone."
+       *
+       * This used to be a bare `execFile('tmux', …)` that resolved null on any
+       * error, and null was read as "the window closed before the agent ever
+       * came up" — so the entry was deleted. A `spawn tmux EAGAIN`, which
+       * `pane.ts` documents as ordinary on a machine at its process cap, is
+       * exactly such an error, and a machine at its process cap is exactly a
+       * machine where a new agent takes a while to start. The result was that
+       * the agent most in need of being visible — one sitting on a trust
+       * prompt it cannot get past — vanished from the fleet instead.
+       *
+       * Going through `pane.ts` brings the control client and the EAGAIN
+       * retry. What is left over is dropped only when tmux positively says the
+       * session is not there; anything else keeps the entry, and the expiry
+       * above is what stops it living forever.
+       */
+      let pane: string | undefined
+      try {
+        pane = (await this.deps.listPanes(session.tmuxSession))[0]
+      } catch (err) {
+        if (this.deps.isMissingTarget(err)) {
+          this.#sessions.delete(session.tmuxSession)
+        }
+        continue
+      }
       if (!pane) {
-        // The window closed before the agent ever came up.
+        // tmux answered, and the session has no panes: the window closed
+        // before the agent ever came up.
         this.#sessions.delete(session.tmuxSession)
         continue
       }

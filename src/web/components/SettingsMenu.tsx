@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/store.ts'
 import { LANGUAGES, LANGUAGE_NAMES } from '../lib/i18n.ts'
-import { THEMES, type Theme } from '../lib/prefs.ts'
+import { SCHEMES, THEMES, type Scheme, type Theme } from '../lib/prefs.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './SettingsMenu.module.css'
@@ -14,6 +14,42 @@ const THEME_KEY = {
 
 const THEME_ICON: Record<Theme, string> = { system: '◐', light: '☀', dark: '☾' }
 
+/** How close the menu may come to the edge of the window before it flips. */
+const VIEWPORT_MARGIN = 8
+
+const SCHEME_KEY = {
+  graphite: 'schemeGraphite',
+  nordic: 'schemeNordic',
+  solar: 'schemeSolar',
+  ember: 'schemeEmber',
+  mauve: 'schemeMauve',
+} as const
+
+/*
+ * A swatch per scheme, in that scheme's own colours.
+ *
+ * A colour scheme named in words is a choice made blind — "Ember" tells you
+ * nothing until you have already applied it and had the whole interface change
+ * around you. Three dots cost one line of the menu and let the choice be made
+ * by looking.
+ *
+ * The colours come from `--swatch-<scheme>-*`, which `gen-themes.py` emits
+ * alongside the palettes, so there is no second copy of them here to fall out
+ * of step with a regenerated scheme. They cannot come from the scheme's own
+ * tokens: those are defined on `:root[data-scheme=…]`, which only ever matches
+ * the root element, and the menu has to draw five schemes at once inside one
+ * document that is only ever in one of them.
+ */
+function Swatch({ scheme }: { scheme: Scheme }) {
+  return (
+    <span className={styles.swatch} data-swatch={scheme} aria-hidden="true">
+      <i style={{ background: `var(--swatch-${scheme}-bg)` }} />
+      <i style={{ background: `var(--swatch-${scheme}-panel-2)` }} />
+      <i style={{ background: `var(--swatch-${scheme}-accent)` }} />
+    </span>
+  )
+}
+
 /**
  * Theme and language, the two things a user changes once and never again.
  * The menu closes on a choice so the result is visible immediately, which is
@@ -22,11 +58,16 @@ const THEME_ICON: Record<Theme, string> = { system: '◐', light: '☀', dark: '
 export function SettingsMenu() {
   const t = useTranslate()
   const theme = useStore((s) => s.theme)
+  const scheme = useStore((s) => s.scheme)
   const lang = useStore((s) => s.lang)
   const setTheme = useStore((s) => s.setTheme)
+  const setScheme = useStore((s) => s.setScheme)
   const setLang = useStore((s) => s.setLang)
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  /** Which edge the menu hangs from; see the effect below. */
+  const [side, setSide] = useState<'right' | 'left'>('right')
 
   useEffect(() => {
     if (!open) return
@@ -35,6 +76,39 @@ export function SettingsMenu() {
     }
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  /*
+   * Keep the menu on the screen.
+   *
+   * It hangs from the right edge of its button, which is right for the button's
+   * usual home at the end of the topbar. But the topbar wraps: at around 900px
+   * the filters take a row of their own and the buttons drop to the left-hand
+   * end of the next one — and a 190px menu hanging leftwards from a button 90px
+   * from the edge of the window is a menu that is mostly off the screen. It was
+   * reachable by scrolling sideways and not otherwise, which for the menu that
+   * holds the theme, the colours and the language is the whole of settings
+   * being unreachable at one width.
+   *
+   * Measured rather than guessed at a breakpoint, because what decides it is
+   * where the button ended up after wrapping, which no media query knows.
+   */
+  useEffect(() => {
+    if (!open) return
+    const menu = menuRef.current
+    if (!menu) return
+    const flip = (): void => {
+      const box = menu.getBoundingClientRect()
+      // `side` is not in the dependencies on purpose: this reads the position
+      // it currently has and only asks whether the other one would be better.
+      setSide((current) => {
+        if (current === 'right') return box.left < VIEWPORT_MARGIN ? 'left' : 'right'
+        return box.right > window.innerWidth - VIEWPORT_MARGIN ? 'right' : 'left'
+      })
+    }
+    flip()
+    window.addEventListener('resize', flip)
+    return () => window.removeEventListener('resize', flip)
   }, [open])
 
   return (
@@ -52,7 +126,13 @@ export function SettingsMenu() {
       </Button>
 
       {open && (
-        <div className={styles.menu} data-testid="settings-menu" role="menu">
+        <div
+          className={styles.menu}
+          data-testid="settings-menu"
+          data-side={side}
+          ref={menuRef}
+          role="menu"
+        >
           <div className={styles.group}>
             <span className={styles.label}>{t('theme')}</span>
             {THEMES.map((option) => (
@@ -71,6 +151,31 @@ export function SettingsMenu() {
               >
                 <span className={styles.icon}>{THEME_ICON[option]}</span>
                 {t(THEME_KEY[option])}
+              </button>
+            ))}
+          </div>
+
+          <div className={styles.group}>
+            <span className={styles.label}>{t('colourScheme')}</span>
+            {SCHEMES.map((option) => (
+              <button
+                key={option}
+                type="button"
+                role="menuitemradio"
+                className={styles.item}
+                data-testid={`scheme-${option}`}
+                aria-checked={scheme === option}
+                aria-pressed={scheme === option}
+                onClick={() => {
+                  setScheme(option)
+                  // Left open, unlike the theme and language choices. Picking a
+                  // palette is a thing people try two or three of before
+                  // settling, and closing the menu on the first one makes
+                  // comparing them four clicks apiece.
+                }}
+              >
+                <Swatch scheme={option} />
+                {t(SCHEME_KEY[option])}
               </button>
             ))}
           </div>

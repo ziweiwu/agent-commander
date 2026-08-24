@@ -1,31 +1,55 @@
 /**
- * Design tokens.
+ * Design tokens. GENERATED — edit `scripts/gen-themes.py` and re-run it.
  *
- * Three theme states have to work: an explicit light or dark choice, written as
- * `data-theme` on <html>, and "system", which removes the attribute entirely so
- * the media query decides. Dark is the base; light is layered over it, once for
- * the system preference and once for the explicit choice.
+ *     python3 scripts/gen-themes.py --write
+ *
+ * Every colour here is derived in OKLCH from the contrast its role requires,
+ * rather than picked and then checked. The generator carries the reasoning and
+ * the research behind it; `scripts/audit-contrast.py` re-measures the result
+ * independently and is what actually gates a change.
+ *
+ * Two axes, and they are separate on purpose. `data-scheme` on <html> picks the
+ * palette family; `data-theme` picks light or dark within it, and its *absence*
+ * means "system", which is why every scheme repeats its light block inside a
+ * `prefers-color-scheme` query. A scheme with no `data-scheme` attribute is the
+ * default one, so a document with no attributes at all is still complete.
  */
 
 :root {
-  --bg: #0e1116;
-  --panel: #161b22;
-  --panel-2: #1c2230;
-  /* Decorative rules and separators. WCAG 1.4.11 exempts these. */
-  --line: #262d3a;
-  /* The edge of an interactive control. The surfaces themselves differ by only
-     ~1.09:1, so this border is the only thing telling you where a card, input
-     or select begins — 1.4.11 requires 3:1 for exactly that. */
-  --line-strong: #656c79;
-  --text: #e6edf3;
-  --dim: #97a3b4;
-  --faint: #7f8b9a;
-  --busy: #4ea8ff;
-  --waiting: #ffb648;
-  --idle: #7f8b9a;
-  --accent: #7ee787;
-  --danger: #ff6b6b;
-  --focus: #4ea8ff;
+  --bg: #15171a;
+  --panel: #1f2123;
+  --panel-2: #282a2d;
+  --line: #31363c;
+  --line-strong: #797c7f;
+  --text: #dfe2e6;
+  --dim: #abafb4;
+  --faint: #909499;
+  --busy: #66a5e5;
+  --waiting: #c79945;
+  --idle: #909499;
+  --accent: #64b176;
+  --danger: #e4868e;
+  --focus: #5594d2;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+
+  /* One row of dots per scheme for the settings menu — see `swatches()`. These
+     follow light/dark but not the current scheme, because the menu draws all
+     five at once. */
+  --swatch-graphite-bg: #15171a;
+  --swatch-graphite-panel-2: #282a2d;
+  --swatch-graphite-accent: #64b176;
+  --swatch-nordic-bg: #091828;
+  --swatch-nordic-panel-2: #1b2c3c;
+  --swatch-nordic-accent: #74af78;
+  --swatch-solar-bg: #051b1d;
+  --swatch-solar-panel-2: #182e31;
+  --swatch-solar-accent: #6eb170;
+  --swatch-ember-bg: #201406;
+  --swatch-ember-panel-2: #342718;
+  --swatch-ember-accent: #67af7b;
+  --swatch-mauve-bg: #181426;
+  --swatch-mauve-panel-2: #2b273a;
+  --swatch-mauve-accent: #64b07a;
 
   /* Type scale. Six steps; anything between them was drift. */
   --text-xs: 11px;
@@ -44,54 +68,439 @@
   --radius-lg: 12px;
   --radius-pill: 999px;
 
-  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   color-scheme: dark;
 }
 
 /* The light palette, applied from two places: an explicit choice, and the
    system preference when no choice has been made. */
 :root[data-theme='light'] {
-  --bg: #f6f7f9;
-  --panel: #ffffff;
-  --panel-2: #eef1f5;
-  --line: #dfe3e8;
-  --line-strong: #878b90;
-  --text: #1b2430;
-  --dim: #55606d;
-  --faint: #636e7c;
-  --busy: #0b6dcc;
-  --waiting: #9a5800;
-  --idle: #636e7c;
-  --accent: #1a7d36;
-  --danger: #c62828;
-  --focus: #0b6fd0;
+  --bg: #eff0f2;
+  --panel: #fafcfe;
+  --panel-2: #e5e6e8;
+  --line: #d5d8db;
+  --line-strong: #797a7c;
+  --text: #2c2d2f;
+  --dim: #4e4f52;
+  --faint: #636467;
+  --busy: #035ca0;
+  --waiting: #775301;
+  --idle: #636467;
+  --accent: #03682e;
+  --danger: #a03244;
+  --focus: #0368b4;
   --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  --swatch-graphite-bg: #eff0f2;
+  --swatch-graphite-panel-2: #e5e6e8;
+  --swatch-graphite-accent: #03682e;
+  --swatch-nordic-bg: #e5f2ff;
+  --swatch-nordic-panel-2: #d8e8fa;
+  --swatch-nordic-accent: #116823;
+  --swatch-solar-bg: #f8f0da;
+  --swatch-solar-panel-2: #eee6d0;
+  --swatch-solar-accent: #04691a;
+  --swatch-ember-bg: #fce2be;
+  --swatch-ember-panel-2: #f2d8b5;
+  --swatch-ember-accent: #04612f;
+  --swatch-mauve-bg: #f1eefe;
+  --swatch-mauve-panel-2: #e7e3f8;
+  --swatch-mauve-accent: #036833;
   color-scheme: light;
 }
 
-/* "System" leaves no attribute, so the media query is what decides. */
 @media (prefers-color-scheme: light) {
   :root:not([data-theme]) {
-    --bg: #f6f7f9;
-    --panel: #ffffff;
-    --panel-2: #eef1f5;
-    --line: #dfe3e8;
-    --line-strong: #878b90;
-    --text: #1b2430;
-    --dim: #55606d;
-    --faint: #636e7c;
-    --busy: #0b6dcc;
-    --waiting: #9a5800;
-    --idle: #636e7c;
-    --accent: #1a7d36;
-    --danger: #c62828;
-    --focus: #0b6fd0;
+    --bg: #eff0f2;
+    --panel: #fafcfe;
+    --panel-2: #e5e6e8;
+    --line: #d5d8db;
+    --line-strong: #797a7c;
+    --text: #2c2d2f;
+    --dim: #4e4f52;
+    --faint: #636467;
+    --busy: #035ca0;
+    --waiting: #775301;
+    --idle: #636467;
+    --accent: #03682e;
+    --danger: #a03244;
+    --focus: #0368b4;
     --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    --swatch-graphite-bg: #eff0f2;
+    --swatch-graphite-panel-2: #e5e6e8;
+    --swatch-graphite-accent: #03682e;
+    --swatch-nordic-bg: #e5f2ff;
+    --swatch-nordic-panel-2: #d8e8fa;
+    --swatch-nordic-accent: #116823;
+    --swatch-solar-bg: #f8f0da;
+    --swatch-solar-panel-2: #eee6d0;
+    --swatch-solar-accent: #04691a;
+    --swatch-ember-bg: #fce2be;
+    --swatch-ember-panel-2: #f2d8b5;
+    --swatch-ember-accent: #04612f;
+    --swatch-mauve-bg: #f1eefe;
+    --swatch-mauve-panel-2: #e7e3f8;
+    --swatch-mauve-accent: #036833;
     color-scheme: light;
   }
 }
 
 /* An explicit dark choice must win over a light system preference. */
 :root[data-theme='dark'] {
+  --bg: #15171a;
+  --panel: #1f2123;
+  --panel-2: #282a2d;
+  --line: #31363c;
+  --line-strong: #797c7f;
+  --text: #dfe2e6;
+  --dim: #abafb4;
+  --faint: #909499;
+  --busy: #66a5e5;
+  --waiting: #c79945;
+  --idle: #909499;
+  --accent: #64b176;
+  --danger: #e4868e;
+  --focus: #5594d2;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  --swatch-graphite-bg: #15171a;
+  --swatch-graphite-panel-2: #282a2d;
+  --swatch-graphite-accent: #64b176;
+  --swatch-nordic-bg: #091828;
+  --swatch-nordic-panel-2: #1b2c3c;
+  --swatch-nordic-accent: #74af78;
+  --swatch-solar-bg: #051b1d;
+  --swatch-solar-panel-2: #182e31;
+  --swatch-solar-accent: #6eb170;
+  --swatch-ember-bg: #201406;
+  --swatch-ember-panel-2: #342718;
+  --swatch-ember-accent: #67af7b;
+  --swatch-mauve-bg: #181426;
+  --swatch-mauve-panel-2: #2b273a;
+  --swatch-mauve-accent: #64b07a;
+  color-scheme: dark;
+}
+
+/* ---- Nordic ---- */
+/* Arctic blues, after Nord — whose muted frost is the appeal and whose low contrast is
+  the usual complaint. The hues are kept and the lightness is re-derived, so it stays
+  cool without going quiet. */
+:root[data-scheme='nordic'] {
+  --bg: #091828;
+  --panel: #122232;
+  --panel-2: #1b2c3c;
+  --line: #23374c;
+  --line-strong: #6b7e92;
+  --text: #d0e5fb;
+  --dim: #94b3d3;
+  --faint: #7a97b6;
+  --busy: #62a8d8;
+  --waiting: #c49a55;
+  --idle: #7a97b6;
+  --accent: #74af78;
+  --danger: #dc8a97;
+  --focus: #5096c5;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='nordic'][data-theme='light'] {
+  --bg: #e5f2ff;
+  --panel: #fafcfe;
+  --panel-2: #d8e8fa;
+  --line: #c2daf5;
+  --line-strong: #6d7c8c;
+  --text: #212e3b;
+  --dim: #3c5167;
+  --faint: #50667d;
+  --busy: #015f8e;
+  --waiting: #795301;
+  --idle: #50667d;
+  --accent: #116823;
+  --danger: #99394e;
+  --focus: #016ca1;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='nordic']:not([data-theme]) {
+    --bg: #e5f2ff;
+    --panel: #fafcfe;
+    --panel-2: #d8e8fa;
+    --line: #c2daf5;
+    --line-strong: #6d7c8c;
+    --text: #212e3b;
+    --dim: #3c5167;
+    --faint: #50667d;
+    --busy: #015f8e;
+    --waiting: #795301;
+    --idle: #50667d;
+    --accent: #116823;
+    --danger: #99394e;
+    --focus: #016ca1;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='nordic'][data-theme='dark'] {
+  --bg: #091828;
+  --panel: #122232;
+  --panel-2: #1b2c3c;
+  --line: #23374c;
+  --line-strong: #6b7e92;
+  --text: #d0e5fb;
+  --dim: #94b3d3;
+  --faint: #7a97b6;
+  --busy: #62a8d8;
+  --waiting: #c49a55;
+  --idle: #7a97b6;
+  --accent: #74af78;
+  --danger: #dc8a97;
+  --focus: #5096c5;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---- Solar ---- */
+/* Teal-tinted dark, cream light, after Solarized — the scheme that made symmetric
+  lightness between the two modes the point. Its hue relationships are the most
+  carefully chosen of any of these. */
+:root[data-scheme='solar'] {
+  --bg: #051b1d;
+  --panel: #0f2427;
+  --panel-2: #182e31;
+  --line: #143c40;
+  --line-strong: #698183;
+  --text: #cde7ea;
+  --dim: #90b7bb;
+  --faint: #759b9f;
+  --busy: #5ea7e3;
+  --waiting: #c69b45;
+  --idle: #759b9f;
+  --accent: #6eb170;
+  --danger: #e4878e;
+  --focus: #4c96d0;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='solar'][data-theme='light'] {
+  --bg: #f8f0da;
+  --panel: #fffcf3;
+  --panel-2: #eee6d0;
+  --line: #e3d7b6;
+  --line-strong: #827a67;
+  --text: #332d1c;
+  --dim: #594f33;
+  --faint: #6e6447;
+  --busy: #015e96;
+  --waiting: #755405;
+  --idle: #6e6447;
+  --accent: #04691a;
+  --danger: #a03244;
+  --focus: #046ba9;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='solar']:not([data-theme]) {
+    --bg: #f8f0da;
+    --panel: #fffcf3;
+    --panel-2: #eee6d0;
+    --line: #e3d7b6;
+    --line-strong: #827a67;
+    --text: #332d1c;
+    --dim: #594f33;
+    --faint: #6e6447;
+    --busy: #015e96;
+    --waiting: #755405;
+    --idle: #6e6447;
+    --accent: #04691a;
+    --danger: #a03244;
+    --focus: #046ba9;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='solar'][data-theme='dark'] {
+  --bg: #051b1d;
+  --panel: #0f2427;
+  --panel-2: #182e31;
+  --line: #143c40;
+  --line-strong: #698183;
+  --text: #cde7ea;
+  --dim: #90b7bb;
+  --faint: #759b9f;
+  --busy: #5ea7e3;
+  --waiting: #c69b45;
+  --idle: #759b9f;
+  --accent: #6eb170;
+  --danger: #e4878e;
+  --focus: #4c96d0;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---- Ember ---- */
+/* Warm browns and ambers, after Gruvbox — which is measurably short of WCAG contrast as
+  published. The warmth is what people want from it; the legibility is put back. */
+:root[data-scheme='ember'] {
+  --bg: #201406;
+  --panel: #2a1e0f;
+  --panel-2: #342718;
+  --line: #44311b;
+  --line-strong: #887867;
+  --text: #f0decb;
+  --dim: #c3aa8e;
+  --faint: #a78f74;
+  --busy: #68a5de;
+  --waiting: #c3994f;
+  --idle: #a78f74;
+  --accent: #67af7b;
+  --danger: #dd8892;
+  --focus: #5794cb;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='ember'][data-theme='light'] {
+  --bg: #fce2be;
+  --panel: #fffbf7;
+  --panel-2: #f2d8b5;
+  --line: #e0caae;
+  --line-strong: #887050;
+  --text: #362202;
+  --dim: #644307;
+  --faint: #7a5823;
+  --busy: #035691;
+  --waiting: #6f4e02;
+  --idle: #7a5823;
+  --accent: #04612f;
+  --danger: #9a2842;
+  --focus: #0363a5;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='ember']:not([data-theme]) {
+    --bg: #fce2be;
+    --panel: #fffbf7;
+    --panel-2: #f2d8b5;
+    --line: #e0caae;
+    --line-strong: #887050;
+    --text: #362202;
+    --dim: #644307;
+    --faint: #7a5823;
+    --busy: #035691;
+    --waiting: #6f4e02;
+    --idle: #7a5823;
+    --accent: #04612f;
+    --danger: #9a2842;
+    --focus: #0363a5;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='ember'][data-theme='dark'] {
+  --bg: #201406;
+  --panel: #2a1e0f;
+  --panel-2: #342718;
+  --line: #44311b;
+  --line-strong: #887867;
+  --text: #f0decb;
+  --dim: #c3aa8e;
+  --faint: #a78f74;
+  --busy: #68a5de;
+  --waiting: #c3994f;
+  --idle: #a78f74;
+  --accent: #67af7b;
+  --danger: #dd8892;
+  --focus: #5794cb;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---- Mauve ---- */
+/* Soft violet, after Catppuccin — whose own tracker records that a fully AA palette
+  stopped looking pastel. This keeps the hue family and accepts being a little less pale
+  for it. */
+:root[data-scheme='mauve'] {
+  --bg: #181426;
+  --panel: #221d30;
+  --panel-2: #2b273a;
+  --line: #37314a;
+  --line-strong: #7d788f;
+  --text: #e3def8;
+  --dim: #b2aacf;
+  --faint: #978eb3;
+  --busy: #7f9fe6;
+  --waiting: #c7984b;
+  --idle: #978eb3;
+  --accent: #64b07a;
+  --danger: #df879b;
+  --focus: #6f8ed3;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='mauve'][data-theme='light'] {
+  --bg: #f1eefe;
+  --panel: #fcfbfe;
+  --panel-2: #e7e3f8;
+  --line: #d9d2f3;
+  --line-strong: #7c788b;
+  --text: #2e2a3a;
+  --dim: #514b65;
+  --faint: #66607b;
+  --busy: #3455a9;
+  --waiting: #775204;
+  --idle: #66607b;
+  --accent: #036833;
+  --danger: #9c3454;
+  --focus: #3f62b7;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='mauve']:not([data-theme]) {
+    --bg: #f1eefe;
+    --panel: #fcfbfe;
+    --panel-2: #e7e3f8;
+    --line: #d9d2f3;
+    --line-strong: #7c788b;
+    --text: #2e2a3a;
+    --dim: #514b65;
+    --faint: #66607b;
+    --busy: #3455a9;
+    --waiting: #775204;
+    --idle: #66607b;
+    --accent: #036833;
+    --danger: #9c3454;
+    --focus: #3f62b7;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='mauve'][data-theme='dark'] {
+  --bg: #181426;
+  --panel: #221d30;
+  --panel-2: #2b273a;
+  --line: #37314a;
+  --line-strong: #7d788f;
+  --text: #e3def8;
+  --dim: #b2aacf;
+  --faint: #978eb3;
+  --busy: #7f9fe6;
+  --waiting: #c7984b;
+  --idle: #978eb3;
+  --accent: #64b07a;
+  --danger: #df879b;
+  --focus: #6f8ed3;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   color-scheme: dark;
 }

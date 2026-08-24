@@ -2,23 +2,24 @@
  * Allow-lists for the values that reach a command line or a live agent's
  * prompt. Kept separate from control.ts so spawn.ts can validate without
  * pulling in the tmux control surface.
+ *
+ * The lists themselves live in `shared/types.ts`, because the browser offers
+ * exactly what this file accepts and a second copy is how those two stop
+ * agreeing. What lives here is the checking — the part that only the server
+ * does, and the only part that is load-bearing (INV-7: "Model and permission
+ * mode are checked against the fixed allow-lists", not "the UI only offers
+ * good ones").
  */
+import {
+  MODEL_ALIASES,
+  MODE_CYCLE,
+  SPAWN_MODES,
+  type ModelAlias,
+  type PermissionMode,
+} from '../shared/types.ts'
 
-/** Model aliases the CLI accepts. `--model` rejects anything else anyway; this
- * refuses it before it ever becomes an argv entry. */
-export const MODEL_ALIASES = ['default', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan'] as const
-export type ModelAlias = (typeof MODEL_ALIASES)[number]
-
-/**
- * Permission modes in the order Shift+Tab cycles them, per the CLI's own
- * documentation: `default → acceptEdits → plan → bypassPermissions → auto`,
- * where the last two appear only when available in that session.
- */
-export const MODE_CYCLE = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'] as const
-export type PermissionMode = (typeof MODE_CYCLE)[number]
-
-/** Modes settable at spawn time. `dontAsk` is reachable by flag but never cycles. */
-export const SPAWN_MODES = [...MODE_CYCLE, 'dontAsk'] as const
+export { MODEL_ALIASES, MODE_CYCLE, SPAWN_MODES }
+export type { ModelAlias, PermissionMode }
 
 export class SpawnOptionError extends Error {}
 

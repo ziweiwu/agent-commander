@@ -18,6 +18,7 @@ import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
 import type { Agent, AgentStatus } from '../shared/types.ts'
 import type { PendingStore } from './pending.ts'
+import { Poller } from './poll.ts'
 
 const SESSIONS_DIR = join(homedir(), '.claude', 'sessions')
 const RECONCILE_MS = 30_000
@@ -149,16 +150,37 @@ export function sortAgents(agents: Agent[]): Agent[] {
 export class Registry {
   #agents = new Map<string, Agent>()
   #watcher: FSWatcher | null = null
-  #tick: NodeJS.Timeout | null = null
-  #reconcile: NodeJS.Timeout | null = null
+  #tick: Poller
+  #reconcileLoop: Poller
   #listeners = new Set<(agents: Agent[]) => void>()
   #refreshing = false
+  #reconciling = false
+  #stopped = false
   #known: Set<string> | null = null
+  /**
+   * Session ids the CLI has not confirmed, that we have already asked about.
+   *
+   * A session written to disk but absent from `#known` is either brand new or a
+   * ghost, and the two are told apart by asking the CLI — which happens on the
+   * 30s reconcile. Waiting for it meant an agent started in a terminal stayed
+   * invisible for up to half a minute, in an app whose whole claim is that you
+   * can see every agent at a glance.
+   *
+   * So an unrecognised id triggers a reconcile now. This set is what keeps that
+   * from becoming a 2s `claude agents --json` loop: a ghost is asked about
+   * once, not once per scan. An id leaves the set when the CLI confirms it or
+   * when its session file goes away, so a pid genuinely reused later is asked
+   * about again.
+   */
+  #asked = new Set<string>()
 
   constructor(
     private readonly dir = SESSIONS_DIR,
     private readonly pending?: PendingStore,
-  ) {}
+  ) {
+    this.#tick = new Poller(TICK_MS, () => this.refresh())
+    this.#reconcileLoop = new Poller(RECONCILE_MS, () => this.reconcile())
+  }
 
   list(): Agent[] {
     return sortAgents([...this.#agents.values()])
@@ -187,30 +209,69 @@ export class Registry {
   }
 
   async start(): Promise<void> {
+    this.#stopped = false
     await this.refresh()
+    // Deliberately not awaited: the fleet is already usable from the local file
+    // read above, and blocking startup on a ~680ms CLI call would delay the
+    // first paint for a cross-check that only removes ghosts. What this used to
+    // be missing is the guard inside `reconcile` — without it this pass and the
+    // first scheduled one could both be in flight, spawning two
+    // `claude agents --json` processes against a machine that may already be at
+    // its process cap. INV-4: a poll cannot overlap itself.
     void this.reconcile()
     try {
       this.#watcher = watch(this.dir, () => void this.refresh())
     } catch {
       // fs.watch is unavailable on some filesystems; the tick below covers it.
     }
-    this.#tick = setInterval(() => void this.refresh(), TICK_MS)
-    this.#reconcile = setInterval(() => void this.reconcile(), RECONCILE_MS)
+    // Both loops re-arm after their work rather than on a wall clock; see
+    // `Poller`, which is INV-4's "cannot overlap itself or outrun its own
+    // cost" written once instead of once per caller.
+    this.#tick.start()
+    this.#reconcileLoop.start()
   }
 
   stop(): void {
+    this.#stopped = true
     this.#watcher?.close()
-    if (this.#tick) clearInterval(this.#tick)
-    if (this.#reconcile) clearInterval(this.#reconcile)
+    this.#tick.stop()
+    this.#reconcileLoop.stop()
     this.#watcher = null
-    this.#tick = null
-    this.#reconcile = null
   }
 
-  /** Cross-check presence against the supported CLI, dropping ghosts. */
+  /**
+   * Cross-check presence against the supported CLI, dropping ghosts.
+   *
+   * Guarded like `refresh`. It was not, and it is the more expensive of the
+   * two: one `claude agents --json` per call at ~680ms.
+   */
   async reconcile(): Promise<void> {
-    this.#known = await readCliSessionIds()
-    if (this.#known) await this.refresh()
+    if (this.#reconciling) return
+    this.#reconciling = true
+    try {
+      this.#known = await readCliSessionIds()
+      if (this.#known) await this.refresh()
+    } finally {
+      this.#reconciling = false
+    }
+  }
+
+  /**
+   * Whether the CLI has yet to vouch for this session.
+   *
+   * A pid can be reused, so the CLI is the authority on what is really live.
+   * Pending entries are ours rather than the CLI's, and are exempt.
+   */
+  #unconfirmed(agent: Agent): boolean {
+    if (agent.sessionId.startsWith('pending:')) return false
+    return !!this.#known && !this.#known.has(agent.sessionId)
+  }
+
+  /** Remember an id worth asking about; true if this is the first time. */
+  #noteUnconfirmed(sessionId: string): boolean {
+    if (this.#asked.has(sessionId)) return false
+    this.#asked.add(sessionId)
+    return true
   }
 
   async refresh(): Promise<void> {
@@ -222,14 +283,28 @@ export class Registry {
       // registered themselves, so a trust prompt can be answered.
       const found = this.pending ? await this.pending.merge(real) : real
       const next = new Map<string, Agent>()
+      const onDisk = new Set<string>(found.map((agent) => agent.sessionId))
+      let unrecognised = false
       for (const agent of found) {
-        // A pid can be reused; the CLI is the authority on what is really live.
-        // Pending entries are ours, not the CLI's, so they are exempt.
-        const isPending = agent.sessionId.startsWith('pending:')
-        if (!isPending && this.#known && !this.#known.has(agent.sessionId)) continue
+        if (this.#unconfirmed(agent)) {
+          // Not a ghost yet — just unconfirmed. Ask the authority now rather
+          // than at the next 30s reconcile; see `#asked` for why this cannot
+          // become a loop.
+          unrecognised = this.#noteUnconfirmed(agent.sessionId) || unrecognised
+          continue
+        }
+        this.#asked.delete(agent.sessionId)
         const prev = this.#agents.get(agent.sessionId)
         next.set(agent.sessionId, prev ? { ...prev, ...agent } : agent)
       }
+      // A session file that has gone away may come back on a reused pid, and
+      // that one deserves a fresh question.
+      for (const id of this.#asked) {
+        if (!onDisk.has(id)) this.#asked.delete(id)
+      }
+      // Fired after the map is built, not awaited: this pass publishes what it
+      // already knows, and the answer arrives on the reconcile's own refresh.
+      if (unrecognised && !this.#stopped) void this.reconcile()
       if (!changed(this.#agents, next)) return
       this.#agents = next
       const list = this.list()

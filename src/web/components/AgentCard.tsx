@@ -82,7 +82,10 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
         </span>
         {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
         {rel && <span>{rel}</span>}
-        {tok && <span>↓ {tok}</span>}
+        {/* INV-11: labelled for what it is. This counts output tokens only,
+            from a transcript tail that is capped, so it is not the session's
+            spend and must not be presented as though it were. */}
+        {tok && <span title={t('tokensTitle')}>↓ {tok}</span>}
         {agent.subagents ? (
           <span>
             {agent.subagents} subagent{agent.subagents > 1 ? 's' : ''}

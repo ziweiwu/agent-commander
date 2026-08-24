@@ -6,6 +6,8 @@ import { tildePath } from '../lib/format.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
 import type { Key } from '../lib/i18n.ts'
+import { MODE_KEY, NEW_AGENT_MODES } from '../lib/modes.ts'
+import { MODEL_ALIASES } from '../../shared/types.ts'
 import { Button, Chip } from './ui/Button.tsx'
 import { FolderBrowser } from './FolderBrowser.tsx'
 import styles from './NewAgentDialog.module.css'
@@ -14,18 +16,13 @@ const RECENT_KEY = 'agent-commander.recentDirs'
 const DEFAULT_DIR_KEY = 'agent-commander.defaultDir'
 const RECENT_MAX = 6
 
-/** Modes settable at spawn time; `dontAsk` is only reachable by flag. */
-const MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto', 'dontAsk'] as const
-const MODE_KEY: Record<string, Key> = {
-  default: 'modeDefault',
-  acceptEdits: 'modeAcceptEdits',
-  plan: 'modePlan',
-  bypassPermissions: 'modeBypassPermissions',
-  auto: 'modeAuto',
-  dontAsk: 'modeDontAsk',
-}
-
-const MODELS = ['default', 'opus', 'sonnet', 'haiku', 'fable', 'opusplan'] as const
+/**
+ * Modes settable at spawn time and the models on offer, both from the lists the
+ * server validates against. `dontAsk` is in `SPAWN_MODES` and not in the cycle,
+ * which is exactly the distinction this dialog needs.
+ */
+const MODES = NEW_AGENT_MODES
+const MODELS = MODEL_ALIASES
 
 function readList(key: string): string[] {
   try {

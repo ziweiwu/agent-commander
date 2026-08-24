@@ -88,7 +88,8 @@ Inputs are 16px so iOS does not zoom the page when you tap them, tap targets are
 
 The terminal is the hard case: a 150-column pane shrunk to a 390px screen would
 render at about 4.6px. Instead it never scales below ~9.5px and pans sideways,
-with a **Fit width** button when you want the whole pane at a glance. The quick
+with a **Fit width** button when you want the whole pane at a glance, and a
+**Full screen** button beside it for when neither is enough. The quick
 keys (`Enter`, arrows, `Tab`, `Esc`, `Ctrl-C`) sit under it, since a phone
 keyboard has none of them.
 
@@ -163,12 +164,17 @@ extension point, holding no credential at all.
 
 ## Themes, language and full screen
 
-The settings menu carries theme (System / Light / Dark) and language (English /
-简体中文). Both persist. "System" writes no `data-theme` attribute at all, so the
-`prefers-color-scheme` media query decides and keeps deciding while the app is
-open; an explicit choice overrides it. The Attach tab has a **Full screen**
+The settings menu carries theme (System / Light / Dark), colour scheme
+(Graphite / Nordic / Solar / Ember / Mauve) and language (English / 简体中文).
+All three persist. Theme and scheme are separate axes — the scheme picks the
+palette family, the theme picks light or dark within it — and
+[Colour schemes](#colour-schemes) has the rest of that. "System" writes no
+`data-theme` attribute at all, so the `prefers-color-scheme` media query decides
+and keeps deciding while the app is open; an explicit choice overrides it. The Attach tab has a **Full screen**
 button — useful on a phone, where the terminal is the cramped part — and `Esc`
-leaves it.
+leaves it. It sits in the key bar under the terminal, next to **Fit width**,
+rather than only as a `⤢` in the panel header: the view that needs the room is
+the one the button should be in.
 
 ## Sorting and finding
 
@@ -260,6 +266,29 @@ The server validates the directory before spawning, and checks the model and
 permission mode against fixed allow-lists so an unrecognised value is refused
 rather than becoming a flag — see INV-7.
 
+## Pruning sessions you never used
+
+Sessions accumulate: you open one in a directory, get distracted, and it sits
+there for a week holding a tmux pane and a `claude` process without ever having
+been asked anything. **Prune N unused** appears beside *New agent* whenever the
+fleet contains any, and closes them.
+
+"Unused" is deliberately the narrowest claim the data supports: the session is
+`idle`, it has a pane, and it carries no activity line, no token spend, no
+last-activity clock, no title it generated and no prompt it was given — the same
+evidence the card already prints "No prompts yet" from. Anything that has ever
+been prompted keeps at least one of those, even long after it goes quiet, so the
+button cannot select work in progress. `busy`, `waiting` and delegating agents
+are excluded outright, and so is `unknown`: a status the app could not read is an
+absence of evidence, not permission to close a session.
+
+Nothing is closed without a confirmation that names the sessions first, they are
+closed one at a time through the same `/exit`-then-kill path as **Close agent**,
+and one refusing to exit does not stop the rest — the toast afterwards reports
+what actually closed rather than what was attempted. The button is unavailable
+while the fleet view is not live, because a card from a dropped connection is a
+memory rather than a reading (INV-11).
+
 ## How it works
 
 | Source | Used for |
@@ -340,11 +369,17 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 431 tests: pure logic, server, and React components
+npm test           # 605 tests: pure logic, server, and React components
+npm run e2e        # 102 end-to-end tests in a real browser, at three screen shapes
 npm run typecheck
 npm run lint
 npm run verify:inv1   # asserts attaching never resizes a real pane (server must be running)
+npm run themes        # regenerate the colour palettes into src/web/styles/tokens.css
 ```
+
+`npm test` and `npm run e2e` both run on every push and pull request
+(`.github/workflows/ci.yml`); the rest are local habits. See **End-to-end tests**
+below for what the second one covers that the first cannot.
 
 ### Releasing
 
@@ -393,10 +428,112 @@ an unreadable header on a phone, an ascending-sort bug that ranked unknown
 values as the smallest, and a markdown parser that turned `__init__.py` into
 `_init_.py`.
 
+### End-to-end tests
+
+```
+npm run e2e                      # all three shapes
+npm run e2e -- --project=phone   # just one
+npm run e2e:ui                   # pick and watch them run
+npm run e2e:report               # the last run's report, traces included
+```
+
+The specs live in `e2e/`, driven by `@playwright/test` and configured in
+`playwright.config.ts`. On a machine that has never run them, fetch the browser
+once — the runner ships without one:
+
+```
+npx playwright install chromium
+```
+
+`playwright.config.ts` builds the web assets and starts a `--mock` server
+itself, so there is nothing to have running first — and because it is `--mock`,
+a suite that types, sends and presses Ctrl-C in a loop cannot reach a real
+agent. It listens on 4599, not 4317, for the reason everything else in this repo
+avoids that port; set `E2E_PORT` if something else already has 4599.
+
+These exist for the joins. Vitest covers each module and each component; what it
+cannot see is a message crossing the socket, being written by the server, coming
+back through a transcript tail and settling the optimistic copy the browser drew
+— five modules and two processes, each individually tested, with every duplicate
+this app has ever sent living somewhere between them.
+
+They run at three shapes, because the layout has three:
+
+| Project | Viewport | Why |
+|---|---|---|
+| `desktop` | 1280×720 | two columns, hardware keyboard |
+| `tablet` | iPad Pro 11, both ways up | the only device that crosses the 900px breakpoint in normal use |
+| `phone` | iPhone 13, plus an SE and a landscape check | the sheet layout, where height is scarce |
+
+Specs that only make sense on one shape carry a `@desktop`, `@tablet` or
+`@phone` tag, and the tag is what keeps them off the others.
+
+The tablet is not a third size for completeness. An iPad is 834px wide in
+portrait and 1194px in landscape, so turning one over mid-conversation switches
+the app between its sheet layout and its two-column one — and what has to
+survive that is which agent is open, which tab it is on, what is half-typed, and
+the terminal's column count, which INV-1 says may never follow the window.
+
+### Colour schemes
+
+Five palettes ship: **Graphite** (the default — neutral slate, no temperature),
+**Nordic** (arctic blues), **Solar** (teal-tinted dark, cream light), **Ember**
+(warm browns and ambers) and **Mauve** (soft violet). Pick one in the settings
+menu under *Colours*, where every row carries a swatch in that scheme's page,
+raised-surface and accent colours: a name tells you nothing about what a palette
+does to a screen you are going to sit in front of all day. That menu stays open when you pick one,
+unlike the theme and language rows — choosing a palette means trying two or
+three, and closing on the first makes comparing them four clicks apiece.
+
+Light and dark stays a separate axis. The scheme picks the palette family;
+System / Light / Dark picks which end of it, and "System" still writes no
+attribute at all. So there are ten palettes, and *Nordic, following the system*
+is a thing you can ask for — which is why the two were not folded into one menu
+of ten entries. Both settings persist in `localStorage`.
+
+The palettes are derived, not chosen. `scripts/gen-themes.py` computes every
+colour in OKLCH from the contrast that colour's role has to clear, and writes
+the stylesheet whole:
+
+```
+python3 scripts/gen-themes.py --write   # same as npm run themes
+```
+
+Edit the generator, never `src/web/styles/tokens.css`. `test/scheme.test.ts`
+re-runs the generator and compares byte for byte, so a hand-edit fails the suite
+rather than surviving until the next `--write` quietly reverts it. The same test
+checks that the menu's list and the stylesheet agree in both directions — a
+scheme in the CSS the menu never offers is unreachable, one in the menu with no
+CSS behind it is a click that does nothing — and that all ten palettes define
+the whole token set.
+
+Three properties are enforced, not just the first. Contrast is the one WCAG
+names, and `audit-contrast.py` is its judge. The other two came out of looking
+at the result: status colours have to differ **from each other**, not only from
+the surface behind them — amber and red both cleared 4.5:1 while sitting 0.073
+apart in OKLab, which is an amber pill and a red one that both just read "warm"
+— and the schemes have to differ from each other, since Graphite and Nordic
+first arrived 0.006 apart, the same colour twice under two names. Both are
+measured by `python3 scripts/gen-themes.py --report`, which is what `--write`
+prints after it writes.
+
+`.cleancode.json` at the repo root exists for this file and this reason only:
+the coefficients of Ottosson's OKLab matrices are added to the pre-commit
+hook's `allowed_numbers`, because `0.4122214708` is not a number wanting a name
+— it *is* the name. Every other rule is left on for every file.
+
+Nordic, Solar, Ember and Mauve borrow their hue relationships and their
+character from Nord, Solarized, Gruvbox and Catppuccin. They are not those
+palettes, and the lightness is re-derived here precisely because the originals
+have documented contrast problems: Gruvbox measurably misses WCAG, Catppuccin's
+own tracker records that a fully AA version stopped looking pastel, and Nord's
+low contrast is its usual complaint. `scripts/gen-themes.py` carries the
+research and says which rule each constant came from.
+
 ### Audit gates
 
 ```
-python3 scripts/audit-contrast.py        # WCAG 1.4.3 / 1.4.11 across both themes
+python3 scripts/audit-contrast.py        # WCAG 1.4.3 / 1.4.11 across all ten palettes
 PORT=4400 node scripts/audit-a11y.mjs    # WCAG 2.2 AA, desktop + phone, light + dark
 PORT=4400 node scripts/audit-ux.mjs      # task flows, keyboard, responsive, features
 PORT=4400 node scripts/audit-mobile.mjs  # real device profiles, portrait + landscape
@@ -407,9 +544,13 @@ localhost. The two that take screenshots write them to `SHOTS`, defaulting to
 `/tmp/agent-commander-audit`.
 
 Each exits non-zero on a finding, so they gate a change. `audit-contrast.py`
-parses `src/web/styles/tokens.css` and measures every pair the interface uses —
-it is what caught `--faint` sitting at 3.80:1 against a panel, and control
-borders at 1.25:1 while being the only thing defining a card's edge.
+parses `src/web/styles/tokens.css` and measures every pair the interface uses,
+independently for each of the ten palettes — it currently reports `10
+palette(s) audited, 0 failing pair(s)`. It is what caught `--faint` sitting at
+3.80:1 against a panel, and control borders at 1.25:1 while being the only thing
+defining a card's edge. It finds the palettes by parsing the stylesheet rather
+than from a list of scheme names, so a scheme added to the generator and
+forgotten here cannot ship unaudited.
 
 ### Randomised QA
 

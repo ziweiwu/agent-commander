@@ -47,8 +47,13 @@
   border-color: color-mix(in srgb, var(--waiting) 50%, transparent);
   background: color-mix(in srgb, var(--waiting) 14%, transparent);
 }
-.close {
+/* The header's action pair, kept on one line and pushed to the end together. */
+.headActions {
   margin-left: auto;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .back {
   display: none;
@@ -64,6 +69,25 @@
   border-bottom: 1px solid var(--line);
 }
 
+/*
+ * Why the Attach tab is greyed out, sat beside it.
+ *
+ * Held to one line by force. The tab strip is a fixed row in a column whose
+ * remaining height is the conversation, so a sentence allowed to wrap here
+ * would take that height from the thing the screen is for — and it is longest
+ * on the narrowest screens, where there is least to give.
+ */
+.tabNote {
+  font-size: var(--text-sm);
+  color: var(--dim);
+  margin-left: 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-bottom: 6px;
+}
+
 /* The tab row has spare width where the header has none, so on a phone the
    icon buttons live here and the agent's name gets the header to itself. */
 .tabActions {
@@ -71,6 +95,28 @@
   display: flex;
   gap: 6px;
   padding-bottom: 4px;
+}
+
+/*
+ * The word next to the ⤢ in the tab row.
+ *
+ * It fits beside "Chat", "Attach" and the ⋯ disclosure on a 390px phone and
+ * does not on a 360px one, where the row would push the layout sideways. Below
+ * that it is hidden the accessible way rather than removed, so the button keeps
+ * its name for a screen reader and only loses the word on screen — and the
+ * terminal's own key bar carries a fully labelled Full screen button anyway.
+ */
+.actionLabel {
+  white-space: nowrap;
+}
+@media (max-width: 380px) {
+  .actionLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 }
 .tab {
   background: none;

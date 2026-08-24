@@ -15,8 +15,20 @@ export class ControlError extends Error {}
 
 export { MODE_CYCLE, isModelAlias, isCyclableMode }
 
+/**
+ * An agent this module is allowed to type into: it exists, and it has a pane.
+ *
+ * Spelling the pane out in the type is what lets every function below take the
+ * lookup result directly. They used to take `Agent`, so `routes.ts` handed each
+ * one an `agent as never` — five casts, all of them on the one path that types
+ * into a live session, in a codebase with no other type escapes. The `undefined`
+ * case really was handled, inside the assertion; the cast just stopped the
+ * compiler checking that it stayed handled.
+ */
+export type Controllable = Agent & { paneId: string }
+
 /** INV-8: the shared guard in front of every action. */
-export function assertControllable(agent: Agent | undefined): asserts agent is Agent {
+export function assertControllable(agent: Agent | undefined): asserts agent is Controllable {
   if (!agent) throw new ControlError('agent is no longer available')
   if (!agent.paneId) throw new ControlError(agent.attachBlockedReason ?? 'agent is not attachable')
   if (agent.status === 'busy') {
@@ -64,10 +76,14 @@ export const liveDeps = (
  * The alias is validated against the allow-list first, so nothing free-text is
  * ever typed into a live session.
  */
-export async function setModel(agent: Agent, alias: string, deps: ControlDeps): Promise<void> {
+export async function setModel(
+  agent: Agent | undefined,
+  alias: string,
+  deps: ControlDeps,
+): Promise<void> {
   assertControllable(agent)
   if (!isModelAlias(alias)) throw new ControlError(`unknown model: ${alias}`)
-  await deps.paste(agent.paneId as string, `/model ${alias}`, true)
+  await deps.paste(agent.paneId, `/model ${alias}`, true)
 }
 
 export interface ModeResult {
@@ -89,7 +105,7 @@ const MAX_STEPS = 6
  * where it actually ended up.
  */
 export async function setMode(
-  agent: Agent,
+  agent: Agent | undefined,
   target: string,
   deps: ControlDeps,
   maxSteps = MAX_STEPS,
@@ -102,7 +118,7 @@ export async function setMode(
 
   for (let steps = 1; steps <= maxSteps; steps += 1) {
     // BTab is tmux's name for back-tab, which is what a terminal emits for Shift+Tab.
-    await deps.key(agent.paneId as string, 'BTab')
+    await deps.key(agent.paneId, 'BTab')
     await deps.wait(250)
     mode = await deps.readMode()
     if (mode === target) return { ok: true, mode, steps }
@@ -168,7 +184,7 @@ const GOAL_POLL_MS = 250
  * by looking at the chat.
  */
 export async function setGoal(
-  agent: Agent,
+  agent: Agent | undefined,
   rawCondition: string,
   deps: ControlDeps,
   verifyMs = GOAL_VERIFY_MS,
@@ -177,7 +193,7 @@ export async function setGoal(
   const condition = assertGoalCondition(rawCondition)
 
   const before = await deps.readGoal()
-  await deps.paste(agent.paneId as string, `/goal ${condition}`, true)
+  await deps.paste(agent.paneId, `/goal ${condition}`, true)
 
   for (let waited = 0; waited < verifyMs; waited += GOAL_POLL_MS) {
     await deps.wait(GOAL_POLL_MS)
@@ -221,9 +237,9 @@ function landed(before: GoalState | undefined, goal: GoalState | undefined): boo
  * evaluation writes a fresh record and the goal reappears on its own, which is
  * the right way round for a claim this app cannot check.
  */
-export async function clearGoal(agent: Agent, deps: ControlDeps): Promise<void> {
+export async function clearGoal(agent: Agent | undefined, deps: ControlDeps): Promise<void> {
   assertControllable(agent)
-  await deps.paste(agent.paneId as string, '/goal clear', true)
+  await deps.paste(agent.paneId, '/goal clear', true)
 }
 
 /** Seconds to let `/exit` shut the session down before forcing it. */
@@ -241,9 +257,9 @@ export interface CloseResult {
  * `/exit` is Claude Code's own shutdown path, so it gets the chance to finish
  * writing its transcript. Only a session that ignores it is killed outright.
  */
-export async function closeAgent(agent: Agent, deps: ControlDeps): Promise<CloseResult> {
+export async function closeAgent(agent: Agent | undefined, deps: ControlDeps): Promise<CloseResult> {
   assertControllable(agent)
-  const paneId = agent.paneId as string
+  const paneId = agent.paneId
 
   await deps.paste(paneId, '/exit', true)
 

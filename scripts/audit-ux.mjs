@@ -170,16 +170,61 @@ for (const scheme of ['light', 'dark']) {
   if (!groupTitles.includes('Needs you')) add('high', 'sorting', 'sorting dropped the groups')
   await page.selectOption(T('sort-select'), 'recent')
 
+/*
+ * Light and dark, compared with each other rather than with a remembered hex.
+ *
+ * This used to assert `bg === 'rgb(14, 17, 22)'`, which was true of the one
+ * palette that existed when it was written. There are ten now, generated from
+ * `scripts/gen-themes.py`, and the check failed the moment they were
+ * regenerated — reporting "dark theme did not repaint the page" about a page
+ * that had repainted perfectly well. An audit that has to be edited whenever a
+ * colour changes is an audit that gets edited without being thought about.
+ *
+ * The property is what matters: choosing dark has to actually darken the page,
+ * and choosing light has to lighten it. `audit-contrast.py` is what judges the
+ * values themselves, across every palette.
+ */
+// sRGB luminance weights, from ITU-R BT.709 by way of WCAG 2.
+const CHANNEL_MAX = 255
+const RED_WEIGHT = 0.2126
+const GREEN_WEIGHT = 0.7152
+const BLUE_WEIGHT = 0.0722
+// What counts as having actually repainted. A "dark" page above the first or a
+// "light" one below the second is a theme that half applied — which comparing
+// the two against each other alone would pass.
+const DARK_ENOUGH = 0.35
+const LIGHT_ENOUGH = 0.65
+
+const luminance = (rgb) => {
+  const [r, g, b] = (rgb.match(/\d+/g) ?? [0, 0, 0]).map(Number)
+  return (RED_WEIGHT * r + GREEN_WEIGHT * g + BLUE_WEIGHT * b) / CHANNEL_MAX
+}
+const paint = async (which) => {
   await page.click(T('settings-button'))
-  await page.click(T('theme-dark'))
+  await page.click(T(`theme-${which}`))
   await page.waitForTimeout(250)
-  const themed = await page.evaluate(() => ({
+  return page.evaluate(() => ({
     attr: document.documentElement.getAttribute('data-theme'),
     bg: getComputedStyle(document.body).backgroundColor,
   }))
-  if (themed.attr !== 'dark') add('high', 'theme', `dark theme not applied (data-theme=${themed.attr})`)
-  if (themed.bg !== 'rgb(14, 17, 22)') add('high', 'theme', `dark theme did not repaint the page (bg=${themed.bg})`)
-  await page.screenshot({ path: `${OUT}/07-theme-dark-forced.png` })
+}
+
+const light = await paint('light')
+if (light.attr !== 'light') add('high', 'theme', `light theme not applied (data-theme=${light.attr})`)
+await page.screenshot({ path: `${OUT}/07-theme-light-forced.png` })
+
+const themed = await paint('dark')
+if (themed.attr !== 'dark') add('high', 'theme', `dark theme not applied (data-theme=${themed.attr})`)
+if (luminance(themed.bg) >= luminance(light.bg)) {
+  add('high', 'theme', `dark is not darker than light (${themed.bg} vs ${light.bg})`)
+}
+if (luminance(themed.bg) > DARK_ENOUGH) {
+  add('high', 'theme', `dark theme did not repaint the page (bg=${themed.bg})`)
+}
+if (luminance(light.bg) < LIGHT_ENOUGH) {
+  add('high', 'theme', `light theme did not repaint the page (bg=${light.bg})`)
+}
+await page.screenshot({ path: `${OUT}/07-theme-dark-forced.png` })
 
   await page.reload({ waitUntil: 'networkidle' })
   await page.waitForTimeout(400)

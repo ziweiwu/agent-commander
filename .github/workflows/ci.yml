@@ -1,0 +1,100 @@
+# The deterministic gates, on every change rather than only at release.
+#
+# These same four commands already run in `npm-publish.yml`. Running them only
+# there meant they fired when a `v*` tag was pushed — that is, at the moment it
+# is most expensive to learn something is broken, with a version number already
+# committed to and npm versions immutable once they land. This workflow moves
+# the discovery to the change that caused it; the publish workflow keeps its own
+# copy so a release is never taken on trust from a green branch.
+#
+# The end-to-end suite runs here too, in a job of its own. It needs a real
+# Chromium, which is why it is not in the matrix above — but unlike the audits
+# it judges behaviour rather than appearance, so nothing about it depends on how
+# a runner renders a font. It drives `--mock`, which is the same server and the
+# same routes with the four providers swapped for fixtures, so it cannot reach a
+# real agent.
+#
+# What is deliberately NOT here, for the same reason `npm-publish.yml` gives:
+# the browser audits (`npm run audit` — contrast, a11y, ux, mobile) and the
+# randomised sweep (`npm run qa`) need a running server and a real Chromium, and
+# font rendering differs enough between macOS and ubuntu-latest that a layout
+# finding would fail CI for a reason that has nothing to do with the change.
+# `npm run verify:inv1` is out for a stronger reason still: it drives a real
+# attach against a live Claude Code agent on a live tmux server, which does not
+# exist on a runner. Both stay local, and stay a habit rather than a gate.
+name: CI
+
+on:
+  push:
+    branches:
+      - '**'
+    # Tags are `npm-publish.yml`'s job; without this a release runs both.
+    tags-ignore:
+      - '**'
+  pull_request:
+
+# A branch that gets three pushes in a minute should test the last one, not all
+# three. In-progress runs for the same ref are cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # package.json claims `engines: node >= 20`. That claim is only true if
+      # something checks it, so the floor and the current release both run.
+      matrix:
+        node: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          # One version, not the matrix: this job is about the browser and the
+          # server agreeing, and running it twice tests Node twice over for
+          # nothing. The matrix above is where the engines floor is checked.
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Only Chromium. The suite drives three viewports through it — desktop,
+      # tablet and phone — which is where the layout genuinely differs; a second
+      # engine would be a different question and a much slower job.
+      - run: npx playwright install --with-deps chromium
+
+      # `playwright.config.ts` builds the web assets and starts the mock server
+      # itself, so there is nothing to start here.
+      - run: npm run e2e
+
+      - uses: actions/upload-artifact@v4
+        # Traces are kept for the first retry, so they exist exactly when
+        # someone needs them: a failure that did not reproduce.
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7

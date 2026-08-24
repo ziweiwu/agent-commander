@@ -380,6 +380,12 @@ export class MockPanes implements PaneApi {
     return lines.slice(0, rows)
   }
 
+  /** The same one-round-trip shape the real adapter has, so the hub is exercised. */
+  async sample(paneId: string): Promise<{ meta: PaneMeta; lines: string[] }> {
+    const geometry = await this.meta()
+    return { meta: geometry, lines: await this.capture(paneId, geometry.rows) }
+  }
+
   async paste(paneId: string, text: string, submit: boolean): Promise<void> {
     // Only a submitted message becomes a transcript entry; loose keystrokes
     // sent by the terminal view do not.

@@ -117,4 +117,21 @@
   .value {
     min-inline-size: 0;
   }
+
+  /*
+   * Inside the sheet, one row is not a preference — it is 30px of conversation.
+   *
+   * The tightening above was aimed at this and did not reach it: measured on a
+   * 320px iPhone SE with an agent open, the two chips still wrapped and the
+   * topbar came to 121px of a 568px screen. Wrapping is fine on the fleet list,
+   * where the height is spare; it is not fine over a conversation that was
+   * being given 26% of the display. The countdown is what goes, because "how
+   * full" is the number you act on and "when it resets" is not.
+   */
+  :global([data-sheet='true']) .chips {
+    flex-wrap: nowrap;
+  }
+  :global([data-sheet='true']) .reset {
+    display: none;
+  }
 }
