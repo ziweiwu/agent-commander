@@ -43,6 +43,22 @@ const PORT = Number(process.env.E2E_PORT ?? 4599)
  *   @phone   — only meaningful on a phone-sized screen
  *   @tablet  — about the breakpoint itself, so only meaningful on a tablet
  */
+/**
+ * One engine, said out loud.
+ *
+ * A device descriptor carries a `defaultBrowserType`, and both of the ones used
+ * below name WebKit — so on a laptop with every browser installed these ran on
+ * WebKit while the desktop project ran on Chromium, and CI, which installs only
+ * Chromium, could not launch them at all. Local and CI silently testing
+ * different engines is worse than either choice of engine.
+ *
+ * Chromium for all three, because these specs are about the layout and the
+ * wiring rather than engine behaviour — the audit scripts make the same choice.
+ * Real WebKit coverage would be a deliberate addition, with the browser
+ * installed in CI to match.
+ */
+const CHROMIUM = { browserName: 'chromium' } as const
+
 const PROJECTS = [
   {
     name: 'desktop',
@@ -53,12 +69,12 @@ const PROJECTS = [
     name: 'tablet',
     // Portrait: 834px wide, which is *below* the breakpoint. The landscape
     // half is driven inside the specs, because rotating is the point.
-    use: { ...devices['iPad Pro 11'] },
+    use: { ...devices['iPad Pro 11'], ...CHROMIUM },
     grepInvert: /@phone|@desktop/,
   },
   {
     name: 'phone',
-    use: { ...devices['iPhone 13'] },
+    use: { ...devices['iPhone 13'], ...CHROMIUM },
     grepInvert: /@desktop|@tablet/,
   },
 ]

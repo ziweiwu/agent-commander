@@ -468,6 +468,12 @@ They run at three shapes, because the layout has three:
 Specs that only make sense on one shape carry a `@desktop`, `@tablet` or
 `@phone` tag, and the tag is what keeps them off the others.
 
+All three run on Chromium, pinned explicitly. Playwright's device descriptors
+name WebKit for the iPad and the iPhone, so without the pin a laptop with every
+browser installed quietly ran two thirds of the suite on a different engine
+than CI, which installs only Chromium. These specs are about the layout and the
+wiring rather than engine behaviour; the audits make the same choice.
+
 The tablet is not a third size for completeness. An iPad is 834px wide in
 portrait and 1194px in landscape, so turning one over mid-conversation switches
 the app between its sheet layout and its two-column one — and what has to
