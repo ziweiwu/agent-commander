@@ -389,6 +389,13 @@ interval at its steady rate. The keystroke case is no longer the victim of this 
 outstanding — but the steady cadence has never been re-derived from what a read
 now costs.
 
+**5a. The origin gate answers to two names.** `sameOriginRequest` measures both
+`Origin` and `Host` against loopback *plus* this host's own Tailscale `DNSName`
+(`routes.ts:229`), read from the CLI probe at startup. Without the second one a
+tokenless server is unreachable through `tailscale serve`, which forwards the
+name the caller asked for. It is one exact name, not the tailnet: another
+machine on it is refused, as is any rebound host.
+
 **5. A configured token replaces the origin gate rather than adding to it.**
 `permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:348`). The
 reasoning above `sameOriginRequest` is sound — a token lives in the URL of the

@@ -16,6 +16,7 @@ import type { Server } from 'node:http'
 import { connect as netConnect } from 'node:net'
 import { WebSocket } from 'ws'
 import { createAppServer } from '../src/server/routes.ts'
+import type { ServerEnv } from '../src/shared/types.ts'
 import { MockPanes, MockSource, MockTail } from '../src/server/mock.ts'
 
 const DOC = '<!doctype html>\n<html lang="en">\n<body><div id="root"></div></body>\n</html>\n'
@@ -30,7 +31,20 @@ afterEach(async () => {
   await Promise.all(dirs.splice(0).map((d) => rm(d, { recursive: true, force: true })))
 })
 
-async function serve(token?: string): Promise<{ base: string; ws: string; port: number }> {
+const TAILNET = 'ziweis-laptop.tail6f6b16.ts.net'
+
+/** A Tailscale that is up, named as this host — what `probeEnv` returns. */
+const tailscaleUp = {
+  cliPath: '/usr/bin/tailscale',
+  dnsName: TAILNET,
+  ip: '100.64.0.1',
+  running: true,
+}
+
+async function serve(
+  token?: string,
+  tailscale: ServerEnv['tailscale'] = null,
+): Promise<{ base: string; ws: string; port: number }> {
   const webRoot = await mkdtemp(join(tmpdir(), 'ac-origin-'))
   dirs.push(webRoot)
   await writeFile(join(webRoot, 'index.html'), DOC)
@@ -43,7 +57,7 @@ async function serve(token?: string): Promise<{ base: string; ws: string; port: 
     makeTail: (id: string) => new MockTail(id),
     mock: true,
     webRoot,
-    env: { tailscale: null, tmux: true, port: 0, platform: 'darwin' },
+    env: { tailscale, tmux: true, port: 0, platform: 'darwin' },
     ...(token ? { token } : {}),
     spawn: async (req) => ({ tmuxSession: 'test-session', cwd: req.cwd }),
   })
@@ -247,5 +261,66 @@ describe('the token gate lets the bundle through', () => {
     const { base } = await serve('s3cret')
     const res = await fetch(`${base}/assets/index-abc123.js`, { method: 'POST', body: '{}' })
     expect(res.status).toBe(401)
+  })
+})
+
+/**
+ * This machine's own Tailscale name is this machine.
+ *
+ * `tailscale serve` terminates TLS and proxies to the loopback port, forwarding
+ * the name the caller asked for — which is not a loopback one, so the origin
+ * check refused it and a tokenless server became unreachable from the phone it
+ * had been reached from before that check existed. `--token` was the only way
+ * back in, for a request that never left the tailnet.
+ *
+ * The name is read from the Tailscale CLI at startup, never from the request,
+ * so matching it means being addressed to this host on a network the user
+ * administers. Everything the origin gate was written to stop is stopped by the
+ * same line as before, which is what the refusals below pin down.
+ */
+describe('a tokenless server answers to its own tailnet name', () => {
+  // Down a raw socket, because `fetch` silently drops a Host override and Host
+  // is the header `tailscale serve` actually forwards.
+  const proxied = (name: string): string => `Host: ${name}\r\nOrigin: https://${name}`
+
+  it('serves a request proxied by tailscale serve', async () => {
+    const { port } = await serve(undefined, tailscaleUp)
+    expect(await rawGet(port, proxied(TAILNET))).toContain('200')
+  })
+
+  it('opens the socket for it too', async () => {
+    const { ws } = await serve(undefined, tailscaleUp)
+    expect(await tryWebSocket(ws, { origin: `https://${TAILNET}` })).toBe('open')
+  })
+
+  it('matches the name case-insensitively, and with the root dot', async () => {
+    const { port } = await serve(undefined, { ...tailscaleUp, dnsName: `${TAILNET}.` })
+    expect(await rawGet(port, proxied(TAILNET.toUpperCase()))).toContain('200')
+  })
+
+  // The exemption is this host's name, not the tailnet's shape.
+  it('refuses another machine on the same tailnet', async () => {
+    const { port } = await serve(undefined, tailscaleUp)
+    expect(await rawGet(port, proxied('someone-else.tail6f6b16.ts.net'))).toContain('403')
+  })
+
+  it('refuses the name when Tailscale is not running', async () => {
+    const { port } = await serve(undefined, { ...tailscaleUp, running: false })
+    expect(await rawGet(port, proxied(TAILNET))).toContain('403')
+  })
+
+  // The whole point of the origin gate, unchanged: a visited page carries its
+  // own Origin, and no reachable name makes that one of ours.
+  it('still refuses a cross-origin page addressing the tailnet name', async () => {
+    const { port, ws } = await serve(undefined, tailscaleUp)
+    const status = await rawGet(port, `Host: ${TAILNET}\r\nOrigin: ${EVIL}`)
+    expect(status).toContain('403')
+    expect(await tryWebSocket(ws, { origin: EVIL })).toBe('rejected')
+  })
+
+  // Rebinding is refused by the same line: the host is not a name we answer to.
+  it('still refuses a rebound host', async () => {
+    const { port } = await serve(undefined, tailscaleUp)
+    expect(await rawGet(port, 'Host: evil.example')).toContain('403')
   })
 })

@@ -194,10 +194,43 @@ function hostnameOf(value: string | undefined): string | null {
   }
 }
 
-/** The only names a tokenless server can legitimately be reached at (INV-3). */
+/** This machine, addressed as itself (INV-3). */
 function isLoopbackName(hostname: string): boolean {
   if (hostname === 'localhost' || hostname === '::1') return true
   return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)
+}
+
+/**
+ * This machine addressed by its own Tailscale name, which is still this
+ * machine (INV-3).
+ *
+ * `tailscale serve` terminates TLS and proxies to the loopback port, forwarding
+ * the name the caller asked for. That name is not a loopback one, so the origin
+ * check below refused it and a tokenless server was unreachable from the phone
+ * it was reached from before the check existed -- the `--token` requirement was
+ * the only way back in, for a request that never left the tailnet.
+ *
+ * Trusting it is narrower than it looks. It is one exact name, this host's own
+ * `DNSName`, read from the Tailscale CLI at startup rather than from anything a
+ * caller sends; a request only matches by being addressed to this machine on a
+ * private network the user administers. A visited web page still cannot use it:
+ * its `Origin` is its own domain, which is neither loopback nor this name. Nor
+ * can a rebound host, which is refused for exactly the same reason.
+ */
+function isOwnTailnetName(hostname: string, tailnet: string | null): boolean {
+  return tailnet !== null && hostname === tailnet
+}
+
+function isSelfName(hostname: string, tailnet: string | null): boolean {
+  return isLoopbackName(hostname) || isOwnTailnetName(hostname, tailnet)
+}
+
+/** This host's Tailscale name, lowercased and trailing dot removed, if up. */
+export function ownTailnetName(env: ServerEnv): string | null {
+  const ts = env.tailscale
+  if (!ts?.running) return null
+  const name = ts.dnsName.replace(/\.$/, '').toLowerCase()
+  return name === '' ? null : name
 }
 
 /**
@@ -225,21 +258,24 @@ function isLoopbackName(hostname: string): boolean {
  * Only tokenless servers are gated. A configured token is already proof of
  * intent that neither a cross-origin page nor a rebound name can produce: it
  * lives in the URL of the real origin, and an attacker who cannot read that
- * origin cannot supply it. That is also what keeps the Tailscale flow working,
- * where the app is legitimately reached at a name that is not loopback and
- * INV-3 already requires `--token`.
+ * origin cannot supply it.
+ *
+ * Both headers are measured against the same set: the names that mean *this
+ * machine* -- loopback, plus this host's own Tailscale name when Tailscale is
+ * up. See `isOwnTailnetName` for why that second one belongs here rather than
+ * behind a token.
  */
-function sameOriginRequest(req: IncomingMessage): boolean {
+function sameOriginRequest(req: IncomingMessage, tailnet: string | null): boolean {
   const origin = req.headers.origin
   if (origin !== undefined) {
     // A sandboxed iframe or a file:// page sends the literal "null". It parses
-    // as a hostname of that name, which is not a loopback one, so it is
-    // refused by the same line as anything else foreign.
+    // as a hostname of that name, which is not one of ours, so it is refused by
+    // the same line as anything else foreign.
     const from = hostnameOf(origin)
-    if (from === null || !isLoopbackName(from)) return false
+    if (from === null || !isSelfName(from, tailnet)) return false
   }
   const asked = hostnameOf(req.headers.host)
-  return asked !== null && isLoopbackName(asked)
+  return asked !== null && isSelfName(asked, tailnet)
 }
 
 /** One browser tab's view state. */
@@ -344,8 +380,13 @@ export function createAppServer(opts: ServeOptions): Server {
     return typeof supplied === 'string' && safeEqual(supplied, opts.token)
   }
 
-  /** True when this request may act at all: the token, or same-origin loopback. */
-  const permitted = (req: IncomingMessage): boolean => !!opts.token || sameOriginRequest(req)
+  // Read once: the CLI probe is a subprocess, and this cannot change under us.
+  const tailnet = ownTailnetName(opts.env)
+
+  /** True when this request may act at all: the token, or this machine itself. */
+  const permitted = (req: IncomingMessage): boolean => {
+    return !!opts.token || sameOriginRequest(req, tailnet)
+  }
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')

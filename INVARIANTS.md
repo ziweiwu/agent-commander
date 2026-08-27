@@ -175,8 +175,8 @@ request" that is sent with no preflight — so any page on any origin could open
 command plus Enter into a live session. That is arbitrary code execution by way
 of a visited web page, and "we only bind loopback" is no defence against it.
 
-So a tokenless server answers only same-origin requests from loopback. Two
-headers, because they answer different questions:
+So a tokenless server answers only same-origin requests addressed to *this
+machine*. Two headers, because they answer different questions:
 
 - `Origin` names the page. Browsers always send it on a WebSocket handshake and
   on any cross-origin request, and never let a page forge it. Absent means a
@@ -186,11 +186,27 @@ headers, because they answer different questions:
   the host perfectly — both say `evil.example`, and only the fact that neither
   is a loopback name gives it away.
 
+"This machine" is two names, not one. Loopback is the obvious one. The other
+is this host's own Tailscale `DNSName`, when Tailscale is up: `tailscale serve`
+terminates TLS and proxies to the loopback port, forwarding the name the caller
+asked for, so a request that never left the tailnet arrives wearing a name that
+is not loopback. Refusing it made a tokenless server unreachable from the phone
+— the flow this project exists to serve — and `--token` was the only way back
+in.
+
+Trusting it is narrower than the tailnet: it is one exact name, read from the
+Tailscale CLI at startup rather than from anything a caller sends, so a request
+matches only by being addressed to *this* host on a network the user
+administers. Another machine on the same tailnet does not match. Nothing the
+gate was written to stop gets through it either — a visited page carries its
+own `Origin`, which is neither loopback nor this name, and a rebound host is
+refused for exactly that reason.
+
 A configured token replaces that gate rather than adding to it: a token is
 proof of intent that neither a cross-origin page nor a rebound name can
-produce, since it lives in the URL of the real origin. That is also what keeps
-the Tailscale flow working, where the app is legitimately reached at a name
-that is not loopback — and which this invariant already requires a token for.
+produce, since it lives in the URL of the real origin. It is what `--host`
+requires, where the app is bound to a network address directly rather than
+reached as itself through a proxy.
 
 **What the gate protects is larger than it looks.** The socket carries every
 agent's conversation verbatim — prompts, tool calls, file paths, whatever was
@@ -223,8 +239,9 @@ than an attacker.
 
 - `test/origin.test.ts` — a cross-origin WebSocket and a cross-origin form POST
   are refused, a rebound `Host` is refused down a raw socket, every honest
-  spelling of loopback still serves, and the bundle is exempt from the token
-  while the document, the fleet and the socket are not
+  spelling of loopback still serves, this host's own tailnet name serves while
+  another machine's does not, and the bundle is exempt from the token while the
+  document, the fleet and the socket are not
 - `test/ui/token.test.tsx` — the token survives into the requests the page makes
   and into the URL the router leaves in the address bar
 

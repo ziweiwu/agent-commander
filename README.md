@@ -318,9 +318,9 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
 
 `--host` is refused without `--token`. This app can type into live agents and
 approve their permission prompts, so it will not expose itself to the network
-unauthenticated. On loopback it also refuses requests that do not come from
-localhost's own origin, because a page in another browser tab is not a stranger
-on the network — see INV-3.
+unauthenticated. It also refuses requests that do not come from this machine's
+own origin, because a page in another browser tab is not a stranger on the
+network — see INV-3.
 
 For access from your phone, put Tailscale in front of it rather than binding
 another address at all:
@@ -329,8 +329,13 @@ another address at all:
 tailscale serve --bg 4317
 ```
 
-Then open `https://<your-machine>.<tailnet>.ts.net/` on the phone. If you would
-rather bind the tailnet address directly, name it — do **not** use
+Then open `https://<your-machine>.<tailnet>.ts.net/` on the phone. No token
+needed: the proxy forwards this machine's own Tailscale name, which counts as
+this machine and nothing else does — another host on the same tailnet is
+refused like any other stranger. Add `--token` anyway if you want the tailnet
+itself authenticated.
+
+If you would rather bind the tailnet address directly, name it — do **not** use
 `--host 0.0.0.0`, which also publishes the app on whatever Wi-Fi you are
 currently joined to:
 
