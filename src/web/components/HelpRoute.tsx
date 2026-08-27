@@ -1,9 +1,9 @@
-import { useNavigate } from 'react-router-dom'
+import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
 import { Help } from './Help.tsx'
 import styles from './App.module.css'
 
 export function HelpRoute() {
-  const navigate = useNavigate()
+  const navigate = useTokenNavigate()
   return (
     <main className={`${styles.layout} ${styles.solo}`}>
       <Help onClose={() => navigate('/')} />

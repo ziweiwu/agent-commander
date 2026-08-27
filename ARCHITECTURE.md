@@ -289,10 +289,10 @@ The client's real architecture is its duplicate suppression, all of it INV-2:
   same-batch check catches.
 - the pending-message timer — an unconfirmed message is marked *not delivered*
   after 12s rather than resent.
-- paste-ack flow control (`transport.ts:130`) — exactly one paste in flight,
+- paste-ack flow control (`transport.ts:90`) — exactly one paste in flight,
   everything typed meanwhile coalesced into the next. Not a debounce: a guessed
   window is wrong at both ends, whereas the ack makes the chunk size a function of
-  how fast tmux is actually draining. `flushText()` (`transport.ts:161`) runs
+  how fast tmux is actually draining. `flushText()` (`transport.ts:121`) runs
   before every other write so an Enter cannot overtake the line it submits.
 
 `reconcile()` (`chat.ts:143`) settles the optimistic echo by counting: a message
@@ -390,13 +390,20 @@ outstanding — but the steady cadence has never been re-derived from what a rea
 now costs.
 
 **5. A configured token replaces the origin gate rather than adding to it.**
-`permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:218`). The
+`permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:348`). The
 reasoning above `sameOriginRequest` is sound — a token lives in the URL of the
 real origin and an attacker who cannot read that origin cannot supply it. The
 unstated consequence is that the token is both the credential *and* the exemption
 from rebinding protection, and it travels in the query string and is printed to
 stdout at startup: scrollback, shell history and `Referer` are all places it can
 escape to.
+
+The same "it lives in the URL" property is also what the token cannot do, and
+`isPublicAsset` (`routes.ts:329`) is the concession: a URL the user opened says
+nothing about the `<script>` that URL then pulls in, so `GET`/`HEAD` under
+`/assets/` skip the token gate or the app 401s its own bundle. The prefix is the
+whole boundary, which is why nothing under it may ever serve agent state, and
+why a miss there 404s instead of falling through to the shell.
 
 **6. A known reconcile gap is documented and unfixed** (`chat.ts:139`): a message
 sent in the second before backfill arrives was baselined against an empty history.

@@ -9,7 +9,7 @@
  * live session. These tests drive the server the way such a page would.
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Server } from 'node:http'
@@ -20,6 +20,7 @@ import { MockPanes, MockSource, MockTail } from '../src/server/mock.ts'
 
 const DOC = '<!doctype html>\n<html lang="en">\n<body><div id="root"></div></body>\n</html>\n'
 const EVIL = 'https://evil.example'
+const BUNDLE = 'console.log("the compiled front end")\n'
 
 const started: Server[] = []
 const dirs: string[] = []
@@ -33,6 +34,8 @@ async function serve(token?: string): Promise<{ base: string; ws: string; port: 
   const webRoot = await mkdtemp(join(tmpdir(), 'ac-origin-'))
   dirs.push(webRoot)
   await writeFile(join(webRoot, 'index.html'), DOC)
+  await mkdir(join(webRoot, 'assets'))
+  await writeFile(join(webRoot, 'assets', 'index-abc123.js'), BUNDLE)
 
   const server = createAppServer({
     source: new MockSource(),
@@ -189,5 +192,60 @@ describe('a token replaces the origin gate', () => {
   it('still refuses a tokenless request, whatever its origin', async () => {
     const { base } = await serve('s3cret')
     expect((await fetch(`${base}/api/agents`, { headers: { origin: base } })).status).toBe(401)
+  })
+})
+
+/**
+ * The built bundle is exempt from the token, and from nothing else.
+ *
+ * A token only ever arrives on the URL the user opened. `index.html`'s own
+ * `<script>` and `<link>` are ordinary subresource requests carrying neither it
+ * nor an `Authorization` header, so gating them 401s the app's JavaScript and
+ * the page hangs on its loading shell — which made `--token`, and every
+ * `--host` flow INV-3 requires a token for, impossible to start at all.
+ *
+ * Nothing this gate protects moves through those files. What does — the fleet,
+ * the transcripts, the socket that types into a live agent — stays gated, which
+ * is what these tests pin down.
+ */
+describe('the token gate lets the bundle through', () => {
+  it('serves an asset with no token', async () => {
+    const { base } = await serve('s3cret')
+    const res = await fetch(`${base}/assets/index-abc123.js`)
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe(BUNDLE)
+  })
+
+  it('still refuses the document that references it', async () => {
+    const { base } = await serve('s3cret')
+    expect((await fetch(`${base}/`)).status).toBe(401)
+  })
+
+  it('still refuses the fleet and the socket', async () => {
+    const { base, ws } = await serve('s3cret')
+    expect((await fetch(`${base}/api/agents`)).status).toBe(401)
+    expect(await tryWebSocket(ws, {})).toBe('rejected')
+  })
+
+  // The exemption is a prefix, and a client route is not under it. Were a miss
+  // to fall through to index.html, `/assets/../agent/x` would serve the shell.
+  it('404s a missing asset rather than falling back to the shell', async () => {
+    const { base } = await serve('s3cret')
+    expect((await fetch(`${base}/assets/nope.js`)).status).toBe(404)
+  })
+
+  // Only the token gate is bypassed. A tokenless server has none to fail, so
+  // its same-origin check still applies to the bundle like anything else.
+  it('holds a tokenless server to its origin gate for assets too', async () => {
+    const { base } = await serve()
+    const res = await fetch(`${base}/assets/index-abc123.js`, { headers: { origin: EVIL } })
+    expect(res.status).toBe(403)
+  })
+
+  // A write must not ride the prefix in: POST is not how a bundle is fetched.
+  it('exempts only reads', async () => {
+    const { base } = await serve('s3cret')
+    const res = await fetch(`${base}/assets/index-abc123.js`, { method: 'POST', body: '{}' })
+    expect(res.status).toBe(401)
   })
 })

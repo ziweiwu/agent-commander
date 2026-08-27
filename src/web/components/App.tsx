@@ -1,9 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { Outlet, useNavigate, useParams, useLocation } from 'react-router-dom'
+import { Outlet, useParams, useLocation } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import { countByGroup, type StatusFilter } from '../lib/filter.ts'
 import { useIsNarrow } from '../hooks/useMediaQuery.ts'
+import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { FleetList } from './FleetList.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
@@ -16,7 +17,7 @@ import styles from './App.module.css'
 /** Shell: topbar, layout, global keyboard. Routes render through `Outlet`. */
 export function App() {
   const t = useTranslate()
-  const navigate = useNavigate()
+  const navigate = useTokenNavigate()
   const location = useLocation()
   const narrow = useIsNarrow()
 
@@ -222,7 +223,7 @@ function moveCardFocus(delta: number): void {
  * /agent/:sessionId.
  */
 export function FleetRoute() {
-  const navigate = useNavigate()
+  const navigate = useTokenNavigate()
   const narrow = useIsNarrow()
   const { sessionId } = useParams()
   const location = useLocation()

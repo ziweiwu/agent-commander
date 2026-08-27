@@ -305,6 +305,31 @@ class Viewer {
   }
 }
 
+/**
+ * The built bundle, which the token cannot reach and does not need to.
+ *
+ * A token only ever arrives on the URL the user opened. The `<script>` and
+ * `<link>` in `index.html` are ordinary subresource requests carrying neither
+ * it nor an `Authorization` header, so gating them 401s the app's own
+ * JavaScript and the page hangs on its loading shell -- `--token`, and with it
+ * every `--host` flow INV-3 requires a token for, could not start at all.
+ *
+ * Exempting them costs nothing this gate was protecting. These files are the
+ * compiled front end, published verbatim on npm; no agent's directory, prompts
+ * or output passes through them. Everything that does carry that -- `/`,
+ * `/api/*`, `/ws`, and the client routes served the same shell -- stays gated,
+ * so INV-3's guarantee is unchanged: reading or typing to an agent still costs
+ * a token in the URL of the real origin. A missing file under this prefix 404s
+ * rather than falling through to the shell, so it cannot be used to read one.
+ *
+ * Only the token gate is bypassed. A tokenless server was never broken here --
+ * it has no gate to fail -- so its same-origin check still applies in full, and
+ * a cross-origin page gets the same 403 for the bundle as for anything else.
+ */
+function isPublicAsset(req: IncomingMessage, pathname: string): boolean {
+  return (req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/assets/')
+}
+
 export function createAppServer(opts: ServeOptions): Server {
   const webRoot = resolve(opts.webRoot)
   // One poller per pane for the whole server, not one per tab (INV-4).
@@ -324,7 +349,8 @@ export function createAppServer(opts: ServeOptions): Server {
 
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost')
-    if (!authorized(url, req)) {
+    const publicAsset = isPublicAsset(req, url.pathname)
+    if (!publicAsset && !authorized(url, req)) {
       res.writeHead(401, { 'content-type': 'text/plain' })
       res.end('unauthorized: append ?token=... to the URL')
       return

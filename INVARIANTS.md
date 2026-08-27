@@ -201,9 +201,32 @@ it lands in browser history, screenshots and anything that logs a link. That is
 why it lives in `sessionStorage` rather than `localStorage`, why it is scoped to
 the tab that was handed it, and why rotating it is just opening a new link.
 
+**Two things carry the token that are easy to miss, and both were once wrong.**
+
+A token arrives on one URL: the one the user opened. Anything the browser then
+fetches on its own has to be accounted for, or the gate refuses the app rather
+than an attacker.
+
+- *The bundle.* `index.html`'s `<script>` and `<link>` are ordinary subresource
+  requests with no token and no `Authorization` header. Gating them 401s the
+  app's own JavaScript and the page hangs on its loading shell, so `GET` and
+  `HEAD` under `/assets/` are exempt from the token — and from nothing else. It
+  costs the gate nothing: those files are the compiled front end, published
+  verbatim on npm, and no agent's directory, prompts or output passes through
+  them. A tokenless server has no token gate to bypass, so its same-origin
+  check still applies to them in full.
+- *The address bar.* The router replaces the whole location, query string
+  included, so `navigate('/agent/x')` drops the token from the URL. Nothing the
+  page remembers can repair that: the *document* request for `/agent/x` is
+  refused before a line of JavaScript runs, so the reload, the bookmark and the
+  link sent to a phone all dead-end. Every in-app navigation re-attaches it.
+
 - `test/origin.test.ts` — a cross-origin WebSocket and a cross-origin form POST
-  are refused, a rebound `Host` is refused down a raw socket, and every honest
-  spelling of loopback still serves
+  are refused, a rebound `Host` is refused down a raw socket, every honest
+  spelling of loopback still serves, and the bundle is exempt from the token
+  while the document, the fleet and the socket are not
+- `test/ui/token.test.tsx` — the token survives into the requests the page makes
+  and into the URL the router leaves in the address bar
 
 ## INV-4 — Bounded polling cost
 
