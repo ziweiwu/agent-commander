@@ -62,36 +62,26 @@ function write(key: string, value: string): void {
 }
 
 /*
- * The fleet view — status filter, sort key, sort direction — is per-tab, so it
- * lives in sessionStorage rather than alongside theme and language in
- * localStorage. Theme is a statement about the user; how the fleet is arranged
- * is a statement about the task in front of them right now. Persisting it in
- * localStorage would mean a tab opened tomorrow to check on the whole fleet
- * silently opens showing only "needs you", with the reason three days in the
- * past — and would leak across every other tab besides. Surviving a reload is
- * the useful part, and sessionStorage is exactly that scope.
+ * The fleet view — status filter, sort key, sort direction — persists in
+ * localStorage, alongside theme and language, so it survives quitting the
+ * browser rather than only a reload.
+ *
+ * This was sessionStorage, on the reasoning that a filter is a statement about
+ * the task in front of you rather than about you, and that a tab opened next
+ * week should not silently show only "needs you" for a reason days in the past.
+ * The objection is about *silently*, and the chip answers it: the active filter
+ * is a header control carrying a glyph as well as a fill, precisely so that
+ * arriving at an already-filtered dashboard reads as a filter rather than as an
+ * empty fleet. What was actually being paid for that safety was retyping the
+ * same choice every morning.
  *
  * The three move together on purpose. "Least tokens first, idle only" is one
  * thought, and restoring the filter while resetting the sort put the user back
  * in a view they never chose — arguably worse than resetting all three, since
- * the half that survived makes the half that did not look deliberate.
+ * the half that survived makes the half that did not look deliberate. That is
+ * why this moved as a set: persisting only the filter would recreate exactly
+ * that split.
  */
-function readSession(key: string): string | null {
-  try {
-    return sessionStorage.getItem(key)
-  } catch {
-    // Safari private mode and some embedded webviews throw on access.
-    return null
-  }
-}
-
-function writeSession(key: string, value: string): void {
-  try {
-    sessionStorage.setItem(key, value)
-  } catch {
-    /* not fatal */
-  }
-}
 
 const FILTERS: readonly StatusFilter[] = ['all', ...GROUPS.map((g) => g.key)]
 
@@ -100,12 +90,12 @@ function isFilter(value: unknown): value is StatusFilter {
 }
 
 export function loadFilter(): StatusFilter {
-  const stored = readSession(FILTER_KEY)
+  const stored = read(FILTER_KEY)
   return isFilter(stored) ? stored : 'all'
 }
 
 export function saveFilter(filter: StatusFilter): void {
-  writeSession(FILTER_KEY, filter)
+  write(FILTER_KEY, filter)
 }
 
 function isSort(value: unknown): value is SortKey {
@@ -117,21 +107,21 @@ function isDir(value: unknown): value is SortDir {
 }
 
 export function loadSort(): SortKey {
-  const stored = readSession(SORT_KEY)
+  const stored = read(SORT_KEY)
   return isSort(stored) ? stored : 'recent'
 }
 
 export function saveSort(sort: SortKey): void {
-  writeSession(SORT_KEY, sort)
+  write(SORT_KEY, sort)
 }
 
 export function loadDir(): SortDir {
-  const stored = readSession(DIR_KEY)
+  const stored = read(DIR_KEY)
   return isDir(stored) ? stored : 'desc'
 }
 
 export function saveDir(dir: SortDir): void {
-  writeSession(DIR_KEY, dir)
+  write(DIR_KEY, dir)
 }
 
 export function loadTheme(): Theme {

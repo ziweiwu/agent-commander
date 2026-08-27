@@ -42,10 +42,9 @@ describe('scheme persistence', () => {
   })
 
   /*
-   * localStorage, unlike the fleet filter's sessionStorage. A palette is a
-   * statement about the person and the room they are in — it should outlive
-   * the tab. How the fleet is sorted is a statement about the task in front of
-   * them right now, and should not.
+   * localStorage: a palette is a statement about the person and the room they
+   * are in, and should outlive the tab. The fleet filter is kept there too, so
+   * that a view chosen once does not have to be chosen again every morning.
    */
   it('is remembered across tabs, which is what localStorage means', async () => {
     const { saveScheme } = await import('../src/web/lib/prefs.ts')

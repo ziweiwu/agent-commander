@@ -12,10 +12,10 @@
  *     string produces a URL that 401s on reload, bookmark or share, before a
  *     line of this file has run. So every navigation has to carry it forward.
  *
- * sessionStorage rather than localStorage, for the same reason the fleet filter
- * uses it: this is scoped to the tab that was handed the secret, and it should
- * not outlive the browsing session or leak into every other tab. A token in the
- * URL always wins, so rotating it is just a matter of opening the new link.
+ * sessionStorage rather than localStorage, which is where every other
+ * preference here lives: this is a secret scoped to the tab that was handed it,
+ * and it should not outlive the browsing session or leak into every other tab.
+ * A token in the URL always wins, so rotating it is just opening the new link.
  */
 const TOKEN_KEY = 'agent-commander.token'
 

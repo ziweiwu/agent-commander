@@ -189,11 +189,14 @@ with what the order means — "most"/"least", "newest"/"oldest" — because nobo
 thinks in "ascending tokens". A session with no value for the chosen key sorts
 last in *both* directions: unknown is not a claim that it is the cheapest.
 
-The status filter you pick — need you / working / idle — survives a reload,
-kept in `sessionStorage`. Not `localStorage`, where theme and language live: a
-filter is a statement about the task in front of you, not about you. Persisting
-it across tabs and days would mean a tab opened next week to check the whole
-fleet quietly showing only the blocked agents, for a reason you set days ago.
+The status filter you pick — need you / working / idle — is remembered, along
+with the sort key and direction, in `localStorage` beside theme and language.
+It survives a reload, a new tab and quitting the browser, so a view you chose
+once does not have to be chosen again tomorrow. The three are stored as a set:
+restoring the filter while resetting the sort leaves you in a view you never
+picked, and the half that survived makes the half that did not look deliberate.
+Nothing hides: the active chip carries a glyph as well as a fill, so arriving
+at an already-filtered dashboard reads as a filter rather than an empty fleet.
 The search box deliberately does not persist — a one-off lookup coming back on
 a reload with no visible cause is just confusing.
 

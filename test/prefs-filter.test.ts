@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * The status filter survives a reload but not a new tab.
+ * The status filter outlives the browser, not just the tab.
  *
- * sessionStorage rather than localStorage is the whole point: a filter is a
- * statement about the task in front of you, not about you. Persisting it
- * forever would mean a tab opened next week to check the whole fleet silently
- * shows only "needs you", with the reason days in the past.
+ * localStorage rather than sessionStorage is the whole point: a view chosen
+ * once should not have to be chosen again tomorrow morning. It was the other
+ * way round, guarding against a tab opened next week silently showing only
+ * "needs you" — but the active chip carries a glyph as well as a fill, so an
+ * already-filtered dashboard reads as filtered rather than as an empty fleet.
  */
 const store = new Map<string, string>()
 
 beforeEach(() => {
   store.clear()
-  vi.stubGlobal('sessionStorage', {
+  vi.stubGlobal('localStorage', {
     getItem: (k: string) => store.get(k) ?? null,
     setItem: (k: string, v: string) => void store.set(k, v),
   })
@@ -24,7 +25,7 @@ afterEach(() => {
 })
 
 describe('filter persistence', () => {
-  it('round-trips through sessionStorage', async () => {
+  it('round-trips through localStorage', async () => {
     const { loadFilter, saveFilter } = await import('../src/web/lib/prefs.ts')
     expect(loadFilter()).toBe('all')
     saveFilter('waiting')
@@ -47,7 +48,7 @@ describe('filter persistence', () => {
 
   /* Safari private mode and some embedded webviews throw on access. */
   it('degrades to "all" when storage is unavailable', async () => {
-    vi.stubGlobal('sessionStorage', {
+    vi.stubGlobal('localStorage', {
       getItem: () => {
         throw new Error('denied')
       },
@@ -58,6 +59,31 @@ describe('filter persistence', () => {
     const { loadFilter, saveFilter } = await import('../src/web/lib/prefs.ts')
     expect(() => saveFilter('busy')).not.toThrow()
     expect(loadFilter()).toBe('all')
+  })
+
+  /*
+   * The distinguishing test, and the reason this file changed: sessionStorage
+   * dies with the browsing session, so a filter kept there is gone the next
+   * time the browser is opened. Asserting the value lands in localStorage *and
+   * not* in sessionStorage is what stops a future refactor quietly restoring
+   * the old scope while every round-trip test above still passes.
+   */
+  it('writes where quitting the browser cannot reach, not to the session', async () => {
+    const session = new Map<string, string>()
+    vi.stubGlobal('sessionStorage', {
+      getItem: (k: string) => session.get(k) ?? null,
+      setItem: (k: string, v: string) => void session.set(k, v),
+    })
+    const { saveFilter, saveSort, saveDir } = await import('../src/web/lib/prefs.ts')
+
+    saveFilter('waiting')
+    saveSort('tokens')
+    saveDir('asc')
+
+    expect(store.get('agent-commander.filter')).toBe('waiting')
+    expect(store.get('agent-commander.sort')).toBe('tokens')
+    expect(store.get('agent-commander.dir')).toBe('asc')
+    expect(session.size).toBe(0)
   })
 
   it('is what the store initialises from, and what setFilter writes back', async () => {
@@ -71,7 +97,7 @@ describe('filter persistence', () => {
 })
 
 /**
- * Sort key and direction share the filter's scope, and for the same reason.
+ * Sort key and direction share the filter's storage, and for the same reason.
  *
  * They are restored *together* with the filter: "least tokens first, idle only"
  * is one thought. Restoring the filter while resetting the sort left the user
@@ -79,14 +105,14 @@ describe('filter persistence', () => {
  * that did not look deliberate.
  */
 describe('sort persistence', () => {
-  it('round-trips the sort key through sessionStorage', async () => {
+  it('round-trips the sort key through localStorage', async () => {
     const { loadSort, saveSort } = await import('../src/web/lib/prefs.ts')
     expect(loadSort()).toBe('recent')
     saveSort('tokens')
     expect(loadSort()).toBe('tokens')
   })
 
-  it('round-trips the direction through sessionStorage', async () => {
+  it('round-trips the direction through localStorage', async () => {
     const { loadDir, saveDir } = await import('../src/web/lib/prefs.ts')
     expect(loadDir()).toBe('desc')
     saveDir('asc')
@@ -111,7 +137,7 @@ describe('sort persistence', () => {
 
   /* Safari private mode and some embedded webviews throw on access. */
   it('degrades to the defaults when storage is unavailable', async () => {
-    vi.stubGlobal('sessionStorage', {
+    vi.stubGlobal('localStorage', {
       getItem: () => {
         throw new Error('denied')
       },

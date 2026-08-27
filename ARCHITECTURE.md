@@ -312,8 +312,7 @@ inside a `prefers-color-scheme` query rather than there being one global one.
 `:root` — so a document carrying no attributes at all is still a complete theme
 rather than an unstyled one. `applyScheme` and `applyTheme` (`prefs.ts`) *remove*
 the attribute rather than set a sentinel, for exactly that reason, and both
-choices persist in `localStorage`: a palette is a statement about the person, in
-the way the fleet filter's `sessionStorage` is not. Folding the two into one
+choices persist in `localStorage`, as the fleet filter now does too. Folding the two into one
 list would mean ten menu entries and no way to say "this one, but follow the
 system".
 
