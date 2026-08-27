@@ -43,7 +43,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 648 tests: pure logic, server, and React components
+npm test              # 657 tests: pure logic, server, and React components
 npm run build
 npm run e2e           # 102 end-to-end tests in a real browser, at three screen shapes
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
@@ -90,8 +90,10 @@ Never point a fuzzer, an audit or a review agent at 4317. It drives real
 agents, and anything that types into whatever it finds will type into someone's
 session. `qa-sweep.sh` refuses that port outright and `--mock` on it is rejected.
 
-`npm run mock` serves a deliberately awkward fixture fleet — nine agents, five
-sharing a home directory, one name too long for its card, two never prompted.
+`npm run mock` serves a deliberately awkward fixture fleet — ten agents, five
+sharing a home directory, one name too long for its card, two never prompted,
+and one Kiro session so the degraded card an agent with no transcript gets is
+on screen rather than only in a test.
 Because the mock fleet runs the same server, routes and validation as the real
 one (`src/server/sources.ts` is the seam), a failure seen in mock mode is the
 failure you would get for real.
@@ -124,14 +126,14 @@ commit.
   The same assumption broke the address bar: the router replaces the whole
   location, so navigation has to re-attach the token.
 - **A configured token *replaces* the origin gate rather than adding to it**
-  (`routes.ts:348`). It is the credential and the exemption from rebinding
+  (`routes.ts:387`). It is the credential and the exemption from rebinding
   protection at once, and it travels in the query string and is printed to
   stdout. See `ARCHITECTURE.md` §"Where it is fragile" 5 and 5a before touching
   either gate.
 - **Development used to default to 4317.** A fixture fleet on the production
   port is indistinguishable from your real one having vanished, and the composer
   on that page types into nothing.
-- **`Registry.changed()` does not watch enrichment fields** (`registry.ts:243`).
+- **`Registry.changed()` does not watch enrichment fields** (`registry.ts:320`).
   `activity`, `goal` and `model` reach the browser only because the enricher
   calls `notify()` itself. Forget that and the UI lags indefinitely with nothing
   raising an error.
@@ -156,8 +158,8 @@ commit.
 
 ## Review agents
 
-Point `qa-bar-raiser` and `ux-bar-raiser` at a `--mock` server on 4400 and never
-at 4317. Both review only — they never edit code — and both are told to say
+Point `harness:qa-bar-raiser` and `harness:ux-bar-raiser` at a `--mock` server on
+4400 and never at 4317. Both review only — they never edit code — and both are told to say
 "nothing found" plainly rather than pad a list. `README.md` §"Review agents"
 lists what they have caught.
 

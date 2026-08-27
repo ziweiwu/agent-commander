@@ -387,7 +387,7 @@ callers writing different field sets.** The fleet enricher filters through
 (`routes.ts:633`) and a trap for any future patch producer that nullifies a field
 it does not know about.
 
-**2. `changed()` (`registry.ts:243`) does not watch enrichment fields.** It
+**2. `changed()` (`registry.ts:320`) does not watch enrichment fields.** It
 compares size, `status`, `name`, `cwd`, `waitingFor` and `paneId` — so `activity`,
 `goal` and `model` reach the browser only because the enricher explicitly calls
 `notify()`. A future writer that forgets lags the UI indefinitely, with nothing
@@ -414,7 +414,7 @@ name the caller asked for. It is one exact name, not the tailnet: another
 machine on it is refused, as is any rebound host.
 
 **5. A configured token replaces the origin gate rather than adding to it.**
-`permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:348`). The
+`permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:387`). The
 reasoning above `sameOriginRequest` is sound — a token lives in the URL of the
 real origin and an attacker who cannot read that origin cannot supply it. The
 unstated consequence is that the token is both the credential *and* the exemption
@@ -423,7 +423,7 @@ stdout at startup: scrollback, shell history and `Referer` are all places it can
 escape to.
 
 The same "it lives in the URL" property is also what the token cannot do, and
-`isPublicAsset` (`routes.ts:329`) is the concession: a URL the user opened says
+`isPublicAsset` (`routes.ts:365`) is the concession: a URL the user opened says
 nothing about the `<script>` that URL then pulls in, so `GET`/`HEAD` under
 `/assets/` skip the token gate or the app 401s its own bundle. The prefix is the
 whole boundary, which is why nothing under it may ever serve agent state, and
