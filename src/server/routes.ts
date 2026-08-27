@@ -42,6 +42,9 @@ import { buildFrame, isNoop } from './frames.ts'
 import { PaneHub } from './pane-hub.ts'
 import { Poller } from './poll.ts'
 
+/** Accepted; the body's `detail` says what actually happened. */
+const HTTP_OK = 200
+
 const TIMELINE_MS = 1000
 const MAX_PASTE = 100_000
 
@@ -894,6 +897,12 @@ async function handleControl(
     res.writeHead(code, { 'content-type': MIME['.json'] as string })
     res.end(JSON.stringify(body))
   }
+  /**
+   * The action was accepted. `detail` says *what* happened, which for these is
+   * not always "it is done": a model switch made mid-turn is `queued`, and a
+   * mode press the session never confirmed is `unverified`.
+   */
+  const accepted = (detail: string): void => reply(HTTP_OK, { ok: true, detail })
 
   try {
     const agent = opts.source.get(sessionId)
@@ -939,12 +948,26 @@ async function handleControl(
     }
 
     if (action === 'model') {
-      await setModel(agent, value, deps)
-      reply(200, { ok: true, detail: value })
+      const { queued } = await setModel(agent, value, deps)
+      // The agent was mid-turn, so the CLI will read this when the turn ends.
+      // Saying `ok` without saying that would claim a switch that has not
+      // happened yet (INV-11).
+      accepted(queued ? 'queued' : value)
       return
     }
 
     const result = await setMode(agent, value, deps)
+    /*
+     * One Shift+Tab went out and the session never reported a new mode. That
+     * is not the same as failing to reach the target: the switch may well have
+     * landed somewhere this app cannot read, so saying it failed would assert
+     * something unknown (INV-11). Reported as a success the interface can
+     * qualify, rather than an error the user can do nothing about.
+     */
+    if (result.unobserved) {
+      accepted('unverified')
+      return
+    }
     if (!result.ok) {
       reply(409, {
         ok: false,

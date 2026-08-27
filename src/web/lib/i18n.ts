@@ -145,6 +145,8 @@ const EN = {
   interruptTitle: 'Stop what this agent is doing now',
   interruptIdle: 'Nothing to interrupt — this agent is not working',
   modeSwitched: 'Permission mode is now {mode}',
+  modelQueued: '{model} is queued — it applies when the current task finishes',
+  modeUnverified: 'Shift+Tab sent; the session did not report a new mode, so it may not have switched',
   hintShiftTab: 'permission mode',
   confirmKey: 'Really send {key} to this agent?',
   /* settings */
@@ -390,6 +392,8 @@ const ZH: Record<Key, string> = {
   interruptTitle: '立即停止该助手正在做的事',
   interruptIdle: '无需中断 —— 该助手当前没有在工作',
   modeSwitched: '权限模式已切换为 {mode}',
+  modelQueued: '{model} 已排队 —— 当前任务结束后生效',
+  modeUnverified: '已发送 Shift+Tab；会话未报告新的权限模式，可能没有切换',
   hintShiftTab: '切换权限模式',
   confirmKey: '确定要向这个代理发送 {key} 吗？',
   settings: '设置',

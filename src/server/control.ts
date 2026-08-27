@@ -1,10 +1,13 @@
 /**
  * Acting on a running agent: closing it, and changing its mode or model.
  *
- * INV-8: every action here refuses an agent that is busy. These work by typing
- * into the agent's own prompt, and a keystroke that lands in the middle of a
- * tool call would be interleaved with work in flight. Idle and waiting are
- * fine — a waiting agent is precisely the one you may want to redirect.
+ * INV-8 guards these, and no longer with one rule for all of them. Closing an
+ * agent and setting its goal are refused while it is busy: both submit an
+ * instruction that changes what the session does next, and one arriving
+ * mid-turn acts on a state nobody chose. Mode and model are allowed at any
+ * point — mode because it sends a control key rather than typing at all, model
+ * because it types through the same `paste` the message composer already uses
+ * on working agents by design. Each function below says which it is and why.
  */
 import { allowsSlashCommands } from '../shared/agent-kinds.ts'
 import type { Agent, GoalState } from '../shared/types.ts'
@@ -102,26 +105,50 @@ export const liveDeps = (
 })
 
 /**
- * Switch the model by typing the CLI's own `/model` command.
+ * Switch the model with the CLI's own `/model <alias>`.
  *
  * The alias is validated against the allow-list first, so nothing free-text is
  * ever typed into a live session.
+ *
+ * Allowed while the agent is working, and the reason is consistency rather than
+ * safety: this pastes text through the very same `paste` primitive the message
+ * composer uses, and `handlePaste` has never had a busy guard at all. Sending
+ * "use opus instead" as a chat message to a working agent is a designed feature
+ * — it is what the composer's Queue mode *is* — so refusing `/model opus`
+ * forbade through one door exactly what the app permits through another, with
+ * the same keystrokes reaching the same prompt.
+ *
+ * What that costs is immediacy, not correctness. Claude Code queues input that
+ * arrives mid-turn and reads it when the turn ends, so the switch applies then
+ * rather than now. The caller is told which of the two happened (`queued`) so
+ * the interface can say so instead of claiming a change that has not landed
+ * yet — INV-11.
  */
 export async function setModel(
   agent: Agent | undefined,
   alias: string,
   deps: ControlDeps,
-): Promise<void> {
-  assertControllable(agent)
+): Promise<{ queued: boolean }> {
+  assertAttachable(agent)
   assertSlashCommandable(agent)
   if (!isModelAlias(alias)) throw new ControlError(`unknown model: ${alias}`)
+  const queued = agent.status === 'busy'
   await deps.paste(agent.paneId, `/model ${alias}`, true)
+  return { queued }
 }
 
 export interface ModeResult {
   ok: boolean
   mode: string | undefined
   steps: number
+  /**
+   * The press went out but the session never reported a different mode.
+   *
+   * Distinct from `ok: false` meaning "cycled and could not reach it": here we
+   * do not know what happened. The mode may well have changed where this app
+   * cannot see it, so the caller must not say the switch failed (INV-11).
+   */
+  unobserved?: boolean
 }
 
 /** How many Shift+Tab presses before giving up; the cycle is at most five long. */
@@ -167,8 +194,22 @@ export async function setMode(
     // BTab is tmux's name for back-tab, which is what a terminal emits for Shift+Tab.
     await deps.key(agent.paneId, 'BTab')
     await deps.wait(250)
-    mode = await deps.readMode()
-    if (mode === target) return { ok: true, mode, steps }
+    const seen = await deps.readMode()
+    if (seen === target) return { ok: true, mode: seen, steps }
+    /*
+     * The reading did not move, so this loop is now blind — and a blind loop
+     * here is not a failed switch, it is five more Shift+Tabs into a live
+     * session, leaving it in a mode nobody asked for and reporting an error
+     * for the privilege.
+     *
+     * Two things cause it and neither is helped by pressing again: the session
+     * reports no permission mode at all (real sessions do exist in that state),
+     * or it is mid-turn and has not written the record where this app can read
+     * it yet. Stop at one press, and say that the outcome is unknown rather
+     * than that it failed.
+     */
+    if (seen === mode) return { ok: false, mode: seen, steps, unobserved: true }
+    mode = seen
   }
   return { ok: false, mode, steps: maxSteps }
 }

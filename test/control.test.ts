@@ -78,10 +78,23 @@ describe('setModel', () => {
     expect(d.paste).not.toHaveBeenCalled()
   })
 
-  it('refuses a busy agent before typing anything', async () => {
+  /*
+   * Allowed mid-turn, and the reason is consistency rather than safety: this
+   * pastes through the same primitive the message composer uses, and that has
+   * never had a busy guard — sending "use opus instead" as a chat message to a
+   * working agent is a designed feature. Refusing `/model opus` forbade through
+   * one door exactly what the app permits through the other.
+   */
+  it('switches a busy agent, and says the change is queued', async () => {
     const d = deps()
-    await expect(setModel(agent({ status: 'busy' }), 'opus', d)).rejects.toThrow(/busy/)
-    expect(d.paste).not.toHaveBeenCalled()
+    const result = await setModel(agent({ status: 'busy' }), 'opus', d)
+    expect(result).toEqual({ queued: true })
+    expect(d.paste).toHaveBeenCalledWith('%1', '/model opus', true)
+  })
+
+  it('is not queued for an idle agent', async () => {
+    const result = await setModel(agent(), 'opus', deps())
+    expect(result).toEqual({ queued: false })
   })
 })
 
@@ -163,10 +176,54 @@ describe('setMode', () => {
     await expect(setMode(noPane, 'plan', deps())).rejects.toThrow(/attachable/)
   })
 
-  // The exception is mode alone. Everything that types keeps the busy refusal.
-  it('is the only exception — model, goal and close still refuse a busy agent', async () => {
+  /*
+   * Mode and model are the exceptions; goal and close are not. Both of those
+   * submit an instruction that changes what the session does next, and one
+   * arriving mid-turn acts on a state nobody chose.
+   */
+  /*
+   * The bug this guards, and it was doing real damage: `setMode` verifies by
+   * re-reading the mode after each press, so when that reading cannot move it
+   * pressed again — six Shift+Tabs into a live session, leaving it wherever
+   * that landed and then reporting "could not reach plan" for the privilege.
+   *
+   * Two real causes, neither helped by pressing again: a session that reports
+   * no permission mode at all (there is one in this user's own fleet), and a
+   * busy agent that has not yet written the record where this app can read it.
+   */
+  it('presses once, not six times, when the mode never changes', async () => {
+    const d = deps({ readMode: async () => 'auto' })
+    const result = await setMode(agent(), 'plan', d)
+
+    expect(d.key).toHaveBeenCalledTimes(1)
+    expect(result.unobserved).toBe(true)
+    expect(result.ok).toBe(false)
+  })
+
+  it('presses once when the session reports no mode at all', async () => {
+    const d = deps({ readMode: async () => undefined })
+    const result = await setMode(agent(), 'plan', d)
+
+    expect(d.key).toHaveBeenCalledTimes(1)
+    expect(result.unobserved).toBe(true)
+  })
+
+  // A reading that is moving is still being followed, up to the bound.
+  it('keeps cycling while the mode is actually changing', async () => {
+    const seen = ['acceptEdits', 'plan']
+    let at = 0
+    const d = deps({ readMode: async () => (at === 0 ? 'default' : seen[at - 1]) })
+    const key = vi.fn(async () => {
+      at += 1
+    })
+    const result = await setMode(agent(), 'plan', { ...d, key })
+
+    expect(result).toMatchObject({ ok: true, mode: 'plan' })
+    expect(key).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves the busy refusal on goal and close', async () => {
     const busy = agent({ status: 'busy' })
-    await expect(setModel(busy, 'opus', deps())).rejects.toThrow(/busy/)
     await expect(setGoal(busy, 'the tests pass', deps())).rejects.toThrow(/busy/)
     await expect(clearGoal(busy, deps())).rejects.toThrow(/busy/)
     await expect(closeAgent(busy, deps())).rejects.toThrow(/busy/)

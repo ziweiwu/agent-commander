@@ -134,6 +134,7 @@ keyboard has none of them.
 | `Enter` | open the focused agent |
 | `Esc` | close the agent (or clear the filter box) |
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
+| `Shift`+`Tab` | in the message box: cycle the permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
 
 ## Claude usage
@@ -266,16 +267,30 @@ phone — enough to push the conversation itself under the layout audit's floor.
 Opening the goal field gives it the whole strip, so its Set and Cancel are
 never scrolled off the end.
 
-**Mode works while the agent is working**, unlike every other control here.
-That is INV-8's one exception and it is earned by what the control sends:
-`/model`, `/goal` and `/exit` are pasted into the agent's prompt, where text
-arriving mid-tool-call interleaves with work in flight, so all three wait until
-the agent is idle. Mode is switched by sending `BTab` — a control key the agent
-handles wherever it is, exactly as it would from the keyboard of the terminal
-this app stands in for. Refusing it was this app being stricter than the thing
-it mirrors, in the one case that matters. **Shift+Tab** in the message box
-cycles it too, the same chord the CLI itself uses; the cost is that Shift+Tab
-no longer tabs backwards out of the box, though Tab and Escape still move focus.
+**Mode and model both work while the agent is working**, unlike Goal and Close,
+which still wait for idle. Those two submit an instruction that changes what the
+session does next, and one arriving mid-turn acts on a state nobody chose.
+
+Mode is switched by sending `BTab` — a control key the agent handles wherever it
+is, exactly as it would from the keyboard of the terminal this app stands in
+for. **Shift+Tab** in the message box does the same, the chord the CLI itself
+uses; the cost is that Shift+Tab no longer tabs backwards out of the box, though
+Tab and Escape still move focus.
+
+Model is allowed for a different reason: it types, but through the very same
+paste the message box already uses on working agents. Sending *"use opus
+instead"* as a message is a designed feature — it is what Queue mode is — so
+refusing the select while permitting the message was one door open and one shut
+onto the same prompt. The CLI reads input that arrives mid-turn when the turn
+ends, so a switch made during a task says it is **queued** rather than pretending
+to have landed.
+
+Neither is visible the instant you make it. Both are read back out of the
+transcript, which a busy session writes only when its turn ends, so the control
+keeps showing what you chose until the agent confirms it — otherwise the next
+fleet broadcast repaints the old value and the click looks like it did nothing.
+That, rather than anything on the server, is what "switching doesn't work"
+looked like from the outside.
 
 **Queue or Interrupt** decides what Send does when the agent is mid-task.
 *Queue* is the default and is what this app has always done: the message waits

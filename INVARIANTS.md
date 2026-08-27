@@ -453,7 +453,19 @@ something nobody wrote — so every action that *types* refuses an agent whose
 status is `busy`. Idle and waiting are allowed: a waiting agent is precisely
 the one you may want to redirect.
 
-**Mode is the exception, because it does not type.** It is switched by sending
+**Two exceptions, for different reasons.**
+
+*Model* is permitted at any point because refusing it was inconsistent with the
+app's own composer. `setModel` pastes `/model <alias>` through the very same
+primitive the message box uses, and the paste path has never had a busy guard —
+sending "use opus instead" as a chat message to a working agent is a designed
+feature, and is exactly what the composer's Queue mode is. Forbidding the
+select while permitting the message was one door open and one shut onto the
+same prompt. What it costs is immediacy: the CLI reads input that arrives
+mid-turn when the turn ends, so the caller is told the change was `queued` and
+the interface says so rather than implying it has landed.
+
+**Mode is the other exception, because it does not type.** It is switched by sending
 `BTab`, a control key Claude Code handles as a toggle wherever it is, exactly
 as it would from the keyboard of the terminal this app stands in for. Refusing
 it while busy made this app stricter than the thing it mirrors, and stricter in
@@ -462,10 +474,24 @@ happens *while* the agent is running. So mode changes are permitted at any
 point in the flow, from the detail panel, from the chat strip, and from
 Shift+Tab in the composer — the same chord the CLI itself uses.
 
-What keeps that safe is the verification already in `setMode`: it re-reads the
-mode the session reports rather than assuming a press landed, so a `BTab`
-swallowed by a busy redraw surfaces as a reported failure instead of a wrong
-mode nobody noticed. `assertAttachable` is the guard it uses — agent exists,
+What keeps that safe is the verification in `setMode`: it re-reads the mode the
+session reports rather than assuming a press landed.
+
+**That verification must stop when it stops seeing.** If the reading does not
+change after a press, this loop is blind, and a blind loop here is not a failed
+switch — it is five more Shift+Tabs into a live session, leaving it in a mode
+nobody asked for and reporting an error for it. Two real causes and neither is
+helped by pressing again: a session that reports no permission mode at all
+(they exist), and a busy agent that has not yet written the record where this
+app can read it. So it presses once more and stops, and reports the outcome as
+*unknown* rather than as failed — the switch may well have landed somewhere
+unobservable, and saying it failed asserts something nobody checked (INV-11).
+
+**Neither switch is observable when it is made.** Both are read back out of the
+transcript, which a busy session writes at the end of its turn, so a control
+bound to the reported value repaints the old one on the next fleet broadcast and
+reads as a click that did nothing. The interface holds what the user chose until
+the agent reports it back. `assertAttachable` is the guard it uses — agent exists,
 pane reachable — and `assertControllable` remains the guard for everything
 that types.
 

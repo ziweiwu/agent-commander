@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
@@ -31,20 +31,65 @@ export function AgentControls({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
   const [pending, setPending] = useState<'mode' | 'model' | 'close' | null>(null)
+  /*
+   * What the user just chose, held until the agent reports it back.
+   *
+   * Both selects are controlled by the agent's *reported* value, and neither
+   * mode nor model is observable until the session writes it into its
+   * transcript. So picking one repainted the old value on the very next fleet
+   * broadcast — a second or so later — and the control snapped back as though
+   * the click had done nothing. That is the whole of what "switching does not
+   * work" looked like from outside, whether or not the switch had landed.
+   */
+  const [picked, setPicked] = useState<{ mode?: string; model?: string }>({})
 
   const slashCommands = allowsSlashCommands(agent.agentKind)
+  useEffect(() => {
+    setPicked((prev) => {
+      const next = { ...prev }
+      if (prev.mode !== undefined && agent.permissionMode === prev.mode) delete next.mode
+      if (prev.model !== undefined && aliasOfModel(agent.model) === prev.model) delete next.model
+      return next
+    })
+  }, [agent.permissionMode, agent.model])
+
+  // A different agent's choice is not this one's.
+  useEffect(() => {
+    setPicked({})
+  }, [agent.sessionId])
+
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
-  // INV-8's exception: mode sends a key rather than typing, so it is the one
-  // control that works while the agent is working. See `control.ts` `setMode`.
-  const modeDisabled = !agent.paneId || pending !== null
+  /*
+   * INV-8's exceptions. Mode sends a control key rather than typing at all;
+   * model types, but through the same `paste` the message composer already
+   * uses on working agents by design — refusing it forbade through one door
+   * what the app permits through the other. Both stay available mid-run, which
+   * is when you reach for them: you notice the wrong model *while* it is being
+   * used. Goal and Close still wait for idle.
+   */
+  const midRunDisabled = !agent.paneId || pending !== null
 
   const run = async (kind: 'mode' | 'model', value: string): Promise<void> => {
     setPending(kind)
+    setPicked((prev) => ({ ...prev, [kind]: value }))
     const result = kind === 'mode' ? await setAgentMode(value) : await setAgentModel(value)
     setPending(null)
-    if (!result.ok) showToast(t('controlFailed', { error: result.error }))
+    if (!result.ok) {
+      // It did not land, so stop showing it as though it had.
+      setPicked((prev) => ({ ...prev, [kind]: undefined }))
+      showToast(t('controlFailed', { error: result.error }))
+      return
+    }
+    /*
+     * Sent, but not yet observable. Neither switch is visible to this app until
+     * the session writes it into its transcript, which for a busy agent is when
+     * the turn ends — so the toast says which of the two happened rather than
+     * letting a silent, unchanged-looking select imply nothing occurred.
+     */
+    if (result.detail === 'queued') showToast(t('modelQueued', { model: value }))
+    else if (result.detail === 'unverified') showToast(t('modeUnverified'))
   }
 
   const onClose = async (): Promise<void> => {
@@ -73,8 +118,8 @@ export function AgentControls({ agent }: { agent: Agent }) {
         <select
           className={styles.select}
           data-testid="mode-select"
-          disabled={modeDisabled}
-          value={agent.permissionMode ?? ''}
+          disabled={midRunDisabled}
+          value={picked.mode ?? agent.permissionMode ?? ''}
           onChange={(e) => void run('mode', e.target.value)}
         >
           {!agent.permissionMode && <option value="">—</option>}
@@ -91,9 +136,8 @@ export function AgentControls({ agent }: { agent: Agent }) {
         <select
           className={styles.select}
           data-testid="model-select"
-          disabled={disabled}
-          title={reason}
-          value={aliasOfModel(agent.model)}
+          disabled={midRunDisabled}
+          value={picked.model ?? aliasOfModel(agent.model)}
           onChange={(e) => void run('model', e.target.value)}
         >
           {!agent.model && <option value="">—</option>}
