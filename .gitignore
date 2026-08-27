@@ -11,6 +11,9 @@ rust/target/
 # Worktrees this repo's own agents check out into
 .claude/worktrees/
 
+# Stop-hook bookkeeping: which tree state the gate list last ran against
+.claude/.verify-gate-state.json
+
 # Playwright e2e output
 test-results/
 playwright-report/

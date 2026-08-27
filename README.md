@@ -446,8 +446,12 @@ that has nothing to do with the release. Run them locally before tagging.
 
 ### Review agents
 
-Two subagents do the verification. `ux-bar-raiser` ships with the repo in
-`.claude/agents/`; `qa-bar-raiser` lives in `~/.claude/agents/`:
+Two subagents do the verification. Neither lives in this repo any more: both
+ship in the `harness` plugin and are addressed as `harness:ux-bar-raiser` and
+`harness:qa-bar-raiser`. The repo used to carry its own `ux-bar-raiser` under
+`.claude/agents/`; that copy fell six months behind the plugin's and, because
+project scope shadows plugin scope, this repo was silently getting the weaker
+one. It was deleted rather than resynced.
 
 - **`ux-bar-raiser`** holds the UX and UI bar. It runs the four gates below,
   reads the screenshots, and returns a scored six-dimension review with
