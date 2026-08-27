@@ -10,6 +10,7 @@ export const agent = (over: Partial<Agent> & { sessionId: string }): Agent => ({
   cwd: '/Users/me/Projects/thing',
   folder: 'thing',
   status: 'idle',
+  agentKind: 'claude',
   kind: 'interactive',
   startedAt: Date.now() - 3_600_000,
   paneId: '%77',

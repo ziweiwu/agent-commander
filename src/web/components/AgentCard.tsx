@@ -1,5 +1,6 @@
 import { memo } from 'react'
 import type { Agent } from '../../shared/types.ts'
+import { CLAUDE_KIND, specOf } from '../../shared/agent-kinds.ts'
 import { relative, tildePath, tokens } from '../lib/format.ts'
 import { plainText } from '../lib/chat.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
@@ -36,6 +37,16 @@ export function useStatusText(): (agent: Agent) => string {
     if (agent.status === 'busy' && agent.delegating === true) {
       return `${t('statusBusy')} · ${t('statusDelegated')}`
     }
+    /*
+     * INV-11 again, and the same compound grammar a third time. This agent's
+     * CLI reports nothing about itself, so `idle` here means only "its pane has
+     * been quiet", which is a far weaker claim than the `idle` on a Claude card
+     * beside it. It reads `idle · quiet` so the two are not mistaken for equals,
+     * and it can never say `waiting` — see `tmux-agents.ts`.
+     */
+    if (agent.statusInferred === true) {
+      return `${t(STATUS_KEY[agent.status] ?? 'statusUnknown')} · ${t('statusFromPane')}`
+    }
     return t(STATUS_KEY[agent.status] ?? 'statusUnknown')
   }
 }
@@ -56,6 +67,10 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
   const statusText = useStatusText()
   const rel = formatRelative(lang, relative(agent.lastActivityAt))
   const tok = tokens(agent.tokens)
+  // Only for agents that are not the default: with a fleet of nine Claude
+  // sessions there is nothing to disambiguate, and a badge on every card is a
+  // word to read past on every card.
+  const kindLabel = agent.agentKind === CLAUDE_KIND ? '' : (specOf(agent.agentKind)?.label ?? agent.agentKind)
 
   return (
     <button
@@ -96,6 +111,11 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
             {agent.name}
           </span>
         )}
+        {kindLabel && (
+          <span className={styles.kind} data-testid="agent-kind">
+            {kindLabel}
+          </span>
+        )}
         {!agent.paneId && <span className={styles.warn}>{t('notAttachable')}</span>}
       </div>
 
@@ -108,7 +128,7 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
           className={`${styles.activity} ${styles.activityMuted}`}
           data-testid="agent-activity"
         >
-          {t('noPromptsYet')}
+          {kindLabel ? t('noTranscript') : t('noPromptsYet')}
         </div>
       )}
     </button>

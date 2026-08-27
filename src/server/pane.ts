@@ -544,6 +544,95 @@ export async function listPanes(session: string): Promise<string[]> {
     .filter((line) => PANE_RE.test(line))
 }
 
+/** One pane, as tmux describes it, for fleet-wide discovery. */
+export interface PaneFacts {
+  paneId: string
+  session: string
+  pid: number
+  command: string
+  /** Epoch seconds of the last output in this pane's window. */
+  activityAt: number
+  /** Panes sharing this pane's window; >1 means activity cannot be attributed. */
+  windowPanes: number
+  dead: boolean
+  cwd: string
+}
+
+/**
+ * Every pane on the machine in one round trip.
+ *
+ * Two format strings rather than one, and the reason is a bug rather than a
+ * preference: `#{pane_current_path}` may contain the separator, and so, in
+ * principle, may a process name. Each command therefore puts its one free-text
+ * field last, and each is split with a limit so that everything after the final
+ * counted separator is taken whole. `execRead` sends both down a single control
+ * connection, so this is still one tmux round trip for the whole fleet — O(1)
+ * in agents, which is what lets INV-4 hold as the fleet grows.
+ *
+ * `window_activity`, not `session_activity`: the session clock is bumped by
+ * client-side events like attaching or resizing, so it reports a session as
+ * having just produced output when it has been silent for twenty minutes. The
+ * window clock tracks actual output, and tmux keeps it whether or not anything
+ * is attached and regardless of the `monitor-activity` option.
+ */
+const FACTS_FORMAT =
+  '#{pane_id}|#{session_name}|#{pane_pid}|#{window_activity}|#{window_panes}|#{pane_dead}|#{pane_current_command}'
+const PATH_FORMAT = '#{pane_id}|#{pane_current_path}'
+
+/** Fields before the free-text one in `FACTS_FORMAT`, which is taken whole. */
+const COUNTED_FACTS = 6
+
+/** Every field of `FACTS_FORMAT`, counting the free-text one. */
+const FACTS_FIELDS = COUNTED_FACTS + 1
+
+/** `%302|/some/path` -> the path, whatever it contains. */
+function parsePaths(out: string): Map<string, string> {
+  const cwdOf = new Map<string, string>()
+  for (const line of splitLines(out)) {
+    const cut = line.indexOf('|')
+    if (cut > 0) cwdOf.set(line.slice(0, cut), line.slice(cut + 1))
+  }
+  return cwdOf
+}
+
+function parseFacts(line: string, cwdOf: Map<string, string>): PaneFacts | null {
+  const parts = line.split('|')
+  if (parts.length < FACTS_FIELDS) return null
+  const [paneId, session, pid, activityAt, windowPanes, dead] = parts as string[] &
+    Record<number, string>
+  if (!paneId || !PANE_RE.test(paneId)) return null
+  return {
+    paneId,
+    session: session ?? '',
+    pid: Number.parseInt(pid ?? '', 10) || 0,
+    // Everything after the counted fields, so a command containing the
+    // separator survives intact.
+    command: parts.slice(COUNTED_FACTS).join('|'),
+    activityAt: Number.parseInt(activityAt ?? '', 10) || 0,
+    windowPanes: Number.parseInt(windowPanes ?? '', 10) || 1,
+    dead: dead === '1',
+    cwd: cwdOf.get(paneId) ?? '',
+  }
+}
+
+export async function fleetFacts(): Promise<PaneFacts[]> {
+  const out = await execRead(
+    ['list-panes', '-a', '-F', FACTS_FORMAT],
+    [`list-panes -a -F '${FACTS_FORMAT}'`],
+  )
+  const paths = await execRead(
+    ['list-panes', '-a', '-F', PATH_FORMAT],
+    [`list-panes -a -F '${PATH_FORMAT}'`],
+  )
+  const cwdOf = parsePaths(paths)
+  const rows: PaneFacts[] = []
+  for (const line of splitLines(out)) {
+    const row = parseFacts(line, cwdOf)
+    if (row) rows.push(row)
+  }
+  return rows
+}
+
 /**
  * Whether tmux said a target does not exist, as opposed to failing to answer.
  *

@@ -21,6 +21,7 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   cwd: '/x',
   folder: 'x',
   status: 'idle',
+  agentKind: 'claude',
   kind: 'interactive',
   startedAt: 0,
   paneId: '%1',
@@ -285,5 +286,56 @@ describe('assertGoalCondition', () => {
 
   it('refuses a condition longer than the cap', () => {
     expect(() => assertGoalCondition('x'.repeat(GOAL_MAX_CHARS + 1))).toThrow(/characters or fewer/)
+  })
+})
+
+/**
+ * A Claude Code slash command is not a feature that degrades on another CLI.
+ *
+ * Every one of these works by typing `/model`, `/goal` or `/exit` into a live
+ * pane and pressing return. Against Kiro that is not a disabled control — it is
+ * this app typing a sentence of its own into somebody's prompt. The browser
+ * hides the controls; this is the boundary that makes it true, because a UI is
+ * not one (INV-6).
+ */
+describe('INV-7 refuses Claude commands for other agent CLIs', () => {
+  const kiro = agent({ agentKind: 'kiro', sessionId: 'tmux:kiro-1', tmuxSession: 'kiro-1' })
+
+  it('refuses /model, and types nothing', async () => {
+    const d = deps()
+    await expect(setModel(kiro, 'opus', d)).rejects.toBeInstanceOf(ControlError)
+    expect(d.paste).not.toHaveBeenCalled()
+  })
+
+  it('refuses the permission-mode cycle', async () => {
+    const d = deps()
+    await expect(setMode(kiro, 'plan', d)).rejects.toBeInstanceOf(ControlError)
+    expect(d.key).not.toHaveBeenCalled()
+  })
+
+  it('refuses /goal, set and cleared', async () => {
+    const d = deps()
+    await expect(setGoal(kiro, 'the tests pass', d)).rejects.toBeInstanceOf(ControlError)
+    await expect(clearGoal(kiro, d)).rejects.toBeInstanceOf(ControlError)
+    expect(d.paste).not.toHaveBeenCalled()
+  })
+
+  it('still allows all of them for Claude', async () => {
+    const d = deps()
+    await setModel(agent(), 'opus', d)
+    expect(d.paste).toHaveBeenCalledWith('%1', '/model opus', true)
+  })
+
+  /*
+   * Close is the exception, because tmux can do it without the agent's help.
+   * Typing `/exit` first would leave a stray line in the prompt of a session
+   * the user asked to close, then force-kill it six seconds later anyway.
+   */
+  it('closes by killing the tmux session rather than typing /exit', async () => {
+    const d = deps()
+    const result = await closeAgent(kiro, d)
+    expect(d.paste).not.toHaveBeenCalled()
+    expect(d.killSession).toHaveBeenCalledWith('kiro-1')
+    expect(result).toEqual({ closed: true, forced: true })
   })
 })

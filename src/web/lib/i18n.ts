@@ -56,6 +56,8 @@ const EN = {
   /* cards */
   notAttachable: 'not attachable',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
+  statusFromPane: 'quiet',
+  noTranscript: 'This agent keeps no transcript this app can read.',
   emptyFleetTitle: 'No Claude Code sessions found',
   emptyFleetBody: 'Start one with `claude` in any directory, or use New agent below.',
   emptyFilterTitle: 'Nothing matches that filter',
@@ -283,6 +285,8 @@ const ZH: Record<Key, string> = {
   waitingStarting: '正在启动',
   notAttachable: '无法接入',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
+  statusFromPane: '窗格静默',
+  noTranscript: '此助手没有本应用能读取的对话记录。',
   emptyFleetTitle: '没有找到 Claude Code 会话',
   emptyFleetBody: '在任意目录运行 `claude` 启动一个，或使用下方的「新建代理」。',
   emptyFilterTitle: '没有符合条件的代理',

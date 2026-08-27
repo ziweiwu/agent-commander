@@ -13,6 +13,7 @@ import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Registry } from './registry.ts'
+import { CompositeSource, TmuxProvider } from './tmux-source.ts'
 import { TranscriptTail } from './transcript.ts'
 import * as panes from './pane.ts'
 import { tmuxControl } from './tmux-client.ts'
@@ -256,7 +257,9 @@ async function main(): Promise<void> {
     makeTail = (id) => new MockTail(id)
     limits = new MockLimits(opts.mockTransitions)
   } else {
-    source = new Registry(undefined, pending)
+    // Claude first: what it reports about itself always beats what this app can
+    // infer from a pane, and `CompositeSource` resolves a clash that way.
+    source = new CompositeSource([new Registry(undefined, pending), new TmuxProvider()])
     paneApi = panes
     makeTail = (id) => new TranscriptTail(id)
     limits = new RateLimitWatcher()

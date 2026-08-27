@@ -16,6 +16,7 @@ const agent = (over: Partial<Agent> & { sessionId: string }): Agent => ({
   cwd: '/Users/me/Projects/thing',
   folder: 'thing',
   status: 'idle',
+  agentKind: 'claude',
   kind: 'interactive',
   startedAt: 1_700_000_000_000,
   paneId: '%77',
@@ -84,5 +85,37 @@ describe('unusedAgents', () => {
 
   it('finds nothing in a fleet that is all working', () => {
     expect(unusedAgents([agent({ sessionId: 'a', status: 'busy', tokens: 5 })])).toEqual([])
+  })
+})
+
+/**
+ * The most dangerous consequence of listing agents that keep no transcript.
+ *
+ * `isUnused` reads "no activity line, no tokens, no title, no last prompt" as
+ * evidence a session was opened and forgotten. Every one of those signals comes
+ * out of a transcript, so for a Kiro agent they are absent by construction —
+ * absence of evidence, not evidence of disuse. Without the guard, a Kiro
+ * session working away in its pane matches every test and is offered to a
+ * button whose whole job is to close it.
+ */
+describe('an agent with no transcript is never prunable', () => {
+  const kiro = agent({
+    sessionId: 'tmux:kiro-1787832510',
+    agentKind: 'kiro',
+    status: 'idle',
+    paneId: '%302',
+  })
+
+  it('is not offered for pruning, even with every transcript field empty', () => {
+    expect(isUnused(kiro)).toBe(false)
+  })
+
+  it('is not offered even once its pane has been quiet for a while', () => {
+    expect(isUnused({ ...kiro, lastActivityAt: undefined })).toBe(false)
+  })
+
+  // The same shape of Claude agent still is, so the guard is not just off.
+  it('leaves the Claude case working', () => {
+    expect(isUnused(agent({ sessionId: 'claude-1', status: 'idle', paneId: '%1' }))).toBe(true)
   })
 })

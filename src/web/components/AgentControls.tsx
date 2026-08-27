@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
+import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
 import { closeAgent, setAgentMode, setAgentModel } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import type { Key } from '../lib/i18n.ts'
@@ -31,6 +32,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
   const showToast = useStore((s) => s.showToast)
   const [pending, setPending] = useState<'mode' | 'model' | 'close' | null>(null)
 
+  const slashCommands = allowsSlashCommands(agent.agentKind)
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
@@ -54,6 +56,15 @@ export function AgentControls({ agent }: { agent: Agent }) {
 
   return (
     <div className={styles.controls} data-testid="agent-controls">
+      {/*
+        Mode and model are Claude Code slash commands typed into the prompt, so
+        for another CLI they are not a disabled feature but a wrong one — the
+        server refuses them (INV-7) and offering them here would only promise
+        something that comes back as an error. Close survives: for those agents
+        it closes the tmux session instead.
+      */}
+      {slashCommands && (
+        <>
       <label className={styles.field}>
         <span className={styles.label}>{t('modeLabel')}</span>
         <select
@@ -91,6 +102,8 @@ export function AgentControls({ agent }: { agent: Agent }) {
           ))}
         </select>
       </label>
+        </>
+      )}
 
       <span className={styles.spacer} />
 

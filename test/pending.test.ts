@@ -27,6 +27,7 @@ const real = (over: Partial<Agent> = {}): Agent => ({
   cwd: '/x',
   folder: 'x',
   status: 'idle',
+  agentKind: 'claude',
   kind: 'interactive',
   startedAt: 0,
   ...over,

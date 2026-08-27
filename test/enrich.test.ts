@@ -10,6 +10,7 @@ const agent = (sessionId: string, extra: Partial<Agent> = {}): Agent => ({
   cwd: '/x',
   folder: 'x',
   status: 'idle',
+  agentKind: 'claude',
   kind: 'interactive',
   startedAt: 0,
   ...extra,
@@ -179,5 +180,29 @@ describe('FleetEnricher', () => {
     await enricher.tick()
     // A fresh tail, because the old one was pruned when the agent vanished.
     expect(built).toBe(2)
+  })
+})
+
+/**
+ * INV-4: never open a tail that cannot resolve.
+ *
+ * `findTranscript` stats every directory under ~/.claude/projects looking for a
+ * file a Kiro session will never have. It misses, caches nothing, and would do
+ * it again for every such agent every five seconds for as long as the server
+ * runs — the most expensive loop in the app, spent entirely on a certainty.
+ */
+describe('agents whose CLI keeps no transcript are never tailed', () => {
+  it('builds no tail for them', async () => {
+    const made: string[] = []
+    const source = new FakeSource([
+      agent('tmux:kiro-1', { agentKind: 'kiro' }),
+      agent('claude-1'),
+    ])
+    const enricher = new FleetEnricher(source, (id) => {
+      made.push(id)
+      return { read: async () => ({ events: [], patch: {}, first: false }) } as TailApi
+    })
+    await enricher.tick()
+    expect(made).toEqual(['claude-1'])
   })
 })

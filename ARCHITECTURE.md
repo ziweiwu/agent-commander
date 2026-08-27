@@ -84,8 +84,26 @@ render into the same object. They fail independently on purpose.
 claude agents --json          ──30s────────────► presence filter
 PendingStore (tmux list-panes)─────────────────► synthetic agents
                                                       ▼
-                                         Registry.#agents: Map<sessionId, Agent>
+                                         Registry.#agents ──┐
+                                                            ├─► CompositeSource
+tmux list-panes -a            ──3s────────────► TmuxProvider ┘   tmux-source.ts
 ```
+
+Two providers behind one `AgentSource`. `Registry` finds Claude sessions from
+the files Claude Code writes about itself; `TmuxProvider` finds every other CLI
+by asking tmux what is running, because they write nothing this app can use —
+Kiro's own `~/.kiro/sessions/cli/<uuid>.json` records neither the pane it runs
+in nor whether it is blocked, so it can be neither attached to nor sorted from.
+Claude is listed first and wins any clash over a tmux session, since what an
+agent reports about itself always beats what this app can infer from a pane.
+
+The tmux side is one `list-panes -a` for the whole machine — O(1) in agents, and
+it reads no pane content. A row is an agent only if its command is not a shell:
+tmux-resurrect restores sessions by name long after the process inside them
+died, so a machine accumulates `gemini-<epoch>` sessions holding nothing but an
+idle `zsh`, and listing those would be worse than listing nothing. Their status
+is inferred from `window_activity` and marked as inferred all the way to the
+pill (INV-11), and can never be `waiting`.
 
 Two sources with different jobs. The session files are authoritative for
 everything, including the tmux pane id the CLI does not expose, and are cheap
@@ -100,8 +118,8 @@ stops on a workspace-trust prompt *first*. Without a synthetic entry the agent i
 invisible in the fleet and the prompt blocking it can only be answered from the
 terminal this app exists to avoid.
 
-Status is not derived here. `toStatus` (`registry.ts:41`) is a four-value
-whitelist over what Claude Code itself wrote — `busy`, `idle`, `waiting`,
+Status is not derived for a Claude agent. `toStatus` (`registry.ts:41`) is a
+four-value whitelist over what Claude Code itself wrote — `busy`, `idle`, `waiting`,
 otherwise `unknown`. See "Where it is fragile", item 14.
 
 ### Transcript — what they are doing

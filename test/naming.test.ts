@@ -12,6 +12,7 @@ const agent = (over: Partial<Agent> & { name: string }): Agent => ({
   cwd: '/Users/me',
   folder: 'me',
   status: 'idle',
+  agentKind: 'claude',
   kind: 'interactive',
   startedAt: 0,
   ...over,

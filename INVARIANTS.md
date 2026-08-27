@@ -250,6 +250,17 @@ than an attacker.
 Properties, not a timetable. The specific intervals live in `ARCHITECTURE.md`,
 where they can drift without making this file wrong.
 
+- **Never open a tail that cannot resolve.** `findTranscript` stats every
+  directory under `~/.claude/projects` looking for a file an agent whose CLI
+  keeps no transcript will never have. It misses, caches nothing, and left
+  unguarded would do it again for every such agent every five seconds forever —
+  the most expensive loop in the app, spent on a certainty.
+- **Fleet status is one tmux query for the whole machine**, never one per agent,
+  and never from pane content. `window_activity` is a clock tmux already keeps,
+  so busy-versus-idle costs nothing and needs no sampling: the verdict is a
+  function of one timestamp, and a missed tick changes latency, not fidelity.
+  (`session_activity` looks like the same thing and is not — client events such
+  as attaching bump it, so it reports output that never happened.)
 - **Nothing polls what nobody is watching.** A pane is read only while some tab
   has it focused *and* attached, and the fleet-wide transcript enrichment — one
   tail per agent, the most expensive loop here — runs only while at least one
@@ -388,6 +399,16 @@ agent lives.
 
 ## INV-7 — One command shape
 
+**Claude Code's slash commands are only ever typed at Claude Code.** `/model`,
+`/goal`, `/exit` and the Shift+Tab mode cycle are how every control action
+works, and against another agent CLI they do not degrade — they type a sentence
+of this app's own devising into somebody's live prompt. `assertSlashCommandable`
+refuses them server-side for any kind whose spec says `slashCommands: false`,
+and the browser hides the controls; the server is the boundary, because a UI is
+not one (INV-6). Closing is the exception, and only because tmux can do it
+without the agent's cooperation: those sessions are closed by killing the tmux
+session rather than by asking.
+
 Starting an agent is the only place this app creates a process. It runs exactly
 one command:
 
@@ -518,6 +539,27 @@ made on resolved paths, and even asking the question is wrapped in a catch.
 Every figure on screen is either something the app currently knows, or is
 marked as something it used to know. Nothing is presented as a reading when it
 is a memory, and nothing is labelled as a total when it is a sample.
+
+**And nothing is presented as reported when it was inferred.** Claude Code
+writes its own status down — `waiting`, and why. An agent found through tmux
+reports nothing, so its status is worked out here from whether its pane has
+produced output lately. That is a far weaker claim wearing the same word, so it
+is marked `statusInferred` on the wire and reads `idle · quiet` on the card,
+never a bare `idle` beside a Claude one.
+
+**An inferred status may never be `waiting`.** An agent blocked on a permission
+prompt and an agent that has finished both sit there emitting nothing; no
+timestamp separates them. Guessing would put a fabricated "needs you" next to
+the real ones, and the whole product rests on that alert being worth walking
+across the room for. `tmux-agents.ts` can return `busy`, `idle` or `unknown`
+and has no branch that returns `waiting`; `test/tmux-agents.test.ts` pins it
+across every age of pane from one second to a day.
+
+The same reasoning removes a feature rather than adding one: the Prune button
+reads "no activity, no tokens, no title" as a session opened and forgotten, but
+every one of those comes from a transcript, so for an agent whose CLI keeps none
+they are absent by construction. That is absence of evidence, and `isUnused`
+refuses it for the same reason it already refuses `unknown`.
 
 **Why this is its own rule:** the principle already existed here, applied to
 exactly one thing. INV-5 says of the quota meters that *"'no reading' and 'a

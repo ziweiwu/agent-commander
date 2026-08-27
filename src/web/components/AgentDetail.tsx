@@ -7,6 +7,7 @@ import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { REASON_KEY, STATUS_KEY, useStatusText } from './AgentCard.tsx'
 import { displayName, isRenamed } from '../lib/naming.ts'
 import { useStore } from '../store/store.ts'
+import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { AgentControls } from './AgentControls.tsx'
 import { FullscreenView } from './FullscreenView.tsx'
 import { Chat } from './Chat.tsx'
@@ -43,6 +44,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
   // desktop, where there is room for it.
   const [controlsOpen, setControlsOpen] = useState(false)
   const showControls = !narrow || controlsOpen
+  const transcripts = hasTranscripts(agent.agentKind)
 
   // Full screen replaces the panel entirely rather than rendering both, so the
   // conversation is not mounted twice and scrolled in two places.
@@ -126,16 +128,24 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
       {showControls && <AgentControls agent={agent} />}
 
       <div className={styles.tabs} role="tablist">
-        <button
-          type="button"
-          role="tab"
-          className={styles.tab}
-          data-testid="tab-chat"
-          aria-selected={tab === 'chat'}
-          onClick={() => onTab('chat')}
-        >
-          {t('tabChat')}
-        </button>
+        {/*
+          Hidden rather than empty. This agent's CLI keeps no transcript this
+          app can read, so the conversation would be blank forever — and a blank
+          Chat tab beside a working Attach tab reads as this app being broken
+          rather than as the agent having nothing to show.
+        */}
+        {transcripts && (
+          <button
+            type="button"
+            role="tab"
+            className={styles.tab}
+            data-testid="tab-chat"
+            aria-selected={tab === 'chat'}
+            onClick={() => onTab('chat')}
+          >
+            {t('tabChat')}
+          </button>
+        )}
         <button
           type="button"
           role="tab"

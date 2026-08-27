@@ -99,6 +99,15 @@
 .warn {
   color: var(--waiting);
 }
+/* Which CLI this is, shown only when it is not the default one. */
+.kind {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0 4px;
+}
 
 .activity {
   font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;

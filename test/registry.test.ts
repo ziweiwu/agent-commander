@@ -77,6 +77,7 @@ describe('sortAgents', () => {
       cwd: '/x',
       folder: 'x',
       status,
+      agentKind: 'claude',
       kind: 'interactive',
       startedAt: 0,
     })

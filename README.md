@@ -8,13 +8,13 @@
 
 See every Claude Code agent on your machine at a glance — status, folder, git
 branch, what it's doing right now — and drop into any one of them from the
-browser.
+browser. Kiro CLI sessions show up too.
 
 Built for the case where you have a dozen `claude` sessions running across
 different projects and one of them has been sitting on a permission dialog for
 twenty minutes without you noticing.
 
-![The fleet view: nine agents grouped Needs you, Working and Idle, with Claude quota meters in the topbar](https://raw.githubusercontent.com/ziweiwu/agent-commander/main/assets/fleet-dark.png)
+![The fleet view: agents grouped Needs you, Working and Idle, one of them a Kiro session](https://raw.githubusercontent.com/ziweiwu/agent-commander/main/assets/fleet-dark.png)
 
 ```
 npx @ziweiwu/agent-commander        # run it
@@ -51,6 +51,35 @@ last-activity clock follows the subagent's transcript rather than its own. Its
 own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
+
+### Other agent CLIs
+
+Kiro CLI sessions appear in the same fleet. They are found through tmux rather
+than through a session file, because Kiro's own
+`~/.kiro/sessions/cli/<uuid>.json` records neither the pane it runs in nor
+whether it is blocked — so tmux is the only thing that knows both. A session is
+recognised by its `kiro-<epoch>` name or by `kiro-cli` being the pane's
+foreground process, and the second test is what keeps dead sessions out: a
+tmux-resurrect husk sitting at a `zsh` prompt is not a running agent, however it
+is named.
+
+They carry a folder, a git branch, an uptime and a last-activity clock, and the
+**Attach** tab works exactly as it does for Claude. Three things are honestly
+missing, and the card says so rather than leaving a blank:
+
+- **No conversation.** Kiro keeps no transcript this app can read, so there is
+  no Chat tab — hidden rather than empty, because an empty one reads as a bug.
+- **No token counts, no delegation.** Both come from a transcript.
+- **Status is inferred, and never `waiting`.** It reads `idle · quiet`, meaning
+  only that the pane has stopped producing output. An agent blocked on a
+  permission prompt and one that has simply finished look identical from
+  outside, and inventing a "needs you" for either would spend the credibility of
+  the one alert this dashboard exists to raise (INV-11).
+
+Mode and model controls are hidden for these agents: they work by typing Claude
+Code's own slash commands into the prompt, and the server refuses them for any
+other CLI rather than typing `/model opus` at something that will take it
+literally. Closing still works — it closes the tmux session instead.
 
 Filter with the search box (name, folder, branch, activity or status) or by
 clicking a status chip in the header. When an agent starts waiting on you, the

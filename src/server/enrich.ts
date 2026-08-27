@@ -9,6 +9,7 @@
  * tail, so the steady-state cost is a few hundred bytes per agent per cycle.
  */
 import type { Agent } from '../shared/types.ts'
+import { hasTranscripts } from '../shared/agent-kinds.ts'
 import type { AgentSource, TailApi } from './sources.ts'
 import { Poller } from './poll.ts'
 
@@ -95,6 +96,13 @@ export class FleetEnricher {
 
       let changed = false
       for (const agent of agents) {
+        /*
+         * INV-4: never open a tail that cannot resolve. `findTranscript` stats
+         * every directory under ~/.claude/projects looking for a file a Kiro
+         * session will never have, misses, caches nothing, and would do it
+         * again for every such agent every five seconds forever.
+         */
+        if (!hasTranscripts(agent.agentKind)) continue
         let tail = this.#tails.get(agent.sessionId)
         if (!tail) {
           tail = this.makeTail(agent.sessionId)

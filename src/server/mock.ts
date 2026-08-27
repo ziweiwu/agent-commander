@@ -5,6 +5,7 @@
  * at real, working agents — the same reason terminal-system-monitor ships a mock
  * mode. `npm run mock` never touches tmux or the filesystem.
  */
+import { CLAUDE_KIND } from '../shared/agent-kinds.ts'
 import type { Agent, RateLimits, TimelineEvent } from '../shared/types.ts'
 import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
 import type { PaneMeta } from './pane.ts'
@@ -31,6 +32,7 @@ const FIXTURES: Agent[] = [
     folder: 'kb-vault',
     status: 'waiting',
     waitingFor: 'dialog open',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 3_600_000,
     version: '2.1.232',
@@ -47,6 +49,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo/Projects/terminal-system-monitor',
     folder: 'terminal-system-monitor',
     status: 'busy',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 7_200_000,
     version: '2.1.232',
@@ -75,6 +78,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo/Projects/useful-markdown-viewer',
     folder: 'useful-markdown-viewer',
     status: 'busy',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 5_400_000,
     version: '2.1.232',
@@ -97,6 +101,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo/Projects/agent-commander',
     folder: 'agent-commander',
     status: 'busy',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 1_500_000,
     version: '2.1.232',
@@ -116,6 +121,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 1_800_000,
     version: '2.1.232',
@@ -135,6 +141,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 50_400_000,
     version: '2.1.232',
@@ -154,6 +161,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 3_600_000,
     version: '2.1.232',
@@ -173,6 +181,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo',
     folder: 'demo',
     status: 'idle',
+    agentKind: CLAUDE_KIND,
     kind: 'interactive',
     startedAt: START - 600_000,
     version: '2.1.232',
@@ -186,6 +195,7 @@ const FIXTURES: Agent[] = [
     cwd: '/Users/demo/Projects/lego-deals',
     folder: 'lego-deals',
     status: 'idle',
+    agentKind: CLAUDE_KIND,
     kind: 'background',
     startedAt: START - 600_000,
     version: '2.1.232',
@@ -193,6 +203,30 @@ const FIXTURES: Agent[] = [
     activity: 'WebFetch: https://example.com/feed.xml',
     lastActivityAt: START - 60_000,
     tokens: 2_010,
+  },
+  /*
+   * A Kiro session, and the reason one is in the fixtures at all: everything a
+   * tmux-discovered agent cannot supply has to be visible in `npm run mock`,
+   * which is this project's UX sign-off gate. No activity line, no tokens, no
+   * conversation, a derived name, and a status this app worked out by watching
+   * the pane rather than one the agent reported (INV-11).
+   */
+  {
+    sessionId: 'tmux:kiro-1787832510',
+    pid: 84_638,
+    name: 'folio',
+    derivedName: true,
+    cwd: '/Users/demo/Projects/folio',
+    folder: 'folio',
+    status: 'busy',
+    statusInferred: true,
+    agentKind: 'kiro',
+    kind: 'interactive',
+    startedAt: START - 900_000,
+    gitBranch: 'main',
+    lastActivityAt: START - 4_000,
+    paneId: '%302',
+    tmuxSession: 'kiro-1787832510',
   },
 ]
 

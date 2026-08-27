@@ -2,7 +2,7 @@
 
 export type AgentStatus = 'busy' | 'idle' | 'waiting' | 'unknown'
 
-/** One Claude Code session, as presented to the UI. */
+/** One agent CLI session, as presented to the UI. */
 export interface Agent {
   sessionId: string
   pid: number
@@ -11,8 +11,27 @@ export interface Agent {
   /** Basename of cwd, precomputed for the card header. */
   folder: string
   status: AgentStatus
+  /**
+   * The status above was derived by this app rather than reported by the agent.
+   *
+   * INV-11: the dashboard never asserts more than it knows. A Claude session
+   * says "waiting, dialog open" about itself; a tmux-discovered agent only ever
+   * shows whether its pane has produced output lately, which is a far weaker
+   * claim wearing the same word. The card labels it so the two are not read as
+   * equals.
+   */
+  statusInferred?: boolean
   /** Why the agent is blocked, e.g. "dialog open". Only set when status is waiting. */
   waitingFor?: string
+  /**
+   * Which agent CLI this is — see `shared/agent-kinds.ts`.
+   *
+   * Required, not optional, so every construction site has to say: a silent
+   * `undefined` here reaches a capability lookup and quietly denies everything.
+   * Distinct from `kind` below, which is Claude Code's own word for what sort
+   * of session it is (`interactive`/`background`) and means nothing elsewhere.
+   */
+  agentKind: string
   kind: string
   startedAt: number
   version?: string

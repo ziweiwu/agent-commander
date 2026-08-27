@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { Outlet, useParams, useLocation } from 'react-router-dom'
+import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import { countByGroup, type StatusFilter } from '../lib/filter.ts'
@@ -241,12 +242,16 @@ export function FleetRoute() {
 
   // A blocked agent is opened to answer its dialog, which only the terminal can
   // do, so redirect to the terminal tab rather than making the user find it.
+  //
+  // An agent whose CLI keeps no readable transcript is redirected for a
+  // different reason: its Chat tab is hidden, so landing on it would leave the
+  // panel showing nothing with no visible way back to the terminal.
   useEffect(() => {
-    if (!agent) return
-    if (wantTab === 'chat' && agent.status === 'waiting' && agent.paneId) {
+    if (!agent || wantTab !== 'chat' || !agent.paneId) return
+    if (agent.status === 'waiting' || !hasTranscripts(agent.agentKind)) {
       navigate(`/agent/${agent.sessionId}/term`, { replace: true })
     }
-  }, [agent?.sessionId, agent?.status, agent?.paneId, wantTab, navigate, agent])
+  }, [agent?.sessionId, agent?.status, agent?.paneId, agent?.agentKind, wantTab, navigate, agent])
 
   useEffect(() => {
     if (!sessionId) return

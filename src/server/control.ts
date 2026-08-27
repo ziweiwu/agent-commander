@@ -6,6 +6,7 @@
  * tool call would be interleaved with work in flight. Idle and waiting are
  * fine — a waiting agent is precisely the one you may want to redirect.
  */
+import { allowsSlashCommands } from '../shared/agent-kinds.ts'
 import type { Agent, GoalState } from '../shared/types.ts'
 import * as panes from './pane.ts'
 
@@ -33,6 +34,23 @@ export function assertControllable(agent: Agent | undefined): asserts agent is C
   if (!agent.paneId) throw new ControlError(agent.attachBlockedReason ?? 'agent is not attachable')
   if (agent.status === 'busy') {
     throw new ControlError('agent is busy — wait until it is idle before changing it')
+  }
+}
+
+/**
+ * INV-7's other half: these actions are Claude Code's slash commands.
+ *
+ * Every one of them works by typing `/model`, `/goal` or `/exit` into a live
+ * pane. Against another CLI that is not a feature that degrades — it is this
+ * app typing a sentence of its own into somebody's prompt and pressing return.
+ * The browser hides these controls for such agents; this is the boundary that
+ * makes it true, because the UI is not one (INV-6).
+ */
+export function assertSlashCommandable(agent: Controllable): void {
+  if (!allowsSlashCommands(agent.agentKind)) {
+    throw new ControlError(
+      `this action types a Claude Code command into the session, which ${agent.agentKind} does not understand`,
+    )
   }
 }
 
@@ -82,6 +100,7 @@ export async function setModel(
   deps: ControlDeps,
 ): Promise<void> {
   assertControllable(agent)
+  assertSlashCommandable(agent)
   if (!isModelAlias(alias)) throw new ControlError(`unknown model: ${alias}`)
   await deps.paste(agent.paneId, `/model ${alias}`, true)
 }
@@ -111,6 +130,7 @@ export async function setMode(
   maxSteps = MAX_STEPS,
 ): Promise<ModeResult> {
   assertControllable(agent)
+  assertSlashCommandable(agent)
   if (!isCyclableMode(target)) throw new ControlError(`unknown permission mode: ${target}`)
 
   let mode = await deps.readMode()
@@ -190,6 +210,7 @@ export async function setGoal(
   verifyMs = GOAL_VERIFY_MS,
 ): Promise<GoalResult> {
   assertControllable(agent)
+  assertSlashCommandable(agent)
   const condition = assertGoalCondition(rawCondition)
 
   const before = await deps.readGoal()
@@ -239,6 +260,7 @@ function landed(before: GoalState | undefined, goal: GoalState | undefined): boo
  */
 export async function clearGoal(agent: Agent | undefined, deps: ControlDeps): Promise<void> {
   assertControllable(agent)
+  assertSlashCommandable(agent)
   await deps.paste(agent.paneId, '/goal clear', true)
 }
 
@@ -256,10 +278,23 @@ export interface CloseResult {
  *
  * `/exit` is Claude Code's own shutdown path, so it gets the chance to finish
  * writing its transcript. Only a session that ignores it is killed outright.
+ *
+ * An agent that does not speak that command skips straight to closing its tmux
+ * session. Typing `/exit` at it would not shut anything down -- it would leave
+ * a stray line in the prompt of a session the user asked to close, and then
+ * force-kill it six seconds later anyway.
  */
 export async function closeAgent(agent: Agent | undefined, deps: ControlDeps): Promise<CloseResult> {
   assertControllable(agent)
   const paneId = agent.paneId
+
+  if (!allowsSlashCommands(agent.agentKind)) {
+    if (!agent.tmuxSession) {
+      throw new ControlError('agent has no shutdown command and no tmux session to close')
+    }
+    await deps.killSession(agent.tmuxSession)
+    return { closed: true, forced: true }
+  }
 
   await deps.paste(paneId, '/exit', true)
 

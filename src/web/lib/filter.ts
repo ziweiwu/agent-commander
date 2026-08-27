@@ -1,4 +1,5 @@
 /** Pure filtering and grouping for the agent list. */
+import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import type { Agent, AgentStatus } from '../../shared/types.ts'
 import { GROUPS, type GroupKey, matches } from './format.ts'
 
@@ -60,9 +61,16 @@ export const IN_GROUP: Record<GroupKey, ReadonlySet<AgentStatus>> = {
  * A pane is required too, because closing is `/exit` typed into that pane. An
  * agent this app cannot close is one it must not offer to prune — the button
  * would promise something it has no way to do.
+ *
+ * And every one of those signals is read out of a transcript, so for an agent
+ * whose CLI writes none they are all absent by construction. That is absence of
+ * evidence, not evidence of disuse: without this clause a Kiro session working
+ * away in its pane matches every test above and gets offered to a button that
+ * types `/exit` into it.
  */
 export function isUnused(agent: Agent): boolean {
   return (
+    hasTranscripts(agent.agentKind) &&
     agent.status === 'idle' &&
     agent.paneId !== undefined &&
     !agent.delegating &&

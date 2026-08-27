@@ -9,6 +9,7 @@
  * attachable, until the real record replaces it.
  */
 import { basename } from 'node:path'
+import { CLAUDE_KIND } from '../shared/agent-kinds.ts'
 import type { Agent } from '../shared/types.ts'
 import { isMissingTarget, listPanes } from './pane.ts'
 
@@ -113,6 +114,7 @@ export class PendingStore {
         folder: basename(session.cwd) || session.cwd,
         status: 'waiting',
         waitingFor: 'starting up',
+        agentKind: CLAUDE_KIND,
         kind: 'interactive',
         startedAt: session.startedAt,
         paneId: pane,

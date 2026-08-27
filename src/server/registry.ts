@@ -16,6 +16,7 @@ import { readdir, readFile } from 'node:fs/promises'
 import { watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, join } from 'node:path'
+import { CLAUDE_KIND } from '../shared/agent-kinds.ts'
 import type { Agent, AgentStatus } from '../shared/types.ts'
 import type { PendingStore } from './pending.ts'
 import { Poller } from './poll.ts'
@@ -75,6 +76,7 @@ export function toAgent(file: SessionFile): Agent | null {
     cwd: file.cwd,
     folder: basename(file.cwd) || file.cwd,
     status: toStatus(file.status),
+    agentKind: CLAUDE_KIND,
     kind: file.kind || 'interactive',
     startedAt: file.startedAt ?? 0,
   }
