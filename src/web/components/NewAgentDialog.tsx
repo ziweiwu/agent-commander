@@ -73,6 +73,18 @@ export function NewAgentDialog() {
   const [browsing, setBrowsing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  /*
+   * INV-2's lesson, on the one control that creates a process.
+   *
+   * `disabled={busy}` is React state and does not reach the DOM until React
+   * flushes, so three submits dispatched in the same tick — key repeat, a
+   * double click, a slow machine — all re-entered this before the attribute
+   * landed and each fired its own `POST /api/agents`. In mock mode that is
+   * three fixtures; in real mode it is three `tmux new-session … claude`
+   * spawns from one click. The composer and the goal field already guard this
+   * with a synchronously-cleared ref, for exactly the same reason.
+   */
+  const startingRef = useRef(false)
   const dirRef = useRef<HTMLInputElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -104,7 +116,8 @@ export function NewAgentDialog() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!dir.trim()) return
+    if (!dir.trim() || startingRef.current) return
+    startingRef.current = true
     setBusy(true)
     setError('')
     const result = await startAgent(dir.trim(), {
@@ -112,6 +125,7 @@ export function NewAgentDialog() {
       ...(model !== 'default' ? { model } : {}),
       ...(mode !== 'default' ? { permissionMode: mode } : {}),
     })
+    startingRef.current = false
     setBusy(false)
     if (result.ok) {
       rememberDir(result.cwd)

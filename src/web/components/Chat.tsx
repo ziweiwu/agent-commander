@@ -86,6 +86,9 @@ export function Chat({ agent }: { agent: Agent }) {
    * without reading guards nothing. The claim is made here, at the moment the
    * mode is armed, and the Send button then says what it will do.
    */
+  /** Send itself stops the agent, so a separate stop would be the same act twice. */
+  const interrupting = busy && sendMode === 'interrupt'
+
   const chooseSendMode = (next: SendMode) => {
     if (next === sendMode) return
     if (next === 'interrupt' && !window.confirm(t('confirmInterruptMode'))) return
@@ -260,7 +263,6 @@ export function Chat({ agent }: { agent: Agent }) {
         */}
       {attachable && (
         <div className={styles.strip} data-testid="composer-strip">
-          <ChatControls agent={agent} />
 
           {/*
             What Send does to an agent that is already working, and the stop
@@ -285,6 +287,9 @@ export function Chat({ agent }: { agent: Agent }) {
               </button>
             ))}
           </div>
+
+          <ChatControls agent={agent} />
+
 
           <div className={styles.quick} role="group" aria-label={t('quickPromptsLabel')}>
             {QUICK_PROMPTS.map((key) => {
@@ -355,16 +360,32 @@ export function Chat({ agent }: { agent: Agent }) {
             and rendering it only when it applies keeps it off the composer row
             on a phone in the common case, where the row is already tight.
           */}
-          {busy && (
+          {/*
+            Not while Send already interrupts. With the mode armed the row read
+            "Interrupt" next to "Interrupt & send" — two buttons a word apart
+            with different blast radii — and the pair squeezed the message box
+            to 32px on a small phone, in the one state where reading what you
+            typed matters most. Wrapping them instead cost the conversation more
+            height than the audit's floor allows, so the redundant one goes.
+          */}
+          {busy && !interrupting && (
             <Button
               type="button"
               variant="compact"
               className={styles.stop}
               data-testid="chat-interrupt"
               title={t('interruptTitle')}
+              aria-label={t('interrupt')}
               onClick={interrupt}
             >
-              {t('interrupt')}
+              {/* The glyph carries it where the label will not fit; the label
+                  is still the accessible name, so nothing is lost to a screen
+                  reader. Spelling it out costs the message box 70px on a small
+                  phone, and the box is what the row is for. */}
+              <span aria-hidden="true" className={styles.stopGlyph}>
+                ■
+              </span>
+              <span className={styles.stopLabel}>{t('interrupt')}</span>
             </Button>
           )}
           <Button

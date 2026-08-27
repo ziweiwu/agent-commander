@@ -3,6 +3,7 @@ import type { Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { setAgentGoal, setAgentMode } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { useHeldChoice } from '../hooks/useHeldChoice.ts'
 import type { Key } from '../lib/i18n.ts'
 import { MODES, MODE_KEY } from '../lib/modes.ts'
 import { Button } from './ui/Button.tsx'
@@ -38,6 +39,10 @@ export function ChatControls({ agent }: { agent: Agent }) {
    * synchronously, so the second finds it taken.
    */
   const sendingRef = useRef(false)
+  const [modeValue, setPickedMode, clearPickedMode] = useHeldChoice(
+    agent.permissionMode,
+    agent.sessionId,
+  )
 
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
@@ -76,11 +81,24 @@ export function ChatControls({ agent }: { agent: Agent }) {
     }
   }
 
-  const onMode = (mode: string): void =>
+  const onMode = (mode: string): void => {
+    setPickedMode(mode)
     void run('mode', async () => {
       const result = await setAgentMode(mode)
-      if (!result.ok) showToast(t('controlFailed', { error: result.error }))
+      if (!result.ok) {
+        // It did not land, so stop showing it as though it had.
+        clearPickedMode()
+        showToast(t('controlFailed', { error: result.error }))
+        return
+      }
+      /*
+       * The server sent the press but the session never reported a new mode.
+       * Saying nothing here reported an unconfirmed switch as a clean success
+       * — the detail panel already surfaces this, and the chat strip did not.
+       */
+      if (result.detail === 'unverified') showToast(t('modeUnverified'))
     })
+  }
 
   const onSetGoal = (): void => {
     // Checked here rather than only on the button, because Enter in the field
@@ -167,7 +185,7 @@ export function ChatControls({ agent }: { agent: Agent }) {
               className={styles.select}
               data-testid="chat-mode-select"
               disabled={modeDisabled}
-              value={agent.permissionMode ?? ''}
+              value={modeValue}
               onChange={(e) => onMode(e.target.value)}
             >
               {!agent.permissionMode && <option value="">—</option>}

@@ -96,6 +96,36 @@
   padding: 2px;
   margin: -2px;
 }
+/*
+ * Say that the row continues.
+ *
+ * This is a horizontal scroller carrying Mode, Goal, the Queue/Interrupt choice
+ * and five quick replies. At 375px roughly 860px of that is past the right edge
+ * at rest, with no scrollbar on touch, no partial chip peeking and no fade — so
+ * three separate review passes independently reported the send-mode control and
+ * every quick reply as simply missing on a phone. They were reachable and
+ * undiscoverable, which for a control that decides whether Send interrupts a
+ * working agent is the wrong half to get right.
+ *
+ * The mask fades the trailing edge only while there is more to reach: `100%`
+ * of a scroller's own width tracks the scroll position, so the fade lifts as
+ * the end comes into view rather than sitting there permanently suggesting
+ * content that is already visible.
+ */
+.strip {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+}
+
+/*
+ * Deliberately not gated on viewport width. The first attempt turned the fade
+ * off above 900px on the reasoning that "at desktop widths the row fits" —
+ * which is false, because what this row has to fit inside is the detail panel,
+ * not the window. On a landscape tablet at 1194px the strip still hides 52% of
+ * itself, and that is the band where the two-column layout takes the width
+ * away. When the content genuinely does fit, the fade falls on empty space at
+ * the trailing edge and shows nothing.
+ */
+
 .strip::-webkit-scrollbar {
   display: none;
 }
@@ -240,6 +270,10 @@
 .sendModeOption {
   font: inherit;
   font-size: var(--text-xs);
+  /* WCAG 2.5.8 floor, and it applies at every width — the narrow-viewport
+     rule below raises it further. This control arms a destructive Send, so it
+     should not be the smallest target on the row. */
+  min-height: 26px;
   padding: 2px 10px;
   border: 0;
   background: transparent;
@@ -282,5 +316,42 @@
   .sendModeOption {
     min-height: 44px;
     padding: 0 14px;
+  }
+}
+
+/*
+ * And on any touch device, however wide. A landscape tablet is 1194px — past
+ * every width rule here — and still a screen people tap with a finger, which is
+ * the case a width-only rule quietly misses.
+ */
+@media (pointer: coarse) {
+  .sendModeOption {
+    min-height: 44px;
+    padding: 0 14px;
+  }
+}
+
+/*
+ * The composer wraps rather than squeezing the box it exists for.
+ *
+ * With Interrupt armed there are two buttons on this row — "Interrupt" and
+ * "Interrupt & send" — and at 320px they held their width and left the textarea
+ * 32px wide. That is the state where seeing what you typed matters most: the
+ * message is the one about to discard the agent's work in flight.
+ */
+
+.stopGlyph {
+  display: none;
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* Below this the label costs the message box more than it is worth. */
+@media (max-width: 460px) {
+  .stopGlyph {
+    display: inline;
+  }
+  .stopLabel {
+    display: none;
   }
 }

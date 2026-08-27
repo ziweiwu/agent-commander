@@ -70,7 +70,10 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         ? `${shown} +${names.length - NAMES_BEFORE_ELLIPSIS}`
         : shown
     const count = String(unused.length)
-    if (!window.confirm(t('pruneConfirm', { count, names: label }))) return
+    // "session(s)" read as an unfinished string on the one dialog that gates a
+    // destructive action, and it is singular far more often than not.
+    const sessionWord = t(unused.length === 1 ? 'pruneSessionOne' : 'pruneSessionMany')
+    if (!window.confirm(t('pruneConfirm', { count, names: label, sessionWord }))) return
 
     setPruning(true)
     let done = 0

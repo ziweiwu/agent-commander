@@ -16,6 +16,7 @@ import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { ChatControls } from '../../src/web/components/ChatControls.tsx'
 import { agent, renderApp, resetStore } from './helpers.tsx'
+import { useStore } from '../../src/web/store/store.ts'
 
 const setAgentGoal = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as const))
 const setAgentMode = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as const))
@@ -58,6 +59,37 @@ describe('mode', () => {
 
     await user.selectOptions(select, 'plan')
     expect(setAgentMode).toHaveBeenCalledExactlyOnceWith('plan')
+  })
+
+  /*
+   * The select is bound to the mode the *agent* reports, which comes out of a
+   * transcript a busy session writes only when its turn ends. Without holding
+   * the pick, the next fleet broadcast repainted the old value a second later
+   * and the click read as though it had done nothing.
+   *
+   * This existed in the detail panel and not here, so the same control was
+   * fixed two clicks away and broken in the view people actually read.
+   */
+  it('holds the picked mode until the agent confirms it', async () => {
+    const user = userEvent.setup()
+    setAgentMode.mockReturnValue(new Promise(() => {}) as Promise<{ ok: true }>)
+    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
+
+    await user.selectOptions(screen.getByTestId('chat-mode-select'), 'plan')
+
+    expect((screen.getByTestId('chat-mode-select') as HTMLSelectElement).value).toBe('plan')
+  })
+
+  // The server said it could not confirm the switch. Reporting that as a clean
+  // success is the interface asserting more than it knows (INV-11).
+  it('surfaces an unverified switch rather than staying silent', async () => {
+    const user = userEvent.setup()
+    setAgentMode.mockResolvedValue({ ok: true, detail: 'unverified' } as never)
+    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
+
+    await user.selectOptions(screen.getByTestId('chat-mode-select'), 'plan')
+
+    expect(useStore.getState().toast).toBeTruthy()
   })
 
   // Reachability is still required: no pane, nothing to send the key to.

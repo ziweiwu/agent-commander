@@ -123,3 +123,51 @@ describe('NewAgentDialog', () => {
     expect(screen.getByText(/tmux/)).toBeDefined()
   })
 })
+
+/*
+ * INV-2, on the one control in this app that creates a process.
+ *
+ * `disabled={busy}` is React state and does not reach the DOM until React
+ * flushes, so three submits dispatched in the same tick — key repeat, a double
+ * click, a slow machine — each re-entered the handler before the attribute
+ * landed. In mock mode that is three fixtures; against a real fleet it is three
+ * `tmux new-session … claude` spawns from one click, and two agents nobody
+ * asked for, in a directory they were not meant to be in.
+ */
+describe('starting an agent happens exactly once', () => {
+  it('sends one spawn for a burst of three submits in the same tick', async () => {
+    const user = userEvent.setup()
+    startAgent.mockReturnValue(new Promise(() => {}))
+    useStore.setState({ newAgentOpen: true })
+    renderApp(<NewAgentDialog />)
+    await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/x')
+
+    /*
+     * Native clicks, not `fireEvent`: Testing Library flushes React between
+     * fired events, so `disabled` lands and the race this guards can never
+     * happen. Three real clicks in one tick is what key repeat and a
+     * double-click actually produce, and what reproduced it in the browser.
+     */
+    const submit = screen.getByTestId('new-agent-submit')
+    submit.click()
+    submit.click()
+    submit.click()
+
+    expect(startAgent).toHaveBeenCalledTimes(1)
+  })
+
+  // A refused attempt must leave the button usable, or one bad path locks the
+  // dialog until it is closed and reopened.
+  it('can be retried after a failure', async () => {
+    const user = userEvent.setup()
+    startAgent.mockResolvedValue({ ok: false, error: 'no such directory' })
+    useStore.setState({ newAgentOpen: true })
+    renderApp(<NewAgentDialog />)
+    await user.type(screen.getByTestId('new-agent-dir'), '~/nope')
+
+    await user.click(screen.getByTestId('new-agent-submit'))
+    await waitFor(() => expect(startAgent).toHaveBeenCalledTimes(1))
+    await user.click(screen.getByTestId('new-agent-submit'))
+    await waitFor(() => expect(startAgent).toHaveBeenCalledTimes(2))
+  })
+})

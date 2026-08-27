@@ -69,7 +69,12 @@
  */
 .pill[data-inferred='true'] {
   border-style: dashed;
-  opacity: 0.85;
+  /* Measured at 1.85:1 against the pill when it inherited the status colour at
+     40% alpha — under 1.4.11's 3:1 and effectively invisible, which makes the
+     one visual cue for "this status was inferred" decorative. The text still
+     carries the meaning (`idle · quiet`); this makes the border carry it too. */
+  border-color: currentColor;
+  opacity: 0.9;
 }
 
 .pill[data-status='busy'] {

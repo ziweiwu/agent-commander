@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
+import { useHeldChoice } from '../hooks/useHeldChoice.ts'
 import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
 import { closeAgent, setAgentMode, setAgentModel } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
@@ -31,33 +32,17 @@ export function AgentControls({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
   const [pending, setPending] = useState<'mode' | 'model' | 'close' | null>(null)
-  /*
-   * What the user just chose, held until the agent reports it back.
-   *
-   * Both selects are controlled by the agent's *reported* value, and neither
-   * mode nor model is observable until the session writes it into its
-   * transcript. So picking one repainted the old value on the very next fleet
-   * broadcast — a second or so later — and the control snapped back as though
-   * the click had done nothing. That is the whole of what "switching does not
-   * work" looked like from outside, whether or not the switch had landed.
-   */
-  const [picked, setPicked] = useState<{ mode?: string; model?: string }>({})
+  // Held until the agent reports it back — see `useHeldChoice`.
+  const [modeValue, setPickedMode, clearPickedMode] = useHeldChoice(
+    agent.permissionMode,
+    agent.sessionId,
+  )
+  const [modelValue, setPickedModel, clearPickedModel] = useHeldChoice(
+    aliasOfModel(agent.model),
+    agent.sessionId,
+  )
 
   const slashCommands = allowsSlashCommands(agent.agentKind)
-  useEffect(() => {
-    setPicked((prev) => {
-      const next = { ...prev }
-      if (prev.mode !== undefined && agent.permissionMode === prev.mode) delete next.mode
-      if (prev.model !== undefined && aliasOfModel(agent.model) === prev.model) delete next.model
-      return next
-    })
-  }, [agent.permissionMode, agent.model])
-
-  // A different agent's choice is not this one's.
-  useEffect(() => {
-    setPicked({})
-  }, [agent.sessionId])
-
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
@@ -73,12 +58,14 @@ export function AgentControls({ agent }: { agent: Agent }) {
 
   const run = async (kind: 'mode' | 'model', value: string): Promise<void> => {
     setPending(kind)
-    setPicked((prev) => ({ ...prev, [kind]: value }))
+    if (kind === 'mode') setPickedMode(value)
+    else setPickedModel(value)
     const result = kind === 'mode' ? await setAgentMode(value) : await setAgentModel(value)
     setPending(null)
     if (!result.ok) {
       // It did not land, so stop showing it as though it had.
-      setPicked((prev) => ({ ...prev, [kind]: undefined }))
+      if (kind === 'mode') clearPickedMode()
+      else clearPickedModel()
       showToast(t('controlFailed', { error: result.error }))
       return
     }
@@ -119,7 +106,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
           className={styles.select}
           data-testid="mode-select"
           disabled={midRunDisabled}
-          value={picked.mode ?? agent.permissionMode ?? ''}
+          value={modeValue}
           onChange={(e) => void run('mode', e.target.value)}
         >
           {!agent.permissionMode && <option value="">—</option>}
@@ -137,7 +124,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
           className={styles.select}
           data-testid="model-select"
           disabled={midRunDisabled}
-          value={picked.model ?? aliasOfModel(agent.model)}
+          value={modelValue}
           onChange={(e) => void run('model', e.target.value)}
         >
           {!agent.model && <option value="">—</option>}
