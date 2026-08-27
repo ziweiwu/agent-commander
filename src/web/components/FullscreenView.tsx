@@ -8,6 +8,7 @@ import { LazyTerminal } from './LazyTerminal.tsx'
 
 import { Button } from './ui/Button.tsx'
 import { displayName } from '../lib/naming.ts'
+import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import styles from './FullscreenView.module.css'
 
 export interface FullscreenViewProps {
@@ -27,6 +28,7 @@ export interface FullscreenViewProps {
  */
 export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProps) {
   const t = useTranslate()
+  const transcripts = hasTranscripts(agent.agentKind)
   const overlayRef = useRef<HTMLDivElement>(null)
 
   useModalChrome(overlayRef, true)
@@ -58,16 +60,26 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
           {displayName(agent)}
         </span>
         <div className={styles.tabs} role="tablist">
-          <button
-            type="button"
-            role="tab"
-            className={styles.tab}
-            data-testid="fullscreen-tab-chat"
-            aria-selected={tab === 'chat'}
-            onClick={() => onTab('chat')}
-          >
-            {t('tabChat')}
-          </button>
+          {/*
+            The same gate as `AgentDetail`, and it was missing here: an agent
+            whose CLI keeps no readable transcript has nothing to put in a
+            conversation, so full screen offered a tab that flickered a route
+            change and snapped straight back. Hiding it in one surface and not
+            its sibling is worse than not hiding it at all — the app contradicts
+            itself one click apart.
+          */}
+          {transcripts && (
+            <button
+              type="button"
+              role="tab"
+              className={styles.tab}
+              data-testid="fullscreen-tab-chat"
+              aria-selected={tab === 'chat'}
+              onClick={() => onTab('chat')}
+            >
+              {t('tabChat')}
+            </button>
+          )}
           <button
             type="button"
             role="tab"
@@ -86,7 +98,11 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
       </header>
 
       <div className={styles.body}>
-        {tab === 'chat' ? <Chat agent={agent} /> : <LazyTerminal agent={agent} onExit={onExit} />}
+        {tab === 'chat' && transcripts ? (
+          <Chat agent={agent} />
+        ) : (
+          <LazyTerminal agent={agent} onExit={onExit} />
+        )}
       </div>
     </div>,
     document.body,

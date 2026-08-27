@@ -105,7 +105,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
         </>
       )}
 
-      <span className={styles.spacer} />
+      {slashCommands && <span className={styles.spacer} />}
 
       <Button
         variant="compact"

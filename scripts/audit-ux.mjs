@@ -70,8 +70,16 @@ for (const scheme of ['light', 'dark']) {
   await page.waitForTimeout(300)
   if (await page.$(T('agent-detail'))) add('high', 'keyboard', 'Shift+Escape does not close the agent')
 
-  const cards = await page.$$(T('agent-card'))
-  await cards[1].click()
+  /*
+   * Asked for, not counted. This used to take `cards[1]` on the reasoning that
+   * the first card is blocked and opens on the terminal — but that quietly also
+   * assumed every other card can hold a conversation, and the moment an agent
+   * whose CLI keeps no transcript sorted into that slot the audit hung waiting
+   * for a composer that was never going to render.
+   */
+  const chatCards = await page.$$(`${T('agent-card')}[data-transcripts="true"]:not([data-status="waiting"])`)
+  if (chatCards.length === 0) throw new Error('no chat-capable agent in the fixture fleet')
+  await chatCards[0].click()
   await page.waitForSelector(T('message'), { timeout: 5000 }).catch(() => add('high', 'chat', 'conversation never rendered'))
   const roles = await page.$$eval(T('message'), (els) => [...new Set(els.map((e) => e.dataset.role))])
   if (!roles.includes('you') || !roles.includes('agent')) {
@@ -282,8 +290,16 @@ for (const vp of VIEWPORTS) {
   const ov = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: innerWidth }))
   if (ov.s > ov.i + 1) add('high', 'responsive', `${vp.name}: horizontal overflow ${ov.s} > ${ov.i}`)
 
-  const cards = await page.$$(T('agent-card'))
-  await cards[1].click()
+  /*
+   * Asked for, not counted. This used to take `cards[1]` on the reasoning that
+   * the first card is blocked and opens on the terminal — but that quietly also
+   * assumed every other card can hold a conversation, and the moment an agent
+   * whose CLI keeps no transcript sorted into that slot the audit hung waiting
+   * for a composer that was never going to render.
+   */
+  const chatCards = await page.$$(`${T('agent-card')}[data-transcripts="true"]:not([data-status="waiting"])`)
+  if (chatCards.length === 0) throw new Error('no chat-capable agent in the fixture fleet')
+  await chatCards[0].click()
   await page.waitForSelector(T('agent-detail'))
   await page.waitForTimeout(400)
 

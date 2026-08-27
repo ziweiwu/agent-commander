@@ -57,6 +57,21 @@
   border: 1px solid var(--line);
   white-space: nowrap;
 }
+/*
+ * INV-11, made visible rather than only readable.
+ *
+ * A status this app worked out from pane activity is a weaker claim than one
+ * the agent reported about itself, and `idle · quiet` said so in six characters
+ * of the same weight — which is not something anyone reads while scanning. The
+ * dashed edge carries it without a word, and without a second colour: a new
+ * colour would assert a distinction the app cannot back up, which is the very
+ * thing this rule exists to prevent.
+ */
+.pill[data-inferred='true'] {
+  border-style: dashed;
+  opacity: 0.85;
+}
+
 .pill[data-status='busy'] {
   color: var(--busy);
   border-color: color-mix(in srgb, var(--busy) 40%, transparent);

@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import type { Agent } from '../../shared/types.ts'
-import { CLAUDE_KIND, specOf } from '../../shared/agent-kinds.ts'
+import { CLAUDE_KIND, hasTranscripts, specOf } from '../../shared/agent-kinds.ts'
 import { relative, tildePath, tokens } from '../lib/format.ts'
 import { plainText } from '../lib/chat.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
@@ -71,6 +71,10 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
   // sessions there is nothing to disambiguate, and a badge on every card is a
   // word to read past on every card.
   const kindLabel = agent.agentKind === CLAUDE_KIND ? '' : (specOf(agent.agentKind)?.label ?? agent.agentKind)
+  // Advertised on the card so a selector can ask for one that can hold a
+  // conversation, rather than counting positions and hoping — which is what the
+  // UX and mobile audits were doing until a Kiro fixture sorted into the slot.
+  const transcripts = hasTranscripts(agent.agentKind)
 
   return (
     <button
@@ -79,6 +83,8 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
       data-testid="agent-card"
       data-status={agent.status}
       data-session-id={agent.sessionId}
+      data-agent-kind={agent.agentKind}
+      data-transcripts={transcripts}
       aria-current={selected}
       onClick={() => onSelect(agent.sessionId)}
     >
@@ -86,7 +92,13 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
         <span className={styles.name} data-testid="agent-name" title={displayName(agent)}>
           {displayName(agent)}
         </span>
-        <span className={styles.pill} data-testid="agent-status" data-status={agent.status}>
+        <span
+          className={styles.pill}
+          data-testid="agent-status"
+          data-status={agent.status}
+          data-inferred={agent.statusInferred === true}
+          title={agent.statusInferred === true ? t('statusInferredTitle') : undefined}
+        >
           {statusText(agent)}
         </span>
       </div>
@@ -127,8 +139,9 @@ export const AgentCard = memo(function AgentCard({ agent, selected, onSelect }: 
         <div
           className={`${styles.activity} ${styles.activityMuted}`}
           data-testid="agent-activity"
+          title={transcripts ? t('noPromptsYet') : t('noTranscript')}
         >
-          {kindLabel ? t('noTranscript') : t('noPromptsYet')}
+          {transcripts ? t('noPromptsYet') : t('noTranscript')}
         </div>
       )}
     </button>

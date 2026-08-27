@@ -53,10 +53,15 @@ for (const { name, device } of PROFILES) {
   const ov = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   if (ov.s > ov.i + 1) add('high', 'overflow', `${name}: list overflows horizontally (${ov.s} > ${ov.i})`)
 
-  // 4. Open an agent -> chat. Not the first card: that one is blocked, and a
-  // blocked agent deliberately opens on the terminal instead.
-  const cards = await page.$$('[data-testid="agent-card"]')
-  await cards[1].click()
+  /*
+   * 4. Open an agent -> chat. Asked for by capability, not by position: a
+   * blocked agent opens on the terminal, and an agent whose CLI keeps no
+   * transcript has no chat at all, so counting cards picks the wrong one as
+   * soon as the fixture fleet gains a second kind.
+   */
+  const cards = await page.$$('[data-testid="agent-card"][data-transcripts="true"]:not([data-status="waiting"])')
+  if (cards.length === 0) throw new Error('no chat-capable agent in the fixture fleet')
+  await cards[0].click()
   await page.waitForSelector('[data-testid="message"]', { timeout: 6000 }).catch(() => add('high', 'chat', `${name}: chat did not render`))
   await page.waitForTimeout(400)
 

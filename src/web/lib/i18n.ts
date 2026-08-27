@@ -57,6 +57,23 @@ const EN = {
   notAttachable: 'not attachable',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
   statusFromPane: 'quiet',
+  helpSectionKinds: 'Other agent CLIs',
+  helpKindsIntro:
+    'Kiro CLI sessions appear alongside Claude Code ones, found through tmux and ' +
+    'marked with a badge. They can be attached to like any other agent, but they ' +
+    'keep no transcript this app can read, so they have no conversation, no token ' +
+    'count and no Chat tab.',
+  helpKindsStatus:
+    'Their status is marked \u201Cquiet\u201D and drawn with a dashed outline, because ' +
+    'it is worked out from whether their terminal has produced output lately rather ' +
+    'than reported by the agent. For the same reason they never show ' +
+    '\u201Cwaiting\u201D: an agent stopped at a prompt and one that has finished look ' +
+    'identical from outside.',
+  statusInferredTitle:
+    "Worked out from whether this agent's terminal has produced output lately. It " +
+    'does not report its own status the way Claude Code does, so it can never show ' +
+    '\u201Cwaiting\u201D \u2014 an agent stopped at a prompt and one that has ' +
+    'finished look the same from outside.',
   noTranscript: 'This agent keeps no transcript this app can read.',
   emptyFleetTitle: 'No Claude Code sessions found',
   emptyFleetBody: 'Start one with `claude` in any directory, or use New agent below.',
@@ -286,6 +303,13 @@ const ZH: Record<Key, string> = {
   notAttachable: '无法接入',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
   statusFromPane: '窗格静默',
+  helpSectionKinds: '其他助手 CLI',
+  helpKindsIntro:
+    'Kiro CLI 会话会与 Claude Code 会话一同显示，通过 tmux 发现并带有标记。它们可以像其他助手一样接入终端，但没有本应用能读取的对话记录，因此没有对话、没有 token 统计，也没有“对话”标签页。',
+  helpKindsStatus:
+    '它们的状态标记为“窗格静默”并以虚线勾勒，因为这是根据终端近期是否有输出推断的，而非助手自报。同理，它们永远不会显示“等待中”——停在提示符前和已经完成，从外部看是一样的。',
+  statusInferredTitle:
+    '根据该助手终端近期是否有输出推断得出。它不像 Claude Code 那样自报状态，因此永远不会显示“等待中”——停在提示符前和已经完成，从外部看是一样的。',
   noTranscript: '此助手没有本应用能读取的对话记录。',
   emptyFleetTitle: '没有找到 Claude Code 会话',
   emptyFleetBody: '在任意目录运行 `claude` 启动一个，或使用下方的「新建代理」。',

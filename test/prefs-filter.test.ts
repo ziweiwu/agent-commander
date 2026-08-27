@@ -177,3 +177,41 @@ describe('sort persistence', () => {
     expect(query).toBe('')
   })
 })
+
+/**
+ * Searching for what is written on the card.
+ *
+ * The card wears a `Kiro` badge, and typing `kiro` returned "Nothing matches
+ * that filter". A search that cannot find a word the user is looking straight
+ * at is the plainest kind of broken, whatever the field list says.
+ */
+describe('free-text search covers the agent kind', () => {
+  const kiro = {
+    sessionId: 'tmux:kiro-1',
+    pid: 1,
+    name: 'folio',
+    cwd: '/x/folio',
+    folder: 'folio',
+    status: 'idle' as const,
+    agentKind: 'kiro',
+    kind: 'interactive',
+    startedAt: 0,
+  }
+
+  it('matches the kind id and its label, either case', async () => {
+    const { matches } = await import('../src/web/lib/format.ts')
+    for (const query of ['kiro', 'Kiro', 'KIRO']) {
+      expect(matches(kiro, query)).toBe(true)
+    }
+  })
+
+  it('does not sweep in every other agent', async () => {
+    const { matches } = await import('../src/web/lib/format.ts')
+    expect(matches({ ...kiro, agentKind: 'claude', folder: 'other' }, 'kiro')).toBe(false)
+  })
+
+  it('still finds a Claude agent by its kind', async () => {
+    const { matches } = await import('../src/web/lib/format.ts')
+    expect(matches({ ...kiro, agentKind: 'claude' }, 'claude')).toBe(true)
+  })
+})

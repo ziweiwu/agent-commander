@@ -72,6 +72,12 @@ export function Help({ onClose }: { onClose: () => void }) {
         </dl>
       </section>
 
+      <section data-testid="help-kinds">
+        <h3>{t('helpSectionKinds')}</h3>
+        <p>{t('helpKindsIntro')}</p>
+        <p>{t('helpKindsStatus')}</p>
+      </section>
+
       <section data-testid="help-tailscale">
         <h3>{t('helpSectionPhone')}</h3>
         <p>{t('helpPhoneIntro')}</p>

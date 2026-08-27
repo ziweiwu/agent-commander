@@ -1,3 +1,4 @@
+import { specOf } from '../../shared/agent-kinds.ts'
 import type { Agent, RateLimits } from '../../shared/types.ts'
 
 /**
@@ -130,11 +131,28 @@ export const GROUPS = [
 
 export type GroupKey = (typeof GROUPS)[number]['key']
 
-/** Does this agent match the free-text filter? */
+/**
+ * Does this agent match the free-text filter?
+ *
+ * The kind is in here because it is on the card: typing `kiro` and being told
+ * nothing matches, while a card two inches away wears a `Kiro` badge, is the
+ * plainest kind of broken search there is. Both the id and the label are
+ * checked, so `kiro` and `Kiro` find it and so would a future kind whose label
+ * and id differ.
+ */
 export function matches(agent: Agent, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
-  return [agent.name, agent.cwd, agent.folder, agent.gitBranch, agent.activity, agent.status]
+  return [
+    agent.name,
+    agent.cwd,
+    agent.folder,
+    agent.gitBranch,
+    agent.activity,
+    agent.status,
+    agent.agentKind,
+    specOf(agent.agentKind)?.label,
+  ]
     .filter((v): v is string => typeof v === 'string')
     .some((v) => v.toLowerCase().includes(q))
 }
