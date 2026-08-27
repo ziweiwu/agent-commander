@@ -124,6 +124,37 @@ export function saveDir(dir: SortDir): void {
   write(DIR_KEY, dir)
 }
 
+/**
+ * What Send does when the agent is already working.
+ *
+ * `queue` types the message at the agent and lets it arrive whenever the agent
+ * next reads its prompt — what this app has always done. `interrupt` stops the
+ * agent first, then sends.
+ *
+ * Per agent, because it is a judgement about *this* session: an agent grinding
+ * through a long sweep is one you interrupt, and one mid-refactor is one you
+ * let finish. A single global setting would carry a habit formed on a scratch
+ * session onto a run you did not want cut off.
+ */
+export type SendMode = 'queue' | 'interrupt'
+
+const SEND_MODE_PREFIX = 'agent-commander.send-mode.'
+
+function isSendMode(value: unknown): value is SendMode {
+  return value === 'queue' || value === 'interrupt'
+}
+
+export function loadSendMode(sessionId: string): SendMode {
+  const stored = read(SEND_MODE_PREFIX + sessionId)
+  // Queue is the default deliberately: it is what the app did before this
+  // existed, and it is the one that cannot destroy work in flight.
+  return isSendMode(stored) ? stored : 'queue'
+}
+
+export function saveSendMode(sessionId: string, mode: SendMode): void {
+  write(SEND_MODE_PREFIX + sessionId, mode)
+}
+
 export function loadTheme(): Theme {
   const stored = read(THEME_KEY)
   return isTheme(stored) ? stored : 'system'

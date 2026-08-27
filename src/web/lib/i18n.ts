@@ -131,6 +131,21 @@ const EN = {
   termNotAttachable: 'This agent cannot be attached to.',
   paneExited: 'pane has exited',
   confirmInterrupt: 'Really interrupt this agent?',
+  confirmInterruptMode:
+    'Interrupt mode: sending while this agent is working will stop it mid-task ' +
+    'first, discarding whatever it had in flight. It stays on for this agent ' +
+    'until you switch it back. Continue?',
+  sendModeLabel: 'What Send does while the agent is working',
+  sendModeQueue: 'Queue',
+  sendModeInterrupt: 'Interrupt',
+  sendModeQueueTitle: 'Let the agent finish; your message waits at its prompt.',
+  sendModeInterruptTitle: 'Stop the agent first, then send. Asked once, then armed.',
+  interrupt: 'Interrupt',
+  interruptAndSend: 'Interrupt & send',
+  interruptTitle: 'Stop what this agent is doing now',
+  interruptIdle: 'Nothing to interrupt — this agent is not working',
+  modeSwitched: 'Permission mode is now {mode}',
+  hintShiftTab: 'permission mode',
   confirmKey: 'Really send {key} to this agent?',
   /* settings */
   settings: 'Settings',
@@ -362,6 +377,20 @@ const ZH: Record<Key, string> = {
   termNotAttachable: '该代理无法接入终端。',
   paneExited: '终端窗格已退出',
   confirmInterrupt: '确定要中断这个代理吗？',
+  confirmInterruptMode:
+    '中断模式：在该助手工作时发送消息，会先打断它并丢弃正在进行的工作。' +
+    '此设置对该助手持续生效，直到你切换回来。是否继续？',
+  sendModeLabel: '助手工作时，发送键的行为',
+  sendModeQueue: '排队',
+  sendModeInterrupt: '中断',
+  sendModeQueueTitle: '让助手做完，你的消息在提示符处等待。',
+  sendModeInterruptTitle: '先打断助手，再发送。只确认一次，之后即生效。',
+  interrupt: '中断',
+  interruptAndSend: '中断并发送',
+  interruptTitle: '立即停止该助手正在做的事',
+  interruptIdle: '无需中断 —— 该助手当前没有在工作',
+  modeSwitched: '权限模式已切换为 {mode}',
+  hintShiftTab: '切换权限模式',
   confirmKey: '确定要向这个代理发送 {key} 吗？',
   settings: '设置',
   theme: '主题',

@@ -446,11 +446,28 @@ true rather than aspirational.
 
 ## INV-8 — Control actions are guarded and verified
 
-Closing an agent, changing its mode or model, and setting or clearing its goal
-all work by typing into that agent's own prompt. A keystroke landing
-mid-tool-call would interleave with work in flight, so every one of them
-refuses an agent whose status is `busy`. Idle and waiting are allowed — a
-waiting agent is precisely the one you may want to redirect.
+Closing an agent, changing its model, and setting or clearing its goal all work
+by typing into that agent's own prompt. Text landing mid-tool-call interleaves
+with work in flight — it arrives in whatever the agent is drawing and submits
+something nobody wrote — so every action that *types* refuses an agent whose
+status is `busy`. Idle and waiting are allowed: a waiting agent is precisely
+the one you may want to redirect.
+
+**Mode is the exception, because it does not type.** It is switched by sending
+`BTab`, a control key Claude Code handles as a toggle wherever it is, exactly
+as it would from the keyboard of the terminal this app stands in for. Refusing
+it while busy made this app stricter than the thing it mirrors, and stricter in
+the one case that matters: deciding "this next step should run in plan mode"
+happens *while* the agent is running. So mode changes are permitted at any
+point in the flow, from the detail panel, from the chat strip, and from
+Shift+Tab in the composer — the same chord the CLI itself uses.
+
+What keeps that safe is the verification already in `setMode`: it re-reads the
+mode the session reports rather than assuming a press landed, so a `BTab`
+swallowed by a busy redraw surfaces as a reported failure instead of a wrong
+mode nobody noticed. `assertAttachable` is the guard it uses — agent exists,
+pane reachable — and `assertControllable` remains the guard for everything
+that types.
 
 - **Close** asks first, in the UI, naming the agent. It sends `/exit`, which is
   Claude Code's own shutdown path, and only kills the tmux session if the pane

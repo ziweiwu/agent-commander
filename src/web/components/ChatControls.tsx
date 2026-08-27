@@ -18,8 +18,10 @@ import styles from './ChatControls.module.css'
  * "this next instruction should run in plan mode" happens while typing that
  * instruction, not before opening the tab.
  *
- * INV-8 applies unchanged: both type into the agent's own prompt, so both are
- * refused while it is busy. The server enforces that; this mirrors it so the
+ * INV-8 guards them differently, and the difference is what each one sends.
+ * A goal is typed into the agent's own prompt, so it is refused while the agent
+ * is busy. Mode sends `BTab`, a control key handled wherever the agent is, so
+ * it stays available mid-run. The server enforces both; this mirrors them so a
  * control reads as unavailable rather than failing after the click.
  */
 export function ChatControls({ agent }: { agent: Agent }) {
@@ -40,6 +42,13 @@ export function ChatControls({ agent }: { agent: Agent }) {
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
+  /*
+   * Mode is the exception, and INV-8 now says so: it is switched by sending
+   * `BTab`, a control key the agent handles wherever it is, not by typing into
+   * its prompt. Deciding "this next step should run in plan mode" happens while
+   * the agent is running, which is precisely when this used to be refused.
+   */
+  const modeDisabled = !agent.paneId || pending !== null
 
   const goal = agent.goal
   // A met goal is finished, not running. Only an unmet one is a live goal.
@@ -157,8 +166,7 @@ export function ChatControls({ agent }: { agent: Agent }) {
             <select
               className={styles.select}
               data-testid="chat-mode-select"
-              disabled={disabled}
-              title={reason}
+              disabled={modeDisabled}
               value={agent.permissionMode ?? ''}
               onChange={(e) => onMode(e.target.value)}
             >

@@ -136,8 +136,40 @@ describe('setMode', () => {
     await expect(setMode(agent(), 'turbo', deps())).rejects.toThrow(/unknown permission mode/)
   })
 
-  it('refuses a busy agent', async () => {
-    await expect(setMode(agent({ status: 'busy' }), 'plan', deps())).rejects.toThrow(/busy/)
+  /*
+   * INV-8's one exception. Mode sends `BTab`, a control key the agent handles
+   * wherever it is, rather than typing into its prompt — so unlike every other
+   * control action it is allowed mid-run. That is the only time it matters:
+   * deciding the next step needs plan mode happens while the agent is working.
+   */
+  it('switches a busy agent, because it sends a key rather than typing', async () => {
+    let mode = 'default'
+    const d = deps({
+      key: vi.fn(async () => {
+        mode = 'plan'
+      }),
+      readMode: async () => mode,
+    })
+    const result = await setMode(agent({ status: 'busy' }), 'plan', d)
+    expect(result).toMatchObject({ ok: true, mode: 'plan' })
+    expect(d.key).toHaveBeenCalledWith('%1', 'BTab')
+    // And it still never types: text is what the busy refusal exists to stop.
+    expect(d.paste).not.toHaveBeenCalled()
+  })
+
+  it('still refuses an agent it cannot reach', async () => {
+    const noPane = agent({ status: 'busy' })
+    delete (noPane as { paneId?: string }).paneId
+    await expect(setMode(noPane, 'plan', deps())).rejects.toThrow(/attachable/)
+  })
+
+  // The exception is mode alone. Everything that types keeps the busy refusal.
+  it('is the only exception — model, goal and close still refuse a busy agent', async () => {
+    const busy = agent({ status: 'busy' })
+    await expect(setModel(busy, 'opus', deps())).rejects.toThrow(/busy/)
+    await expect(setGoal(busy, 'the tests pass', deps())).rejects.toThrow(/busy/)
+    await expect(clearGoal(busy, deps())).rejects.toThrow(/busy/)
+    await expect(closeAgent(busy, deps())).rejects.toThrow(/busy/)
   })
 })
 

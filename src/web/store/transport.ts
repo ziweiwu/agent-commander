@@ -141,6 +141,29 @@ export function sendMessage(text: string): void {
   send({ type: 'paste', sessionId: selected, text, submit: true })
 }
 
+/**
+ * Stop the agent, then say the next thing.
+ *
+ * Two writes, deliberately in this order and deliberately not merged into one:
+ * the server queues writes per pane (`pane.ts` `enqueue`), so an `Escape` put on
+ * the wire before the paste is delivered before it. Merging them into a single
+ * "interrupt and send" message on the server would be a second command shape
+ * for the one path that types into a live session, which INV-7 exists to
+ * prevent.
+ *
+ * The caller is claiming a human chose to interrupt — see `sendConfirmedKey`.
+ * Here that claim is made once, when the send mode is switched, rather than on
+ * every message: a dialog in front of every send is one people learn to dismiss
+ * without reading, which leaves the guard weaker than a single deliberate
+ * choice that relabels the button it arms.
+ */
+export function interruptAndSend(text: string): void {
+  const { selected } = useStore.getState()
+  if (!selected || text.trim().length === 0) return
+  sendConfirmedKey('Escape')
+  sendMessage(text)
+}
+
 /** Send a control key that cannot destroy work. */
 export function sendKey(key: string): void {
   const { selected } = useStore.getState()

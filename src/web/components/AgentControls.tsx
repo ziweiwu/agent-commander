@@ -36,6 +36,9 @@ export function AgentControls({ agent }: { agent: Agent }) {
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
+  // INV-8's exception: mode sends a key rather than typing, so it is the one
+  // control that works while the agent is working. See `control.ts` `setMode`.
+  const modeDisabled = !agent.paneId || pending !== null
 
   const run = async (kind: 'mode' | 'model', value: string): Promise<void> => {
     setPending(kind)
@@ -70,8 +73,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
         <select
           className={styles.select}
           data-testid="mode-select"
-          disabled={disabled}
-          title={reason}
+          disabled={modeDisabled}
           value={agent.permissionMode ?? ''}
           onChange={(e) => void run('mode', e.target.value)}
         >

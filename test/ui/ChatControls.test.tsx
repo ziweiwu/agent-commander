@@ -2,10 +2,12 @@
  * The two switches that sit above the message box: permission mode, and the
  * session goal (`/goal`).
  *
- * Both type into the agent's own prompt, so INV-8's guard applies to both — a
- * busy agent is refused — and INV-2's "exactly once" applies to setting a
- * goal, which is an instruction to a live session however small the control
- * that sends it looks.
+ * The two are guarded differently, and INV-8 says why. Setting a goal types
+ * into the agent's own prompt, so a busy agent is refused. Switching mode sends
+ * `BTab`, a control key the agent handles wherever it is, so it stays available
+ * mid-run — which is the only time anyone reaches for it. INV-2's "exactly
+ * once" applies to the goal either way: it is an instruction to a live session,
+ * however small the control that sends it looks.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
@@ -40,12 +42,30 @@ describe('mode', () => {
     expect(setAgentMode).toHaveBeenCalledExactlyOnceWith('plan')
   })
 
-  // INV-8: a keystroke landing mid-tool-call would interleave with work in flight.
-  it('is refused while the agent is busy, and says why', () => {
-    renderApp(<ChatControls agent={agent({ sessionId: 'a', status: 'busy' })} />)
+  /*
+   * INV-8's exception. Mode sends `BTab` — a control key the agent handles
+   * wherever it is — rather than typing into its prompt, so it is the one
+   * control that stays available mid-run. That is when it is wanted: the
+   * decision that the next step needs plan mode is made while the agent works.
+   */
+  it('stays available while the agent is busy', async () => {
+    const user = userEvent.setup()
+    renderApp(
+      <ChatControls agent={agent({ sessionId: 'a', status: 'busy', permissionMode: 'default' })} />,
+    )
     const select = screen.getByTestId('chat-mode-select') as HTMLSelectElement
-    expect(select.disabled).toBe(true)
-    expect(select.title).toBe('Only while the agent is idle')
+    expect(select.disabled).toBe(false)
+
+    await user.selectOptions(select, 'plan')
+    expect(setAgentMode).toHaveBeenCalledExactlyOnceWith('plan')
+  })
+
+  // Reachability is still required: no pane, nothing to send the key to.
+  it('is unavailable on an agent with no pane', () => {
+    const noPane = agent({ sessionId: 'a', status: 'busy' })
+    delete (noPane as { paneId?: string }).paneId
+    renderApp(<ChatControls agent={noPane} />)
+    expect((screen.getByTestId('chat-mode-select') as HTMLSelectElement).disabled).toBe(true)
   })
 })
 

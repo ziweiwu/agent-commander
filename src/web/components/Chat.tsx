@@ -7,7 +7,9 @@ import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
-import { sendMessage } from '../store/transport.ts'
+import { interruptAndSend, sendConfirmedKey, sendMessage, setAgentMode } from '../store/transport.ts'
+import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
+import { MODES, MODE_KEY } from '../lib/modes.ts'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button, Chip } from './ui/Button.tsx'
@@ -51,6 +53,7 @@ export function Chat({ agent }: { agent: Agent }) {
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
   const events = useStore((s) => s.events)
+  const showToast = useStore((s) => s.showToast)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -61,8 +64,62 @@ export function Chat({ agent }: { agent: Agent }) {
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
 
   const attachable = Boolean(agent.paneId)
+  const busy = agent.status === 'busy'
   // The interface language is only the fallback, for a chat with nothing in it.
   const promptLang = useMemo(() => conversationLang(messages, lang), [messages, lang])
+
+  /*
+   * Per agent, and re-read whenever the open agent changes: this is a judgement
+   * about the session in front of you, not a habit. Held in state as well as
+   * storage so the toggle repaints, and keyed off `sessionId` so switching
+   * agents cannot carry one agent's answer onto another.
+   */
+  const [sendMode, setSendMode] = useState<SendMode>(() => loadSendMode(agent.sessionId))
+  useEffect(() => {
+    setSendMode(loadSendMode(agent.sessionId))
+  }, [agent.sessionId])
+
+  /*
+   * INV-6, paid once. `Escape` destroys work in flight, so it may not reach a
+   * live agent unless a human said so — but asking on every send would put a
+   * modal in front of every message in this mode, and a modal people dismiss
+   * without reading guards nothing. The claim is made here, at the moment the
+   * mode is armed, and the Send button then says what it will do.
+   */
+  const chooseSendMode = (next: SendMode) => {
+    if (next === sendMode) return
+    if (next === 'interrupt' && !window.confirm(t('confirmInterruptMode'))) return
+    setSendMode(next)
+    saveSendMode(agent.sessionId, next)
+  }
+
+  /** The standalone stop. Its own confirmation, because it is its own action. */
+  const interrupt = () => {
+    if (!attachable) return
+    if (!window.confirm(t('confirmInterrupt'))) return
+    sendConfirmedKey('Escape')
+  }
+
+  /*
+   * Shift+Tab cycles the permission mode, the same chord Claude Code itself
+   * uses for it — the point is that the muscle memory carries over.
+   *
+   * It works at any point in the flow, including while the agent is working —
+   * that is INV-8's one exception, and the reason is that this sends `BTab`
+   * rather than typing into the prompt. Deciding the next step needs plan mode
+   * happens mid-run, which is exactly when this used to be refused.
+   *
+   * It costs reverse tab-navigation out of the composer, which is a real
+   * a11y trade: `Tab` forward and `Escape` both still move focus, so this is
+   * not a keyboard trap (WCAG 2.1.2), but it is a binding worth knowing about.
+   */
+  const cycleMode = async () => {
+    if (!attachable) return
+    const at = MODES.indexOf((agent.permissionMode ?? MODES[0]) as (typeof MODES)[number])
+    const next = MODES[(at + 1) % MODES.length] as string
+    const result = await setAgentMode(next)
+    showToast(result.ok ? t('modeSwitched', { mode: t(MODE_KEY[next] ?? 'modeDefault') }) : t('controlFailed', { error: result.error }))
+  }
 
   const rows = useMemo(() => {
     const out: Array<{ key: string; day?: string; message?: (typeof messages)[number] }> = []
@@ -113,7 +170,10 @@ export function Chat({ agent }: { agent: Agent }) {
     const text = draftRef.current
     if (text.trim().length === 0 || !attachable) return
     draftRef.current = ''
-    sendMessage(text)
+    // Interrupting is only meaningful against an agent that is actually working;
+    // on an idle one the two modes are the same act, so the Escape is not sent.
+    if (sendMode === 'interrupt' && busy) interruptAndSend(text)
+    else sendMessage(text)
     setDraft('')
     setPinned(true)
     inputRef.current?.focus()
@@ -201,6 +261,31 @@ export function Chat({ agent }: { agent: Agent }) {
       {attachable && (
         <div className={styles.strip} data-testid="composer-strip">
           <ChatControls agent={agent} />
+
+          {/*
+            What Send does to an agent that is already working, and the stop
+            itself. Both live here rather than in the detail panel's control
+            row: that row sits above the tabs and is absent in full screen,
+            which is exactly where a long conversation gets read — and deciding
+            "stop what you are doing and read this instead" happens while
+            typing the instruction, not before opening the tab.
+          */}
+          <div className={styles.sendMode} role="group" aria-label={t('sendModeLabel')}>
+            {(['queue', 'interrupt'] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={styles.sendModeOption}
+                data-testid={`send-mode-${mode}`}
+                aria-pressed={sendMode === mode}
+                title={t(mode === 'queue' ? 'sendModeQueueTitle' : 'sendModeInterruptTitle')}
+                onClick={() => chooseSendMode(mode)}
+              >
+                {t(mode === 'queue' ? 'sendModeQueue' : 'sendModeInterrupt')}
+              </button>
+            ))}
+          </div>
+
           <div className={styles.quick} role="group" aria-label={t('quickPromptsLabel')}>
             {QUICK_PROMPTS.map((key) => {
               const text = translate(promptLang, key)
@@ -255,20 +340,47 @@ export function Chat({ agent }: { agent: Agent }) {
               if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
                 e.preventDefault()
                 submit()
+                return
+              }
+              // The chord Claude Code uses for this, so the habit carries over.
+              if (e.key === 'Tab' && e.shiftKey) {
+                e.preventDefault()
+                void cycleMode()
               }
             }}
           />
+          {/*
+            Only while there is something to stop. It sits with Send rather
+            than up in the settings strip because it is an act, not a setting —
+            and rendering it only when it applies keeps it off the composer row
+            on a phone in the common case, where the row is already tight.
+          */}
+          {busy && (
+            <Button
+              type="button"
+              variant="compact"
+              className={styles.stop}
+              data-testid="chat-interrupt"
+              title={t('interruptTitle')}
+              onClick={interrupt}
+            >
+              {t('interrupt')}
+            </Button>
+          )}
           <Button
             type="submit"
             className={styles.send}
             data-testid="composer-send"
             disabled={!attachable || draft.trim().length === 0}
           >
-            {t('send')}
+            {/* The button says what it will do, which is what makes asking once
+                at the toggle enough rather than asking on every send. */}
+            {sendMode === 'interrupt' && busy ? t('interruptAndSend') : t('send')}
           </Button>
         </div>
         <div className={styles.hint} data-testid="composer-hint">
-          <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')}
+          <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')} ·{' '}
+          <kbd>Shift+Tab</kbd> {t('hintShiftTab')}
         </div>
       </form>
     </div>

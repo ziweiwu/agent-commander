@@ -223,3 +223,64 @@
     margin: 6px 0 4px;
   }
 }
+
+/*
+ * What Send does while the agent is working, as a two-state segmented control
+ * rather than a checkbox: the two options name what will happen, and neither
+ * is a default the other is measured against.
+ */
+.sendMode {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+
+.sendModeOption {
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 2px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sendModeOption[aria-pressed='true'] {
+  background: var(--panel-2);
+  color: var(--fg);
+}
+
+.sendModeOption:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* The stop reads as the one control here that takes something away. */
+.stop {
+  flex: none;
+  color: var(--waiting);
+}
+
+.stop:disabled {
+  color: var(--faint);
+}
+
+/*
+ * A segmented control is two small targets side by side, which is exactly the
+ * shape that lands under the touch minimum — at rest these are 21px tall, sat
+ * among chips that are comfortably tappable, so a mis-tap hits the other one.
+ *
+ * Keyed on width rather than `pointer: coarse` because that is what the
+ * project's own UX audit measures: it resizes the viewport without claiming a
+ * touch device, so a pointer query never matches and the rule silently does
+ * nothing. Last in the file so its padding wins over the base rule.
+ */
+@media (max-width: 900px) {
+  .sendModeOption {
+    min-height: 44px;
+    padding: 0 14px;
+  }
+}

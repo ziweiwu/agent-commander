@@ -93,7 +93,10 @@ Open an agent and you get two tabs:
   summary). Messages you send appear immediately as *sending…* and settle once
   the agent's transcript confirms them; one the agent never echoes back is
   marked *not delivered* rather than spinning forever, and is never resent
-  for you. A typing indicator shows while it is working. `Enter` sends, `Shift+Enter` adds a newline. Above the box is a
+  for you. A typing indicator shows while it is working. `Enter` sends,
+  `Shift+Enter` adds a newline, and `Shift+Tab` cycles the permission mode —
+  the same chord the CLI uses, and it works mid-task. An agent that is working
+  can be stopped from here too, rather than only from the terminal. Above the box is a
   row of the replies you end up typing over and over — *continue*, *yes, go
   ahead*, *run the tests*, *what's blocking you?*, *summarise where you
   are*. Picking one sends it as it reads, and leaves anything you had
@@ -254,13 +257,40 @@ ignores it.
 ### From the chat itself
 
 Directly above the message box, sharing the line with the quick replies, sit
-the two switches you reach for while reading a conversation rather than before
-opening it: **Mode**, and a **Goal** toggle. Deciding that the next instruction
-should run in plan mode happens while typing that instruction. They share that
-line rather than taking one of their own because a row of their own cost 44px
-of a 568px phone — enough to push the conversation itself under the layout
-audit's floor. Opening the goal field gives it the whole strip, so its Set and
-Cancel are never scrolled off the end.
+the switches you reach for while reading a conversation rather than before
+opening it: **Mode**, a **Goal** toggle, and the choice of what Send does to an
+agent that is already working. Deciding that the next instruction should run in
+plan mode happens while typing that instruction. They share that line rather
+than taking one of their own because a row of their own cost 44px of a 568px
+phone — enough to push the conversation itself under the layout audit's floor.
+Opening the goal field gives it the whole strip, so its Set and Cancel are
+never scrolled off the end.
+
+**Mode works while the agent is working**, unlike every other control here.
+That is INV-8's one exception and it is earned by what the control sends:
+`/model`, `/goal` and `/exit` are pasted into the agent's prompt, where text
+arriving mid-tool-call interleaves with work in flight, so all three wait until
+the agent is idle. Mode is switched by sending `BTab` — a control key the agent
+handles wherever it is, exactly as it would from the keyboard of the terminal
+this app stands in for. Refusing it was this app being stricter than the thing
+it mirrors, in the one case that matters. **Shift+Tab** in the message box
+cycles it too, the same chord the CLI itself uses; the cost is that Shift+Tab
+no longer tabs backwards out of the box, though Tab and Escape still move focus.
+
+**Queue or Interrupt** decides what Send does when the agent is mid-task.
+*Queue* is the default and is what this app has always done: the message waits
+at the agent's prompt and arrives when it next looks. *Interrupt* stops the
+agent first and then sends. Choosing it asks once — after that the Send button
+reads **Interrupt & send**, which is what makes asking again on every message
+unnecessary, and a dialog in front of every send is one people learn to dismiss
+without reading. The choice is remembered per agent, because it is a judgement
+about that session: an agent grinding through a long sweep is one you interrupt,
+one mid-refactor is one you let finish.
+
+Beside Send, and only while there is something to stop, is **Interrupt**. It
+asks every time, because unlike the mode choice it is a single destructive act
+rather than a standing preference (INV-6). It was previously reachable only by
+switching to Attach and finding Esc.
 
 Being part of the conversation view means they are there in full screen too,
 unlike the panel's control row — and full screen is where a phone actually
@@ -406,8 +436,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 605 tests: pure logic, server, and React components
-npm run e2e        # 102 end-to-end tests in a real browser, at three screen shapes
+npm test           # 672 tests: pure logic, server, and React components
+npm run e2e        # 105 end-to-end tests in a real browser, at three screen shapes
 npm run typecheck
 npm run lint
 npm run verify:inv1   # asserts attaching never resizes a real pane (server must be running)

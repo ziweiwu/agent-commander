@@ -43,9 +43,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 657 tests: pure logic, server, and React components
+npm test              # 672 tests: pure logic, server, and React components
 npm run build
-npm run e2e           # 102 end-to-end tests in a real browser, at three screen shapes
+npm run e2e           # 105 end-to-end tests in a real browser, at three screen shapes
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
 npm run verify:inv1   # attaching never resizes a real pane — server must be running

@@ -28,10 +28,23 @@ export { MODE_CYCLE, isModelAlias, isCyclableMode }
  */
 export type Controllable = Agent & { paneId: string }
 
-/** INV-8: the shared guard in front of every action. */
-export function assertControllable(agent: Agent | undefined): asserts agent is Controllable {
+/** There is an agent, and there is a pane to reach it through. */
+export function assertAttachable(agent: Agent | undefined): asserts agent is Controllable {
   if (!agent) throw new ControlError('agent is no longer available')
   if (!agent.paneId) throw new ControlError(agent.attachBlockedReason ?? 'agent is not attachable')
+}
+
+/**
+ * INV-8: the shared guard in front of every action that types into the prompt.
+ *
+ * The busy refusal is about *text*. `/model`, `/goal` and `/exit` are pasted
+ * into the agent's prompt buffer, and text arriving mid-tool-call interleaves
+ * with work in flight — it lands in whatever the agent is drawing and submits
+ * something nobody wrote. Anything that types is refused until the agent is
+ * idle; see `setMode` for the one action that does not type.
+ */
+export function assertControllable(agent: Agent | undefined): asserts agent is Controllable {
+  assertAttachable(agent)
   if (agent.status === 'busy') {
     throw new ControlError('agent is busy — wait until it is idle before changing it')
   }
@@ -122,6 +135,20 @@ const MAX_STEPS = 6
  * and `auto` when they are unavailable, so a fixed number of presses would land
  * somewhere else entirely. Gives up after a bounded number of steps and reports
  * where it actually ended up.
+ *
+ * **The one control action allowed while the agent is working**, and the reason
+ * is what it sends. Every other action pastes text into the prompt buffer,
+ * which mid-tool-call interleaves with work in flight and submits something
+ * nobody wrote. This sends `BTab` — a control key Claude Code handles as a
+ * toggle wherever it is, exactly as it would from the keyboard of the terminal
+ * this app is standing in for. Refusing it was the app being stricter than the
+ * thing it mirrors: deciding "this next step needs plan mode" happens *while*
+ * the agent is running, which is the only time it matters.
+ *
+ * The verification loop is what makes this safe to allow. It re-reads the mode
+ * the session reports rather than assuming a press landed, and reports where it
+ * actually ended up — so a press swallowed by a busy redraw is visible as a
+ * failure rather than a wrong mode nobody noticed.
  */
 export async function setMode(
   agent: Agent | undefined,
@@ -129,7 +156,7 @@ export async function setMode(
   deps: ControlDeps,
   maxSteps = MAX_STEPS,
 ): Promise<ModeResult> {
-  assertControllable(agent)
+  assertAttachable(agent)
   assertSlashCommandable(agent)
   if (!isCyclableMode(target)) throw new ControlError(`unknown permission mode: ${target}`)
 

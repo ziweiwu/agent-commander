@@ -99,14 +99,36 @@ test.describe('acting on a running agent', () => {
     await expect(select).toBeEnabled()
   })
 
-  test('INV-8 refuses to act on a busy agent, and says why', async ({ page }) => {
+  test('INV-8 refuses to type at a busy agent, and says why', async ({ page }) => {
     await openAgent(page, AGENT.busy)
 
     // Typing into the prompt of an agent that is mid-tool-call would interleave
-    // with work in flight, so the controls are drawn as unavailable rather than
-    // being offered and then refused.
-    await expect(page.getByTestId('chat-mode-select')).toBeDisabled()
+    // with work in flight, so the controls that type are drawn as unavailable
+    // rather than being offered and then refused.
     await expect(page.getByTestId('goal-toggle')).toBeDisabled()
+  })
+
+  /*
+   * INV-8's one exception, end to end. Mode is switched by sending `BTab` — a
+   * control key the agent handles wherever it is — rather than by typing into
+   * its prompt, so it stays available mid-run. That is the only time it is
+   * wanted: the decision that the next step needs plan mode is made while the
+   * agent is working.
+   */
+  test('INV-8 still changes the mode of a busy agent', async ({ page }) => {
+    await openAgent(page, AGENT.busy)
+
+    const select = page.getByTestId('chat-mode-select')
+    await expect(select).toBeEnabled()
+
+    await select.selectOption('plan')
+
+    // Success is the absence of the failure toast, exactly as for an idle
+    // agent above: the mock's deps cycle the real `MODE_CYCLE` and `setMode`
+    // verifies against what the session reports, so a refusal would surface
+    // as a toast rather than as a wrong value here.
+    await page.waitForTimeout(3_000)
+    await expect(page.getByTestId('toast')).toHaveCount(0)
   })
 
   test('INV-8 sets a goal and clears it again', async ({ page }) => {
