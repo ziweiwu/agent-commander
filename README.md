@@ -451,8 +451,10 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 672 tests: pure logic, server, and React components
-npm run e2e        # 105 end-to-end tests in a real browser, at three screen shapes
+npm test           # 683 tests: pure logic, server, and React components
+npm run e2e        # 177 end-to-end tests: desktop/tablet/phone on Chromium,
+                   # and phone/tablet again on WebKit — every browser on iOS is
+                   # WebKit, and this app is meant to be used from a phone
 npm run typecheck
 npm run lint
 npm run verify:inv1   # asserts attaching never resizes a real pane (server must be running)

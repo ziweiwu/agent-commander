@@ -43,9 +43,10 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 672 tests: pure logic, server, and React components
+npm test              # 683 tests: pure logic, server, and React components
 npm run build
-npm run e2e           # 105 end-to-end tests in a real browser, at three screen shapes
+npm run e2e           # 177 end-to-end tests, five projects: desktop/tablet/phone on
+                      # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
 npm run verify:inv1   # attaching never resizes a real pane — server must be running
@@ -56,7 +57,11 @@ of them: five gates, each answering a question the others cannot, and the note
 on why the last three stay local habits rather than CI gates.
 
 `npm test` and `npm run e2e` run on every push and pull request
-(`.github/workflows/ci.yml`). The rest are local.
+(`.github/workflows/ci.yml`), which installs both Chromium and WebKit. The
+second engine is not redundancy: every browser on iOS is WebKit, and for this
+app's first five releases every "iPhone" and "iPad" result it produced was
+Chromium wearing an iPhone user-agent. `ENGINE=webkit npm run audit:mobile`
+runs the device audit on WebKit too. The rest are local.
 
 The first three also run as a `Stop` hook, so a turn that leaves the tree
 failing is refused rather than summarised. The hook lives in the `harness`

@@ -52,12 +52,19 @@ const PORT = Number(process.env.E2E_PORT ?? 4599)
  * Chromium, could not launch them at all. Local and CI silently testing
  * different engines is worse than either choice of engine.
  *
- * Chromium for all three, because these specs are about the layout and the
- * wiring rather than engine behaviour — the audit scripts make the same choice.
- * Real WebKit coverage would be a deliberate addition, with the browser
- * installed in CI to match.
+ * Chromium is therefore named explicitly rather than inherited, so local and CI
+ * run the same engine.
+ *
+ * WebKit is now a deliberate addition alongside it, not instead of it, and CI
+ * installs it to match. Every phone and tablet result this project produced for
+ * its first five releases was Chromium wearing an iPhone user-agent — which is
+ * a strange thing for an app whose headline feature is reaching it from a phone
+ * over Tailscale, where every browser on the device is WebKit. A sweep found no
+ * defects in Safari 26.5; these projects are what keeps that true, since the
+ * one thing nobody would notice is the day it stops being.
  */
 const CHROMIUM = { browserName: 'chromium' } as const
+const WEBKIT = { browserName: 'webkit' } as const
 
 const PROJECTS = [
   {
@@ -76,6 +83,16 @@ const PROJECTS = [
     name: 'phone',
     use: { ...devices['iPhone 13'], ...CHROMIUM },
     grepInvert: /@desktop|@tablet/,
+  },
+  {
+    name: 'phone-safari',
+    use: { ...devices['iPhone 13'], ...WEBKIT },
+    grepInvert: /@desktop|@tablet/,
+  },
+  {
+    name: 'tablet-safari',
+    use: { ...devices['iPad Pro 11'], ...WEBKIT },
+    grepInvert: /@phone|@desktop/,
   },
 ]
 

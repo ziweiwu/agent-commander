@@ -1,4 +1,4 @@
-import { chromium, devices } from 'playwright'
+import { chromium, devices, webkit } from 'playwright'
 
 const OUT = process.env.SHOTS ?? '/tmp/agent-commander-audit'
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
@@ -12,7 +12,16 @@ const PROFILES = [
   { name: 'ipad', device: devices['iPad Pro 11'] },
 ]
 
-const browser = await chromium.launch()
+/*
+ * Chromium by default, WebKit on request: `ENGINE=webkit npm run audit:mobile`.
+ *
+ * These profiles all name iOS devices, and every browser on iOS is WebKit — so
+ * running them on Chromium alone measured an engine no iPhone has. Chromium
+ * stays the default because CI and the other audits use it and a silent switch
+ * would make two runs incomparable.
+ */
+const ENGINE = process.env.ENGINE === 'webkit' ? webkit : chromium
+const browser = await ENGINE.launch()
 
 for (const { name, device } of PROFILES) {
   const ctx = await browser.newContext({ ...device })
@@ -110,7 +119,24 @@ for (const { name, device } of PROFILES) {
       const cols = screen.offsetWidth
       return {
         measured,
-        clipped: wrap.scrollWidth > wrap.clientWidth + 1,
+        /*
+         * The rendered rect, not `scrollWidth`.
+         *
+         * The pane is shrunk with a CSS transform, which does not change its
+         * layout size — and engines disagree about whether a transformed child
+         * still counts toward its parent's `scrollWidth`. WebKit says yes and
+         * Chromium says no, so the old check reported a 7px clip on WebKit
+         * that measurement of the actual painted rects shows is not there: both
+         * boxes span 25..789 exactly. What the user can or cannot see is the
+         * rendered geometry, so that is what this asks about.
+         */
+        clipped: (() => {
+          const inner = wrap.firstElementChild
+          if (!inner) return false
+          const wb = wrap.getBoundingClientRect()
+          const ib = inner.getBoundingClientRect()
+          return ib.right > wb.right + 1 || ib.left < wb.left - 1
+        })(),
         scale: Math.round(m * 100) / 100,
         naturalW: screen.offsetWidth,
         shownW: Math.round(wrap.clientWidth),

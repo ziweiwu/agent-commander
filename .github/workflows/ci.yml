@@ -121,10 +121,13 @@ jobs:
           tmux new-session -d -s ci-keepalive
           tmux display-message -p ok
 
-      # Only Chromium, which is what `playwright.config.ts` pins all three
-      # projects to. The suite drives three viewports through it — desktop,
-      # tablet and phone — which is where the layout genuinely differs.
-      - run: npx playwright install --with-deps chromium
+      # Both engines, because `playwright.config.ts` now names both. The suite
+      # drives five projects: desktop, tablet and phone on Chromium, and phone
+      # and tablet again on WebKit. The second engine is not redundancy — every
+      # browser on iOS is WebKit, and this app's headline feature is reaching it
+      # from a phone, so for five releases the only engine that mattered on the
+      # target device was the one nothing ran.
+      - run: npx playwright install --with-deps chromium webkit
 
       # `playwright.config.ts` builds the web assets and starts the mock server
       # itself, so there is nothing to start here.
