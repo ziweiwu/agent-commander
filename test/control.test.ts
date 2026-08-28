@@ -191,6 +191,36 @@ describe('setMode', () => {
    * no permission mode at all (there is one in this user's own fleet), and a
    * busy agent that has not yet written the record where this app can read it.
    */
+  /*
+   * The flakiness this replaced.
+   *
+   * The mode is observed by reading a record the session writes to its own
+   * transcript, and that write is not instant. With a single read at a fixed
+   * 250ms, a record that landed at 400ms looked like a press that had done
+   * nothing: the loop stopped, correctly refusing to press blind, and left the
+   * session one step from where it started rather than at the target. Whether
+   * the switch worked came down to whether the write beat the timer.
+   *
+   * Polling makes a slow write cost latency instead of an answer.
+   */
+  it('reaches the target when the session reports the press late', async () => {
+    let reads = 0
+    const d = deps({
+      // Reports the old mode for the first few looks, then the new one — the
+      // shape of a transcript record that lands a few hundred ms after the key.
+      readMode: async () => {
+        reads += 1
+        return reads <= 4 ? 'default' : 'plan'
+      },
+    })
+
+    const result = await setMode(agent(), 'plan', d)
+
+    expect(result).toMatchObject({ ok: true, mode: 'plan' })
+    // One press, not a second one fired because the first looked ignored.
+    expect(d.key).toHaveBeenCalledTimes(1)
+  })
+
   it('presses once, not six times, when the mode never changes', async () => {
     const d = deps({ readMode: async () => 'auto' })
     const result = await setMode(agent(), 'plan', d)

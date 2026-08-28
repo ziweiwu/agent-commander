@@ -13,7 +13,7 @@
  * `Escape`, and queue mode may not send one at all.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
 import { Chat } from '../../src/web/components/Chat.tsx'
@@ -219,5 +219,39 @@ describe('Shift+Tab cycles the permission mode', () => {
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
     expect(transport.setAgentMode).toHaveBeenCalledWith(MODES[0])
+  })
+})
+
+/**
+ * An IME's Enter belongs to the IME.
+ *
+ * Typing Chinese or Japanese goes through a composition: you type pinyin, the
+ * input method offers candidates, and Enter commits the one you picked. That
+ * Enter reaches the textarea as a real keydown carrying `isComposing`, and
+ * without a guard it sent the half-composed buffer and swallowed the keypress
+ * the IME was waiting for — so the message went out as raw pinyin and the
+ * candidate never landed. This app translates itself into Chinese and follows
+ * the conversation's language when offering quick replies, so those are exactly
+ * its users.
+ */
+describe('Enter during IME composition', () => {
+  it('does not send while a candidate is being composed', async () => {
+    open(working({ status: 'idle' }))
+    const box = screen.getByTestId('composer-input') as HTMLTextAreaElement
+
+    fireEvent.change(box, { target: { value: 'nihao' } })
+    fireEvent.keyDown(box, { key: 'Enter', isComposing: true })
+
+    expect(transport.sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('still sends on a plain Enter', async () => {
+    open(working({ status: 'idle' }))
+    const box = screen.getByTestId('composer-input') as HTMLTextAreaElement
+
+    fireEvent.change(box, { target: { value: 'ready' } })
+    fireEvent.keyDown(box, { key: 'Enter' })
+
+    expect(transport.sendMessage).toHaveBeenCalledWith('ready')
   })
 })

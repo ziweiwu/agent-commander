@@ -341,6 +341,20 @@ export function Chat({ agent }: { agent: Agent }) {
               e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`
             }}
             onKeyDown={(e) => {
+              /*
+               * An IME's Enter belongs to the IME.
+               *
+               * Typing Chinese or Japanese goes through a composition: you type
+               * pinyin or kana, the input method offers candidates, and Enter
+               * commits the one you picked. That Enter arrives here as a real
+               * keydown with `isComposing` set, and without this guard it sent
+               * the half-composed buffer — swallowing the keypress the IME was
+               * waiting for, so the message went out as raw pinyin and the
+               * candidate never landed. This app already translates itself into
+               * Chinese and follows the conversation's language when it offers
+               * quick replies, so those are precisely its users.
+               */
+              if (e.nativeEvent.isComposing) return
               // Slack's convention: Enter sends, Shift+Enter starts a new line.
               if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
                 e.preventDefault()

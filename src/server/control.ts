@@ -155,6 +155,26 @@ export interface ModeResult {
 const MAX_STEPS = 6
 
 /**
+ * How long to let the session report a press, and how often to look.
+ *
+ * This used to be a single read 250ms after the press, and that made the whole
+ * control a coin toss: the mode is observed by reading a record the session
+ * writes to its transcript, and when that record had not landed within the one
+ * window we looked in, the press looked like it had done nothing. The loop then
+ * stopped — correctly refusing to press blind — leaving the mode one step from
+ * where it started rather than at the target, and reporting that it could not
+ * confirm. Sometimes 250ms was enough. That is what "flaky" was.
+ *
+ * Polling instead of guessing a delay is the fix: the answer arrives when it
+ * arrives, and the only thing a slow write costs now is a little latency
+ * rather than a wrong mode. The window is generous because the alternative to
+ * waiting is a wrong answer, and the whole call is a deliberate user action —
+ * nobody is holding this key down.
+ */
+const SETTLE_WINDOW_MS = 2500
+const SETTLE_POLL_MS = 120
+
+/**
  * Switch permission mode by cycling Shift+Tab until the session reports the
  * target.
  *
@@ -177,11 +197,32 @@ const MAX_STEPS = 6
  * actually ended up — so a press swallowed by a busy redraw is visible as a
  * failure rather than a wrong mode nobody noticed.
  */
+/**
+ * The mode the session reports once it has had a chance to report it.
+ *
+ * Returns as soon as the reading differs from `from`, or gives `from` back
+ * unchanged when the window closes — which is the caller's signal that the
+ * press was never observed, not that it failed.
+ */
+async function settledMode(
+  from: string | undefined,
+  deps: ControlDeps,
+  windowMs: number,
+): Promise<string | undefined> {
+  for (let waited = 0; waited < windowMs; waited += SETTLE_POLL_MS) {
+    await deps.wait(SETTLE_POLL_MS)
+    const seen = await deps.readMode()
+    if (seen !== from) return seen
+  }
+  return from
+}
+
 export async function setMode(
   agent: Agent | undefined,
   target: string,
   deps: ControlDeps,
   maxSteps = MAX_STEPS,
+  settleMs = SETTLE_WINDOW_MS,
 ): Promise<ModeResult> {
   assertAttachable(agent)
   assertSlashCommandable(agent)
@@ -193,8 +234,7 @@ export async function setMode(
   for (let steps = 1; steps <= maxSteps; steps += 1) {
     // BTab is tmux's name for back-tab, which is what a terminal emits for Shift+Tab.
     await deps.key(agent.paneId, 'BTab')
-    await deps.wait(250)
-    const seen = await deps.readMode()
+    const seen = await settledMode(mode, deps, settleMs)
     if (seen === target) return { ok: true, mode: seen, steps }
     /*
      * The reading did not move, so this loop is now blind — and a blind loop
