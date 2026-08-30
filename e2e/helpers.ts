@@ -32,8 +32,23 @@ export const AGENT = {
 export const card = (page: Page, sessionId: string) =>
   page.locator(`[data-testid="agent-card"][data-session-id="${sessionId}"]`)
 
-/** Open the fleet and wait for the socket to have delivered it. */
+/**
+ * Pin the fleet rendering before the page boots.
+ *
+ * The default view is the forest, which draws no cards — so a spec written
+ * against `agent-card` has to say it wants the card list rather than inherit
+ * whatever the default happens to be. Every card spec pins `legacy` here; the
+ * forest spec pins `forest` for the same reason, so neither suite moves when
+ * the default does. (This was learned the hard way: when the default flipped
+ * to forest, every card spec failed in CI at once.)
+ */
+export async function pinView(page: Page, view: 'legacy' | 'forest'): Promise<void> {
+  await page.addInitScript((v: string) => localStorage.setItem('agent-commander.view', v), view)
+}
+
+/** Open the fleet as the card list and wait for the socket to have delivered it. */
 export async function openFleet(page: Page): Promise<void> {
+  await pinView(page, 'legacy')
   await page.goto('/')
   await expect(page.getByTestId('connection-status')).toHaveAttribute('data-state', 'open')
   await expect(page.getByTestId('agent-card').first()).toBeVisible()
@@ -41,6 +56,7 @@ export async function openFleet(page: Page): Promise<void> {
 
 /** Open one agent's detail view and wait for its conversation to arrive. */
 export async function openAgent(page: Page, sessionId: string): Promise<void> {
+  await pinView(page, 'legacy')
   await page.goto(`/agent/${sessionId}`)
   await expect(page.getByTestId('agent-detail')).toBeVisible()
   await expect(page.getByTestId('message').first()).toBeVisible()
