@@ -52,9 +52,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 777 tests: pure logic, server, and React components
+npm test              # 789 tests: pure logic, server, and React components
 npm run build
-npm run e2e           # 228 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 233 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
@@ -118,7 +118,7 @@ failure you would get for real.
 ## The invariant contract
 
 `INVARIANTS.md` numbers every property this app is built against, INV-1 through
-INV-13, and each is greppable from a test name:
+INV-14, and each is greppable from a test name:
 
 ```sh
 npm test -- -t INV-3
@@ -186,6 +186,15 @@ commit.
   and `test/scheme.test.ts` (a 5s timeout around spawning `python3`) both fail
   when the machine is busy and pass on a quiet one. A red Stop hook naming only
   those two is worth re-running before believing.
+- **The e2e `/clear` follow test flakes on slow CI runners.** `control.spec.ts`
+  "INV-8 follows the agent to the session it is now running" failed both
+  attempts on one GitHub runner and passed on rerun with nothing changed. One
+  red occurrence of exactly that test is worth a rerun before it is believed —
+  and worth root-causing if it ever fails twice in a row on different runs.
+- **Piping a test run through `tail` eats the verdict.** `npm run e2e | tail`
+  reports tail's exit code, not Playwright's, and the failure list scrolls out
+  of the kept lines — a 92-failure run once read as "141 passed" that way.
+  Redirect to a file and check the exit code, never pipe a gate.
 
 ## Review agents
 
@@ -201,7 +210,7 @@ lists what they have caught.
   each thing fails. Trim an entry when it is fixed; the record of trimmed ones
   is §"Fixed since this list was written". §"How it is checked" is the gate
   design.
-- **`INVARIANTS.md`** — INV-1 … INV-13, each with the tests that prove it.
+- **`INVARIANTS.md`** — INV-1 … INV-14, each with the tests that prove it.
 
 `README.md` is for the person using the app. These two are for the person
 changing it.

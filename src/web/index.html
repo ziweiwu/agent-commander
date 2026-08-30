@@ -12,6 +12,14 @@
     <title>agent-commander</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🛰</text></svg>" />
     <!--
+      Under /assets/ deliberately: GET there skips the token gate, and the
+      manifest and touch icon are fetched by the browser without the page's
+      token — anywhere else they would 401 on a token-protected server. Both
+      are static files; nothing under this prefix may ever serve agent state.
+    -->
+    <link rel="manifest" href="/assets/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/assets/icon-192.png" />
+    <!--
       The shell is behind a module download, parse and execute. On a warm
       localhost that is 121ms and nobody notices; over Tailscale on a phone it
       measured 8.7s of an entirely blank page, with nothing on screen to say the

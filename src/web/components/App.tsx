@@ -319,7 +319,7 @@ export function FleetRoute() {
       */}
       {!(narrow && showDetail) &&
         (view === 'forest' ? (
-          <ForestRoute />
+          <ForestRoute searchRef={searchRef} />
         ) : (
           <FleetList
             tiled={!showDetail}

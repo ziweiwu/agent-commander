@@ -108,3 +108,20 @@
     min-height: 44px;
   }
 }
+
+/* The line under the alerts toggle saying why it cannot turn on: the browser
+   has no Notification API here, or the permission was refused. Wrapped rather
+   than truncated — it is the explanation, and half of one explains nothing. */
+.hint {
+  display: block;
+  padding: 4px 10px 2px;
+  font-size: var(--text-xs);
+  color: var(--faint);
+  max-width: 210px;
+  white-space: normal;
+}
+
+.item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}

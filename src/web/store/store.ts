@@ -27,6 +27,7 @@ import {
   loadSort,
   loadScheme,
   loadTheme,
+  loadNotify,
   loadView,
   saveDir,
   saveFilter,
@@ -34,6 +35,7 @@ import {
   saveSort,
   saveScheme,
   saveTheme,
+  saveNotify,
   saveView,
   type Scheme,
   type Theme,
@@ -68,6 +70,7 @@ export interface AppState {
 
   fleet: FleetState
   view: View
+  notify: boolean
   theme: Theme
   scheme: Scheme
   lang: Lang
@@ -109,6 +112,7 @@ export interface AppState {
 
   /* actions */
   setView: (view: View) => void
+  setNotify: (notify: boolean) => void
   setTheme: (theme: Theme) => void
   setScheme: (scheme: Scheme) => void
   setLang: (lang: Lang) => void
@@ -173,6 +177,7 @@ export const useStore = create<AppState>()((set, get) => ({
   // to on a reload with no visible cause.
   fleet: { query: '', filter: loadFilter(), sort: loadSort(), dir: loadDir() },
   view: loadView(),
+  notify: loadNotify() === 'on',
   theme: loadTheme(),
   scheme: loadScheme(),
   lang: loadLang(),
@@ -195,6 +200,11 @@ export const useStore = create<AppState>()((set, get) => ({
   setView: (view) => {
     saveView(view)
     set({ view })
+  },
+
+  setNotify: (notify) => {
+    saveNotify(notify ? 'on' : 'off')
+    set({ notify })
   },
 
   setTheme: (theme) => {

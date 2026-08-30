@@ -47,6 +47,7 @@ export type View = (typeof VIEWS)[number]
 export const DEFAULT_VIEW: View = 'forest'
 
 const THEME_KEY = 'agent-commander.theme'
+const NOTIFY_KEY = 'agent-commander.notify'
 const SCHEME_KEY = 'agent-commander.scheme'
 const VIEW_KEY = 'agent-commander.view'
 const LANG_KEY = 'agent-commander.lang'
@@ -118,6 +119,22 @@ export function loadFilter(): StatusFilter {
 
 export function saveFilter(filter: StatusFilter): void {
   write(FILTER_KEY, filter)
+}
+
+/*
+ * Off by default: an OS notification is the app reaching out of its tab, and
+ * that is opted into, never inherited. The stored preference is only half the
+ * gate — the browser's own permission is checked again at fire time, so
+ * revoking it in site settings wins over anything stored here.
+ */
+export type NotifyChoice = 'on' | 'off'
+
+export function loadNotify(): NotifyChoice {
+  return read(NOTIFY_KEY) === 'on' ? 'on' : 'off'
+}
+
+export function saveNotify(choice: NotifyChoice): void {
+  write(NOTIFY_KEY, choice)
 }
 
 function isSort(value: unknown): value is SortKey {

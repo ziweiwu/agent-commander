@@ -851,3 +851,38 @@ assume.
 - `e2e/forest.spec.ts` — the same clauses against the real server and mock
   sidecars, plus depth-3 nesting, the raised orphan, and no sideways scroll at
   any width
+
+## INV-14 — A notification is a transition, not a state
+
+The tab title and the aria-live region describe standing state and may say
+"(2 blocked)" for as long as it stays true. An OS notification reaches out of
+the tab, so it fires only for an agent this page has **watched become**
+waiting:
+
+- **The first fleet frame is backlog, not news.** An agent that has been
+  waiting three days notifies nobody on page load — this page never saw it
+  become blocked and cannot claim the event happened now. The same rule makes
+  turning the preference on start from "now" rather than replaying everything
+  already blocked, because the tracker runs on every frame whether or not the
+  preference is on.
+- **A standing block never re-fires.** An agent that unblocks and blocks again
+  is news again; one that simply stays blocked is not. The notification `tag`
+  carries the session id, so even a flapping agent replaces its own
+  notification rather than stacking copies.
+- **The stored preference is only half the gate.** `Notification.permission`
+  is read again at fire time, so revoking it in the browser's site settings
+  wins immediately over anything stored — and the API is feature-checked, so a
+  browser without it (iOS Safari outside an installed web app) gets a disabled
+  toggle that says so rather than one that silently does nothing (INV-11).
+- **A visible tab never notifies.** The waiting group at the top of the screen
+  is already the notification.
+
+Off by default. Enabling it is a click in settings, which is also the moment
+the browser's own permission prompt rides — the one gesture a browser accepts
+as intent rather than ambience.
+
+- `test/ui/notify.test.tsx` — the first frame is backlog; a watched transition
+  notifies; a standing block does not repeat; unblocked-then-blocked is news
+  again; tracking continues while disabled so enabling later dumps nothing; a
+  visible tab stays silent; a revoked permission wins over the stored
+  preference

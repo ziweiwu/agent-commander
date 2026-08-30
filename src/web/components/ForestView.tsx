@@ -209,6 +209,7 @@ function FamilyBlock({ family, selected, stale, staleSince, onOpen }: FamilyBloc
     <section
       className={styles.family}
       data-testid="forest-family"
+      data-session-id={family.sessionId}
       data-status={agent.status}
       data-selected={selected}
       data-total={family.total}

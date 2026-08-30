@@ -9,6 +9,7 @@ import { formatRelative } from '../lib/i18n.ts'
 import { relative } from '../lib/format.ts'
 import { AgentCard } from './AgentCard.tsx'
 import { Button } from './ui/Button.tsx'
+import { SearchBar } from './SearchBar.tsx'
 import { SortControl } from './SortControl.tsx'
 import styles from './FleetList.module.css'
 
@@ -36,7 +37,6 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const conn = useStore((s) => s.conn)
   const fleetAt = useStore((s) => s.fleetAt)
   const fleet = useStore((s) => s.fleet)
-  const setQuery = useStore((s) => s.setQuery)
   const setNewAgentOpen = useStore((s) => s.setNewAgentOpen)
   const showToast = useStore((s) => s.showToast)
   const [pruning, setPruning] = useState(false)
@@ -95,21 +95,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
 
   return (
     <div className={`${styles.column} ${tiled ? styles.tiled : ''}`}>
-      <div className={styles.searchbar}>
-        <input
-          id="search"
-          ref={searchRef}
-          data-testid="search"
-          type="search"
-          value={fleet.query}
-          placeholder={t('searchPlaceholder')}
-          aria-label={t('searchLabel')}
-          autoComplete="off"
-          spellCheck={false}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-        <kbd className={styles.slashHint}>/</kbd>
-      </div>
+      <SearchBar searchRef={searchRef} />
 
       <SortControl />
 
@@ -202,7 +188,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   )
 }
 
-function Empty({ title, body }: { title: string; body: string }) {
+export function Empty({ title, body }: { title: string; body: string }) {
   return (
     <div className={styles.empty} data-testid="empty-state">
       <p className={styles.emptyTitle}>{title}</p>

@@ -79,6 +79,23 @@ test.describe('the forest', () => {
     await expect(bare.first()).toBeVisible()
   })
 
+  // The same query narrows both renderings — AGENTS.md's "true in both" rule,
+  // and the sharpest case of it: two views disagreeing about which agents
+  // exist would be worse than either view alone.
+  test('narrows to what the search matches, and says so when nothing does', async ({ page }) => {
+    await openForest(page)
+    const before = await page.getByTestId('forest-family').count()
+    expect(before).toBeGreaterThan(1)
+
+    await page.getByTestId('search').fill('kb-vault')
+    await expect(page.getByTestId('forest-family')).toHaveCount(1)
+
+    await page.getByTestId('search').fill('nothing-is-called-this')
+    await expect(page.getByTestId('empty-state')).toContainText('nothing-is-called-this')
+    await page.getByTestId('search').fill('')
+    await expect(page.getByTestId('forest-family')).toHaveCount(before)
+  })
+
   test('opens an agent from its lane', async ({ page }) => {
     await openForest(page)
 

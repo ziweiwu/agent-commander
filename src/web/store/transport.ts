@@ -18,6 +18,7 @@ import type {
   ServerMessage,
 } from '../../shared/types.ts'
 import { withToken } from '../lib/token.ts'
+import { notifyBlocked } from '../lib/notify.ts'
 import { useStore } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -358,6 +359,7 @@ function handle(msg: ServerMessage): void {
     case 'fleet': {
       useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt: Date.now() })
       announceBlocked(msg.agents)
+      notifyBlocked(msg.agents, { enabled: state.notify, lang: state.lang })
       return
     }
     case 'limits': {

@@ -129,8 +129,23 @@ other CLI rather than typing `/model opus` at something that will take it
 literally. Closing still works — it closes the tmux session instead.
 
 Filter with the search box (name, folder, branch, activity or status) or by
-clicking a status chip in the header. When an agent starts waiting on you, the
-browser tab title becomes `(1) agent-commander`.
+clicking a status chip in the header — the query, the chips and the sort apply
+to whichever rendering is on, so the forest and the cards always agree about
+which agents exist. When an agent starts waiting on you, the browser tab title
+becomes `(1) agent-commander`.
+
+### Notifications
+
+Settings carries an **Alerts** toggle: with it on, an agent that *starts*
+waiting raises an OS notification — but only while the tab is hidden (a
+visible fleet is already the notification), and never for agents that were
+already blocked when the page opened. Clicking the notification opens that
+agent. The toggle asks for the browser's permission when you turn it on; if
+the browser cannot show notifications at all (Safari on iOS outside an
+installed web app), the toggle says so instead of pretending.
+
+The app ships a web manifest, so on a phone it can be added to the Home Screen
+and opens full-screen like an installed app.
 
 Open an agent and you get two tabs:
 
@@ -520,8 +535,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 777 tests: pure logic, server, and React components
-npm run e2e        # 228 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 789 tests: pure logic, server, and React components
+npm run e2e        # 233 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck
@@ -666,6 +681,11 @@ the stylesheet whole:
 ```
 python3 scripts/gen-themes.py --write   # same as npm run themes
 ```
+
+The app icon is generated the same way: `python3 scripts/gen-icons.py` redraws
+`src/web/public/assets/icon-*.png` from the graphite status colours (standard
+library only), so a palette change can regenerate it honestly. Both PNGs are
+committed; the script exists so they never have to be edited by hand.
 
 Edit the generator, never `src/web/styles/tokens.css`. `test/scheme.test.ts`
 re-runs the generator and compares byte for byte, so a hand-edit fails the suite

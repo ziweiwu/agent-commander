@@ -5,41 +5,6 @@
   gap: 12px;
 }
 
-.searchbar {
-  position: relative;
-  display: flex;
-}
-.searchbar input {
-  flex: 1;
-  min-width: 0;
-  font: inherit;
-  font-size: var(--text-md);
-  padding: 9px 34px 9px 12px;
-  min-height: 40px;
-  color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-md);
-}
-.searchbar input::placeholder {
-  color: var(--faint);
-}
-.slashHint {
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  font: 11px ui-monospace, Menlo, monospace;
-  color: var(--faint);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-xs);
-  padding: 0 5px;
-  pointer-events: none;
-}
-.searchbar input:focus + .slashHint {
-  display: none;
-}
-
 /*
  * New agent, and — when there is anything to prune — the prune button beside
  * it. They share a row on a wide list and stack on a narrow one, so the phone
