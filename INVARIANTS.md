@@ -296,6 +296,33 @@ where they can drift without making this file wrong.
   writes landing within a few ms of the watch being registered, which is
   precisely the "server starts, live session writes" case.
 
+**Nothing polls what nobody is watching — and nothing re-sends what the watcher
+already has.** The first half was always here; the second was the gap, and
+`/api/tree` fell straight into it. The delegation graph is polled every three
+seconds while the tree view is open, and measured against 53 real sessions the
+body is 54.6 KB that is *byte-identical* from one poll to the next — 0 of 55,916
+bytes differing, 64 MB an hour re-sent to a phone over Tailscale, which is the
+connection this app exists to be used from.
+
+The pane path never had this problem because it was written against the same
+rule stated in frame terms: `buildFrame` sends only the rows that changed and
+`isNoop` drops a frame carrying no visual change at all. So the graph is
+conditional. The server hashes the body it would send and answers a matching
+`If-None-Match` with a bare 304; the browser sends the tag back and, on a 304,
+**keeps its existing trees by identity**.
+
+That last clause is load-bearing and is the half that was actually broken in the
+browser. `setTrees(body.trees)` handed every `tree` prop a new object identity
+every three seconds even when the JSON was identical, so the `memo` on
+`TreeRoot` could never hit and all 260 nodes re-rendered for data nobody had
+changed. A 304 now carries no trees at all, which makes that churn impossible to
+reintroduce rather than merely fixed.
+
+The read itself still happens on every poll — a `readdir` and a few cached
+sidecars, ~3ms for the whole fleet. It is not worth caching state that Claude
+Code owns and this app only observes; what is worth saving is the transfer and
+the render behind it.
+
 This invariant used to enumerate intervals, and they went stale: it was written
 when a frame cost two tmux round trips at p50 141ms, against a 140ms budget it
 could not meet. Through the control client a read is roughly 20ms. The numbers
@@ -316,6 +343,12 @@ were the reason for the rules, not the rules.
 - `test/registry-presence.test.ts` — an unconfirmed session is asked about at
   once rather than at the next 30s reconcile, and a ghost is asked about once
   rather than once per scan
+- `test/tree-routes.test.ts` — the graph is served with an `ETag`, a matching
+  `If-None-Match` gets a bare 304, a real change gets a new tag and a body, and
+  a stale or unknown tag is answered in full rather than with a 304
+- `test/ui/TreeRoute.test.tsx` — the first poll carries no tag and the next
+  carries the one just served; an unchanged answer does not blank the graph;
+  and a changed one is what advances the tag
 
 ## INV-5 — Degrade, don't error
 
@@ -400,9 +433,9 @@ agent lives.
 ## INV-7 — One command shape
 
 **Claude Code's slash commands are only ever typed at Claude Code.** `/model`,
-`/goal`, `/exit` and the Shift+Tab mode cycle are how every control action
-works, and against another agent CLI they do not degrade — they type a sentence
-of this app's own devising into somebody's live prompt. `assertSlashCommandable`
+`/goal`, `/clear`, `/compact`, `/exit` and the Shift+Tab mode cycle are how
+every control action works, and against another agent CLI they do not degrade —
+they type a sentence of this app's own devising into somebody's live prompt. `assertSlashCommandable`
 refuses them server-side for any kind whose spec says `slashCommands: false`,
 and the browser hides the controls; the server is the boundary, because a UI is
 not one (INV-6). Closing is the exception, and only because tmux can do it
@@ -436,6 +469,9 @@ dialog offered both and the route forwarded neither, so choosing "plan" and
 makes "the failure you see in `--mock` is the failure you would get for real"
 true rather than aspirational.
 
+- `test/control.test.ts` — every command, `/clear` and `/compact` included, is
+  refused for a kind whose spec says `slashCommands: false`, and nothing is
+  typed on the way to the refusal
 - `test/spawn.test.ts` — path expansion, absolute-path requirement, refusal of
   files and missing directories, session-name sanitising, and the model and
   mode allow-lists
@@ -446,8 +482,8 @@ true rather than aspirational.
 
 ## INV-8 — Control actions are guarded and verified
 
-Closing an agent, changing its model, and setting or clearing its goal all work
-by typing into that agent's own prompt. Text landing mid-tool-call interleaves
+Closing an agent, clearing or compacting its context, changing its model, and
+setting or clearing its goal all work by typing into that agent's own prompt. Text landing mid-tool-call interleaves
 with work in flight — it arrives in whatever the agent is drawing and submits
 something nobody wrote — so every action that *types* refuses an agent whose
 status is `busy`. Idle and waiting are allowed: a waiting agent is precisely
@@ -474,18 +510,36 @@ happens *while* the agent is running. So mode changes are permitted at any
 point in the flow, from the detail panel, from the chat strip, and from
 Shift+Tab in the composer — the same chord the CLI itself uses.
 
-What keeps that safe is the verification in `setMode`: it re-reads the mode the
-session reports rather than assuming a press landed.
+**One press, and no target. The target was the bug.** This control used to be a
+`<select>`: the user named a mode and the server pressed `BTab` and re-read,
+up to six times, until the session reported it. Every failure it had came from
+having something to reach for. A busy agent does not write its permission mode
+down until its turn ends, so the reading could not move; the loop correctly
+refused to press blind and stopped — but it had already pressed twice, leaving
+a live session in a mode nobody asked for and reporting `unverified` for it.
+Two more causes had the same shape and neither was helped by pressing again: a
+session that reports no permission mode at all (they exist), and a cycle that
+silently omits `bypassPermissions` and `auto` when they are unavailable, which
+is why counting presses was never an option either. Polling for the reading
+instead of guessing a delay narrowed this and could not close it.
 
-**That verification must stop when it stops seeing.** If the reading does not
-change after a press, this loop is blind, and a blind loop here is not a failed
-switch — it is five more Shift+Tabs into a live session, leaving it in a mode
-nobody asked for and reporting an error for it. Two real causes and neither is
-helped by pressing again: a session that reports no permission mode at all
-(they exist), and a busy agent that has not yet written the record where this
-app can read it. So it presses once more and stops, and reports the outcome as
-*unknown* rather than as failed — the switch may well have landed somewhere
-unobservable, and saying it failed asserts something nobody checked (INV-11).
+Without a target there is nothing to chase. `cycleMode` sends exactly one
+`BTab` and reports where the session says it landed. The app now mirrors the
+CLI, which also only cycles — INV-7's "one command shape" applied to the one
+control that had grown a second one.
+
+The press is still verified, and the distinction it draws is the whole of what
+is left. A reading that moved is reported. A reading that did not is reported
+as *unobserved*: the key reached the pane, so this is not a failure — only the
+observation is missing, and saying the switch failed asserts something nobody
+checked (INV-11). The interface says *pressed…* rather than naming a mode.
+
+**Two controls show this one setting at once** — the composer strip and the
+detail panel's control row are both on screen — so the mode a user has just
+moved to is held in the store rather than per component. Held locally, pressing
+one button updated it and left the other reading the old mode two inches away
+until the enricher caught up. An app that contradicts itself within one glance
+is worse than one that is briefly behind.
 
 **Neither switch is observable when it is made.** Both are read back out of the
 transcript, which a busy session writes at the end of its turn, so a control
@@ -500,11 +554,35 @@ that types.
   is still alive after a grace period.
 - **Model** is set with the CLI's `/model <alias>`, the alias checked against the
   allow-list before anything is typed.
-- **Mode** is switched by sending `BTab` and re-reading the mode the session
-  reports, repeating until it matches. It is verified rather than counted,
-  because the Shift+Tab cycle omits `bypassPermissions` and `auto` when they are
-  unavailable — a fixed number of presses would land somewhere else. It gives up
-  after a bounded number of steps and reports where it actually ended up.
+- **Mode** is advanced by sending one `BTab` and re-reading the mode the session
+  reports. It never presses twice and never aims at a named mode; see above for
+  why both of those were the same bug.
+
+- **Clear** asks first, in the UI, naming the agent, because there is no undo.
+  It sends `/clear`, and it is **verified by watching the session id turn over**
+  rather than by reading the transcript. `/clear` does not edit a conversation,
+  it replaces one: Claude Code opens a fresh transcript under a new session id
+  and rewrites `~/.claude/sessions/<pid>.json` to point at it. The old file
+  simply stops growing, which is also exactly what a `/clear` that never
+  arrived looks like — the id is the only thing that separates them, and Claude
+  Code writes it rather than this app inferring it.
+
+  The new id is the answer and not decoration on it. Every URL, socket focus and
+  route naming the old one is dead the moment the clear lands, so the browser
+  follows the agent to its new id; without that, `focusAgent` points at nothing,
+  the route bails to the fleet, and the agent reappears further down the page as
+  a stranger. From the user's side, the panel closed itself.
+
+- **Compact** sends `/compact` and is deliberately **not verified**, because the
+  number forbids it: a compaction writes a `compact_boundary` record when it
+  finishes, and the one real sample reports `durationMs: 157676` — over two and
+  a half minutes. Holding a request open for that is a hung button, not a
+  verification strategy. So it returns as soon as the text is submitted, the
+  interface says the compaction was *asked for* rather than that it happened
+  (INV-11), and the result arrives on its own: the transcript tail turns the
+  boundary record into a timeline event through the loop already reading that
+  file, carrying `preTokens → postTokens` and whether the trigger was `manual`
+  or `auto`.
 
 - **Goal** sends `/goal <condition>`, and `/goal clear` to end one. Setting a
   goal writes a `goal_status` record into the transcript immediately, so the
@@ -528,10 +606,15 @@ to a live session, and `pending` is React state that does not land until React
 flushes, so the composer's goal field guards the send with a ref the same way
 the message box does.
 
-`test/control.test.ts` covers each guard, the allow-lists, a shortened cycle,
-the give-up path, and the goal's validation and verification.
-`test/ui/ChatControls.test.tsx` covers the composer's switches, including the
-burst case.
+`test/control.test.ts` covers each guard, the allow-lists, the single press and
+its unobserved case, the clear's rotation and *its* unobserved case, the
+compaction that does not wait, and the goal's validation and verification.
+`test/control-routes.test.ts` covers the same actions over HTTP — mode, clear
+and compact carry no body at all, and `JSON.parse('')` throws, which surfaced as
+"that did not take effect" about a control the server had never called.
+`test/ui/ChatControls.test.tsx` and `test/ui/AgentControls.test.tsx` cover the
+browser's half: the burst case, the two mode buttons agreeing, the confirm
+before a clear, and following the session id afterwards.
 
 ## INV-9 — The folder browser cannot leave its root
 
@@ -633,6 +716,28 @@ what it is.
   marked without being hidden; the caption is announced rather than only drawn;
   and an empty fleet, which asserts nothing, gets no caveat
 
+### Two more places the same rule bit
+
+**A composer with the socket down used to accept the message.** `send()` returns
+without doing anything when the socket is not open — correct, because queuing is
+the one thing INV-2 forbids — but the composer cleared the box, marked the
+message `sending…`, and twelve seconds later called it `not delivered`. The
+fleet list and the tree both caption a disconnected view; this was the one
+surface where a user *acts*, and it said nothing. It now refuses at the
+composer, keeps every character of the draft, and says so in a live region
+rather than only by greying a button.
+
+- `test/ui/chat-offline.test.tsx` — the draft survives, nothing is sent, nothing
+  is replayed on reconnect, and the explanation is reachable by keyboard
+
+**A dead pane was a five-second toast.** With no pty to report an exit (INV-1),
+the only signal was a notice that expired while the terminal went on showing its
+last frame as though it were live. The exit is now carried on the wire as
+`kind: 'pane-exited'` and recorded in the store, so the terminal reads a fact
+rather than matching the server's English prose — a coupling that would have
+broken silently the day anyone reworded the string, in an app that ships a
+second language.
+
 ## INV-12 — Input to a live agent is bounded
 
 No client can queue unbounded work into a running agent. Writes are charged
@@ -668,3 +773,73 @@ an agent, and a tab switching views quickly is not what this guards.
   and is reported once rather than 5,000 times; a briskly typed sentence is
   never refused; the budget refills after a burst; and an oversized frame is
   refused before it is parsed
+
+## INV-13 — A delegation tree claims only what the sidecars say
+
+The tree view shows an agent's delegates, and everything under them. Its
+structure is **read, not derived**: Claude Code writes one small sidecar beside
+every subagent transcript.
+
+```
+~/.claude/projects/<slug>/<sessionId>/subagents/
+  agent-<agentId>.jsonl        the delegate's own transcript
+  agent-<agentId>.meta.json    {agentType, description, toolUseId,
+                                parentAgentId, spawnDepth}
+```
+
+Measured against 350 of them on this machine: every transcript has a sidecar
+and every sidecar a transcript, `spawnDepth: 1` never carries `parentAgentId`
+and depth 2 and 3 always do. So a whole tree costs one `readdir` plus a few
+hundred bytes each, with no transcript parsing at all — which is what makes it
+cheap enough to poll under INV-4. Sidecars are cached by path for the life of
+the process because they are written once and never touched again; only the
+transcript is re-`stat`ed. The directory is flat, so a grandchild sits beside
+its parent and the tree is rebuilt from `parentAgentId`, never from the path.
+
+**An unresolvable parent is raised to the top, never dropped.** A sidecar that
+is missing or half-written takes its entire subtree with it if children are only
+ever attached to a parent that exists. Silently losing a branch of somebody's
+work is a worse failure than showing it at the wrong depth (INV-5), so the node
+is re-parented and marked, and the view says what happened rather than quietly
+lying about the shape of the work.
+
+**Three states, and the third is the point.** This is INV-11 applied to a
+delegate rather than to an agent, and the ordering is evidence, then a marked
+guess, then an admission:
+
+- `done` is claimed **only on evidence** — the sidecar says `stoppedByUser`, or
+  the parent's transcript carries a result for this delegate's `toolUseId`.
+  Something recorded the ending.
+- `active` is a guess: the transcript grew recently *and* the parent is busy. It
+  is marked `stateInferred` and renders as `active · inferred` with a dashed
+  edge — the same device a fleet card already uses for a status this app worked
+  out rather than read. On its own a recent write says nothing, because a
+  delegate that finished half a second ago also wrote half a second ago.
+- `quiet` is everything else, and **a quiet node is never drawn as done.** An
+  agent that finished and an agent that died both stop writing; no timestamp
+  separates them. This is the same absence-of-evidence trap that removed the
+  Prune button's reach in INV-11, and it is the failure this invariant exists to
+  prevent: telling somebody their work completed when nothing checked.
+
+**An agent with no delegates and an agent this app cannot ask are different
+claims.** The sidecars are written by Claude Code, so for a CLI that keeps no
+transcript there is nothing to read — and "has not delegated" would be a claim
+nobody could make. That tree comes back `unknown` and the view says so.
+
+**Transcript size is captioned as a size, never as a percentage.** There is no
+total for it to be a fraction of. INV-11 caught exactly this once already, with
+`tokens` displayed as spend and sorted as "most spent".
+
+Colour is never the only signal: every state chip carries a glyph and a word,
+which is what `audit:contrast` and the generated palettes both assume.
+
+- `test/subagents.test.ts` — a three-deep tree assembled from `parentAgentId`;
+  an orphan raised rather than dropped; one malformed sidecar costing only its
+  own node; the `isFork` and `stoppedByUser` variants; a missing `subagents/`
+  directory returning an empty tree rather than throwing; `unknown` rather than
+  empty for a CLI with no transcript; and each of the three states, including a
+  delegate that is not called active while its parent is idle
+- `test/ui/TreeView.test.tsx` — a quiet delegate is not rendered as done, an
+  inferred `active` says so in words, an evidenced `done` is not marked as a
+  guess, a stopped delegate is named rather than called finished, size is
+  labelled as a size, and the two empty cases say different things

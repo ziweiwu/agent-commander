@@ -27,14 +27,17 @@ import {
   loadSort,
   loadScheme,
   loadTheme,
+  loadView,
   saveDir,
   saveFilter,
   saveLang,
   saveSort,
   saveScheme,
   saveTheme,
+  saveView,
   type Scheme,
   type Theme,
+  type View,
 } from '../lib/prefs.ts'
 
 export type Tab = 'chat' | 'attach'
@@ -64,6 +67,7 @@ export interface AppState {
   newAgentOpen: boolean
 
   fleet: FleetState
+  view: View
   theme: Theme
   scheme: Scheme
   lang: Lang
@@ -75,8 +79,36 @@ export interface AppState {
 
   frame: Frame | null
   toast: string | null
+  /** Sessions whose pane the server told us has exited. */
+  exited: string[]
+  /**
+   * The permission mode the user just moved to, held until the agent reports it.
+   *
+   * In the store rather than in the component because **two controls show this
+   * one setting at once** — the composer strip and the detail panel's control
+   * row are both on screen — and a mode is read out of a transcript the session
+   * writes at the end of its turn. Held per component, pressing one button
+   * updated it and left the other reading the old mode two inches away, for as
+   * long as it took the enricher to catch up. An app that contradicts itself
+   * within one glance is worse than one that is briefly behind.
+   */
+  heldMode: { sessionId: string; mode: string } | null
+  /**
+   * A session this app knows exists but has not seen in a fleet broadcast yet.
+   *
+   * `/clear` replaces a session rather than editing it, so the moment it lands
+   * the browser is looking at an id the registry has not scanned for — up to a
+   * couple of seconds. The route's "the agent ended while it was open" rule
+   * cannot tell that apart from a session that really has gone, and bounced the
+   * user to the fleet immediately after every clear.
+   *
+   * The same distinction `PendingStore` makes on the server for a just-started
+   * agent, made here for a just-cleared one.
+   */
+  expectSession: string | null
 
   /* actions */
+  setView: (view: View) => void
   setTheme: (theme: Theme) => void
   setScheme: (scheme: Scheme) => void
   setLang: (lang: Lang) => void
@@ -87,6 +119,11 @@ export interface AppState {
   setFullscreen: (on: boolean) => void
   setNewAgentOpen: (open: boolean) => void
   showToast: (message: string) => void
+  markExited: (sessionId: string) => void
+  /** Hold a mode the user chose; cleared once the agent reports it back. */
+  setHeldMode: (sessionId: string, mode: string) => void
+  /** Expect a session the fleet has not broadcast yet; null once it arrives. */
+  setExpectSession: (sessionId: string | null) => void
   addPending: (text: string) => void
   rebuildChat: () => void
   resetConversation: () => void
@@ -135,6 +172,7 @@ export const useStore = create<AppState>()((set, get) => ({
   // view, a search term is a one-off lookup that would be baffling to come back
   // to on a reload with no visible cause.
   fleet: { query: '', filter: loadFilter(), sort: loadSort(), dir: loadDir() },
+  view: loadView(),
   theme: loadTheme(),
   scheme: loadScheme(),
   lang: loadLang(),
@@ -146,6 +184,18 @@ export const useStore = create<AppState>()((set, get) => ({
 
   frame: null,
   toast: null,
+  exited: [],
+  heldMode: null,
+  expectSession: null,
+
+  // No `applyView` counterpart to the two below: a theme and a scheme have to
+  // reach the document because CSS selects on them, whereas the view decides
+  // which component the fleet route renders. Putting it on <html> as well would
+  // be a second copy of the same fact, free to disagree with this one.
+  setView: (view) => {
+    saveView(view)
+    set({ view })
+  },
 
   setTheme: (theme) => {
     saveTheme(theme)
@@ -181,11 +231,17 @@ export const useStore = create<AppState>()((set, get) => ({
   setFullscreen: (fullscreen) => set({ fullscreen }),
   setNewAgentOpen: (newAgentOpen) => set({ newAgentOpen }),
 
+  markExited: (sessionId) =>
+    set((s) => (s.exited.includes(sessionId) ? s : { exited: [...s.exited, sessionId] })),
   showToast: (toast) => {
     window.clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => set({ toast: null }), 5000)
     set({ toast })
   },
+
+  setHeldMode: (sessionId, mode) => set({ heldMode: { sessionId, mode } }),
+
+  setExpectSession: (expectSession) => set({ expectSession }),
 
   /** Echo a sent message locally so sending feels instant. */
   addPending: (text) => {

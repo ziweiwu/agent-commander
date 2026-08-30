@@ -14,19 +14,20 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Registry } from './registry.ts'
 import { CompositeSource, TmuxProvider } from './tmux-source.ts'
-import { TranscriptTail } from './transcript.ts'
+import { findTranscript, TranscriptTail } from './transcript.ts'
 import * as panes from './pane.ts'
 import { tmuxControl } from './tmux-client.ts'
-import { MockLimits, MockPanes, MockSource, MockTail } from './mock.ts'
+import { MockLimits, MockPanes, MockSource, MockTail, mockTree, SESSION_BY_PANE } from './mock.ts'
 import { RateLimitWatcher } from './limits.ts'
 import { createAppServer } from './routes.ts'
 import { FleetEnricher } from './enrich.ts'
 import { probeEnv } from './env.ts'
 import { checkSpawnRequest } from './spawn.ts'
 import { PendingStore } from './pending.ts'
+import { readTree } from './subagents.ts'
 import { MODE_CYCLE } from './options.ts'
 import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
-import type { GoalState } from '../shared/types.ts'
+import type { Agent, GoalState } from '../shared/types.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1'])
@@ -226,6 +227,18 @@ function printHelp(): void {
   )
 }
 
+/**
+ * One agent's delegates, read from the sidecars beside its transcript.
+ *
+ * The transcript is located per call rather than cached here because
+ * `findTranscript` already caches nothing and the tree route runs only while
+ * somebody has the view open (INV-4). The sidecars themselves are cached in
+ * `subagents.ts`, which is where the repeated cost would otherwise be.
+ */
+async function readAgentTree(agent: Agent) {
+  return readTree(agent, await findTranscript(agent.sessionId))
+}
+
 async function main(): Promise<void> {
   let opts: Options
   try {
@@ -245,6 +258,25 @@ async function main(): Promise<void> {
   // Mock mode reports whatever mode was last asked for, so the UI round-trips.
   let mockMode: string = 'auto'
   let mockGoal: GoalState | undefined
+  /*
+   * The fake session's id, and it has to be a variable for one control only.
+   * `/clear` does not edit a session, it replaces one — Claude Code opens a
+   * fresh transcript under a new id — so a mock that kept a fixed id would
+   * exercise the *unverified* path every time and never the one a user gets.
+   */
+  /*
+   * Which session id each fake process is running *now*, keyed by pid because
+   * that is what `clearContext` asks with. Seeded from the fleet on first use
+   * so it starts out agreeing with the fixtures.
+   */
+  const mockSessionIds = new Map<number, string>()
+  const mockSessionOf = (pid: number): string => {
+    const known = mockSessionIds.get(pid)
+    if (known !== undefined) return known
+    const found = source.list().find((a) => a.pid === pid)?.sessionId ?? `mock-session-${pid}`
+    mockSessionIds.set(pid, found)
+    return found
+  }
 
   let source: AgentSource
   let paneApi: PaneApi
@@ -297,6 +329,9 @@ async function main(): Promise<void> {
 
   const env = await probeEnv(opts.port)
 
+  /** See the `tree` option below: the mock fleet's ages are fixed, as real ones are. */
+  const mockEpoch = Date.now()
+
   const server = createAppServer({
     source,
     panes: paneApi,
@@ -308,12 +343,28 @@ async function main(): Promise<void> {
     pending,
     limits,
     onViewers: (count) => enricher.setWatched(count > 0),
+    // Real trees are read off disk from the sidecars Claude Code writes; mock
+    // mode substitutes its own below, through the same route.
+    ...(opts.mock ? {} : { tree: (agent: Agent) => readAgentTree(agent) }),
     ...(opts.browseRoot ? { browseRoot: opts.browseRoot } : {}),
     // Mock mode advertises the flow but must never start a real process. It
     // still runs the same directory validation, so the error path a user hits
     // in mock mode is the one they would hit for real.
     ...(opts.mock
       ? {
+          /*
+           * Pinned to one instant for the life of the process, not `Date.now()`
+           * per call.
+           *
+           * A real delegate's `lastWriteAt` is an mtime — a fixed point that
+           * does not move once the delegate stops writing. Recomputing the
+           * fixtures' ages on every poll slid them forward instead, so the
+           * graph was a different graph three seconds later and the conditional
+           * request in INV-4 could never produce a 304 in mock mode. That made
+           * the mock fleet advertise a cost the real one does not have, which
+           * is the opposite of what it is for.
+           */
+          tree: async (agent: Agent) => mockTree(agent, mockEpoch),
           spawn: async (req) => ({
             tmuxSession: 'mock-session',
             // The same checks the real path runs — directory, model and mode —
@@ -324,7 +375,7 @@ async function main(): Promise<void> {
           // anywhere: the fake pane advances through the real cycle so the UI
           // round-trip can be exercised end to end.
           control: {
-            paste: async (_paneId: string, text: string) => {
+            paste: async (paneId: string, text: string) => {
               // The goal toggle is the one control whose state the fake pane
               // has to hold: without it the UI would set a goal and read back
               // nothing, which is the failure path, not the happy one.
@@ -332,6 +383,28 @@ async function main(): Promise<void> {
                 mockGoal = undefined
                 return
               }
+              /*
+               * `/clear` is verified by the session id turning over, so the
+               * fake session has to turn it over — and the fixture fleet has to
+               * follow, or mock mode never exercises the path where the browser
+               * has to find the agent again under its new id. That path is the
+               * one with the sharp edge (INV-8), so it is the one mock mode
+               * most needs to have.
+               */
+              if (text === '/clear') {
+                const current = SESSION_BY_PANE.get(paneId)
+                const agent = current ? source.get(current) : undefined
+                if (agent && source instanceof MockSource) {
+                  const next = `mock-session-${Date.now()}`
+                  mockSessionIds.set(agent.pid, next)
+                  source.rotate(agent.sessionId, next)
+                }
+                mockGoal = undefined
+                return
+              }
+              // `/compact` is not verified at all and writes nothing here; the
+              // real one is observed later through the transcript.
+              if (text === '/compact') return
               const set = /^\/goal (.+)$/.exec(text)
               if (set) {
                 mockGoal = { condition: set[1] as string, met: false, at: Date.now(), fresh: true }
@@ -343,6 +416,7 @@ async function main(): Promise<void> {
             },
             readMode: async () => mockMode,
             readGoal: async () => mockGoal,
+            readSessionId: async (pid: number) => mockSessionOf(pid),
             paneAlive: async () => false,
             killSession: async () => {},
             wait: async () => {},

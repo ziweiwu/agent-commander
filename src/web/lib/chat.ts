@@ -9,7 +9,7 @@
  */
 import type { TimelineEvent } from '../../shared/types.ts'
 
-export type Role = 'you' | 'agent'
+export type Role = 'you' | 'agent' | 'notice'
 
 export interface ToolCall {
   id: string
@@ -35,6 +35,16 @@ export interface ChatMessage {
    * from the four before it.
    */
   priorCopies?: number
+  /**
+   * For `role === 'notice'`: what happened, and the numbers behind it.
+   *
+   * Carried rather than pre-formatted so the reader sees it in their own
+   * language — the server has no business writing a sentence into a
+   * conversation.
+   */
+  notice?: 'compacted' | 'compactedAuto'
+  tokensBefore?: number
+  tokensAfter?: number
 }
 
 /** Messages closer together than this from the same speaker share a header. */
@@ -78,8 +88,20 @@ export function buildMessages(events: TimelineEvent[]): ChatMessage[] {
         break
       }
 
-      case 'notice':
+      /*
+       * A compaction. Stands on its own rather than folding into a message: it
+       * is not something either party said, it is a change to what the agent
+       * can still remember, and it belongs at the point in the conversation
+       * where the memory was cut.
+       */
+      case 'notice': {
+        const message = push('notice', event.at, '', event.id)
+        message.grouped = false
+        if (event.notice) message.notice = event.notice
+        if (event.tokensBefore !== undefined) message.tokensBefore = event.tokensBefore
+        if (event.tokensAfter !== undefined) message.tokensAfter = event.tokensAfter
         break
+      }
     }
   }
 

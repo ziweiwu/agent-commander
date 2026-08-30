@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
-import { setAgentGoal, setAgentMode } from '../store/transport.ts'
+import { setAgentGoal } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
-import { useHeldChoice } from '../hooks/useHeldChoice.ts'
-import type { Key } from '../lib/i18n.ts'
-import { MODES, MODE_KEY } from '../lib/modes.ts'
 import { Button } from './ui/Button.tsx'
+import { ModeButton } from './ModeButton.tsx'
 import styles from './ChatControls.module.css'
 
 /**
@@ -22,13 +20,15 @@ import styles from './ChatControls.module.css'
  * INV-8 guards them differently, and the difference is what each one sends.
  * A goal is typed into the agent's own prompt, so it is refused while the agent
  * is busy. Mode sends `BTab`, a control key handled wherever the agent is, so
- * it stays available mid-run. The server enforces both; this mirrors them so a
- * control reads as unavailable rather than failing after the click.
+ * it stays available mid-run — it lives in `ModeButton`, shared with the detail
+ * panel, and carries its own guard for that reason. The server enforces both;
+ * this mirrors them so a control reads as unavailable rather than failing
+ * after the click.
  */
 export function ChatControls({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
-  const [pending, setPending] = useState<'mode' | 'goal' | null>(null)
+  const [pending, setPending] = useState<'goal' | null>(null)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -39,21 +39,9 @@ export function ChatControls({ agent }: { agent: Agent }) {
    * synchronously, so the second finds it taken.
    */
   const sendingRef = useRef(false)
-  const [modeValue, setPickedMode, clearPickedMode] = useHeldChoice(
-    agent.permissionMode,
-    agent.sessionId,
-  )
-
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
-  /*
-   * Mode is the exception, and INV-8 now says so: it is switched by sending
-   * `BTab`, a control key the agent handles wherever it is, not by typing into
-   * its prompt. Deciding "this next step should run in plan mode" happens while
-   * the agent is running, which is precisely when this used to be refused.
-   */
-  const modeDisabled = !agent.paneId || pending !== null
 
   const goal = agent.goal
   // A met goal is finished, not running. Only an unmet one is a live goal.
@@ -69,7 +57,7 @@ export function ChatControls({ agent }: { agent: Agent }) {
     if (editing) inputRef.current?.focus()
   }, [editing])
 
-  const run = async (kind: 'mode' | 'goal', action: () => Promise<void>): Promise<void> => {
+  const run = async (kind: 'goal', action: () => Promise<void>): Promise<void> => {
     if (sendingRef.current) return
     sendingRef.current = true
     setPending(kind)
@@ -79,25 +67,6 @@ export function ChatControls({ agent }: { agent: Agent }) {
       sendingRef.current = false
       setPending(null)
     }
-  }
-
-  const onMode = (mode: string): void => {
-    setPickedMode(mode)
-    void run('mode', async () => {
-      const result = await setAgentMode(mode)
-      if (!result.ok) {
-        // It did not land, so stop showing it as though it had.
-        clearPickedMode()
-        showToast(t('controlFailed', { error: result.error }))
-        return
-      }
-      /*
-       * The server sent the press but the session never reported a new mode.
-       * Saying nothing here reported an unconfirmed switch as a clean success
-       * — the detail panel already surfaces this, and the chat strip did not.
-       */
-      if (result.detail === 'unverified') showToast(t('modeUnverified'))
-    })
   }
 
   const onSetGoal = (): void => {
@@ -179,23 +148,7 @@ export function ChatControls({ agent }: { agent: Agent }) {
         </div>
       ) : (
         <div className={styles.goal}>
-          <label className={styles.field}>
-            <span className={styles.label}>{t('modeLabel')}</span>
-            <select
-              className={styles.select}
-              data-testid="chat-mode-select"
-              disabled={modeDisabled}
-              value={modeValue}
-              onChange={(e) => onMode(e.target.value)}
-            >
-              {!agent.permissionMode && <option value="">—</option>}
-              {MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {t(MODE_KEY[mode] as Key)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <ModeButton agent={agent} />
 
           <button
             type="button"

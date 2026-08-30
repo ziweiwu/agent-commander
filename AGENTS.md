@@ -13,6 +13,15 @@ It is an observer of somebody else's work in progress. That is the whole design
 pressure: the sessions on screen are real, and this app is never allowed to
 disturb one.
 
+The fleet has **two renderings**, chosen in settings and stored per browser:
+`ForestView` draws each session as a family on one shared time axis, and
+`FleetList` is the grouped card list. Neither is deprecated — the list says what
+an agent is *doing*, the forest says whether anything in a family is still
+moving — so a change to one is not automatically a change to the other, and
+anything that must be true of the fleet has to be true in both. `FleetRoute`
+picks between them; the layout maths lives in `src/web/lib/forest.ts` as pure
+functions so it can be tested without a DOM.
+
 ## The two constraints everything else follows from
 
 `ARCHITECTURE.md` opens with these, and says explicitly that everything else is
@@ -43,9 +52,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 683 tests: pure logic, server, and React components
+npm test              # 782 tests: pure logic, server, and React components
 npm run build
-npm run e2e           # 177 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 141 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
@@ -98,7 +107,10 @@ session. `qa-sweep.sh` refuses that port outright and `--mock` on it is rejected
 `npm run mock` serves a deliberately awkward fixture fleet — ten agents, five
 sharing a home directory, one name too long for its card, two never prompted,
 and one Kiro session so the degraded card an agent with no transcript gets is
-on screen rather than only in a test.
+on screen rather than only in a test. The delegation trees behind them are
+awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
+in each of INV-13's three states, an orphan whose parent is not on disk, an
+agent that has delegated nothing, and a CLI that cannot say either way.
 Because the mock fleet runs the same server, routes and validation as the real
 one (`src/server/sources.ts` is the seam), a failure seen in mock mode is the
 failure you would get for real.
@@ -106,7 +118,7 @@ failure you would get for real.
 ## The invariant contract
 
 `INVARIANTS.md` numbers every property this app is built against, INV-1 through
-INV-12, and each is greppable from a test name:
+INV-13, and each is greppable from a test name:
 
 ```sh
 npm test -- -t INV-3
@@ -133,7 +145,7 @@ commit.
 - **A configured token *replaces* the origin gate rather than adding to it**
   (`routes.ts:387`). It is the credential and the exemption from rebinding
   protection at once, and it travels in the query string and is printed to
-  stdout. See `ARCHITECTURE.md` §"Where it is fragile" 5 and 5a before touching
+  stdout. See `ARCHITECTURE.md` §"Where it is fragile" 6 and 6a before touching
   either gate.
 - **Development used to default to 4317.** A fixture fleet on the production
   port is indistinguishable from your real one having vanished, and the composer
@@ -156,6 +168,20 @@ commit.
   term echoed verbatim into "No agent matches …" forced the document to 2175px.
   The review agents found that one, plus an xterm use-after-dispose crash on
   every full-screen toggle and a sort that ranked unknown values as smallest.
+- **A control action that carries no value still goes through `readJson`.**
+  Mode, clear and compact take no argument, so the browser sends no body at all
+  — and `JSON.parse('')` throws. Every unit test passed while pressing the mode
+  button reported *"that did not take effect: Unexpected end of JSON input"*
+  about a control the server had never called. `test/control-routes.test.ts`
+  exists because `test/control.test.ts` calls the functions directly and
+  structurally cannot catch this.
+- **`/clear` replaces the session; it does not edit it.** Claude Code opens a
+  fresh transcript under a new session id and rewrites
+  `~/.claude/sessions/<pid>.json`. Anything holding the old id — a URL, a socket
+  focus, a mock fixture, an e2e test — is stale the moment it lands. That is
+  also why one fixture (`AGENT.clearable`) is reserved for the clear spec: every
+  e2e project shares one mock server, and clearing a fixture another test uses
+  deletes that test's agent out from under it.
 - **`npm test` is flaky under load.** `test/enrich.test.ts` (INV-4 tail counts)
   and `test/scheme.test.ts` (a 5s timeout around spawning `python3`) both fail
   when the machine is busy and pass on a quiet one. A red Stop hook naming only
@@ -175,7 +201,7 @@ lists what they have caught.
   each thing fails. Trim an entry when it is fixed; the record of trimmed ones
   is §"Fixed since this list was written". §"How it is checked" is the gate
   design.
-- **`INVARIANTS.md`** — INV-1 … INV-12, each with the tests that prove it.
+- **`INVARIANTS.md`** — INV-1 … INV-13, each with the tests that prove it.
 
 `README.md` is for the person using the app. These two are for the person
 changing it.

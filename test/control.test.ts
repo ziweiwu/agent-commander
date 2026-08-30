@@ -3,12 +3,14 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   assertControllable,
   assertGoalCondition,
+  clearContext,
   clearGoal,
   closeAgent,
+  compactContext,
   ControlError,
   GOAL_MAX_CHARS,
+  cycleMode,
   setGoal,
-  setMode,
   setModel,
   type ControlDeps,
 } from '../src/server/control.ts'
@@ -34,6 +36,7 @@ const deps = (over: Partial<ControlDeps> = {}): ControlDeps => ({
   key: vi.fn(async () => {}),
   readMode: async () => 'default',
   readGoal: async () => undefined,
+  readSessionId: async () => 'session-before',
   paneAlive: async () => false,
   killSession: vi.fn(async () => {}),
   wait: async () => {},
@@ -98,55 +101,162 @@ describe('setModel', () => {
   })
 })
 
-describe('setMode', () => {
-  /** A fake session that cycles through the modes it actually supports. */
-  const cycling = (cycle: string[], start = 0) => {
-    let index = start
-    return {
-      deps: deps({
-        key: vi.fn(async () => {
-          index = (index + 1) % cycle.length
-        }),
-        readMode: async () => cycle[index],
-      }),
-      at: () => cycle[index],
-    }
+describe('clearContext', () => {
+  /*
+   * `/clear` is verified by the session id turning over, and that is the whole
+   * design: it does not edit a conversation, it replaces one. Claude Code opens
+   * a fresh transcript under a new id and rewrites the session record, so the
+   * old transcript simply stops growing — which is also exactly what a `/clear`
+   * that never arrived looks like from here.
+   */
+  const rotating = (after = 1) => {
+    let reads = 0
+    return deps({
+      readSessionId: async () => {
+        reads += 1
+        return reads > after ? 'session-after' : 'session-before'
+      },
+    })
   }
 
-  it('does nothing when already in the target mode', async () => {
-    const d = deps({ readMode: async () => 'plan' })
-    const result = await setMode(agent(), 'plan', d)
-    expect(result).toMatchObject({ ok: true, steps: 0 })
-    expect(d.key).not.toHaveBeenCalled()
+  it('types /clear and reports the id the session is running now', async () => {
+    const d = rotating()
+
+    const result = await clearContext(agent(), d)
+
+    expect(d.paste).toHaveBeenCalledExactlyOnceWith('%1', '/clear', true)
+    expect(result).toMatchObject({ ok: true, sessionId: 'session-after' })
+    expect(result.unobserved).toBeUndefined()
   })
 
-  it('cycles until the session reports the target', async () => {
-    const c = cycling(['default', 'acceptEdits', 'plan', 'bypassPermissions', 'auto'])
-    const result = await setMode(agent(), 'plan', c.deps)
-    expect(result.ok).toBe(true)
-    expect(result.steps).toBe(2)
-    expect(c.at()).toBe('plan')
+  /*
+   * The id never turned over inside the window. The paste went out, so this is
+   * not a failure — a large conversation clears slower than anything worth
+   * blocking a request on. Saying it failed asserts something nobody read, and
+   * a caller that navigated on it would land on an id that may not exist.
+   */
+  it('reports an unobserved clear rather than a failure', async () => {
+    const d = deps({ readSessionId: async () => 'session-before' })
+
+    const result = await clearContext(agent(), d, 400)
+
+    expect(d.paste).toHaveBeenCalledOnce()
+    expect(result).toMatchObject({ ok: true, unobserved: true })
+    expect(result.sessionId).toBeUndefined()
   })
 
-  // The cycle omits bypassPermissions and auto when unavailable, which is why
-  // this is verified rather than counted.
-  it('still lands correctly on a session with a shortened cycle', async () => {
-    const c = cycling(['default', 'acceptEdits', 'plan'])
-    const result = await setMode(agent(), 'plan', c.deps)
-    expect(result.ok).toBe(true)
-    expect(c.at()).toBe('plan')
+  // A session record that cannot be read is INV-5's case, not an error: the
+  // clear may well have landed, and nothing here can tell.
+  it('reports unobserved when the session record cannot be read', async () => {
+    const d = deps({ readSessionId: async () => undefined })
+
+    const result = await clearContext(agent(), d, 400)
+
+    expect(result).toMatchObject({ ok: true, unobserved: true })
   })
 
-  it('gives up and reports where it ended rather than cycling forever', async () => {
-    const c = cycling(['default', 'acceptEdits', 'plan'])
-    const result = await setMode(agent(), 'bypassPermissions', c.deps, 4)
-    expect(result.ok).toBe(false)
-    expect(result.steps).toBe(4)
-    expect(result.mode).toBeDefined()
+  it('refuses a busy agent, because it types', async () => {
+    const d = deps()
+    await expect(clearContext(agent({ status: 'busy' }), d)).rejects.toThrow(/busy/)
+    expect(d.paste).not.toHaveBeenCalled()
+  })
+})
+
+describe('compactContext', () => {
+  it('types /compact and does not wait for it', async () => {
+    const d = deps({
+      // A compaction that never finishes. Anything that verified would hang
+      // here, which is the point: the real one ran for 157 seconds.
+      readSessionId: async () => 'session-before',
+    })
+
+    await compactContext(agent(), d)
+
+    expect(d.paste).toHaveBeenCalledExactlyOnceWith('%1', '/compact', true)
   })
 
-  it('refuses a mode that is not in the cycle', async () => {
-    await expect(setMode(agent(), 'turbo', deps())).rejects.toThrow(/unknown permission mode/)
+  it('refuses a busy agent, because it types', async () => {
+    const d = deps()
+    await expect(compactContext(agent({ status: 'busy' }), d)).rejects.toThrow(/busy/)
+    expect(d.paste).not.toHaveBeenCalled()
+  })
+})
+
+describe('cycleMode', () => {
+  /*
+   * One press, and the reading is reported rather than chased.
+   *
+   * The suite this replaced tested a `setMode(target)` that pressed `BTab` up
+   * to six times until the session reported the mode a `<select>` had asked
+   * for. Every one of those cases was about a failure mode a target creates:
+   * reaching a mode that the cycle silently omits, giving up part-way, landing
+   * somewhere nobody asked for. There is no target now, so there is nothing to
+   * miss — see `cycleMode` for why that was the fix rather than more polling.
+   */
+
+  it('presses Shift+Tab exactly once and reports where it landed', async () => {
+    let mode = 'default'
+    const d = deps({
+      key: vi.fn(async () => {
+        mode = 'acceptEdits'
+      }),
+      readMode: async () => mode,
+    })
+
+    const result = await cycleMode(agent(), d)
+
+    expect(result).toMatchObject({ ok: true, mode: 'acceptEdits' })
+    expect(result.unobserved).toBeUndefined()
+    expect(d.key).toHaveBeenCalledExactlyOnceWith('%1', 'BTab')
+  })
+
+  /*
+   * The mode is observed by reading a record the session writes to its own
+   * transcript, and that write is not instant. A single read at a fixed delay
+   * made a record that landed a few hundred ms late look like a press that had
+   * done nothing. Polling makes a slow write cost latency instead of an answer.
+   */
+  it('waits for a session that reports the press late', async () => {
+    let reads = 0
+    let mode = 'default'
+    const d = deps({
+      key: vi.fn(async () => {
+        mode = 'plan'
+      }),
+      readMode: async () => {
+        reads += 1
+        return reads <= 4 ? 'default' : mode
+      },
+    })
+
+    const result = await cycleMode(agent(), d)
+
+    expect(result).toMatchObject({ ok: true, mode: 'plan' })
+    expect(d.key).toHaveBeenCalledTimes(1)
+  })
+
+  /*
+   * The reading never moved. That is not a failed switch — the key reached the
+   * pane — so it is reported as a success this app could not observe (INV-11),
+   * and critically it does *not* press again. Pressing again is what used to
+   * leave a live session in a mode nobody asked for.
+   */
+  it('reports an unobserved press rather than pressing again', async () => {
+    const d = deps({ readMode: async () => 'auto' })
+
+    const result = await cycleMode(agent(), d)
+
+    expect(d.key).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ ok: true, mode: 'auto', unobserved: true })
+  })
+
+  it('reports an unobserved press when the session reports no mode at all', async () => {
+    const d = deps({ readMode: async () => undefined })
+
+    const result = await cycleMode(agent(), d)
+
+    expect(d.key).toHaveBeenCalledTimes(1)
+    expect(result).toMatchObject({ ok: true, unobserved: true })
   })
 
   /*
@@ -163,7 +273,9 @@ describe('setMode', () => {
       }),
       readMode: async () => mode,
     })
-    const result = await setMode(agent({ status: 'busy' }), 'plan', d)
+
+    const result = await cycleMode(agent({ status: 'busy' }), d)
+
     expect(result).toMatchObject({ ok: true, mode: 'plan' })
     expect(d.key).toHaveBeenCalledWith('%1', 'BTab')
     // And it still never types: text is what the busy refusal exists to stop.
@@ -173,7 +285,7 @@ describe('setMode', () => {
   it('still refuses an agent it cannot reach', async () => {
     const noPane = agent({ status: 'busy' })
     delete (noPane as { paneId?: string }).paneId
-    await expect(setMode(noPane, 'plan', deps())).rejects.toThrow(/attachable/)
+    await expect(cycleMode(noPane, deps())).rejects.toThrow(/attachable/)
   })
 
   /*
@@ -181,77 +293,6 @@ describe('setMode', () => {
    * submit an instruction that changes what the session does next, and one
    * arriving mid-turn acts on a state nobody chose.
    */
-  /*
-   * The bug this guards, and it was doing real damage: `setMode` verifies by
-   * re-reading the mode after each press, so when that reading cannot move it
-   * pressed again — six Shift+Tabs into a live session, leaving it wherever
-   * that landed and then reporting "could not reach plan" for the privilege.
-   *
-   * Two real causes, neither helped by pressing again: a session that reports
-   * no permission mode at all (there is one in this user's own fleet), and a
-   * busy agent that has not yet written the record where this app can read it.
-   */
-  /*
-   * The flakiness this replaced.
-   *
-   * The mode is observed by reading a record the session writes to its own
-   * transcript, and that write is not instant. With a single read at a fixed
-   * 250ms, a record that landed at 400ms looked like a press that had done
-   * nothing: the loop stopped, correctly refusing to press blind, and left the
-   * session one step from where it started rather than at the target. Whether
-   * the switch worked came down to whether the write beat the timer.
-   *
-   * Polling makes a slow write cost latency instead of an answer.
-   */
-  it('reaches the target when the session reports the press late', async () => {
-    let reads = 0
-    const d = deps({
-      // Reports the old mode for the first few looks, then the new one — the
-      // shape of a transcript record that lands a few hundred ms after the key.
-      readMode: async () => {
-        reads += 1
-        return reads <= 4 ? 'default' : 'plan'
-      },
-    })
-
-    const result = await setMode(agent(), 'plan', d)
-
-    expect(result).toMatchObject({ ok: true, mode: 'plan' })
-    // One press, not a second one fired because the first looked ignored.
-    expect(d.key).toHaveBeenCalledTimes(1)
-  })
-
-  it('presses once, not six times, when the mode never changes', async () => {
-    const d = deps({ readMode: async () => 'auto' })
-    const result = await setMode(agent(), 'plan', d)
-
-    expect(d.key).toHaveBeenCalledTimes(1)
-    expect(result.unobserved).toBe(true)
-    expect(result.ok).toBe(false)
-  })
-
-  it('presses once when the session reports no mode at all', async () => {
-    const d = deps({ readMode: async () => undefined })
-    const result = await setMode(agent(), 'plan', d)
-
-    expect(d.key).toHaveBeenCalledTimes(1)
-    expect(result.unobserved).toBe(true)
-  })
-
-  // A reading that is moving is still being followed, up to the bound.
-  it('keeps cycling while the mode is actually changing', async () => {
-    const seen = ['acceptEdits', 'plan']
-    let at = 0
-    const d = deps({ readMode: async () => (at === 0 ? 'default' : seen[at - 1]) })
-    const key = vi.fn(async () => {
-      at += 1
-    })
-    const result = await setMode(agent(), 'plan', { ...d, key })
-
-    expect(result).toMatchObject({ ok: true, mode: 'plan' })
-    expect(key).toHaveBeenCalledTimes(2)
-  })
-
   it('leaves the busy refusal on goal and close', async () => {
     const busy = agent({ status: 'busy' })
     await expect(setGoal(busy, 'the tests pass', deps())).rejects.toThrow(/busy/)
@@ -428,8 +469,15 @@ describe('INV-7 refuses Claude commands for other agent CLIs', () => {
 
   it('refuses the permission-mode cycle', async () => {
     const d = deps()
-    await expect(setMode(kiro, 'plan', d)).rejects.toBeInstanceOf(ControlError)
+    await expect(cycleMode(kiro, d)).rejects.toBeInstanceOf(ControlError)
     expect(d.key).not.toHaveBeenCalled()
+  })
+
+  it('refuses /clear and /compact, and types nothing', async () => {
+    const d = deps()
+    await expect(clearContext(kiro, d)).rejects.toBeInstanceOf(ControlError)
+    await expect(compactContext(kiro, d)).rejects.toBeInstanceOf(ControlError)
+    expect(d.paste).not.toHaveBeenCalled()
   })
 
   it('refuses /goal, set and cleared', async () => {

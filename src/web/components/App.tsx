@@ -8,6 +8,7 @@ import { useIsNarrow } from '../hooks/useMediaQuery.ts'
 import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { FleetList } from './FleetList.tsx'
+import { ForestRoute } from './ForestRoute.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
 import { NewAgentDialog } from './NewAgentDialog.tsx'
 import { SettingsMenu } from './SettingsMenu.tsx'
@@ -34,7 +35,11 @@ export function App() {
 
   const searchRef = useRef<HTMLInputElement>(null)
   const isHelp = location.pathname.startsWith('/help')
-  const sheetMode = narrow && selected !== null && !isHelp
+  const isTree = location.pathname.startsWith('/tree')
+  // Both take the whole page, so neither leaves an agent selected behind it and
+  // neither has a fleet to filter.
+  const solo = isHelp || isTree
+  const sheetMode = narrow && selected !== null && !solo
 
   // Modals and the mobile sheet own the screen; the page behind must not scroll.
   useEffect(() => {
@@ -135,8 +140,23 @@ export function App() {
         <h1 className={styles.title}>
           agent<span>-commander</span>
         </h1>
-        {isHelp ? <span className={styles.spacer} /> : <Filters />}
+        {solo ? <span className={styles.spacer} /> : <Filters />}
         <UsageChips />
+        {/*
+          A peer of the fleet rather than a mode of it: the tree answers "what
+          is the shape of the work" where the fleet answers "which agent needs
+          me", and neither is a filter on the other.
+        */}
+        <Button
+          variant="icon"
+          data-testid="tree-button"
+          title={t('treeTitle')}
+          aria-label={t('treeTitle')}
+          aria-pressed={isTree}
+          onClick={() => navigate(isTree ? '/' : '/tree')}
+        >
+          ⑂
+        </Button>
         <Button
           variant="icon"
           data-testid="help-button"
@@ -223,6 +243,15 @@ function moveCardFocus(delta: number): void {
  * idea of "focused" in step with it, including on a reload straight into
  * /agent/:sessionId.
  */
+/**
+ * How long the browser will wait for a session it was told exists.
+ *
+ * The registry scans every 2s, so this is that with room for a busy machine.
+ * Bounded because an expectation this app cannot keep must expire rather than
+ * leave the panel blank indefinitely (INV-11).
+ */
+const EXPECT_MS = 8000
+
 export function FleetRoute() {
   const navigate = useTokenNavigate()
   const narrow = useIsNarrow()
@@ -230,7 +259,10 @@ export function FleetRoute() {
   const location = useLocation()
   const agents = useStore((s) => s.agents)
   const selected = useStore((s) => s.selected)
+  const expectSession = useStore((s) => s.expectSession)
+  const setExpectSession = useStore((s) => s.setExpectSession)
   const tab = useStore((s) => s.tab)
+  const view = useStore((s) => s.view)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const wantTab = location.pathname.endsWith('/term') ? 'attach' : 'chat'
@@ -258,23 +290,60 @@ export function FleetRoute() {
     setAttached(wantTab === 'attach')
   }, [sessionId, wantTab])
 
-  // The agent ended while it was open.
+  /*
+   * The agent ended while it was open — but *only* that, and telling it apart
+   * from an agent that has not arrived yet is the whole of this effect.
+   *
+   * `/clear` replaces a session rather than editing it, so straight after one
+   * the URL names an id the registry has not scanned for. Without the
+   * exception below this rule fired instantly and sent the user back to the
+   * fleet every single time they cleared an agent, which reads exactly like the
+   * panel closing itself.
+   *
+   * The wait is bounded. A session that never appears is a claim this app
+   * cannot keep, and leaving the panel blank forever is worse than admitting
+   * it: the expectation is dropped after `EXPECT_MS` and the ordinary rule
+   * takes over.
+   */
   useEffect(() => {
+    if (!expectSession) return
+    if (agents.some((a) => a.sessionId === expectSession)) {
+      setExpectSession(null)
+      return
+    }
+    const timer = window.setTimeout(() => setExpectSession(null), EXPECT_MS)
+    return () => window.clearTimeout(timer)
+  }, [expectSession, agents, setExpectSession])
+
+  useEffect(() => {
+    if (sessionId && sessionId === expectSession) return
     if (sessionId && agents.length > 0 && !agent) navigate('/', { replace: true })
-  }, [sessionId, agent, agents.length, navigate])
+  }, [sessionId, agent, agents, expectSession, navigate])
 
   const showDetail = Boolean(agent)
 
   return (
     <main className={`${styles.layout} ${showDetail ? '' : styles.solo}`}>
-      {!(narrow && showDetail) && (
-        <FleetList
-          tiled={!showDetail}
-          selected={selected}
-          searchRef={searchRef}
-          onSelect={(id) => navigate(`/agent/${id}`)}
-        />
-      )}
+      {/*
+        Two views over the same fleet, chosen in Settings and remembered per
+        browser. Not a migration: the card list is not deprecated, it answers a
+        different question — what each agent is doing — where the forest answers
+        whether anything in a family is still moving at all. The forest is the
+        default because a session that delegates stops writing its own
+        transcript, and a list has to bolt a word onto a card to explain that
+        silence.
+      */}
+      {!(narrow && showDetail) &&
+        (view === 'forest' ? (
+          <ForestRoute />
+        ) : (
+          <FleetList
+            tiled={!showDetail}
+            selected={selected}
+            searchRef={searchRef}
+            onSelect={(id) => navigate(`/agent/${id}`)}
+          />
+        ))}
       {agent && (
         <AgentDetail
           agent={agent}

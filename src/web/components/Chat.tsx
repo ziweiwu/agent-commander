@@ -7,9 +7,9 @@ import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
-import { interruptAndSend, sendConfirmedKey, sendMessage, setAgentMode } from '../store/transport.ts'
+import { cycleAgentMode, interruptAndSend, sendConfirmedKey, sendMessage } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
-import { MODES, MODE_KEY } from '../lib/modes.ts'
+import { MODE_KEY } from '../lib/modes.ts'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button, Chip } from './ui/Button.tsx'
@@ -20,6 +20,14 @@ const PIN_SLACK = 60
 
 /** Within this window, an identical quick prompt is a mis-tap, not a decision. */
 const QUICK_REPEAT_MS = 1000
+
+/**
+ * The one place the composer says why it will not send, named so the controls
+ * it disables can point at it: a caption a sighted user reads beside a greyed
+ * Send button is nothing at all to someone who arrives at that button by
+ * keyboard.
+ */
+const OFFLINE_HINT_ID = 'composer-offline-hint'
 
 /**
  * The replies that get typed over and over: unblock it, approve it, make it
@@ -65,6 +73,21 @@ export function Chat({ agent }: { agent: Agent }) {
 
   const attachable = Boolean(agent.paneId)
   const busy = agent.status === 'busy'
+  /*
+   * INV-11, on the one screen where the user acts rather than reads.
+   *
+   * `transport.send()` returns without doing anything when the socket is not
+   * open, and it is right to: holding the message and replaying it on reconnect
+   * is INV-2's single prohibition. But the composer went on looking exactly as
+   * it does when it works — a typed message was accepted, drawn as *sending…*,
+   * and only twelve seconds later admitted to as *not delivered*. The fleet
+   * list and the tree both caption a disconnected view; this one, where
+   * somebody is about to type an instruction to a live agent, said nothing.
+   *
+   * So the composer refuses instead, and says so beside itself rather than only
+   * in the header chip at the other end of the screen.
+   */
+  const online = conn === 'open'
   // The interface language is only the fallback, for a chat with nothing in it.
   const promptLang = useMemo(() => conversationLang(messages, lang), [messages, lang])
 
@@ -98,9 +121,19 @@ export function Chat({ agent }: { agent: Agent }) {
 
   /** The standalone stop. Its own confirmation, because it is its own action. */
   const interrupt = () => {
-    if (!attachable) return
+    // Asking first and then dropping the key on the floor is worse than not
+    // offering it: the user walks away believing the agent was stopped.
+    if (!attachable || !online) return
     if (!window.confirm(t('confirmInterrupt'))) return
     sendConfirmedKey('Escape')
+    /*
+     * Said out loud because it is the one thing here that cannot be checked.
+     * Every neighbouring control reads the transcript back and has its own
+     * sentence for "sent, but unconfirmed" — mode, clear, compact, goal. An
+     * Escape leaves no record at all, so silence here would be the interface
+     * implying a verification it never made (INV-8, INV-11).
+     */
+    showToast(t('interruptSent'))
   }
 
   /*
@@ -116,12 +149,28 @@ export function Chat({ agent }: { agent: Agent }) {
    * a11y trade: `Tab` forward and `Escape` both still move focus, so this is
    * not a keyboard trap (WCAG 2.1.2), but it is a binding worth knowing about.
    */
+  /*
+   * Shift+Tab in the message box is the same act as the mode button beside it,
+   * and now sends the same thing: one press, no target.
+   *
+   * It used to compute the *next* mode from the one the agent last reported and
+   * ask the server to reach it. That was wrong twice over — the cycle silently
+   * omits modes that are unavailable, so the arithmetic named a mode that is
+   * not next; and reaching a named mode is what made the control unreliable at
+   * all (see `cycleMode` in `src/server/control.ts`).
+   */
   const cycleMode = async () => {
     if (!attachable) return
-    const at = MODES.indexOf((agent.permissionMode ?? MODES[0]) as (typeof MODES)[number])
-    const next = MODES[(at + 1) % MODES.length] as string
-    const result = await setAgentMode(next)
-    showToast(result.ok ? t('modeSwitched', { mode: t(MODE_KEY[next] ?? 'modeDefault') }) : t('controlFailed', { error: result.error }))
+    const result = await cycleAgentMode()
+    if (!result.ok) {
+      showToast(t('controlFailed', { error: result.error }))
+      return
+    }
+    if (result.detail === undefined || result.detail === 'unverified') {
+      showToast(t('modeUnverified'))
+      return
+    }
+    showToast(t('modeSwitched', { mode: t(MODE_KEY[result.detail] ?? 'modeDefault') }))
   }
 
   const rows = useMemo(() => {
@@ -172,6 +221,14 @@ export function Chat({ agent }: { agent: Agent }) {
     e?.preventDefault()
     const text = draftRef.current
     if (text.trim().length === 0 || !attachable) return
+    /*
+     * Refused *before* the draft is cleared, and never held to send later.
+     * Both halves matter. Queuing it would be INV-2's one prohibition; clearing
+     * the box on a send that could not go loses four typed sentences to a
+     * dropped socket, which is the failure nobody forgives. The text stays
+     * where it is, and sending it again stays the user's decision.
+     */
+    if (!online) return
     draftRef.current = ''
     // Interrupting is only meaningful against an agent that is actually working;
     // on an idle one the two modes are the same act, so the Escape is not sent.
@@ -185,7 +242,8 @@ export function Chat({ agent }: { agent: Agent }) {
   // A quick prompt is its own message: it leaves whatever is half-typed in the
   // composer alone rather than overwriting or appending to it.
   const sendQuick = (text: string) => {
-    if (!attachable) return
+    // A chip is a send like any other, so it goes nowhere with the socket down.
+    if (!attachable || !online) return
     // A chip has no draft to clear, so it needs its own guard. A double click
     // is two separate tasks a hundred-odd milliseconds apart, which no
     // same-batch check would catch — but nobody deliberately sends the same
@@ -303,6 +361,8 @@ export function Chat({ agent }: { agent: Agent }) {
                   // box in; it sends.
                   title={t('quickPromptSend', { text })}
                   aria-label={t('quickPromptSend', { text })}
+                  disabled={!online}
+                  aria-describedby={online ? undefined : OFFLINE_HINT_ID}
                   onClick={() => sendQuick(text)}
                 >
                   {/* The chip shape is used elsewhere in the app to mean "fill
@@ -331,6 +391,13 @@ export function Chat({ agent }: { agent: Agent }) {
             rows={1}
             value={draft}
             disabled={!attachable}
+            /*
+             * Still typeable with the socket down. Drafting is not sending, and
+             * a disabled box would throw away the half-written reply this whole
+             * change exists to keep; what is refused is the send, not the
+             * writing. The description says why the send is refused.
+             */
+            aria-describedby={online ? undefined : OFFLINE_HINT_ID}
             placeholder={
               attachable ? t('messagePlaceholder', { name: shortName(agent) }) : t('messageDisabled')
             }
@@ -390,6 +457,8 @@ export function Chat({ agent }: { agent: Agent }) {
               data-testid="chat-interrupt"
               title={t('interruptTitle')}
               aria-label={t('interrupt')}
+              disabled={!online}
+              aria-describedby={online ? undefined : OFFLINE_HINT_ID}
               onClick={interrupt}
             >
               {/* The glyph carries it where the label will not fit; the label
@@ -406,17 +475,36 @@ export function Chat({ agent }: { agent: Agent }) {
             type="submit"
             className={styles.send}
             data-testid="composer-send"
-            disabled={!attachable || draft.trim().length === 0}
+            disabled={!attachable || !online || draft.trim().length === 0}
+            aria-describedby={online ? undefined : OFFLINE_HINT_ID}
           >
             {/* The button says what it will do, which is what makes asking once
                 at the toggle enough rather than asking on every send. */}
             {sendMode === 'interrupt' && busy ? t('interruptAndSend') : t('send')}
           </Button>
         </div>
-        <div className={styles.hint} data-testid="composer-hint">
-          <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')} ·{' '}
-          <kbd>Shift+Tab</kbd> {t('hintShiftTab')}
-        </div>
+        {online ? (
+          <div className={styles.hint} data-testid="composer-hint">
+            <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')} ·{' '}
+            <kbd>Shift+Tab</kbd> {t('hintShiftTab')}
+          </div>
+        ) : (
+          /*
+           * In place of the key hints, not above them. With nothing connected
+           * Enter does not send, so leaving that row up is the interface making
+           * a claim it cannot keep — and taking the line rather than adding one
+           * costs the conversation no height on a phone, which is the budget
+           * the whole composer is written against.
+           */
+          <div
+            className={styles.hint}
+            id={OFFLINE_HINT_ID}
+            data-testid="composer-offline"
+            role="status"
+          >
+            {t(conn === 'closed' ? 'connReconnecting' : 'connConnecting')}
+          </div>
+        )}
       </form>
     </div>
   )

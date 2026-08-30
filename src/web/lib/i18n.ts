@@ -144,13 +144,33 @@ const EN = {
   interruptAndSend: 'Interrupt & send',
   interruptTitle: 'Stop what this agent is doing now',
   interruptIdle: 'Nothing to interrupt — this agent is not working',
+  /* The one control action INV-8 cannot verify. Nothing records an Escape, so
+     claiming it landed would be exactly the assertion INV-11 forbids — this
+     says what was done and what remains unknown. */
+  interruptSent: 'Escape was sent. Nothing records it, so this cannot be confirmed — check the Attach tab.',
   modeSwitched: 'Permission mode is now {mode}',
   modelQueued: '{model} is queued — it applies when the current task finishes',
   modeUnverified: 'Shift+Tab sent; the session did not report a new mode, so it may not have switched',
+  /* The cycle button. Its visible label is a glyph and a mode name, which does
+     not say what pressing it does — so the accessible name says both halves,
+     the same way the goal toggle already does. */
+  modeCycleAction: 'Permission mode: {mode}. Press to switch to the next mode.',
+  modeCycleUnknownAction: 'Permission mode not reported. Press to switch mode.',
+  modeUnknown: 'unknown',
+  modePressed: 'pressed…',
   hintShiftTab: 'permission mode',
   confirmKey: 'Really send {key} to this agent?',
   /* settings */
   settings: 'Settings',
+  /* The two fleet views. "Cards" rather than "Legacy" as the visible label:
+     the code name says which one came first, which is no help at all when the
+     question is which one to look at now. The hints say what each one shows,
+     because a one-word name cannot. */
+  viewLabel: 'View',
+  viewForest: 'Forest',
+  viewForestHint: 'Every session with what it handed out, on one time axis',
+  viewLegacy: 'Cards',
+  viewLegacyHint: 'The card list, grouped by status',
   theme: 'Theme',
   themeSystem: 'System',
   themeLight: 'Light',
@@ -233,6 +253,7 @@ const EN = {
   controlBusy: 'Only while the agent is idle',
   controlFailed: 'That did not take effect: {error}',
   closeAgent: 'Close agent',
+  closeKeep: 'Keep it running',
   /* goal — Claude Code's own /goal, driven from the composer */
   goalLabel: 'Goal',
   goalPlaceholder: 'Keep working until…',
@@ -249,6 +270,53 @@ const EN = {
   closing: 'Closing…',
   closedGracefully: '{name} exited.',
   closedForced: '{name} did not respond to /exit and was stopped.',
+  /* tree — the fleet's delegation graph */
+  treeTab: 'Tree',
+  treeTitle: 'Delegation',
+  treeEmpty: 'No agents are running.',
+  treeNoDelegates: 'Has not delegated anything.',
+  /* Absence of evidence, not evidence of absence: the files this reads are
+     written by Claude Code, so for another CLI there is nothing to read and
+     "delegated nothing" would be a claim nobody checked (INV-11). */
+  treeUnknown: '{kind} keeps no transcript, so this app cannot tell whether it has delegated.',
+  treeDelegateCount: '{n} delegate',
+  treeDelegateCountPlural: '{n} delegates',
+  treeRunningCount: '{n} running',
+  treeReparented:
+    '{name} names a parent that is not on disk. Raised to the top level rather than dropped.',
+  treeStateDone: 'done',
+  treeStateActive: 'active',
+  treeStateQuiet: 'quiet',
+  /* Marked as a guess wherever it appears, the same way an inferred status is
+     on a fleet card. */
+  treeStateInferred: 'inferred',
+  treeStoppedByUser: 'stopped by you',
+  /* Captioned as a size, never a percentage: there is no total for it to be a
+     percentage of, and INV-11 caught exactly this once already with tokens. */
+  treeWritten: '{size} written',
+  treeSizeLabel: 'transcript size',
+  treeOpenAgent: 'Open {name}',
+  /* clear + compact — Claude Code's own /clear and /compact */
+  clearContext: 'Clear',
+  clearKeep: 'Keep the conversation',
+  clearing: 'Clearing…',
+  clearContextTitle: 'Discard this conversation and start the agent fresh',
+  /* The confirm has to say the second half. Clearing does not just reset the
+     agent — it starts a new session, and the conversation on this screen is
+     the old one, which nothing can get back. */
+  clearConfirm:
+    'Clear {name}? The agent starts a fresh session and this conversation is discarded. There is no undo.',
+  cleared: '{name} was cleared and is now a fresh session.',
+  clearUnverified:
+    '/clear was sent, but {name} has not started a new session yet — it may not have taken effect.',
+  compactContext: 'Compact',
+  compacting: 'Compacting…',
+  compactContextTitle: 'Ask the agent to summarise and shorten its own context',
+  /* Asked for, not done: a compaction runs for minutes, so claiming it had
+     finished would be the interface asserting more than it knows. */
+  compactRequested: 'Compaction requested. {name} will summarise its context; this takes a while.',
+  compacted: 'compacted · {before} → {after}',
+  compactedAuto: 'compacted automatically · {before} → {after}',
   /* folder browser */
   browse: 'Browse…',
   browseTitle: 'Choose a directory',
@@ -393,12 +461,22 @@ const ZH: Record<Key, string> = {
   interruptAndSend: '中断并发送',
   interruptTitle: '立即停止该助手正在做的事',
   interruptIdle: '无需中断 —— 该助手当前没有在工作',
+  interruptSent: '已发送 Escape。该操作没有任何记录，因此无法确认是否生效 —— 请在「终端」标签页查看。',
   modeSwitched: '权限模式已切换为 {mode}',
   modelQueued: '{model} 已排队 —— 当前任务结束后生效',
   modeUnverified: '已发送 Shift+Tab；会话未报告新的权限模式，可能没有切换',
+  modeCycleAction: '权限模式：{mode}。按下切换到下一个模式。',
+  modeCycleUnknownAction: '未报告权限模式。按下切换模式。',
+  modeUnknown: '未知',
+  modePressed: '已按下…',
   hintShiftTab: '切换权限模式',
   confirmKey: '确定要向这个代理发送 {key} 吗？',
   settings: '设置',
+  viewLabel: '视图',
+  viewForest: '森林',
+  viewForestHint: '在同一条时间轴上显示每个会话及其派发出去的任务',
+  viewLegacy: '卡片',
+  viewLegacyHint: '按状态分组的卡片列表',
   theme: '主题',
   themeSystem: '跟随系统',
   themeLight: '浅色',
@@ -467,6 +545,7 @@ const ZH: Record<Key, string> = {
   controlBusy: '仅在代理空闲时可用',
   controlFailed: '未能生效：{error}',
   closeAgent: '关闭代理',
+  closeKeep: '让它继续运行',
   goalLabel: '目标',
   goalPlaceholder: '持续工作直到……',
   goalConditionLabel: '目标条件',
@@ -482,6 +561,36 @@ const ZH: Record<Key, string> = {
   closing: '正在关闭…',
   closedGracefully: '{name} 已退出。',
   closedForced: '{name} 未响应 /exit，已被强制结束。',
+  treeTab: '树',
+  treeTitle: '委派关系',
+  treeEmpty: '没有正在运行的代理。',
+  treeNoDelegates: '未委派任何子代理。',
+  treeUnknown: '{kind} 不保存记录，因此无法判断它是否委派过子代理。',
+  treeDelegateCount: '{n} 个子代理',
+  treeDelegateCountPlural: '{n} 个子代理',
+  treeRunningCount: '{n} 个进行中',
+  treeReparented: '{name} 的上级不在磁盘上，已提升到顶层而不是丢弃。',
+  treeStateDone: '已完成',
+  treeStateActive: '进行中',
+  treeStateQuiet: '静默',
+  treeStateInferred: '推断',
+  treeStoppedByUser: '已被你停止',
+  treeWritten: '已写入 {size}',
+  treeSizeLabel: '记录大小',
+  treeOpenAgent: '打开 {name}',
+  clearContext: '清空',
+  clearKeep: '保留这段对话',
+  clearing: '正在清空…',
+  clearContextTitle: '丢弃当前对话，让该代理重新开始',
+  clearConfirm: '要清空 {name} 吗？代理会开启新会话，当前对话将被丢弃，且无法恢复。',
+  cleared: '{name} 已清空，现在是一个新会话。',
+  clearUnverified: '已发送 /clear，但 {name} 尚未开启新会话，可能没有生效。',
+  compactContext: '压缩',
+  compacting: '正在压缩…',
+  compactContextTitle: '请该代理总结并压缩自己的上下文',
+  compactRequested: '已请求压缩。{name} 会总结自己的上下文，这需要一些时间。',
+  compacted: '已压缩 · {before} → {after}',
+  compactedAuto: '已自动压缩 · {before} → {after}',
   browse: '浏览…',
   browseTitle: '选择目录',
   browseUp: '上一级',

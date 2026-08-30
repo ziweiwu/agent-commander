@@ -119,6 +119,33 @@ export async function readSessionFiles(dir = SESSIONS_DIR): Promise<Agent[]> {
   return agents
 }
 
+/**
+ * The session id this process is currently running, read straight from its own
+ * record rather than from anything this app remembers.
+ *
+ * Exists for `/clear`, which is the one control action whose effect is to
+ * *replace* the session: Claude Code starts a fresh transcript under a new id
+ * and rewrites this file to point at it. Watching the id change is therefore
+ * proof the clear landed, and it is a far better sentinel than the transcript —
+ * the old file stops being written and the new one is not found by the old id,
+ * so there is nothing to poll for there.
+ *
+ * Returns undefined for a missing or malformed record, which is INV-5's case:
+ * the caller reports an unverified clear rather than an error.
+ */
+export async function readSessionId(
+  pid: number,
+  dir = SESSIONS_DIR,
+): Promise<string | undefined> {
+  try {
+    const raw = await readFile(join(dir, `${pid}.json`), 'utf8')
+    const parsed = JSON.parse(raw) as SessionFile
+    return typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined
+  } catch {
+    return undefined
+  }
+}
+
 /** The supported presence check. Returns null if the CLI is unavailable. */
 export async function readCliSessionIds(): Promise<Set<string> | null> {
   return new Promise((resolve) => {

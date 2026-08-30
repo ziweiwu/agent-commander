@@ -9,7 +9,7 @@ import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { extname, join, normalize, resolve } from 'node:path'
-import { timingSafeEqual } from 'node:crypto'
+import { createHash, timingSafeEqual } from 'node:crypto'
 import { WebSocketServer, type WebSocket } from 'ws'
 import {
   ALLOWED_KEYS,
@@ -21,19 +21,23 @@ import {
 import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
 import { SpawnError, SpawnOptionError, startAgent } from './spawn.ts'
 import {
+  clearContext,
   clearGoal,
   closeAgent,
+  compactContext,
   ControlError,
+  cycleMode,
   liveDeps,
   setGoal,
-  setMode,
   setModel,
 } from './control.ts'
 import { BrowseError, isInside, listDirs } from './browse.ts'
 import { readGoal, readPermissionMode } from './transcript.ts'
 import type { PendingStore } from './pending.ts'
 import type {
+  AgentTree,
   ControlResponse,
+  FleetTree,
   NewAgentRequest,
   NewAgentResponse,
   ServerEnv,
@@ -44,6 +48,7 @@ import { Poller } from './poll.ts'
 
 /** Accepted; the body's `detail` says what actually happened. */
 const HTTP_OK = 200
+const HTTP_NOT_MODIFIED = 304
 
 const TIMELINE_MS = 1000
 const MAX_PASTE = 100_000
@@ -162,6 +167,13 @@ export interface ServeOptions {
   browseRoot?: string
   /** Injected by tests and by mock mode so no real agent is driven. */
   control?: import('./control.ts').ControlDeps
+  /**
+   * Reads one agent's delegation tree. Injected so mock mode can stand in.
+   *
+   * Absent in tests that do not exercise the tree; `/api/tree` then reports
+   * every agent as having no delegates rather than failing.
+   */
+  tree?: (agent: Agent) => Promise<AgentTree>
   /** Account-level quota. Absent in tests that only exercise the fleet. */
   limits?: LimitsApi
   /**
@@ -425,7 +437,13 @@ export function createAppServer(opts: ServeOptions): Server {
       void handleBrowse(url, res, opts)
       return
     }
-    const control = /^\/api\/agents\/([^/]+)\/(close|mode|model|goal)$/.exec(url.pathname)
+    if (url.pathname === '/api/tree') {
+      void handleTree(req, res, opts)
+      return
+    }
+    const control = /^\/api\/agents\/([^/]+)\/(close|clear|compact|mode|model|goal)$/.exec(
+      url.pathname,
+    )
     if (control && req.method === 'POST') {
       void handleControl(req, res, opts, decodeURIComponent(control[1] as string), control[2] as string)
       return
@@ -731,7 +749,7 @@ function watchPane(viewer: Viewer, hub: PaneHub, paneId: string, sessionId: stri
     viewer.frameFails = 0
     const { meta, lines } = event.sample
     if (meta.dead) {
-      viewer.send({ type: 'error', sessionId, message: 'pane has exited' })
+      viewer.send({ type: 'error', sessionId, message: 'pane has exited', kind: 'pane-exited' })
       viewer.attached = false
       viewer.clearFrameTimer()
       return
@@ -826,7 +844,16 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
     if (size > MAX_BODY) throw new Error('request body too large')
     chunks.push(buf)
   }
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'))
+  const raw = Buffer.concat(chunks).toString('utf8')
+  /*
+   * An empty body is a request that carries no value, not a malformed one.
+   * `JSON.parse('')` throws, and the error it throws — "Unexpected end of JSON
+   * input" — reached the user as a toast reading "that did not take effect"
+   * about a control that had never been called. Actions that take no value are
+   * now the majority here: close, clear, compact and mode.
+   */
+  if (raw.length === 0) return undefined
+  return JSON.parse(raw)
 }
 
 async function handleNewAgent(
@@ -885,7 +912,59 @@ async function handleBrowse(url: URL, res: ServerResponse, opts: ServeOptions): 
   }
 }
 
-/** Close, mode and model. Each refuses a busy agent inside control.ts (INV-8). */
+/**
+ * The whole fleet's delegation graph.
+ *
+ * Plain HTTP rather than a fifth socket message, and polled by the tree view
+ * only while it is open. That satisfies INV-4's first rule — nothing polls what
+ * nobody is watching — without adding a subscription lifecycle to the wire,
+ * which is deliberately four messages up and six down. The data is neither hot
+ * nor pushed: it is a `readdir` and a few cached sidecar reads per agent.
+ */
+async function handleTree(
+  req: IncomingMessage,
+  res: ServerResponse,
+  opts: ServeOptions,
+): Promise<void> {
+  const read = opts.tree
+  const agents = opts.source.list()
+  const trees: AgentTree[] = read
+    ? await Promise.all(agents.map((agent) => read(agent)))
+    : agents.map((agent) => ({ sessionId: agent.sessionId, children: [] }))
+  const body = JSON.stringify({ trees } satisfies FleetTree)
+  const etag = `"${createHash('sha1').update(body).digest('base64url')}"`
+
+  /*
+   * A delegation graph changes on the order of a minute; this route is polled
+   * every three seconds. Measured against 53 real sessions the payload is
+   * 54.6 KB and *byte-identical* between consecutive polls — 64 MB an hour
+   * re-sent to a phone on Tailscale, which is the connection this app was
+   * written for.
+   *
+   * The pane path has always been careful about exactly this: `buildFrame`
+   * sends only the rows that changed and `isNoop` drops a frame with no visual
+   * change. This is that rule applied to the graph.
+   *
+   * The read above still happens — it is a `readdir` and a few cached sidecars,
+   * ~3ms for the whole fleet, and skipping it would mean caching state that
+   * something else owns. What is saved is the transfer and, because the client
+   * keeps its previous array on a 304, the re-render of every node behind it.
+   */
+  if (req.headers['if-none-match'] === etag) {
+    res.writeHead(HTTP_NOT_MODIFIED, { etag })
+    res.end()
+    return
+  }
+  res.writeHead(HTTP_OK, { 'content-type': MIME['.json'] as string, etag })
+  res.end(body)
+}
+
+/**
+ * Close, clear, compact, mode, model and goal.
+ *
+ * Each refuses a busy agent inside control.ts (INV-8), except mode: it sends a
+ * control key rather than typing, so it stays available mid-run.
+ */
 async function handleControl(
   req: IncomingMessage,
   res: ServerResponse,
@@ -912,6 +991,41 @@ async function handleControl(
     if (action === 'close') {
       const result = await closeAgent(agent, deps)
       reply(200, { ok: true, detail: result.forced ? 'forced' : 'exited' })
+      return
+    }
+
+    /*
+     * `/clear` replaces the session rather than editing it, so the new id is
+     * the answer and not decoration on it: every URL, socket focus and route
+     * naming the old one is dead the moment this returns, and a client that
+     * does not follow it loses the agent the user was looking at.
+     */
+    if (action === 'clear') {
+      const result = await clearContext(agent, deps)
+      accepted(result.unobserved ? 'unverified' : (result.sessionId ?? 'unverified'))
+      return
+    }
+
+    // Compaction runs for minutes. Nothing waits on it — see `compactContext`.
+    if (action === 'compact') {
+      await compactContext(agent, deps)
+      accepted('requested')
+      return
+    }
+
+    /*
+     * Mode takes no value either. It advances one Shift+Tab and reports where
+     * the session says it landed — there is no target to miss, which is the
+     * whole point of the change (see `cycleMode`).
+     *
+     * `unverified` means the press went out and the session has not written its
+     * mode down yet, which a busy one does only at the end of its turn. That is
+     * a success the interface qualifies, not an error the user can act on
+     * (INV-11).
+     */
+    if (action === 'mode') {
+      const result = await cycleMode(agent, deps)
+      accepted(result.unobserved ? 'unverified' : (result.mode ?? 'unverified'))
       return
     }
 
@@ -947,35 +1061,11 @@ async function handleControl(
       return
     }
 
-    if (action === 'model') {
-      const { queued } = await setModel(agent, value, deps)
-      // The agent was mid-turn, so the CLI will read this when the turn ends.
-      // Saying `ok` without saying that would claim a switch that has not
-      // happened yet (INV-11).
-      accepted(queued ? 'queued' : value)
-      return
-    }
-
-    const result = await setMode(agent, value, deps)
-    /*
-     * One Shift+Tab went out and the session never reported a new mode. That
-     * is not the same as failing to reach the target: the switch may well have
-     * landed somewhere this app cannot read, so saying it failed would assert
-     * something unknown (INV-11). Reported as a success the interface can
-     * qualify, rather than an error the user can do nothing about.
-     */
-    if (result.unobserved) {
-      accepted('unverified')
-      return
-    }
-    if (!result.ok) {
-      reply(409, {
-        ok: false,
-        error: `could not reach ${value}; the session is in ${result.mode ?? 'an unknown mode'}`,
-      })
-      return
-    }
-    reply(200, { ok: true, detail: result.mode ?? value })
+    const { queued } = await setModel(agent, value, deps)
+    // The agent was mid-turn, so the CLI will read this when the turn ends.
+    // Saying `ok` without saying that would claim a switch that has not
+    // happened yet (INV-11).
+    accepted(queued ? 'queued' : value)
   } catch (err) {
     const known = err instanceof ControlError || err instanceof SpawnOptionError
     reply(known ? 400 : 500, {

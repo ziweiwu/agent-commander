@@ -44,9 +44,19 @@ export function resetStore(): void {
     pendingSeq: 0,
     frame: null,
     toast: null,
+    heldMode: null,
+    expectSession: null,
   })
 }
 
+/**
+ * Render inside a router, the way every component runs in the real app.
+ *
+ * The router goes in through `wrapper` rather than around `ui`, because the
+ * `rerender` this returns replaces the *root* — with the router written into
+ * the element, a rerender dropped it, and any component reaching for
+ * `useNavigate` threw on the second render but not the first.
+ */
 export function renderApp(ui: ReactElement, options?: RenderOptions) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>, options)
+  return render(ui, { wrapper: MemoryRouter, ...options })
 }

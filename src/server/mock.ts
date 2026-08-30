@@ -5,8 +5,14 @@
  * at real, working agents — the same reason terminal-system-monitor ships a mock
  * mode. `npm run mock` never touches tmux or the filesystem.
  */
-import { CLAUDE_KIND } from '../shared/agent-kinds.ts'
-import type { Agent, RateLimits, TimelineEvent } from '../shared/types.ts'
+import { CLAUDE_KIND, hasTranscripts } from '../shared/agent-kinds.ts'
+import type {
+  Agent,
+  AgentTree,
+  RateLimits,
+  SubagentNode,
+  TimelineEvent,
+} from '../shared/types.ts'
 import type { AgentSource, LimitsApi, PaneApi, TailApi } from './sources.ts'
 import type { PaneMeta } from './pane.ts'
 
@@ -264,7 +270,7 @@ const MOCK_TIMELINE: Array<Omit<TimelineEvent, 'id'>> = [
  */
 const echoes = new Map<string, Array<{ at: number; text: string }>>()
 
-const SESSION_BY_PANE = new Map(
+export const SESSION_BY_PANE = new Map(
   FIXTURES.filter((a) => a.paneId !== undefined).map((a) => [a.paneId as string, a.sessionId]),
 )
 
@@ -301,6 +307,36 @@ export class MockSource implements AgentSource {
   notify(): void {
     const list = this.list()
     for (const fn of this.#listeners) fn(list)
+  }
+
+  /**
+   * Re-key a fixture, the way `/clear` re-keys a real session.
+   *
+   * `/clear` does not edit a conversation, it replaces one: Claude Code opens a
+   * fresh transcript under a new session id and the registry picks it up on its
+   * next scan. A mock that kept the old id would exercise the *unverified* path
+   * every time and never the one a user actually gets — and it is the path with
+   * the sharp edge, since every URL and socket focus naming the old id dies
+   * with it.
+   */
+  rotate(sessionId: string, next: string): void {
+    const agent = this.#agents.get(sessionId)
+    if (!agent) return
+    this.#agents.delete(sessionId)
+    this.#agents.set(next, {
+      ...agent,
+      sessionId: next,
+      // A cleared session has no conversation and nothing to say about one.
+      activity: undefined,
+      tokens: undefined,
+      aiTitle: undefined,
+      lastPrompt: undefined,
+      goal: undefined,
+      subagents: undefined,
+      delegating: false,
+      lastActivityAt: Date.now(),
+    })
+    this.notify()
   }
 
   async start(): Promise<void> {
@@ -459,5 +495,196 @@ export class MockTail implements TailApi {
     this.#sent = true
     const events = MOCK_TIMELINE.map((e, i) => ({ ...e, id: `${this.sessionId}:${i}` }))
     return { events, patch: {}, first: true }
+  }
+}
+
+const MINUTE_MS = 60_000
+
+/*
+ * The ages of the delegates that have been silent a while.
+ *
+ * Every one is far outside the 90s window `subagents.ts` infers `active` from,
+ * so what these nodes claim has to come from what the fixture records rather
+ * than from how recently they wrote — which is the case INV-13 exists for. They
+ * differ from one another only so the view is not asked to render one age five
+ * times over.
+ */
+const STOPPED_AUDIT_AGE_MS = 18 * MINUTE_MS
+const UNCLAIMED_TRIAGE_AGE_MS = 14 * MINUTE_MS
+const FINISHED_RESEARCH_AGE_MS = 11 * MINUTE_MS
+const FINISHED_CROSS_CHECK_AGE_MS = 13 * MINUTE_MS
+const ORPHANED_SWEEP_AGE_MS = 22 * MINUTE_MS
+
+/**
+ * A fixture delegate, said as an age rather than as a timestamp.
+ *
+ * Ages are relative to `now` rather than to the frozen clock, because two of
+ * the three states are *about* recency — a node pinned to `START` would be
+ * `quiet` forever and the `active` branch would never be exercised.
+ */
+type NodeSpec = Partial<Omit<SubagentNode, 'agentId' | 'lastWriteAt'>> & {
+  agentId: string
+  lastWroteMsAgo: number
+}
+
+type NodeFactory = (spec: NodeSpec) => SubagentNode
+
+function fixtureNodes(now: number): NodeFactory {
+  return ({ lastWroteMsAgo, ...over }) => ({
+    agentType: 'general-purpose',
+    description: '',
+    depth: 1,
+    lastWriteAt: now - lastWroteMsAgo,
+    bytes: 40_000,
+    state: 'quiet',
+    children: [],
+    ...over,
+  })
+}
+
+/** The user stopped it: the one delegate here with evidence of an ending. */
+function stoppedUxAudit(node: NodeFactory): SubagentNode {
+  return node({
+    agentId: 'a58ddcc3c4b6b8989',
+    agentType: 'ux-bar-raiser',
+    description: 'UX audit of the terminal system monitor',
+    lastWroteMsAgo: STOPPED_AUDIT_AGE_MS,
+    bytes: 412_000,
+    state: 'done',
+    stoppedByUser: true,
+  })
+}
+
+/**
+ * A sweep and the check it handed down, both `active` only by inference.
+ *
+ * Two of them, at two depths, so the dashed edge and the word the view marks a
+ * guess with are on screen somewhere other than a root.
+ */
+function runningQaSweep(node: NodeFactory): SubagentNode {
+  const contrastCheck = node({
+    agentId: 'ad49ce3a43efeaa2b',
+    agentType: 'general-purpose',
+    description: 'Check contrast at 20 columns in both themes',
+    depth: 2,
+    parentAgentId: 'ac4c01953dfb1440f',
+    lastWroteMsAgo: 9_000,
+    bytes: 71_000,
+    state: 'active',
+    stateInferred: true,
+  })
+  return node({
+    agentId: 'ac4c01953dfb1440f',
+    agentType: 'qa-bar-raiser',
+    description: 'Adversarial QA sweep across every terminal size',
+    lastWroteMsAgo: 4_000,
+    bytes: 188_000,
+    state: 'active',
+    stateInferred: true,
+    children: [contrastCheck],
+  })
+}
+
+/**
+ * A brief long enough to need wrapping.
+ *
+ * A brief is the widest thing in this view, and widths break in the awkward
+ * case rather than the tidy one.
+ */
+function wrappingTriageBrief(node: NodeFactory): SubagentNode {
+  return node({
+    agentId: 'a6c07bfd53044168f',
+    agentType: 'qa-triage',
+    description:
+      'Independent second pass over the QA report, verifying every claimed finding against the source before it is believed',
+    lastWroteMsAgo: UNCLAIMED_TRIAGE_AGE_MS,
+    bytes: 52_000,
+  })
+}
+
+/** A depth-3 chain: a delegate whose delegate delegated again. */
+function kissaListeningList(node: NodeFactory): SubagentNode {
+  const openingHours = node({
+    agentId: 'ab481603df0bb2d1d',
+    description: 'Cross-check opening hours against the venues',
+    depth: 3,
+    parentAgentId: 'a69275682c401ef83',
+    lastWroteMsAgo: FINISHED_CROSS_CHECK_AGE_MS,
+    bytes: 96_000,
+    state: 'done',
+  })
+  const regionalResearch = node({
+    agentId: 'a69275682c401ef83',
+    description: 'Research Benelux, Italy and Spain bars',
+    depth: 2,
+    parentAgentId: 'a9b1181eab51efaf0',
+    lastWroteMsAgo: FINISHED_RESEARCH_AGE_MS,
+    bytes: 244_000,
+    state: 'done',
+    children: [openingHours],
+  })
+  return node({
+    agentId: 'a9b1181eab51efaf0',
+    agentType: 'find-music',
+    description: 'Kissa listening list for Tokyo and Yokohama',
+    lastWroteMsAgo: 2_000,
+    bytes: 301_000,
+    state: 'active',
+    stateInferred: true,
+    children: [regionalResearch],
+  })
+}
+
+/**
+ * Its parent is not on disk. Raised to the top and marked, rather than dropped
+ * along with anything below it — see `assemble` in `subagents.ts` and INV-13.
+ */
+function orphanedVaultSweep(node: NodeFactory): SubagentNode {
+  return node({
+    agentId: 'ab21ff3003f5f193c',
+    agentType: 'Explore',
+    description: 'Sweep the vault for existing kissa notes',
+    depth: 2,
+    parentAgentId: 'a-parent-that-is-gone',
+    lastWroteMsAgo: ORPHANED_SWEEP_AGE_MS,
+    bytes: 31_000,
+    reparented: true,
+  })
+}
+
+/** The sole delegate of the agent whose name is too long for its card. */
+function reviewOfTheDiff(node: NodeFactory): SubagentNode {
+  return node({
+    agentId: 'af0e1cdf1ec262236',
+    agentType: 'code-reviewer',
+    description: 'Review the diff for correctness',
+    lastWroteMsAgo: 8_000,
+    bytes: 118_000,
+  })
+}
+
+/**
+ * The fixture fleet's delegation trees.
+ *
+ * Deliberately awkward, for the same reason the fleet itself is: a depth-3
+ * chain, a delegate the user stopped, one node in each of the three states, an
+ * orphan whose parent is not on disk, an agent that has delegated nothing, and
+ * a CLI that cannot say either way. Every one of those is a case the view has
+ * to render correctly and none of them is the happy path.
+ */
+const DELEGATES_BY_SESSION: Record<string, (node: NodeFactory) => SubagentNode[]> = {
+  'mock-busy': (node) => [stoppedUxAudit(node), runningQaSweep(node), wrappingTriageBrief(node)],
+  'mock-busy-2': (node) => [kissaListeningList(node), orphanedVaultSweep(node)],
+  'mock-long-name': (node) => [reviewOfTheDiff(node)],
+}
+
+export function mockTree(agent: Agent, now = Date.now()): AgentTree {
+  if (!hasTranscripts(agent.agentKind)) {
+    return { sessionId: agent.sessionId, children: [], unknown: true }
+  }
+  const delegates = DELEGATES_BY_SESSION[agent.sessionId]
+  return {
+    sessionId: agent.sessionId,
+    children: delegates ? delegates(fixtureNodes(now)) : [],
   }
 }

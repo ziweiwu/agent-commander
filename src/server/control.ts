@@ -1,5 +1,6 @@
 /**
- * Acting on a running agent: closing it, and changing its mode or model.
+ * Acting on a running agent: closing it, clearing or compacting its context,
+ * and changing its mode or model.
  *
  * INV-8 guards these, and no longer with one rule for all of them. Closing an
  * agent and setting its goal are refused while it is busy: both submit an
@@ -12,6 +13,7 @@
 import { allowsSlashCommands } from '../shared/agent-kinds.ts'
 import type { Agent, GoalState } from '../shared/types.ts'
 import * as panes from './pane.ts'
+import { readSessionId } from './registry.ts'
 
 import { isCyclableMode, isModelAlias, MODE_CYCLE } from './options.ts'
 
@@ -44,7 +46,7 @@ export function assertAttachable(agent: Agent | undefined): asserts agent is Con
  * into the agent's prompt buffer, and text arriving mid-tool-call interleaves
  * with work in flight — it lands in whatever the agent is drawing and submits
  * something nobody wrote. Anything that types is refused until the agent is
- * idle; see `setMode` for the one action that does not type.
+ * idle; see `cycleMode` for the one action that does not type.
  */
 export function assertControllable(agent: Agent | undefined): asserts agent is Controllable {
   assertAttachable(agent)
@@ -77,6 +79,13 @@ export interface ControlDeps {
   readMode: () => Promise<string | undefined>
   /** Reads the goal the session reports now; used to verify one was set. */
   readGoal: () => Promise<GoalState | undefined>
+  /**
+   * Reads the session id this process is running now.
+   *
+   * `/clear` replaces the session rather than editing it, so this is how the
+   * clear is verified — see `clearContext`.
+   */
+  readSessionId: (pid: number) => Promise<string | undefined>
   paneAlive: (paneId: string) => Promise<boolean>
   killSession: (tmuxSession: string) => Promise<void>
   wait: (ms: number) => Promise<void>
@@ -90,6 +99,7 @@ export const liveDeps = (
   key: panes.key,
   readMode,
   readGoal,
+  readSessionId,
   paneAlive: async (paneId) => {
     try {
       const meta = await panes.meta(paneId)
@@ -140,63 +150,28 @@ export async function setModel(
 export interface ModeResult {
   ok: boolean
   mode: string | undefined
-  steps: number
   /**
    * The press went out but the session never reported a different mode.
    *
-   * Distinct from `ok: false` meaning "cycled and could not reach it": here we
-   * do not know what happened. The mode may well have changed where this app
-   * cannot see it, so the caller must not say the switch failed (INV-11).
+   * Not a failure. The key reached the pane; only the *reading* is missing, and
+   * a busy session does not write its permission mode down until its turn ends.
+   * Saying the switch failed would assert something nobody checked (INV-11).
    */
   unobserved?: boolean
 }
 
-/** How many Shift+Tab presses before giving up; the cycle is at most five long. */
-const MAX_STEPS = 6
-
 /**
  * How long to let the session report a press, and how often to look.
  *
- * This used to be a single read 250ms after the press, and that made the whole
- * control a coin toss: the mode is observed by reading a record the session
- * writes to its transcript, and when that record had not landed within the one
- * window we looked in, the press looked like it had done nothing. The loop then
- * stopped — correctly refusing to press blind — leaving the mode one step from
- * where it started rather than at the target, and reporting that it could not
- * confirm. Sometimes 250ms was enough. That is what "flaky" was.
- *
- * Polling instead of guessing a delay is the fix: the answer arrives when it
- * arrives, and the only thing a slow write costs now is a little latency
- * rather than a wrong mode. The window is generous because the alternative to
- * waiting is a wrong answer, and the whole call is a deliberate user action —
- * nobody is holding this key down.
+ * The mode is observed by reading a record the session writes to its
+ * transcript, and that record arrives when it arrives. Polling instead of
+ * guessing a delay means a slow write costs a little latency rather than a
+ * wrong answer. The window is generous because the whole call is a deliberate
+ * user action — nobody is holding this key down.
  */
 const SETTLE_WINDOW_MS = 2500
 const SETTLE_POLL_MS = 120
 
-/**
- * Switch permission mode by cycling Shift+Tab until the session reports the
- * target.
- *
- * Verified rather than counted: the cycle silently omits `bypassPermissions`
- * and `auto` when they are unavailable, so a fixed number of presses would land
- * somewhere else entirely. Gives up after a bounded number of steps and reports
- * where it actually ended up.
- *
- * **The one control action allowed while the agent is working**, and the reason
- * is what it sends. Every other action pastes text into the prompt buffer,
- * which mid-tool-call interleaves with work in flight and submits something
- * nobody wrote. This sends `BTab` — a control key Claude Code handles as a
- * toggle wherever it is, exactly as it would from the keyboard of the terminal
- * this app is standing in for. Refusing it was the app being stricter than the
- * thing it mirrors: deciding "this next step needs plan mode" happens *while*
- * the agent is running, which is the only time it matters.
- *
- * The verification loop is what makes this safe to allow. It re-reads the mode
- * the session reports rather than assuming a press landed, and reports where it
- * actually ended up — so a press swallowed by a busy redraw is visible as a
- * failure rather than a wrong mode nobody noticed.
- */
 /**
  * The mode the session reports once it has had a chance to report it.
  *
@@ -217,41 +192,129 @@ async function settledMode(
   return from
 }
 
-export async function setMode(
+/**
+ * Advance the permission mode by one Shift+Tab, exactly as the CLI's own
+ * keyboard does, and report where the session says it landed.
+ *
+ * **This used to chase a named mode and that is what made it a coin toss.** The
+ * old `setMode(target)` pressed `BTab` and re-read, up to six times, until the
+ * session reported the mode the user had picked from a `<select>`. Against an
+ * idle agent it worked. Against a busy one the reading cannot move — Claude
+ * Code writes its permission mode at the end of a turn — so the settle window
+ * closed unchanged, the loop correctly refused to press blind, and by then it
+ * had already pressed twice: the session was left one or two steps past where
+ * it started, in a mode nobody asked for, reported as `unverified`. Two more
+ * causes had the same shape, a session that reports no mode at all and a cycle
+ * that silently omits `bypassPermissions` and `auto` when they are unavailable,
+ * which is why counting presses was never an option either.
+ *
+ * A target is the thing that cannot be delivered. Without one there is nothing
+ * to chase: one press is one step, the failure mode is gone rather than
+ * narrowed, and the app now mirrors the CLI, which also only cycles (INV-7).
+ *
+ * **The one control action allowed while the agent is working**, and the reason
+ * is what it sends. Every other action pastes text into the prompt buffer,
+ * which mid-tool-call interleaves with work in flight and submits something
+ * nobody wrote. This sends `BTab` — a control key Claude Code handles as a
+ * toggle wherever it is, exactly as it would from the keyboard of the terminal
+ * this app is standing in for. Deciding "this next step needs plan mode"
+ * happens *while* the agent is running, which is the only time it matters.
+ */
+export async function cycleMode(
   agent: Agent | undefined,
-  target: string,
   deps: ControlDeps,
-  maxSteps = MAX_STEPS,
   settleMs = SETTLE_WINDOW_MS,
 ): Promise<ModeResult> {
   assertAttachable(agent)
   assertSlashCommandable(agent)
-  if (!isCyclableMode(target)) throw new ControlError(`unknown permission mode: ${target}`)
 
-  let mode = await deps.readMode()
-  if (mode === target) return { ok: true, mode, steps: 0 }
+  const before = await deps.readMode()
+  // BTab is tmux's name for back-tab, which is what a terminal emits for Shift+Tab.
+  await deps.key(agent.paneId, 'BTab')
+  const seen = await settledMode(before, deps, settleMs)
+  if (seen === before) return { ok: true, mode: seen, unobserved: true }
+  return { ok: true, mode: seen }
+}
 
-  for (let steps = 1; steps <= maxSteps; steps += 1) {
-    // BTab is tmux's name for back-tab, which is what a terminal emits for Shift+Tab.
-    await deps.key(agent.paneId, 'BTab')
-    const seen = await settledMode(mode, deps, settleMs)
-    if (seen === target) return { ok: true, mode: seen, steps }
-    /*
-     * The reading did not move, so this loop is now blind — and a blind loop
-     * here is not a failed switch, it is five more Shift+Tabs into a live
-     * session, leaving it in a mode nobody asked for and reporting an error
-     * for the privilege.
-     *
-     * Two things cause it and neither is helped by pressing again: the session
-     * reports no permission mode at all (real sessions do exist in that state),
-     * or it is mid-turn and has not written the record where this app can read
-     * it yet. Stop at one press, and say that the outcome is unknown rather
-     * than that it failed.
-     */
-    if (seen === mode) return { ok: false, mode: seen, steps, unobserved: true }
-    mode = seen
+export interface ClearResult {
+  ok: boolean
+  /** The id the session is running now, when it was observed to change. */
+  sessionId?: string
+  /**
+   * The paste went out and the session id never changed inside the window.
+   *
+   * Not a failure, for the same reason `cycleMode` reports one: `/clear` is
+   * slower on a large conversation than any window worth blocking on, and a
+   * clear that lands late is indistinguishable from here to one that never
+   * landed at all. Saying it failed asserts something nobody checked (INV-11).
+   */
+  unobserved?: boolean
+}
+
+/** How long to watch for the session id to turn over, and how often to look. */
+const CLEAR_VERIFY_MS = 6000
+const CLEAR_POLL_MS = 250
+
+/**
+ * Discard the agent's conversation with Claude Code's own `/clear`.
+ *
+ * Refused while the agent is busy, like everything else that types: this is
+ * pasted into the prompt buffer and submitted, and text arriving mid-tool-call
+ * interleaves with work in flight.
+ *
+ * **Verified by watching the session id turn over, not the transcript.**
+ * `/clear` does not edit a conversation, it replaces one: Claude Code opens a
+ * fresh transcript under a new session id and rewrites
+ * `~/.claude/sessions/<pid>.json` to point at it. So there is nothing to read
+ * back in the old file — it simply stops growing, which is also what a
+ * `/clear` that never arrived looks like. The id is the only signal that
+ * separates them, it costs one small read, and it is written by Claude Code
+ * rather than inferred here.
+ *
+ * The caller needs that new id for a second reason: the agent the user was
+ * looking at is now addressed differently, and every route, socket focus and
+ * URL naming the old id is dead the moment this returns.
+ */
+export async function clearContext(
+  agent: Agent | undefined,
+  deps: ControlDeps,
+  verifyMs = CLEAR_VERIFY_MS,
+): Promise<ClearResult> {
+  assertControllable(agent)
+  assertSlashCommandable(agent)
+
+  const before = await deps.readSessionId(agent.pid)
+  await deps.paste(agent.paneId, '/clear', true)
+
+  for (let waited = 0; waited < verifyMs; waited += CLEAR_POLL_MS) {
+    await deps.wait(CLEAR_POLL_MS)
+    const now = await deps.readSessionId(agent.pid)
+    if (now !== undefined && now !== before) return { ok: true, sessionId: now }
   }
-  return { ok: false, mode, steps: maxSteps }
+  return { ok: true, unobserved: true }
+}
+
+/**
+ * Ask the agent to compact its own context with Claude Code's `/compact`.
+ *
+ * Refused while busy for the same reason `/clear` is: it types.
+ *
+ * **Deliberately not verified here, and the number is why.** A compaction
+ * writes a `compact_boundary` record when it finishes, and the one real sample
+ * on this machine reports `durationMs: 157676` — over two and a half minutes.
+ * Holding a request open for that is not a verification strategy, it is a hung
+ * button. So this returns as soon as the text is submitted, the interface says
+ * the compaction was *asked for* rather than that it happened (INV-11), and the
+ * result arrives on its own: the transcript tail turns that boundary record
+ * into a timeline event, through the loop that is already reading the file.
+ */
+export async function compactContext(
+  agent: Agent | undefined,
+  deps: ControlDeps,
+): Promise<void> {
+  assertControllable(agent)
+  assertSlashCommandable(agent)
+  await deps.paste(agent.paneId, '/compact', true)
 }
 
 /**

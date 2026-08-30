@@ -26,7 +26,7 @@ const transport = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   sendConfirmedKey: vi.fn(),
   interruptAndSend: vi.fn(),
-  setAgentMode: vi.fn(async () => ({ ok: true } as const)),
+  cycleAgentMode: vi.fn(async () => ({ ok: true, detail: 'acceptEdits' } as const)),
 }))
 
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -184,14 +184,24 @@ describe('the choice is remembered per agent', () => {
 })
 
 describe('Shift+Tab cycles the permission mode', () => {
-  it('moves to the next mode from the composer', async () => {
+  /*
+   * The chord in the message box is the same act as the mode button beside it,
+   * and now sends the same thing: one press, no target.
+   *
+   * It used to compute the next mode from the one the agent last reported and
+   * ask the server to reach *that*. Wrong twice over — the cycle silently omits
+   * modes that are unavailable, so the arithmetic named a mode that was not
+   * next; and reaching a named mode is what made the whole control unreliable
+   * (see `cycleMode` in `src/server/control.ts`).
+   */
+  it('sends one press from the composer', async () => {
     const user = userEvent.setup()
     open(working({ status: 'idle', permissionMode: 'default' }))
 
     screen.getByTestId('composer-input').focus()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
-    expect(transport.setAgentMode).toHaveBeenCalledWith('acceptEdits')
+    expect(transport.cycleAgentMode).toHaveBeenCalledOnce()
   })
 
   /*
@@ -207,18 +217,19 @@ describe('Shift+Tab cycles the permission mode', () => {
     screen.getByTestId('composer-input').focus()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
-    expect(transport.setAgentMode).toHaveBeenCalledWith('acceptEdits')
+    expect(transport.cycleAgentMode).toHaveBeenCalledOnce()
   })
 
-  it('wraps around the end of the cycle', async () => {
+  // Nothing about the press depends on where the session currently is, which is
+  // the property that removed the wrap-around arithmetic along with its bug.
+  it('sends the same press from the last mode in the cycle', async () => {
     const user = userEvent.setup()
-    const last = MODES[MODES.length - 1] as string
-    open(working({ permissionMode: last }))
+    open(working({ permissionMode: MODES[MODES.length - 1] as string }))
 
     screen.getByTestId('composer-input').focus()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
-    expect(transport.setAgentMode).toHaveBeenCalledWith(MODES[0])
+    expect(transport.cycleAgentMode).toHaveBeenCalledExactlyOnceWith()
   })
 })
 

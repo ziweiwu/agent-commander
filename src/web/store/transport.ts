@@ -8,9 +8,11 @@
  */
 import type {
   Agent,
+  AgentTree,
   ClientMessage,
   ControlResponse,
   DirListing,
+  FleetTree,
   NewAgentResponse,
   ServerEnv,
   ServerMessage,
@@ -254,9 +256,35 @@ async function control(action: string, value?: string): Promise<ControlResponse>
   return controlAgent(selected, action, value)
 }
 
-export const setAgentMode = (mode: string): Promise<ControlResponse> => control('mode', mode)
+/**
+ * Advance the permission mode by one Shift+Tab.
+ *
+ * Takes no argument on purpose. Asking for a *named* mode is what made this
+ * control unreliable — see `cycleMode` in `src/server/control.ts`.
+ */
+export function cycleAgentMode(): Promise<ControlResponse> {
+  return control('mode')
+}
+
 export const setAgentModel = (model: string): Promise<ControlResponse> => control('model', model)
 export const closeAgent = (): Promise<ControlResponse> => control('close')
+
+/**
+ * Discard the agent's conversation with Claude Code's `/clear`.
+ *
+ * On success `detail` is the id the session is running *now*. `/clear` does not
+ * edit a session, it replaces one, so the caller has to follow the agent to its
+ * new id — every URL and socket focus naming the old one is already dead.
+ */
+export const clearAgentContext = (): Promise<ControlResponse> => control('clear')
+
+/**
+ * Ask the agent to compact its own context.
+ *
+ * Returns as soon as the request is submitted. Compaction takes minutes, so
+ * nothing here waits for it; the result shows up in the conversation on its own.
+ */
+export const compactAgentContext = (): Promise<ControlResponse> => control('compact')
 
 /**
  * Close one named agent. Used by pruning, which closes sessions one at a time
@@ -278,6 +306,50 @@ export async function browseDirs(path?: string, hidden = false): Promise<DirList
   const body = (await res.json()) as DirListing & { error?: string }
   if (body.error) throw new Error(body.error)
   return body
+}
+
+/**
+ * The result of one poll: either a new graph, or word that it has not moved.
+ *
+ * `changed: false` is not an error and not an empty graph — it means the
+ * caller's existing trees are still current and must be **kept by identity**,
+ * which is what stops the whole view re-rendering (see `fetchTree`).
+ */
+export type TreeResult =
+  | { changed: false }
+  | { changed: true; trees: AgentTree[]; etag: string | null }
+
+/** The graph has not moved since the caller's `ETag`; the body is empty. */
+const HTTP_NOT_MODIFIED = 304
+
+/**
+ * The fleet's delegation graph.
+ *
+ * Fetched rather than pushed, and only while the tree view is open — INV-4's
+ * first rule is that nothing polls what nobody is watching, and a route the
+ * view stops calling when it unmounts satisfies it without adding a
+ * subscription to the socket.
+ *
+ * **Conditional, because the graph is nearly always the same graph.** Measured
+ * against 53 real sessions the payload is 54.6 KB and byte-identical from one
+ * three-second poll to the next: 64 MB an hour, re-sent to a phone over
+ * Tailscale. The `ETag` the server sends comes back as `If-None-Match` and the
+ * answer is usually a 304 carrying nothing.
+ *
+ * `cache: 'no-store'` keeps the browser's own HTTP cache out of it. The
+ * revalidation here is explicit and the 304 has to reach this function rather
+ * than being turned back into a 200 from a store we are not managing.
+ */
+export async function fetchTree(etag: string | null, signal?: AbortSignal): Promise<TreeResult> {
+  const res = await fetch(withToken('/api/tree'), {
+    cache: 'no-store',
+    ...(etag === null ? {} : { headers: { 'if-none-match': etag } }),
+    ...(signal ? { signal } : {}),
+  })
+  if (res.status === HTTP_NOT_MODIFIED) return { changed: false }
+  if (!res.ok) throw new Error(String(res.status))
+  const body = (await res.json()) as FleetTree
+  return { changed: true, trees: body.trees, etag: res.headers.get('etag') }
 }
 
 function handle(msg: ServerMessage): void {
@@ -309,6 +381,13 @@ function handle(msg: ServerMessage): void {
       return
     }
     case 'error':
+      /*
+       * A dead pane is a state, not a passing notice. The toast says it once
+       * and is gone in five seconds; the terminal has to keep showing that
+       * nothing typed there can arrive, so the fact is recorded rather than
+       * only announced.
+       */
+      if (msg.kind === 'pane-exited' && msg.sessionId) state.markExited(msg.sessionId)
       state.showToast(msg.message)
   }
 }

@@ -13,34 +13,43 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router-dom'
 import { ChatControls } from '../../src/web/components/ChatControls.tsx'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 
 const setAgentGoal = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as const))
-const setAgentMode = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as const))
-vi.mock('../../src/web/store/transport.ts', () => ({ setAgentGoal, setAgentMode }))
+const cycleAgentMode = vi.hoisted(() =>
+  vi.fn(async () => ({ ok: true, detail: 'plan' }) as { ok: true; detail?: string }),
+)
+vi.mock('../../src/web/store/transport.ts', () => ({ setAgentGoal, cycleAgentMode }))
 
 const GOAL = { condition: 'every test passes', met: false, at: 1_786_000_000_000 }
 
 beforeEach(() => {
   resetStore()
   setAgentGoal.mockClear()
-  setAgentMode.mockClear()
+  cycleAgentMode.mockClear()
+  cycleAgentMode.mockResolvedValue({ ok: true, detail: 'plan' })
 })
 
 describe('mode', () => {
+  /*
+   * This was a `<select>` and is now one button, because asking for a *named*
+   * mode is what made the control unreliable — see `ModeButton` and `cycleMode`
+   * in `src/server/control.ts`. The cases below are about a press and a
+   * reading, which is all there is left to get wrong.
+   */
+
   it('shows the mode the session is actually in', () => {
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
-    expect((screen.getByTestId('chat-mode-select') as HTMLSelectElement).value).toBe('plan')
+    expect(screen.getByTestId('mode-cycle').textContent).toContain('Plan')
   })
 
-  it('switches mode from the chat, without opening the panel row', async () => {
+  it('advances one step from the chat, without opening the panel row', async () => {
     const user = userEvent.setup()
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
-    await user.selectOptions(screen.getByTestId('chat-mode-select'), 'plan')
-    expect(setAgentMode).toHaveBeenCalledExactlyOnceWith('plan')
+    await user.click(screen.getByTestId('mode-cycle'))
+    expect(cycleAgentMode).toHaveBeenCalledOnce()
   })
 
   /*
@@ -54,42 +63,62 @@ describe('mode', () => {
     renderApp(
       <ChatControls agent={agent({ sessionId: 'a', status: 'busy', permissionMode: 'default' })} />,
     )
-    const select = screen.getByTestId('chat-mode-select') as HTMLSelectElement
-    expect(select.disabled).toBe(false)
+    const button = screen.getByTestId('mode-cycle') as HTMLButtonElement
+    expect(button.disabled).toBe(false)
 
-    await user.selectOptions(select, 'plan')
-    expect(setAgentMode).toHaveBeenCalledExactlyOnceWith('plan')
+    await user.click(button)
+    expect(cycleAgentMode).toHaveBeenCalledOnce()
   })
 
   /*
-   * The select is bound to the mode the *agent* reports, which comes out of a
+   * The label is bound to the mode the *agent* reports, which comes out of a
    * transcript a busy session writes only when its turn ends. Without holding
-   * the pick, the next fleet broadcast repainted the old value a second later
-   * and the click read as though it had done nothing.
-   *
-   * This existed in the detail panel and not here, so the same control was
-   * fixed two clicks away and broken in the view people actually read.
+   * the server's answer, the next fleet broadcast repainted the old value a
+   * second later and the click read as though it had done nothing.
    */
-  it('holds the picked mode until the agent confirms it', async () => {
+  it('holds the new mode until the agent confirms it', async () => {
     const user = userEvent.setup()
-    setAgentMode.mockReturnValue(new Promise(() => {}) as Promise<{ ok: true }>)
+    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'acceptEdits' })
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
 
-    await user.selectOptions(screen.getByTestId('chat-mode-select'), 'plan')
+    await user.click(screen.getByTestId('mode-cycle'))
 
-    expect((screen.getByTestId('chat-mode-select') as HTMLSelectElement).value).toBe('plan')
+    expect(screen.getByTestId('mode-cycle').textContent).toContain('Accept edits')
   })
 
-  // The server said it could not confirm the switch. Reporting that as a clean
-  // success is the interface asserting more than it knows (INV-11).
-  it('surfaces an unverified switch rather than staying silent', async () => {
+  /*
+   * INV-2's "exactly once", applied to a control. Two clicks in one React batch
+   * both read `pending` before it flushes; the ref is what stops the second
+   * sending another Shift+Tab into a live session.
+   */
+  it('sends one press from a double click', async () => {
     const user = userEvent.setup()
-    setAgentMode.mockResolvedValue({ ok: true, detail: 'unverified' } as never)
+    cycleAgentMode.mockReturnValue(new Promise(() => {}) as never)
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
 
-    await user.selectOptions(screen.getByTestId('chat-mode-select'), 'plan')
+    const button = screen.getByTestId('mode-cycle')
+    await user.click(button)
+    await user.click(button)
+
+    expect(cycleAgentMode).toHaveBeenCalledOnce()
+  })
+
+  /*
+   * The press went out and the session has not written a mode down. Saying
+   * nothing would report an unconfirmed switch as a clean success, and showing
+   * a mode would claim one this app never read (INV-11).
+   */
+  it('says the press was not reported rather than naming a mode', async () => {
+    const user = userEvent.setup()
+    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'unverified' })
+    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
+
+    await user.click(screen.getByTestId('mode-cycle'))
 
     expect(useStore.getState().toast).toBeTruthy()
+    const button = screen.getByTestId('mode-cycle')
+    expect(button.getAttribute('data-unreported')).toBe('true')
+    expect(button.textContent).toContain('pressed')
   })
 
   // Reachability is still required: no pane, nothing to send the key to.
@@ -97,7 +126,58 @@ describe('mode', () => {
     const noPane = agent({ sessionId: 'a', status: 'busy' })
     delete (noPane as { paneId?: string }).paneId
     renderApp(<ChatControls agent={noPane} />)
-    expect((screen.getByTestId('chat-mode-select') as HTMLSelectElement).disabled).toBe(true)
+    expect((screen.getByTestId('mode-cycle') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  /*
+   * Two of these are on screen at once — the composer strip and the detail
+   * panel's control row — and they show one setting. Held per component,
+   * pressing one updated it and left the other reading the old mode two inches
+   * away until the enricher caught up. An app that contradicts itself within
+   * one glance is worse than one that is briefly behind.
+   */
+  it('agrees with the other mode button on screen', async () => {
+    const user = userEvent.setup()
+    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'acceptEdits' })
+    const a = agent({ sessionId: 'a', permissionMode: 'default' })
+    renderApp(
+      <>
+        <ChatControls agent={a} />
+        <ChatControls agent={a} />
+      </>,
+    )
+
+    const [first, second] = screen.getAllByTestId('mode-cycle')
+    await user.click(first as HTMLElement)
+
+    expect(first?.textContent).toContain('Accept edits')
+    expect(second?.textContent).toContain('Accept edits')
+  })
+
+  // A hold belongs to the agent it was made on, not to the next one opened.
+  it('does not carry a held mode onto another agent', async () => {
+    const user = userEvent.setup()
+    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'acceptEdits' })
+    renderApp(
+      <>
+        <ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />
+        <ChatControls agent={agent({ sessionId: 'b', permissionMode: 'plan' })} />
+      </>,
+    )
+
+    const [first, second] = screen.getAllByTestId('mode-cycle')
+    await user.click(first as HTMLElement)
+
+    expect(first?.textContent).toContain('Accept edits')
+    expect(second?.textContent).toContain('Plan')
+  })
+
+  // The glyph and a mode name do not say what pressing will do.
+  it('names both halves of the action for a screen reader', () => {
+    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
+    const label = screen.getByTestId('mode-cycle').getAttribute('aria-label') ?? ''
+    expect(label).toContain('Plan')
+    expect(label).toMatch(/next mode/i)
   })
 })
 
@@ -133,9 +213,9 @@ describe('goal toggle', () => {
     const user = userEvent.setup()
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
     await user.click(screen.getByTestId('goal-toggle'))
-    expect(screen.queryByTestId('chat-mode-select')).toBeNull()
+    expect(screen.queryByTestId('mode-cycle')).toBeNull()
     await user.click(screen.getByTestId('goal-cancel'))
-    expect(screen.getByTestId('chat-mode-select')).toBeTruthy()
+    expect(screen.getByTestId('mode-cycle')).toBeTruthy()
   })
 
   it('cancels without sending, and forgets the draft', async () => {
@@ -209,11 +289,9 @@ describe('goal toggle', () => {
     })
 
     // The agent picks up work while the condition is being typed.
-    rerender(
-      <MemoryRouter>
-        <ChatControls agent={agent({ sessionId: 'a', status: 'busy' })} />
-      </MemoryRouter>,
-    )
+    // `renderApp` supplies the router through `wrapper`, so a rerender keeps
+    // it — passing another one here would nest two Routers.
+    rerender(<ChatControls agent={agent({ sessionId: 'a', status: 'busy' })} />)
     act(() => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
     })

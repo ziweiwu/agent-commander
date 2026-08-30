@@ -66,6 +66,14 @@
 .chip:hover {
   border-color: var(--focus);
 }
+.chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.chip:disabled:hover {
+  border-color: var(--line-strong);
+}
+
 .chip[aria-pressed='true'] {
   border-color: var(--focus);
   color: var(--text);

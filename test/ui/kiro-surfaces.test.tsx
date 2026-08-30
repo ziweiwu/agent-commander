@@ -31,9 +31,11 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   focusAgent: vi.fn(),
   setAttached: vi.fn(),
   closeAgent: vi.fn(),
-  setAgentMode: vi.fn(),
+  cycleAgentMode: vi.fn(),
   setAgentModel: vi.fn(),
   setAgentGoal: vi.fn(),
+  clearAgentContext: vi.fn(),
+  compactAgentContext: vi.fn(),
 }))
 
 vi.mock('../../src/web/components/LazyTerminal.tsx', () => ({
@@ -104,8 +106,12 @@ describe('controls that would type a Claude command are not offered', () => {
         <AgentControls agent={kiro({ status: 'idle' })} />
       </MemoryRouter>,
     )
-    expect(screen.queryByTestId('mode-select')).toBeNull()
+    expect(screen.queryByTestId('mode-cycle')).toBeNull()
     expect(screen.queryByTestId('model-select')).toBeNull()
+    // /clear and /compact are Claude Code commands too, so for another CLI
+    // they are not a disabled feature but a wrong one (INV-7).
+    expect(screen.queryByTestId('clear-agent')).toBeNull()
+    expect(screen.queryByTestId('compact-agent')).toBeNull()
     expect(screen.queryByTestId('close-agent')).not.toBeNull()
   })
 
@@ -116,7 +122,9 @@ describe('controls that would type a Claude command are not offered', () => {
         <AgentControls agent={agent({ sessionId: 'claude-1', status: 'idle', paneId: '%1' })} />
       </MemoryRouter>,
     )
-    expect(screen.queryByTestId('mode-select')).not.toBeNull()
+    expect(screen.queryByTestId('mode-cycle')).not.toBeNull()
     expect(screen.queryByTestId('model-select')).not.toBeNull()
+    expect(screen.queryByTestId('clear-agent')).not.toBeNull()
+    expect(screen.queryByTestId('compact-agent')).not.toBeNull()
   })
 })

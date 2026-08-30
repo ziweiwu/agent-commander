@@ -39,9 +39,9 @@ Everything below is downstream of those two.
    │                 │ control.ts ──┐    │            │
  enrich.ts           │ spawn.ts ─┐  │  pane-hub.ts    │
    │                 │ frames.ts │  │    │            │
- transcript.ts       │           │  └── pane.ts ── tmux-client.ts
-                     │        options.ts        │
-                     └──────────── sources.ts ── shared/types.ts
+ transcript.ts       │ subagents.ts │  └── pane.ts ── tmux-client.ts
+   │                 │        options.ts        │
+   └─────────────────┴──────────── sources.ts ── shared/types.ts
 
         poll.ts ← registry.ts, enrich.ts, limits.ts, routes.ts
 ```
@@ -51,8 +51,13 @@ callers and no dependencies of its own. It holds INV-4's cadence rule — re-arm
 after the work, never sooner than the last pass took — which was previously
 written once properly and three times as `setInterval` plus a busy flag.
 
+`src/server/subagents.ts` is a leaf beside `transcript.ts` and reads a different
+thing from the same directory: the sidecars Claude Code writes for every
+delegate. It parses no transcripts at all (INV-13), which is what keeps
+`/api/tree` cheap enough to poll.
+
 `src/server/cli.ts` is the composition root: it parses argv, chooses real or
-mock providers, and constructs everything. It imports thirteen modules and is
+mock providers, and constructs everything. It imports fourteen modules and is
 imported by none. `src/server/routes.ts` is the second hub — the HTTP and
 WebSocket surface. Everything else is a leaf. The graph is acyclic and shallow.
 
@@ -128,6 +133,7 @@ otherwise `unknown`. See "Where it is fragile", item 14.
 ~/.claude/projects/**/<sid>.jsonl ──5s, one tail per agent──► 11 card fields
                                   ──1s, focused tab only────► TimelineEvent[]
 <sid>/subagents/*.jsonl (mtime)  ─────────────────────────► delegating + clock
+<sid>/subagents/*.meta.json      ──3s, Tree view only─────► AgentTree
 ```
 
 `transcript.ts` turns JSONL into events plus a `Partial<Agent>` patch. Two
@@ -145,6 +151,13 @@ dead one are identical. The subagent's transcript mtime is the thing still
 moving, so it overrides `lastActivityAt`. The directory is `stat`ed before it is
 read, because most agents never delegate and the common case should cost one
 syscall.
+
+`subagents.ts` reads the *other* files in that directory, and they turn the same
+count into a shape. Beside every `agent-<id>.jsonl` sits an `agent-<id>.meta.json`
+naming the delegate's type, its brief and its parent — so the whole tree is read
+rather than derived, with no transcript parsing at all (INV-13). Sidecars are
+cached by path forever: they are written once when a delegate is spawned and
+never touched again.
 
 ### Quota — whether anyone can keep working
 
@@ -204,11 +217,17 @@ width is a CSS transform and never a `resize`.
 ### Control — typing on the user's behalf
 
 ```
-POST /api/agents/:id/{close,mode,model,goal}
+POST /api/agents/:id/{close,clear,compact,mode,model,goal}
    └─ assertControllable()   refuses busy, or no pane            control.ts:19
    └─ paste "/model opus" etc. into the agent's own prompt
-   └─ re-read the transcript until the change shows up
+   └─ re-read something the CLI wrote, until the change shows up
 ```
+
+Three of those carry no request body at all — `mode`, `clear` and `compact` take
+no value — which is why `readJson` reads an empty body as *no value* rather than
+parsing it. It did not, and `JSON.parse('')` throws: pressing the mode button
+reported "that did not take effect: Unexpected end of JSON input" about a
+control the server had never called.
 
 Every mutation works by typing into the prompt, which is why `busy` is refused: a
 keystroke landing mid-tool-call interleaves with work in flight. Nothing free-text
@@ -216,13 +235,25 @@ ever reaches a live prompt — models are allow-listed (`options.ts:9`), modes a
 allow-listed (`options.ts:17`), and a goal condition is rejected for control
 characters, a newline, or a leading `/`.
 
-Nothing is assumed to have worked. `setMode` presses `BTab` and re-reads the
-session's own reported mode up to six times, because the cycle silently omits
-modes that are unavailable and a fixed press count lands somewhere else entirely.
-`setGoal` polls the transcript for a set-sentinel. `clearGoal` (`control.ts:224`)
-is the one action that cannot be verified — clearing writes nothing — so the
-server drops its own copy and lets the next evaluation restore the goal if the
-clear never landed. That is the right way round for a claim this app cannot check.
+Nothing is assumed to have worked, and each action is verified against whatever
+the CLI actually writes down — which is a different file for almost every one.
+
+`cycleMode` presses `BTab` **once** and re-reads the session's reported mode. It
+used to chase a named mode over up to six presses, and having a target was the
+bug: a busy agent does not write its mode down until its turn ends, so the loop
+went blind after two presses had already landed. See INV-8.
+
+`setGoal` polls the transcript for a set-sentinel. `clearContext` watches
+`~/.claude/sessions/<pid>.json` for the session id to **turn over**, because
+`/clear` replaces the session rather than editing it — the old transcript just
+stops growing, which is also what a clear that never arrived looks like.
+`compactContext` verifies nothing on purpose: the one real sample took
+`durationMs: 157676`, so it returns immediately and the `compact_boundary`
+record is picked up later by the transcript tail that is already reading the
+file. `clearGoal` (`control.ts`) is the one action that cannot be verified at
+all — clearing writes nothing — so the server drops its own copy and lets the
+next evaluation restore the goal if the clear never landed. That is the right
+way round for a claim this app cannot check.
 
 ## What is pushed, what is polled
 
@@ -239,15 +270,20 @@ Pushed: two `fs.watch` registrations, `AgentSource.onChange` and
 | Quota file `stat` | 2s | `limits.ts:37` |
 | Pane capture (focused + attached only) | 140ms → 1s | `pane-hub.ts:40`, `:42` |
 | …while an echo is expected, after a write | 25ms for ≤1s | `pane-hub.ts:76`, `:58` |
-| Mode-switch verification | 250ms × ≤6 | `control.ts` |
+| Mode-switch settling | 120ms for ≤2.5s | `control.ts:172`, `:173` |
+| `/clear` session-id turnover | 250ms for ≤6s | `control.ts:255`, `:256` |
 | `/exit` grace before kill | 500ms × 6s | `control.ts:230` |
 | Pending-agent expiry | 5m | `pending.ts:16` |
 | WebSocket heartbeat | 30s, drop after 2 missed | `routes.ts` |
 | Environment probe | once at startup | `env.ts` |
+| Delegation tree, while the Tree view is open | 3s | `TreeRoute.tsx` |
 
-Two of those are conditional rather than constant. The pane capture runs only
-while some tab has that agent focused *and* attached; the fleet-wide enrichment
-runs only while at least one tab is connected at all — `routes.ts` reports the
+Three of those are conditional rather than constant. The pane capture runs only
+while some tab has that agent focused *and* attached; the delegation tree is
+fetched only while the Tree view is mounted, which is why it is plain HTTP
+rather than a fifth socket message — an effect that stops on unmount satisfies
+INV-4's first rule without a subscription lifecycle on the wire; and the
+fleet-wide enrichment runs only while at least one tab is connected at all — `routes.ts` reports the
 viewer count through `ServeOptions.onViewers` and `cli.ts` idles
 `FleetEnricher` on it. Both are INV-4's first rule, which is about who is
 watching rather than how often.
@@ -264,6 +300,10 @@ replaced: it stops the overlap but turns an overrun into ticks dropped at a rate
 nobody chose and nothing reports.
 
 ## The wire, and one tab's state machine
+
+Deliberately small, and it has stayed that way: the delegation tree is the most
+recent addition to the app and it is a `GET`, not a seventh server message. The
+data is neither hot nor pushed, and only one view wants it.
 
 One WebSocket per browser tab. Four messages up — `focus`, `attach`, `paste`,
 `key` (`types.ts:189`) — and six down — `fleet`, `limits`, `timeline`, `frame`,
@@ -297,6 +337,17 @@ seven times a second, and that cadence should not be expressed as a React effect
 The URL is the selection state — `/agent/:id` and `/agent/:id/term` — so the
 phone's back gesture closes an agent instead of leaving the app.
 
+The fleet has **two renderings and one route**. `FleetRoute` picks between
+`ForestView` and `FleetList` on a stored preference (`prefs.ts`, `VIEWS`); the
+view is deliberately *not* a URL — it is how you like to read, not what you are
+looking at, and putting it in the address bar would mean a link sent to a phone
+carried the sender's preference with it. `ForestRoute` polls the same
+`/api/tree` the tree view does, on the same mount-scoped loop, so the second
+rendering added no endpoint, no wire message and no new polling rule (INV-4).
+`src/web/lib/forest.ts` holds the layout as pure functions — the log axis, the
+fold, and the accessible description that carries a mark's state and age,
+because position is the one channel a screen reader cannot receive.
+
 The client's real architecture is its duplicate suppression, all of it INV-2:
 
 - `draftRef` in `Chat.tsx` — three Enter keydowns in one React batch each read the
@@ -307,11 +358,26 @@ The client's real architecture is its duplicate suppression, all of it INV-2:
   same-batch check catches.
 - the pending-message timer — an unconfirmed message is marked *not delivered*
   after 12s rather than resent.
+- `sendingRef` in `ModeButton.tsx` and in `AgentControls.tsx` — the same lesson
+  again, and for clear it is the one with the highest stakes: a second press
+  would discard the fresh session the first one had just created.
 - paste-ack flow control (`transport.ts:90`) — exactly one paste in flight,
   everything typed meanwhile coalesced into the next. Not a debounce: a guessed
   window is wrong at both ends, whereas the ack makes the chunk size a function of
   how fast tmux is actually draining. `flushText()` (`transport.ts:121`) runs
   before every other write so an Enter cannot overtake the line it submits.
+
+Two pieces of state in the store exist for the same underlying reason — the
+browser knows something the fleet broadcast has not caught up with yet, and
+binding straight to the broadcast makes a control look like it did nothing.
+`heldMode` holds the permission mode a user just moved to; it lives in the store
+rather than in the component because *two* mode buttons are on screen at once
+and holding it locally left them disagreeing two inches apart. `expectSession`
+holds a session id `/clear` has just created: the registry has not scanned for
+it, and the route's "the agent ended while it was open" rule cannot otherwise
+tell that apart from an agent that really has gone. Both expire — `expectSession`
+on a timer, because an expectation this app cannot keep must not leave the panel
+blank forever.
 
 `reconcile()` (`chat.ts:143`) settles the optimistic echo by counting: a message
 is confirmed when its text has appeared once *more* than it had when it was sent.
@@ -380,25 +446,35 @@ Ordered by how quietly each one fails. A list like this is only worth keeping if
 it is trimmed when things are fixed — see "Fixed since this list was written"
 below, which is where the entries that used to be here went.
 
-**1. `Registry.enrich()` (`registry.ts:183`) is a blind shallow merge with two
+**1. The delegation tree reads an undocumented internal format, and it is the
+second place this app does that.** `agent-<id>.meta.json` is not a published
+contract any more than `~/.claude/sessions/<pid>.json` is (INV-5), and the tree
+is the only thing in the app that depends on it. A change of shape degrades to
+"no tree" for that agent, which is the right direction — but it degrades
+*silently*, and an empty tree looks identical to an agent that has not
+delegated. The sidecars are also cached by path for the life of the process on
+the grounds that they are written once and never rewritten; if that ever stops
+being true, a delegate's type and brief go stale with nothing to say so.
+
+**2. `Registry.enrich()` (`registry.ts:183`) is a blind shallow merge with two
 callers writing different field sets.** The fleet enricher filters through
 `CARD_FIELDS` (`enrich.ts:17`); the focused viewer passes its whole patch
 (`routes.ts:410`). `undefined` overwrites, which is load-bearing for goal-clear
 (`routes.ts:633`) and a trap for any future patch producer that nullifies a field
 it does not know about.
 
-**2. `changed()` (`registry.ts:320`) does not watch enrichment fields.** It
+**3. `changed()` (`registry.ts:320`) does not watch enrichment fields.** It
 compares size, `status`, `name`, `cwd`, `waitingFor` and `paneId` — so `activity`,
 `goal` and `model` reach the browser only because the enricher explicitly calls
 `notify()`. A future writer that forgets lags the UI indefinitely, with nothing
 raising an error.
 
-**3. `tokens` is not the session's spend.** It is output tokens only
+**4. `tokens` is not the session's spend.** It is output tokens only
 (`transcript.ts:244`), accumulated per tail, from a backfill capped at
 `BACKFILL_BYTES = 256 * 1024` (`transcript.ts:17`). The card presents it as the
 agent's cost and it is a sort key.
 
-**4. `BASE_MS = 140` (`pane-hub.ts:40`) is calibrated to a cost that no longer
+**5. `BASE_MS = 140` (`pane-hub.ts:40`) is calibrated to a cost that no longer
 exists.** It was chosen when a frame needed two round trips at p50 141ms; through
 the control client a `sample()` is roughly 20ms, so the loop idles most of every
 interval at its steady rate. The keystroke case is no longer the victim of this —
@@ -406,14 +482,14 @@ interval at its steady rate. The keystroke case is no longer the victim of this 
 outstanding — but the steady cadence has never been re-derived from what a read
 now costs.
 
-**5a. The origin gate answers to two names.** `sameOriginRequest` measures both
+**6a. The origin gate answers to two names.** `sameOriginRequest` measures both
 `Origin` and `Host` against loopback *plus* this host's own Tailscale `DNSName`
 (`routes.ts:229`), read from the CLI probe at startup. Without the second one a
 tokenless server is unreachable through `tailscale serve`, which forwards the
 name the caller asked for. It is one exact name, not the tailnet: another
 machine on it is refused, as is any rebound host.
 
-**5. A configured token replaces the origin gate rather than adding to it.**
+**6. A configured token replaces the origin gate rather than adding to it.**
 `permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:387`). The
 reasoning above `sameOriginRequest` is sound — a token lives in the URL of the
 real origin and an attacker who cannot read that origin cannot supply it. The
@@ -429,14 +505,14 @@ nothing about the `<script>` that URL then pulls in, so `GET`/`HEAD` under
 whole boundary, which is why nothing under it may ever serve agent state, and
 why a miss there 404s instead of falling through to the shell.
 
-**6. A known reconcile gap is documented and unfixed** (`chat.ts:139`): a message
+**7. A known reconcile gap is documented and unfixed** (`chat.ts:139`): a message
 sent in the second before backfill arrives was baselined against an empty history.
 Re-baselining on backfill was tried and reverted, because it cannot tell "this
 backfill contains an older copy" from "this backfill contains mine" — and being
 wrong that way sends a delivered message to a live agent twice. It is a real
 limitation, not an oversight, and it currently lives only in a source comment.
 
-**7. Status is trusted wholesale from Claude Code's session file.** `toStatus`
+**8. Status is trusted wholesale from Claude Code's session file.** `toStatus`
 (`registry.ts:41`) is a whitelist over a field this app does not write, with
 `unknown` as the only fallback. Knowing which agents are blocked is the entire
 purpose of the dashboard, and that judgement has no independent corroboration —
@@ -445,14 +521,14 @@ notably, the two liveness signals the app *does* compute, `delegating` and
 is a reasonable dependency, but it is the largest one in the system and should be
 named as such.
 
-**8. Comment density is inverted relative to risk.** The tmux layer runs 30–36%
+**9. Comment density is inverted relative to risk.** The tmux layer runs 30–36%
 comments (`pane.ts` 173/478, `pane-hub.ts` 136/311, `tmux-client.ts` 128/375) and
 is also the layer with source-level assertions and a live-server verifier.
 `registry.ts` runs 11% (28/259), is consumed by every other plane, and has nothing
 watching it. The reasoning was recorded where it was hard-won rather than where it
 is load-bearing.
 
-**9. `isMissingTarget()` (`pane.ts`) reads tmux's prose.** Telling "this session
+**10. `isMissingTarget()` (`pane.ts`) reads tmux's prose.** Telling "this session
 does not exist" from "this question could not be put" is what stops a pending
 agent being forgotten on a machine at its process cap, and tmux only says which
 one it means in English. The wording has been stable for many years and the

@@ -7,8 +7,35 @@ import styles from './Message.module.css'
 /** How many tool calls show before the run collapses behind a summary. */
 const VISIBLE_TOOLS = 4
 
+/** Compact 886876 to "887k" — a token count is read for its order of magnitude. */
+function tokens(value: number | undefined): string {
+  if (value === undefined) return '?'
+  if (value < 1000) return String(value)
+  return `${Math.round(value / 1000)}k`
+}
+
 export const Message = memo(function Message({ message }: { message: ChatMessage }) {
   const t = useTranslate()
+
+  /*
+   * A compaction is not something either party said, so it is not drawn as a
+   * message. It is a mark on the conversation at the point where the agent's
+   * memory was cut, which is the only place it means anything.
+   */
+  if (message.role === 'notice') {
+    return (
+      <div className={styles.notice} data-testid="notice" data-notice={message.notice}>
+        <span className={styles.noticeText}>
+          {t(message.notice === 'compactedAuto' ? 'compactedAuto' : 'compacted', {
+            before: tokens(message.tokensBefore),
+            after: tokens(message.tokensAfter),
+          })}
+        </span>
+        <time className={styles.noticeTime}>{clock(message.at)}</time>
+      </div>
+    )
+  }
+
   const classes = [styles.msg]
   if (message.role === 'you') classes.push(styles.you)
   if (!message.grouped) classes.push(styles.ungrouped)

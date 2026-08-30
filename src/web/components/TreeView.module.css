@@ -1,0 +1,320 @@
+/*
+ * The delegation tree.
+ *
+ * Rails and elbows are drawn in CSS rather than with box-drawing characters,
+ * because a character-drawn tree cannot survive a description that wraps, a
+ * translated label, or a 320px screen — and the description is the widest thing
+ * in this view.
+ */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 24px;
+}
+
+.root {
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--idle);
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.root[data-status='busy'] {
+  border-left-color: var(--busy);
+}
+.root[data-status='waiting'] {
+  border-left-color: var(--waiting);
+}
+
+.rootHead {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 11px 13px;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.rootHead:hover {
+  background: var(--panel-2);
+}
+
+.caret {
+  grid-row: span 2;
+  align-self: center;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1;
+  transform: rotate(-90deg);
+  transition: transform 0.12s;
+}
+.root[data-open='true'] .caret {
+  transform: rotate(0deg);
+}
+
+.rootName {
+  font-weight: 600;
+  font-size: var(--text-md);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.rootMeta {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  font-size: var(--text-xs);
+  color: var(--dim);
+  min-width: 0;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sep {
+  color: var(--faint);
+}
+
+/* The fleet card's pill, verbatim, so the two views never name one state two
+   ways — including the dashed edge that marks an inferred status (INV-11). */
+.pill {
+  grid-row: span 2;
+  align-self: center;
+  flex: none;
+  font-size: var(--text-xs);
+  padding: 1px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.pill[data-status='busy'] {
+  color: var(--busy);
+  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
+}
+.pill[data-status='waiting'] {
+  color: var(--waiting);
+  border-color: color-mix(in srgb, var(--waiting) 50%, transparent);
+  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+}
+.pill[data-inferred='true'] {
+  border-style: dashed;
+  border-color: currentColor;
+  opacity: 0.9;
+}
+
+.kids {
+  padding: 2px 13px 12px 30px;
+  display: flex;
+  flex-direction: column;
+}
+
+.node {
+  position: relative;
+  padding: 9px 0 9px 20px;
+  border-left: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 10px;
+  align-items: baseline;
+}
+.node::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 13px;
+  height: 1px;
+  background: var(--line);
+}
+/* The last child's rail stops at its own elbow rather than running past it. */
+.node[data-last='true'] {
+  border-left-color: transparent;
+}
+.node[data-last='true']::after {
+  content: '';
+  position: absolute;
+  left: -1px;
+  top: 0;
+  width: 1px;
+  height: 19px;
+  background: var(--line);
+}
+
+.nodeName {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.nodeDesc {
+  grid-column: 1;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.nodeFoot {
+  grid-column: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 9px;
+  margin-top: 2px;
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+
+.nest {
+  grid-column: 1 / -1;
+  padding-left: 20px;
+}
+
+.chip {
+  grid-row: 1;
+  grid-column: 2;
+  flex: none;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: var(--text-xs);
+  padding: 1px 8px 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.glyph {
+  font-size: 10px;
+  line-height: 1;
+}
+.chip[data-state='done'] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+.chip[data-state='active'] {
+  color: var(--busy);
+  border-color: color-mix(in srgb, var(--busy) 42%, transparent);
+}
+.chip[data-stopped='true'] {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 42%, transparent);
+}
+/*
+ * A guessed state, marked the way the fleet card marks an inferred status: a
+ * dashed edge and the word. Not a new colour — a colour would assert a
+ * distinction this app cannot back up, which is what INV-11 exists to stop.
+ */
+.chip[data-inferred='true'] {
+  border-style: dashed;
+  border-color: currentColor;
+}
+.inferred {
+  opacity: 0.85;
+}
+
+/*
+ * Transcript size. A bar and a caption in kilobytes, never a percentage —
+ * nothing here knows what "all of it" would be.
+ */
+.bar {
+  width: 72px;
+  height: 4px;
+  flex: none;
+  border-radius: var(--radius-pill);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.bar i {
+  display: block;
+  height: 100%;
+  background: var(--line-strong);
+}
+.node[data-state='active'] .bar i {
+  background: var(--busy);
+}
+
+.orphan {
+  color: var(--waiting);
+}
+
+/*
+ * A root with nothing under it is a line, not a card. Most agents on a busy
+ * machine have delegated nothing, and giving each of them a paragraph and a
+ * button buried the two or three trees this view exists to show.
+ */
+.root[data-empty='true'] {
+  border-left-width: 2px;
+}
+.root[data-empty='true'] .rootHead {
+  padding-bottom: 4px;
+}
+
+.empty {
+  margin: 0;
+  padding: 0 13px 10px 30px;
+  font-size: var(--text-xs);
+  color: var(--faint);
+  font-style: italic;
+}
+
+.rootFoot {
+  display: flex;
+  padding: 0 13px 11px 30px;
+}
+
+.open {
+  font: inherit;
+  font-size: var(--text-xs);
+  color: var(--dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  min-height: 30px;
+  cursor: pointer;
+}
+.open:hover {
+  border-color: var(--focus);
+  color: var(--text);
+}
+
+/*
+ * A phone. The indent is what breaks first — three levels at desktop spacing
+ * eats a 390px screen — so the rails narrow and the text column does not.
+ */
+@media (max-width: 620px) {
+  .kids {
+    padding-left: 20px;
+  }
+  .node {
+    padding-left: 14px;
+  }
+  .node::before {
+    width: 9px;
+  }
+  .nest {
+    padding-left: 12px;
+  }
+  .empty,
+  .rootFoot {
+    padding-left: 20px;
+  }
+}

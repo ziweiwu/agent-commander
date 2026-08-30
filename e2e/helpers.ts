@@ -19,6 +19,14 @@ export const AGENT = {
   busy: 'mock-busy',
   /** Not running in tmux: attach is impossible and must say why (INV-5). */
   noTmux: 'mock-no-tmux',
+  /**
+   * Reserved for `/clear`, and reserved because clearing is destructive to the
+   * fixture itself: it rotates the session id, exactly as a real one does, so
+   * the agent this test clears stops existing under the name it had. Every spec
+   * shares one mock server, so pointing this at a fixture another test uses
+   * deletes that test's agent out from under it.
+   */
+  clearable: 'mock-idle-db',
 } as const
 
 export const card = (page: Page, sessionId: string) =>

@@ -37,7 +37,31 @@ whole thing works from a phone over Tailscale:
 
 </details>
 
-## What it shows
+## Two views over one fleet
+
+There are two ways to read the same machine, chosen in the settings menu and
+remembered per browser.
+
+**Forest** — the default — draws every session as a *family*: itself, and
+everything it has handed out, all on one shared time axis with **now at the
+right-hand edge**. A family with a mark on the right is working, whoever in it
+is doing the writing. That is the question a list structurally cannot answer,
+because an agent that delegates stops writing its own transcript and looks
+exactly like one that died. The summary names the straggler as well as the
+count — `3 of 5 writing · one quiet 40m` — because a family is only as healthy
+as its slowest member, and a card that reported only its freshest would go on
+looking fine while one delegate had been silent for an hour.
+
+Anything with no history at all gets **no mark**, rather than one at the far
+left: a session that has never been prompted has no duration, and a mark at the
+old end of the axis would claim it had been silent for hours (INV-11).
+
+**Cards** is the grouped list below, unchanged. It is not deprecated — it
+answers a different question. The list says what each agent is *doing*, in a
+line of its own; the forest says whether anything in a family is still moving.
+Neither can hide an agent the other shows.
+
+## What the card list shows
 
 Agents are grouped **Needs you → Working → Idle**, so anything blocked on you is
 the first thing on screen. Each card carries the agent's name, status (with the
@@ -51,6 +75,30 @@ last-activity clock follows the subagent's transcript rather than its own. Its
 own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
+
+### The delegation tree
+
+The **⑂** button in the topbar opens a second view of the same fleet: every
+agent with everything it has handed out underneath it, nested as deep as the
+work actually goes. Claude Code writes the graph down — one small file beside
+each subagent's transcript naming its type, its brief and its parent — so this
+is read rather than guessed at.
+
+Each delegate shows what it was asked to do, how much it has written, and one of
+three states. They are three rather than two on purpose:
+
+- **done** — something recorded the ending. You stopped it, or the parent logged
+  its result.
+- **active · inferred** — its transcript grew recently and the parent is working.
+  A good guess, and it says that it is one.
+- **quiet · 22m** — nothing has been written for a while and nothing recorded an
+  ending. It may have finished; it may have died. There is no way to tell from
+  here, so the view says how long rather than picking one.
+
+A delegate whose parent is missing from disk is shown at the top level and
+marked, rather than disappearing along with everything beneath it. An agent
+whose CLI keeps no transcript says the app *cannot tell* whether it delegated —
+which is a different thing from having delegated nothing.
 
 ### Other agent CLIs
 
@@ -134,7 +182,7 @@ keyboard has none of them.
 | `Enter` | open the focused agent |
 | `Esc` | close the agent (or clear the filter box) |
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
-| `Shift`+`Tab` | in the message box: cycle the permission mode, mid-task included |
+| `Shift`+`Tab` | in the message box: advance the permission mode one step, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
 
 ## Claude usage
@@ -197,9 +245,10 @@ extension point, holding no credential at all.
 
 ## Themes, language and full screen
 
-The settings menu carries theme (System / Light / Dark), colour scheme
+The settings menu carries the view (Forest / Cards), theme (System / Light / Dark), colour scheme
 (Graphite / Nordic / Solar / Ember / Mauve) and language (English / 简体中文).
-All three persist. Theme and scheme are separate axes — the scheme picks the
+All four persist, in this browser only — none of them reaches the server, and
+none can reach an agent. Theme and scheme are separate axes — the scheme picks the
 palette family, the theme picks light or dark within it — and
 [Colour schemes](#colour-schemes) has the rest of that. "System" writes no
 `data-theme` attribute at all, so the `prefers-color-scheme` media query decides
@@ -244,16 +293,34 @@ on the card, and these names are derived *from* the directory anyway.
 
 ## Controlling a running agent
 
-The detail panel carries **Mode**, **Model** and **Close**. All three type into
-the agent's own prompt, so they are enabled only while it is idle or waiting —
-greyed with a tooltip while it is busy, so a keystroke never interleaves with a
-tool call in flight. On a phone they collapse behind a `⋯` button, because the
-row cost 111px of a 568px screen.
+The detail panel carries **Mode**, **Model**, **Compact**, **Clear** and
+**Close**. Everything except Mode types into the agent's own prompt, so those
+are enabled only while it is idle or waiting — greyed with a tooltip while it is
+busy, so a keystroke never interleaves with a tool call in flight. On a phone
+they collapse behind a `⋯` button, because the row cost 111px of a 568px screen.
 
-Mode switching sends Shift+Tab and re-reads the mode until it matches, rather
-than counting presses: the cycle omits `bypassPermissions` and `auto` when they
-are unavailable. Closing sends `/exit` first and only forces a session that
-ignores it.
+**Mode** is one press of Shift+Tab, the same chord the CLI's own keyboard uses,
+and the button shows where the session says it landed. It used to be a dropdown
+that named a mode and let the server hunt for it, and having a target was the
+whole problem: a working agent does not write its permission mode down until its
+turn ends, so the hunt went blind after it had already pressed twice and left
+the session somewhere nobody asked for. There is nothing to chase now. If the
+session has not reported the new mode yet the button says *pressed…* rather than
+naming one it has not read.
+
+**Compact** asks the agent to summarise and shorten its own context. It runs for
+minutes, so nothing waits for it — the toast says the compaction was *requested*,
+and when it finishes the conversation shows a mark saying how much it shed
+(`compacted · 887k → 29k`). An automatic compaction, which the CLI does on its
+own when the window fills, shows up the same way and says it was automatic.
+
+**Clear** discards the conversation and starts the agent fresh. It asks first,
+because there is no undo — and it does something the other controls do not:
+`/clear` replaces the session rather than editing it, so the agent comes back
+under a new id and the dashboard follows it there. The conversation on screen
+goes with the old one.
+
+**Close** sends `/exit` first and only forces a session that ignores it.
 
 ### From the chat itself
 
@@ -273,9 +340,11 @@ session does next, and one arriving mid-turn acts on a state nobody chose.
 
 Mode is switched by sending `BTab` — a control key the agent handles wherever it
 is, exactly as it would from the keyboard of the terminal this app stands in
-for. **Shift+Tab** in the message box does the same, the chord the CLI itself
-uses; the cost is that Shift+Tab no longer tabs backwards out of the box, though
-Tab and Escape still move focus.
+for. **Shift+Tab** in the message box does the same thing as the button, the
+chord the CLI itself uses; the cost is that Shift+Tab no longer tabs backwards
+out of the box, though Tab and Escape still move focus. The two mode buttons on
+screen — this one and the detail panel's — always agree, because a setting shown
+twice that disagrees with itself is worse than one that is briefly behind.
 
 Model is allowed for a different reason: it types, but through the very same
 paste the message box already uses on working agents. Sending *"use opus
@@ -373,6 +442,7 @@ memory rather than a reading (INV-11).
 | `~/.claude/sessions/<pid>.json` | Session list, status, cwd, and the tmux pane id. Read every 2s. |
 | `claude agents --json` | Authoritative presence check. Costs ~680ms, so it runs every 30s to reconcile. |
 | `~/.claude/projects/*/<sessionId>.jsonl` | The timeline, tailed incrementally by byte offset. |
+| `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the Tree view is open. |
 | `tmux capture-pane` / `send-keys` | The Attach tab, and delivering your input. |
 | `~/.claude/agent-commander/rate-limits.json` | Your 5-hour and 7-day subscription quota. The only file this app **writes** — see [Claude usage](#claude-usage). |
 
@@ -451,8 +521,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 683 tests: pure logic, server, and React components
-npm run e2e        # 177 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 782 tests: pure logic, server, and React components
+npm run e2e        # 237 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

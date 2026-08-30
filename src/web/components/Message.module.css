@@ -182,3 +182,35 @@
     margin-top: 8px;
   }
 }
+
+/*
+ * A conversation-level mark rather than an utterance: centred on a rule, muted,
+ * and never coloured as a status. It reports something that already happened
+ * and needs no attention.
+ */
+.notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0;
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+.notice::before,
+.notice::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--line);
+}
+.noticeText {
+  flex: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.noticeTime {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}

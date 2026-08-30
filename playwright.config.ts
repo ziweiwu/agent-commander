@@ -42,6 +42,15 @@ const PORT = Number(process.env.E2E_PORT ?? 4599)
  *   @desktop — needs a pointer, a hardware keyboard, or a resizable window
  *   @phone   — only meaningful on a phone-sized screen
  *   @tablet  — about the breakpoint itself, so only meaningful on a tablet
+ *   @once    — destroys the fixture it uses, so only one project may run it
+ *
+ * `@once` is about the server rather than the screen, and it is the odd one
+ * out for that reason. All five projects share a single `--mock` server, so a
+ * test whose whole subject is a destructive action — `/clear` rotates a
+ * session's id, exactly as the real one does — removes its own fixture and
+ * every later project finds an agent that is no longer there. Running it in one
+ * project is not reduced coverage: what it checks has nothing to do with the
+ * viewport.
  */
 /**
  * One engine, said out loud.
@@ -70,6 +79,7 @@ const PROJECTS = [
   {
     name: 'desktop',
     use: { ...devices['Desktop Chrome'] },
+    // The one project that runs `@once`, because it runs first.
     grepInvert: /@phone|@tablet/,
   },
   {
@@ -77,22 +87,22 @@ const PROJECTS = [
     // Portrait: 834px wide, which is *below* the breakpoint. The landscape
     // half is driven inside the specs, because rotating is the point.
     use: { ...devices['iPad Pro 11'], ...CHROMIUM },
-    grepInvert: /@phone|@desktop/,
+    grepInvert: /@phone|@desktop|@once/,
   },
   {
     name: 'phone',
     use: { ...devices['iPhone 13'], ...CHROMIUM },
-    grepInvert: /@desktop|@tablet/,
+    grepInvert: /@desktop|@tablet|@once/,
   },
   {
     name: 'phone-safari',
     use: { ...devices['iPhone 13'], ...WEBKIT },
-    grepInvert: /@desktop|@tablet/,
+    grepInvert: /@desktop|@tablet|@once/,
   },
   {
     name: 'tablet-safari',
     use: { ...devices['iPad Pro 11'], ...WEBKIT },
-    grepInvert: /@phone|@desktop/,
+    grepInvert: /@phone|@desktop|@once/,
   },
 ]
 

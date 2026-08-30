@@ -23,6 +23,81 @@ const assistant = (blocks: unknown[], extra: Record<string, unknown> = {}): stri
   })
 
 describe('parseLines', () => {
+  /*
+   * A compaction is the only observable trace `/compact` ever leaves. The
+   * request itself is text pasted into a prompt, and the work runs for minutes
+   * — the real sample this was written against reports `durationMs: 157676` —
+   * so nothing waits for it and this record is what tells the user it happened.
+   *
+   * `system` records are otherwise skipped as meta, which is why this is read
+   * before that filter rather than after it.
+   */
+  it('turns a compaction boundary into a notice with its token counts', () => {
+    const { events } = parseLines(
+      [
+        line({
+          type: 'system',
+          subtype: 'compact_boundary',
+          content: 'Conversation compacted',
+          timestamp: '2026-08-27T14:01:53.941Z',
+          compactMetadata: { trigger: 'manual', preTokens: 886876, postTokens: 28634 },
+        }),
+      ],
+      seq(),
+    )
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({
+      kind: 'notice',
+      notice: 'compacted',
+      tokensBefore: 886876,
+      tokensAfter: 28634,
+    })
+  })
+
+  /*
+   * A compaction the CLI did on its own because the window filled is different
+   * news from one the user asked for, and telling them apart is the only thing
+   * `trigger` is for.
+   */
+  it('distinguishes an automatic compaction from a requested one', () => {
+    const { events } = parseLines(
+      [
+        line({
+          type: 'system',
+          subtype: 'compact_boundary',
+          timestamp: '2026-08-27T14:01:53.941Z',
+          compactMetadata: { trigger: 'auto', preTokens: 700000, postTokens: 20000 },
+        }),
+      ],
+      seq(),
+    )
+    expect(events[0]).toMatchObject({ notice: 'compactedAuto' })
+  })
+
+  // A boundary with no metadata still marks the conversation; it just cannot
+  // say by how much, and must not invent a number to fill the gap (INV-11).
+  it('keeps a compaction boundary that carries no numbers', () => {
+    const { events } = parseLines(
+      [line({ type: 'system', subtype: 'compact_boundary', timestamp: '2026-08-27T14:01:53.941Z' })],
+      seq(),
+    )
+    expect(events[0]).toMatchObject({ kind: 'notice' })
+    expect(events[0]?.tokensBefore).toBeUndefined()
+    expect(events[0]?.tokensAfter).toBeUndefined()
+  })
+
+  // Every other `system` record is still meta and still skipped.
+  it('ignores system records that are not a compaction', () => {
+    const { events } = parseLines(
+      [
+        line({ type: 'system', subtype: 'turn_duration', timestamp: '2026-08-27T14:01:53.941Z' }),
+        line({ type: 'system', subtype: 'local_command', timestamp: '2026-08-27T14:01:53.941Z' }),
+      ],
+      seq(),
+    )
+    expect(events).toHaveLength(0)
+  })
+
   it('extracts assistant text and tool calls', () => {
     const { events } = parseLines(
       [

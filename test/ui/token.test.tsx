@@ -87,7 +87,16 @@ function Address() {
  * gives the components a new singleton, and setting state on the old one leaves
  * them rendering an empty fleet with nothing to click.
  */
-async function appAt(url: string, state: Partial<{ agents: Agent[]; selected: string }> = {}) {
+/*
+ * Pinned to the card list on purpose. What this file asserts — that the token
+ * survives the first navigation, in the address bar as well as on requests —
+ * is the same in either view, and the assertions below reach for a card. The
+ * default view is a preference; this file should not silently follow it.
+ */
+async function appAt(
+  url: string,
+  state: Partial<{ agents: Agent[]; selected: string }> = {},
+) {
   window.history.replaceState({}, '', url)
   vi.resetModules()
   // Scoped to this import rather than hoisted: the block above exercises the
@@ -103,7 +112,7 @@ async function appAt(url: string, state: Partial<{ agents: Agent[]; selected: st
   }))
   const { App, FleetRoute } = await import('../../src/web/components/App.tsx')
   const { useStore } = await import('../../src/web/store/store.ts')
-  useStore.setState(state)
+  useStore.setState({ view: 'legacy', ...state })
   render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>

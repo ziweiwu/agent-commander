@@ -42,6 +42,8 @@ interface Block {
 
 interface Record_ {
   type?: string
+  subtype?: string
+  compactMetadata?: { trigger?: string; preTokens?: number; postTokens?: number }
   timestamp?: string
   uuid?: string
   isSidechain?: boolean
@@ -201,6 +203,12 @@ export interface ParseResult {
   patch: Partial<Agent>
 }
 
+/** A record's own timestamp, falling back to now when it has none or it is junk. */
+function stamp(raw: string | undefined): number {
+  const at = raw ? Date.parse(raw) : Number.NaN
+  return Number.isFinite(at) ? at : Date.now()
+}
+
 /** Convert raw JSONL lines into timeline events plus a fleet-card patch. */
 export function parseLines(lines: string[], seq: () => string): ParseResult {
   const events: TimelineEvent[] = []
@@ -231,10 +239,36 @@ export function parseLines(lines: string[], seq: () => string): ParseResult {
     const goal = goalFromRecord(rec)
     if (goal) patch.goal = goal
 
+    /*
+     * A compaction, read before the `system` records are skipped as meta.
+     *
+     * This is the only thing this app can ever know about `/compact`. The
+     * request itself is unobservable — it is text pasted into a prompt — and
+     * the work runs for minutes (`durationMs: 157676` in the one real sample),
+     * so the button that asks for it cannot wait and does not claim it
+     * happened. This record is Claude Code saying it did, with the numbers.
+     *
+     * `trigger` is kept because the two are different news: one the user asked
+     * for, and one the CLI did on its own because the window filled. The
+     * second is exactly the sort of thing a dashboard exists to surface.
+     */
+    if (type === 'system' && rec.subtype === 'compact_boundary') {
+      const meta = rec.compactMetadata
+      events.push({
+        id: seq(),
+        at: stamp(rec.timestamp),
+        kind: 'notice',
+        text: '',
+        notice: meta?.trigger === 'manual' ? 'compacted' : 'compactedAuto',
+        ...(typeof meta?.preTokens === 'number' ? { tokensBefore: meta.preTokens } : {}),
+        ...(typeof meta?.postTokens === 'number' ? { tokensAfter: meta.postTokens } : {}),
+      })
+      continue
+    }
+
     if (META_TYPES.has(type)) continue
 
-    const at = rec.timestamp ? Date.parse(rec.timestamp) : Number.NaN
-    const when = Number.isFinite(at) ? at : Date.now()
+    const when = stamp(rec.timestamp)
     // 'HEAD' is what a non-repo or detached checkout reports; it tells the
     // user nothing, so it is not worth a slot on the card.
     if (rec.gitBranch && rec.gitBranch !== 'HEAD') patch.gitBranch = rec.gitBranch
@@ -306,6 +340,10 @@ export function describe(event: TimelineEvent): string {
       return trim(event.text ? `${event.tool} → ${event.text}` : 'delegating to subagent')
     case 'user':
       return trim(`you: ${event.text}`)
+    case 'notice':
+      // The card has no room for the token pair and no i18n; the timeline
+      // carries the detail.
+      return event.notice === 'compactedAuto' ? 'compacted automatically' : 'compacted'
     default:
       return trim(event.text)
   }

@@ -188,6 +188,77 @@ export interface TimelineEvent {
   tool?: string
   /** True when this event came from a subagent sidechain. */
   sidechain?: boolean
+  /**
+   * For `kind === 'notice'`: which notice this is, so the client names it in
+   * the reader's language rather than displaying a sentence the server wrote.
+   */
+  notice?: 'compacted' | 'compactedAuto'
+  /** Context tokens either side of a compaction, for the notice above. */
+  tokensBefore?: number
+  tokensAfter?: number
+}
+
+/**
+ * What a delegate is doing, and how much of that this app actually knows.
+ *
+ * Three states rather than two, and the third is the point (INV-13). An agent
+ * that finished and an agent that died both stop writing; nothing on disk
+ * separates them, so `quiet` is its own answer and is never drawn as `done`.
+ * That is the same absence-of-evidence rule INV-11 already applies to an
+ * inferred status on a fleet card.
+ */
+export type SubagentState = 'active' | 'quiet' | 'done'
+
+/** One delegate in an agent's tree, and everything below it. */
+export interface SubagentNode {
+  /** Claude Code's own id for the delegate; the transcript is named after it. */
+  agentId: string
+  /** The subagent type, e.g. `general-purpose`, or a forked skill's name. */
+  agentType: string
+  /** The one-line brief the parent gave it. */
+  description: string
+  /** 1 for a delegate of the session itself, 2 for a delegate of a delegate. */
+  depth: number
+  parentAgentId?: string
+  /** When its transcript was last written to. */
+  lastWriteAt: number
+  /** Transcript size. A coarse "how much work", never a percentage of anything. */
+  bytes: number
+  state: SubagentState
+  /**
+   * The state was worked out here rather than reported (INV-11).
+   *
+   * Set on `active`, which is a guess from a recent write and a busy parent,
+   * and never on `done`, which is only ever claimed on evidence.
+   */
+  stateInferred?: boolean
+  /** The user stopped it. Evidence of an ending, so the state is `done`. */
+  stoppedByUser?: boolean
+  /**
+   * Its parent id named a delegate that is not on disk, so it was raised to the
+   * top of the tree rather than dropped along with everything under it.
+   */
+  reparented?: boolean
+  children: SubagentNode[]
+}
+
+/** One agent's delegates. `children` is empty for an agent that never delegated. */
+export interface AgentTree {
+  sessionId: string
+  children: SubagentNode[]
+  /**
+   * This app cannot tell whether this agent has delegated at all.
+   *
+   * True for a CLI that keeps no transcript: the evidence lives in files it
+   * does not write, so an empty tree here is absence of evidence rather than
+   * evidence of absence, and must not read as "delegated nothing".
+   */
+  unknown?: boolean
+}
+
+/** The whole fleet's delegation graph, as served by `GET /api/tree`. */
+export interface FleetTree {
+  trees: AgentTree[]
 }
 
 /** A rendered snapshot of a tmux pane. */
@@ -235,7 +306,13 @@ export type ServerMessage =
    * again (INV-2), it only tells the client the pipe is free.
    */
   | { type: 'paste-ack'; sessionId: string; seq: number }
-  | { type: 'error'; sessionId?: string; message: string }
+  /*
+   * `kind` names the condition; `message` is only how to say it. A client that
+   * has to match the prose cannot survive the prose being reworded — and the
+   * pane-exit case is the one state a viewer has to react to structurally,
+   * because INV-1 means there is no pty to report the exit any other way.
+   */
+  | { type: 'error'; sessionId?: string; message: string; kind?: 'pane-exited' }
 
 /** Control keys the server will forward. Anything else is rejected (INV-2). */
 export const ALLOWED_KEYS = [

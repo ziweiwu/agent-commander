@@ -80,6 +80,70 @@
   padding: 20px 4px;
 }
 
+/* ---- the pane has ended ---- */
+
+/*
+ * What replaces the terminal when its pane exits.
+ *
+ * INV-1 forbids the pty that would otherwise report an exit, so nothing on
+ * screen changes on its own: xterm goes on drawing its last frame for as long
+ * as the tab is open, and a frozen capture is indistinguishable from a live one
+ * that happens to be quiet. That is the state this block exists to end. The
+ * explanation goes *above* the capture and takes the top of the reading order,
+ * rather than floating over it — an overlay would still leave a terminal
+ * underneath that looks like it is running.
+ */
+.gone {
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius-md);
+}
+.goneText {
+  flex: 1;
+  min-width: 0;
+}
+.goneTitle {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+.goneBody {
+  margin: 4px 0 0;
+  color: var(--dim);
+  font-size: var(--text-base);
+}
+
+/*
+ * The caption on what is left of the terminal.
+ *
+ * The last frame is kept because it usually says why the agent died, and it is
+ * deliberately not dimmed: an earlier draft faded it to 3.1:1 while its own
+ * caption explained that it was worth keeping. Subordinate here means captioned
+ * and second in the reading order, never harder to read.
+ */
+.lastFrame {
+  align-self: stretch;
+  margin: 0 0 6px;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
+/* Nothing typed can reach a pane that has gone, so the capture stops being
+   somewhere to type: clicking it no longer hands focus to xterm. Panning still
+   works, because the scroll is owned by `.wrap` above it. */
+.exited .scale {
+  pointer-events: none;
+}
+
 /* ---- full page ---- */
 
 .fullscreen {

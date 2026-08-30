@@ -9,7 +9,7 @@
  * verified against a live session (INV-8). So the failure a user sees here is
  * the failure they would get for real.
  */
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { AGENT, openAgent, openFleet, stamp } from './helpers.ts'
 
 test.describe('starting an agent', () => {
@@ -79,24 +79,24 @@ test.describe('starting an agent', () => {
 })
 
 test.describe('acting on a running agent', () => {
-  test('INV-8 changes the permission mode through the server', async ({ page }) => {
+  test('INV-8 advances the permission mode through the server', async ({ page }) => {
     await openAgent(page, AGENT.idle)
-    const select = page.getByTestId('chat-mode-select')
-    await expect(select).toBeEnabled()
+    // Two of these are on screen — the composer strip and the detail panel's
+    // control row — and they show the same setting. Scoped to the composer.
+    const button = page.getByTestId('chat-controls').getByTestId('mode-cycle')
+    await expect(button).toBeEnabled()
+    const before = (await button.textContent()) ?? ''
 
-    await select.selectOption('plan')
+    await button.click()
 
     /*
-     * The mock's control deps cycle a real `MODE_CYCLE` on each key and report
-     * the mode they land on, which is what `setMode` verifies against — it
-     * presses Shift+Tab and re-reads until the session agrees, because the
-     * cycle silently omits modes that are unavailable. Success is the absence
-     * of the failure toast; a mode that could not be reached is a 409 and says
-     * where it actually ended up.
+     * The mock's control deps advance a real `MODE_CYCLE` on each key and
+     * report the mode they land on, which is what `cycleMode` reads back. One
+     * press is one step, so the label has to change — and it changes to
+     * whatever the session says, not to something the browser worked out.
      */
-    await page.waitForTimeout(3_000)
-    await expect(page.getByTestId('toast')).toHaveCount(0)
-    await expect(select).toBeEnabled()
+    await expect(button).not.toHaveText(before)
+    await expect(button).toHaveAttribute('data-unreported', 'false')
   })
 
   test('INV-8 refuses to type at a busy agent, and says why', async ({ page }) => {
@@ -118,17 +118,91 @@ test.describe('acting on a running agent', () => {
   test('INV-8 still changes the mode of a busy agent', async ({ page }) => {
     await openAgent(page, AGENT.busy)
 
-    const select = page.getByTestId('chat-mode-select')
-    await expect(select).toBeEnabled()
+    // Two of these are on screen — the composer strip and the detail panel's
+    // control row — and they show the same setting. Scoped to the composer.
+    const button = page.getByTestId('chat-controls').getByTestId('mode-cycle')
+    await expect(button).toBeEnabled()
+    const before = (await button.textContent()) ?? ''
 
-    await select.selectOption('plan')
+    await button.click()
 
-    // Success is the absence of the failure toast, exactly as for an idle
-    // agent above: the mock's deps cycle the real `MODE_CYCLE` and `setMode`
-    // verifies against what the session reports, so a refusal would surface
-    // as a toast rather than as a wrong value here.
-    await page.waitForTimeout(3_000)
+    // Exactly as for an idle agent above: the press goes out and the label
+    // follows what the session reports. A refusal would surface as a toast.
+    await expect(button).not.toHaveText(before)
     await expect(page.getByTestId('toast')).toHaveCount(0)
+  })
+
+  /**
+   * Reveal the detail panel's control row.
+   *
+   * On a phone and a tablet it collapses behind the `⋯` disclosure, because the
+   * row cost 111px of a 568px screen. Clear and Compact live in that row, so a
+   * spec that only ever ran on a desktop would say nothing about the two
+   * viewports this app is most used from.
+   */
+  const controls = async (page: Page) => {
+    const toggle = page.getByTestId('controls-toggle')
+    if (await toggle.isVisible()) await toggle.click()
+    return page.getByTestId('agent-controls')
+  }
+
+  /*
+   * The sharp edge in `/clear`, and the reason it has an end-to-end test at all.
+   *
+   * `/clear` does not edit a conversation, it replaces one: Claude Code opens a
+   * fresh transcript under a new session id. So the id in the address bar stops
+   * existing the moment it lands, and without following it `focusAgent` points
+   * at nothing, the route bails to the fleet, and the agent reappears further
+   * down the page as a stranger. From the user's side, the panel closed itself.
+   *
+   * `@once` because it is destructive in exactly that way: the fixture it
+   * clears stops existing under the name it had, and all five projects share
+   * one mock server. Nothing about this is viewport-dependent, so running it in
+   * one project loses no coverage.
+   */
+  test('INV-8 follows the agent to the session it is now running @once', async ({ page }) => {
+    await openAgent(page, AGENT.clearable)
+
+    await (await controls(page)).getByTestId('clear-agent').click()
+    await page.getByTestId('confirm-accept').click()
+
+    // A different id, and still on an agent rather than back at the fleet.
+    await expect(page).not.toHaveURL(new RegExp(AGENT.clearable))
+    await expect(page).toHaveURL(/\/agent\//)
+    await expect(page.getByTestId('agent-detail')).toBeVisible()
+  })
+
+  // There is no undo, so it asks — and a refused dialog must send nothing.
+  test('INV-8 sends no /clear when the confirmation is refused', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+
+    await (await controls(page)).getByTestId('clear-agent').click()
+    await page.getByTestId('confirm-cancel').click()
+
+    // The dialog is gone and nothing happened: same agent, same session.
+    await expect(page.getByTestId('confirm-dialog')).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(AGENT.idle))
+  })
+
+  /*
+   * Compaction runs for minutes, so nothing waits for it. The only honest thing
+   * to say when the button returns is that it was asked for (INV-11).
+   */
+  test('INV-8 reports a compaction as requested rather than done', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+
+    await (await controls(page)).getByTestId('compact-agent').click()
+
+    await expect(page.getByTestId('toast')).toContainText(/requested/i)
+  })
+
+  // Both type into the prompt, so both wait for idle exactly as Close does.
+  test('INV-8 offers neither clear nor compact to a busy agent', async ({ page }) => {
+    await openAgent(page, AGENT.busy)
+    const row = await controls(page)
+
+    await expect(row.getByTestId('clear-agent')).toBeDisabled()
+    await expect(row.getByTestId('compact-agent')).toBeDisabled()
   })
 
   test('INV-8 sets a goal and clears it again', async ({ page }) => {

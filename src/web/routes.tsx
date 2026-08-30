@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { App, FleetRoute } from './components/App.tsx'
 import { HelpRoute } from './components/HelpRoute.tsx'
+import { TreeRoute } from './components/TreeRoute.tsx'
 import { withTokenPath } from './lib/token.ts'
 
 /**
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { index: true, element: <FleetRoute /> },
       { path: 'agent/:sessionId', element: <FleetRoute /> },
       { path: 'agent/:sessionId/term', element: <FleetRoute /> },
+      { path: 'tree', element: <TreeRoute /> },
       { path: 'help', element: <HelpRoute /> },
       { path: '*', element: <Navigate to={withTokenPath('/')} replace /> },
     ],

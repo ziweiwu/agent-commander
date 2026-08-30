@@ -1,0 +1,60 @@
+/*
+ * Sized to sit in two places without either redefining it: the composer strip,
+ * where it stands beside the goal toggle, and the detail panel's control row
+ * beside the model select. `flex: none` is load-bearing in the composer — the
+ * strip is a horizontal scroller, and a shrinkable child there is allowed to
+ * shrink below its own content and render underneath the chips next to it.
+ */
+.mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  padding: 3px 10px;
+  min-height: 30px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mode:hover:not(:disabled) {
+  border-color: var(--focus);
+}
+.mode:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The chord, drawn rather than spelt, because the accessible name already
+   carries the sentence and the strip has no room for it twice. */
+.kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  color: var(--faint);
+  flex: none;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/*
+ * The press landed but the session has not said where. Muted rather than
+ * coloured: a new colour would assert a distinction this app cannot back up,
+ * which is the thing INV-11 exists to prevent.
+ */
+.mode[data-unreported='true'] .name {
+  color: var(--faint);
+  font-style: italic;
+}
+
+.compact {
+  min-height: 36px;
+  padding: 5px 10px;
+}
