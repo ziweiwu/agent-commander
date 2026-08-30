@@ -147,6 +147,9 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.woff2': 'font/woff2',
   '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  // Chrome's install criteria read the manifest by its declared type.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 }
 
 const KEY_SET: ReadonlySet<string> = new Set(ALLOWED_KEYS)
