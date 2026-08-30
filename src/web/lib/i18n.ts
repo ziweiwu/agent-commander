@@ -270,32 +270,13 @@ const EN = {
   closing: 'Closing…',
   closedGracefully: '{name} exited.',
   closedForced: '{name} did not respond to /exit and was stopped.',
-  /* tree — the fleet's delegation graph */
-  treeTab: 'Tree',
-  treeTitle: 'Delegation',
-  treeEmpty: 'No agents are running.',
-  treeNoDelegates: 'Has not delegated anything.',
+  /* delegation — what the forest says about a family's delegates */
   /* Absence of evidence, not evidence of absence: the files this reads are
      written by Claude Code, so for another CLI there is nothing to read and
      "delegated nothing" would be a claim nobody checked (INV-11). */
   treeUnknown: '{kind} keeps no transcript, so this app cannot tell whether it has delegated.',
-  treeDelegateCount: '{n} delegate',
-  treeDelegateCountPlural: '{n} delegates',
-  treeRunningCount: '{n} running',
   treeReparented:
     '{name} names a parent that is not on disk. Raised to the top level rather than dropped.',
-  treeStateDone: 'done',
-  treeStateActive: 'active',
-  treeStateQuiet: 'quiet',
-  /* Marked as a guess wherever it appears, the same way an inferred status is
-     on a fleet card. */
-  treeStateInferred: 'inferred',
-  treeStoppedByUser: 'stopped by you',
-  /* Captioned as a size, never a percentage: there is no total for it to be a
-     percentage of, and INV-11 caught exactly this once already with tokens. */
-  treeWritten: '{size} written',
-  treeSizeLabel: 'transcript size',
-  treeOpenAgent: 'Open {name}',
   /* clear + compact — Claude Code's own /clear and /compact */
   clearContext: 'Clear',
   clearKeep: 'Keep the conversation',
@@ -561,23 +542,8 @@ const ZH: Record<Key, string> = {
   closing: '正在关闭…',
   closedGracefully: '{name} 已退出。',
   closedForced: '{name} 未响应 /exit，已被强制结束。',
-  treeTab: '树',
-  treeTitle: '委派关系',
-  treeEmpty: '没有正在运行的代理。',
-  treeNoDelegates: '未委派任何子代理。',
   treeUnknown: '{kind} 不保存记录，因此无法判断它是否委派过子代理。',
-  treeDelegateCount: '{n} 个子代理',
-  treeDelegateCountPlural: '{n} 个子代理',
-  treeRunningCount: '{n} 个进行中',
   treeReparented: '{name} 的上级不在磁盘上，已提升到顶层而不是丢弃。',
-  treeStateDone: '已完成',
-  treeStateActive: '进行中',
-  treeStateQuiet: '静默',
-  treeStateInferred: '推断',
-  treeStoppedByUser: '已被你停止',
-  treeWritten: '已写入 {size}',
-  treeSizeLabel: '记录大小',
-  treeOpenAgent: '打开 {name}',
   clearContext: '清空',
   clearKeep: '保留这段对话',
   clearing: '正在清空…',

@@ -6,23 +6,15 @@ import { buildForest } from '../lib/forest.ts'
 import { ForestView } from './ForestView.tsx'
 
 /**
- * How often to re-read the delegation graph while this view is open.
- *
- * The same 3s the tree view uses, and for the same reason: a delegate's state
- * changes on the order of a minute, and this view is about the shape of the
- * work rather than its instant. The fleet itself still arrives pushed, so the
- * only thing on this timer is the graph.
- */
-
-/**
  * The fleet drawn as families on a shared time axis.
  *
- * Polled over HTTP rather than pushed, and **only while this component is
- * mounted** — INV-4's first rule is that nothing polls what nobody is watching,
- * and an effect that stops on unmount satisfies it without adding a
- * subscription lifecycle to the wire. This is the same shape `TreeRoute` uses;
- * the two views ask the same server for the same graph, so neither of them
- * needed a new endpoint.
+ * The delegation graph is polled over HTTP rather than pushed, and **only
+ * while this component is mounted** — INV-4's first rule is that nothing polls
+ * what nobody is watching, and an effect that stops on unmount satisfies it
+ * without adding a subscription lifecycle to the wire. 3s is slow on purpose:
+ * a delegate's state changes on the order of a minute, and this view is about
+ * the shape of the work rather than its instant. The fleet itself still
+ * arrives pushed, so the only thing on the timer is the graph.
  */
 
 export function ForestRoute() {

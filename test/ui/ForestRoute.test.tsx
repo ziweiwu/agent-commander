@@ -1,17 +1,17 @@
 /**
- * The tree view's polling, and what it does with an answer that has not moved.
+ * The forest's polling, and what it does with an answer that has not moved.
  *
  * The server stopped re-sending an unchanged graph (`test/tree-routes.test.ts`).
  * This is the half that makes that worth anything: the browser has to send the
- * tag back, and — the part that was actually broken — it has to leave its
- * existing trees alone when the answer is 304. Calling `setTrees` with a freshly
- * parsed copy of identical data gave every `tree` prop a new identity every
- * three seconds, so the `memo` on `TreeRoot` could never hit and all of it
- * re-rendered for data nobody had changed.
+ * tag back, and it has to leave its existing trees alone when the answer is a
+ * 304. `useFleetTrees` holds the tag in a ref and a `{ changed: false }` answer
+ * never reaches `setTrees`, so identity churn is impossible by construction —
+ * what a reader would notice, and what is asserted here, is the consequence:
+ * an unchanged answer is not an empty one.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, waitFor } from '@testing-library/react'
-import { TreeRoute } from '../../src/web/components/TreeRoute.tsx'
+import { ForestRoute } from '../../src/web/components/ForestRoute.tsx'
 import { fetchTree } from '../../src/web/store/transport.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
@@ -37,6 +37,9 @@ const tree = (agentId: string): AgentTree => ({
   ],
 })
 
+/** The delegate's lane, distinguishable from the session's own at depth 0. */
+const delegateLane = () => document.querySelector('[data-testid="forest-lane"][data-depth="1"]')
+
 beforeEach(() => {
   resetStore()
   asMock.mockReset()
@@ -47,14 +50,14 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('INV-4 the tree view does not re-read what it already has', () => {
+describe('INV-4 the forest does not re-read what it already has', () => {
   it('sends no tag on the first poll and the served tag on the next', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     asMock
       .mockResolvedValueOnce({ changed: true, trees: [tree('a')], etag: '"v1"' })
       .mockResolvedValue({ changed: false })
 
-    renderApp(<TreeRoute />)
+    renderApp(<ForestRoute />)
 
     await waitFor(() => expect(asMock).toHaveBeenCalledTimes(1))
     expect(asMock.mock.calls[0]?.[0]).toBeNull()
@@ -65,30 +68,20 @@ describe('INV-4 the tree view does not re-read what it already has', () => {
     expect(asMock.mock.calls[1]?.[0]).toBe('"v1"')
   })
 
-  /*
-   * The identity churn itself is now impossible by construction rather than by
-   * assertion: a 304 comes back as `{ changed: false }`, which carries no trees
-   * for `setTrees` to be handed. What is worth testing is the consequence a
-   * reader would notice — an unchanged answer is not an empty one.
-   *
-   * Deliberately not asserted here: that no re-render happened. React reuses a
-   * DOM node across re-renders whenever the element type and key match, so
-   * comparing element identity would pass either way and prove nothing.
-   */
   it('does not blank the graph when the answer is unchanged', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     asMock
       .mockResolvedValueOnce({ changed: true, trees: [tree('a')], etag: '"v1"' })
       .mockResolvedValue({ changed: false })
 
-    renderApp(<TreeRoute />)
-    await screen.findByTestId('tree-root')
+    renderApp(<ForestRoute />)
+    await waitFor(() => expect(delegateLane()).toBeTruthy())
 
     await vi.advanceTimersByTimeAsync(3_000)
     await waitFor(() => expect(asMock).toHaveBeenCalledTimes(2))
 
-    // `getByTestId` throws when absent, so these are the assertion.
-    expect(screen.getByTestId('tree-node')).toBeTruthy()
+    // `getByText` throws when absent, so these are the assertion.
+    expect(delegateLane()).toBeTruthy()
     expect(screen.getByText('Explore')).toBeTruthy()
   })
 
@@ -98,8 +91,8 @@ describe('INV-4 the tree view does not re-read what it already has', () => {
       .mockResolvedValueOnce({ changed: true, trees: [tree('a')], etag: '"v1"' })
       .mockResolvedValue({ changed: true, trees: [tree('b')], etag: '"v2"' })
 
-    renderApp(<TreeRoute />)
-    await screen.findByTestId('tree-root')
+    renderApp(<ForestRoute />)
+    await waitFor(() => expect(delegateLane()).toBeTruthy())
 
     await vi.advanceTimersByTimeAsync(3_000)
 

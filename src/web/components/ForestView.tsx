@@ -160,6 +160,7 @@ function LaneRow({ lane, sessionId, selected, stale, staleSince, onOpen }: LaneR
           ) : (
             <span
               className={styles.mark}
+              data-testid="forest-mark"
               role="img"
               aria-label={lane.describe}
               data-state={lane.state}
@@ -175,7 +176,7 @@ function LaneRow({ lane, sessionId, selected, stale, staleSince, onOpen }: LaneR
       </span>
 
       {lane.orphan && (
-        <span className={styles.orphan}>
+        <span className={styles.orphan} data-testid="forest-orphan">
           <span aria-hidden="true">△</span> {t('treeReparented', { name: lane.label })}
         </span>
       )}

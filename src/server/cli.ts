@@ -231,7 +231,7 @@ function printHelp(): void {
  * One agent's delegates, read from the sidecars beside its transcript.
  *
  * The transcript is located per call rather than cached here because
- * `findTranscript` already caches nothing and the tree route runs only while
+ * `findTranscript` already caches nothing and the forest polls only while
  * somebody has the view open (INV-4). The sidecars themselves are cached in
  * `subagents.ts`, which is where the repeated cost would otherwise be.
  */

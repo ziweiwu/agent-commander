@@ -52,9 +52,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 782 tests: pure logic, server, and React components
+npm test              # 777 tests: pure logic, server, and React components
 npm run build
-npm run e2e           # 141 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 228 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed

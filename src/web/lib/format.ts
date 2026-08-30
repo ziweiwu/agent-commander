@@ -110,19 +110,6 @@ export function tildePath(path: string): string {
   return match ? `~${path.slice(match[0].length)}` : path
 }
 
-/**
- * The label for the folder chip.
- *
- * Several sessions typically run straight from the home directory, where the
- * basename is the username and tells you nothing. Showing `~` is both shorter
- * and more honest about the fact that they are not scoped to a project.
- */
-export function folderLabel(agent: Agent): string {
-  const short = tildePath(agent.cwd)
-  if (short === '~') return '~'
-  return short.startsWith('~/') ? agent.folder : short
-}
-
 export const GROUPS = [
   { key: 'waiting', statuses: ['waiting'] },
   { key: 'busy', statuses: ['busy'] },

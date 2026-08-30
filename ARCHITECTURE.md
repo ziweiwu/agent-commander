@@ -133,7 +133,7 @@ otherwise `unknown`. See "Where it is fragile", item 14.
 ~/.claude/projects/**/<sid>.jsonl ──5s, one tail per agent──► 11 card fields
                                   ──1s, focused tab only────► TimelineEvent[]
 <sid>/subagents/*.jsonl (mtime)  ─────────────────────────► delegating + clock
-<sid>/subagents/*.meta.json      ──3s, Tree view only─────► AgentTree
+<sid>/subagents/*.meta.json      ──3s, forest view only───► AgentTree
 ```
 
 `transcript.ts` turns JSONL into events plus a `Partial<Agent>` patch. Two
@@ -276,11 +276,11 @@ Pushed: two `fs.watch` registrations, `AgentSource.onChange` and
 | Pending-agent expiry | 5m | `pending.ts:16` |
 | WebSocket heartbeat | 30s, drop after 2 missed | `routes.ts` |
 | Environment probe | once at startup | `env.ts` |
-| Delegation tree, while the Tree view is open | 3s | `TreeRoute.tsx` |
+| Delegation tree, while the forest view is open | 3s | `useFleetTrees.ts` |
 
 Three of those are conditional rather than constant. The pane capture runs only
 while some tab has that agent focused *and* attached; the delegation tree is
-fetched only while the Tree view is mounted, which is why it is plain HTTP
+fetched only while the forest view is mounted, which is why it is plain HTTP
 rather than a fifth socket message — an effect that stops on unmount satisfies
 INV-4's first rule without a subscription lifecycle on the wire; and the
 fleet-wide enrichment runs only while at least one tab is connected at all — `routes.ts` reports the
@@ -301,9 +301,9 @@ nobody chose and nothing reports.
 
 ## The wire, and one tab's state machine
 
-Deliberately small, and it has stayed that way: the delegation tree is the most
+Deliberately small, and it has stayed that way: the delegation graph is the most
 recent addition to the app and it is a `GET`, not a seventh server message. The
-data is neither hot nor pushed, and only one view wants it.
+data is neither hot nor pushed, and only the forest wants it.
 
 One WebSocket per browser tab. Four messages up — `focus`, `attach`, `paste`,
 `key` (`types.ts:189`) — and six down — `fleet`, `limits`, `timeline`, `frame`,
@@ -341,9 +341,9 @@ The fleet has **two renderings and one route**. `FleetRoute` picks between
 `ForestView` and `FleetList` on a stored preference (`prefs.ts`, `VIEWS`); the
 view is deliberately *not* a URL — it is how you like to read, not what you are
 looking at, and putting it in the address bar would mean a link sent to a phone
-carried the sender's preference with it. `ForestRoute` polls the same
-`/api/tree` the tree view does, on the same mount-scoped loop, so the second
-rendering added no endpoint, no wire message and no new polling rule (INV-4).
+carried the sender's preference with it. `ForestRoute` polls
+`/api/tree` on a mount-scoped loop (`useFleetTrees`), so the rendering owns no
+endpoint, no wire message and no new polling rule (INV-4).
 `src/web/lib/forest.ts` holds the layout as pure functions — the log axis, the
 fold, and the accessible description that carries a mark's state and age,
 because position is the one channel a screen reader cannot receive.
@@ -448,8 +448,8 @@ below, which is where the entries that used to be here went.
 
 **1. The delegation tree reads an undocumented internal format, and it is the
 second place this app does that.** `agent-<id>.meta.json` is not a published
-contract any more than `~/.claude/sessions/<pid>.json` is (INV-5), and the tree
-is the only thing in the app that depends on it. A change of shape degrades to
+contract any more than `~/.claude/sessions/<pid>.json` is (INV-5), and the
+forest's delegate lanes are the only thing in the app that depends on it. A change of shape degrades to
 "no tree" for that agent, which is the right direction — but it degrades
 *silently*, and an empty tree looks identical to an agent that has not
 delegated. The sidecars are also cached by path for the life of the process on

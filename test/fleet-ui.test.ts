@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { countByGroup, grouped, sortAgents, visibleAgents, type FleetState } from '../src/web/lib/filter.ts'
-import { folderLabel, matches, relative, tildePath, tokens, uptimeParts } from '../src/web/lib/format.ts'
+import { matches, relative, tildePath, tokens, uptimeParts } from '../src/web/lib/format.ts'
 import { formatRelative, formatUptime } from '../src/web/lib/i18n.ts'
 import type { Agent } from '../src/shared/types.ts'
 
@@ -78,21 +78,6 @@ describe('matches', () => {
   })
 })
 
-describe('folderLabel', () => {
-  // Five sessions typically run from home, where the basename is the username
-  // and distinguishes nothing.
-  it('shows ~ for a session running in the home directory', () => {
-    expect(folderLabel(agent({ sessionId: 'x', cwd: '/Users/me', folder: 'me' }))).toBe('~')
-  })
-
-  it('shows the project name for a session inside home', () => {
-    expect(folderLabel(agent({ sessionId: 'x', cwd: '/Users/me/Projects/blog', folder: 'blog' }))).toBe('blog')
-  })
-
-  it('shows the full path when it is outside home', () => {
-    expect(folderLabel(agent({ sessionId: 'x', cwd: '/opt/src', folder: 'src' }))).toBe('/opt/src')
-  })
-})
 
 describe('tildePath', () => {
   it('abbreviates the home directory', () => {

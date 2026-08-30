@@ -915,7 +915,7 @@ async function handleBrowse(url: URL, res: ServerResponse, opts: ServeOptions): 
 /**
  * The whole fleet's delegation graph.
  *
- * Plain HTTP rather than a fifth socket message, and polled by the tree view
+ * Plain HTTP rather than a fifth socket message, and polled by the forest view
  * only while it is open. That satisfies INV-4's first rule — nothing polls what
  * nobody is watching — without adding a subscription lifecycle to the wire,
  * which is deliberately four messages up and six down. The data is neither hot

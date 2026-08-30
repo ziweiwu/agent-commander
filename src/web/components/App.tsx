@@ -35,10 +35,9 @@ export function App() {
 
   const searchRef = useRef<HTMLInputElement>(null)
   const isHelp = location.pathname.startsWith('/help')
-  const isTree = location.pathname.startsWith('/tree')
-  // Both take the whole page, so neither leaves an agent selected behind it and
-  // neither has a fleet to filter.
-  const solo = isHelp || isTree
+  // Help takes the whole page, so it leaves no agent selected behind it and
+  // has no fleet to filter.
+  const solo = isHelp
   const sheetMode = narrow && selected !== null && !solo
 
   // Modals and the mobile sheet own the screen; the page behind must not scroll.
@@ -142,21 +141,6 @@ export function App() {
         </h1>
         {solo ? <span className={styles.spacer} /> : <Filters />}
         <UsageChips />
-        {/*
-          A peer of the fleet rather than a mode of it: the tree answers "what
-          is the shape of the work" where the fleet answers "which agent needs
-          me", and neither is a filter on the other.
-        */}
-        <Button
-          variant="icon"
-          data-testid="tree-button"
-          title={t('treeTitle')}
-          aria-label={t('treeTitle')}
-          aria-pressed={isTree}
-          onClick={() => navigate(isTree ? '/' : '/tree')}
-        >
-          ⑂
-        </Button>
         <Button
           variant="icon"
           data-testid="help-button"

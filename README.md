@@ -76,16 +76,15 @@ own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
 
-### The delegation tree
+### The delegation lanes
 
-The **⑂** button in the topbar opens a second view of the same fleet: every
-agent with everything it has handed out underneath it, nested as deep as the
-work actually goes. Claude Code writes the graph down — one small file beside
-each subagent's transcript naming its type, its brief and its parent — so this
-is read rather than guessed at.
+The forest draws every agent's family: everything it has handed out, one lane
+per delegate, nested as deep as the work actually goes. Claude Code writes the
+graph down — one small file beside each subagent's transcript naming its type,
+its brief and its parent — so this is read rather than guessed at.
 
-Each delegate shows what it was asked to do, how much it has written, and one of
-three states. They are three rather than two on purpose:
+Each delegate's mark carries one of three states. They are three rather than
+two on purpose:
 
 - **done** — something recorded the ending. You stopped it, or the parent logged
   its result.
@@ -93,7 +92,7 @@ three states. They are three rather than two on purpose:
   A good guess, and it says that it is one.
 - **quiet · 22m** — nothing has been written for a while and nothing recorded an
   ending. It may have finished; it may have died. There is no way to tell from
-  here, so the view says how long rather than picking one.
+  here, so the lane says how long rather than picking one.
 
 A delegate whose parent is missing from disk is shown at the top level and
 marked, rather than disappearing along with everything beneath it. An agent
@@ -442,7 +441,7 @@ memory rather than a reading (INV-11).
 | `~/.claude/sessions/<pid>.json` | Session list, status, cwd, and the tmux pane id. Read every 2s. |
 | `claude agents --json` | Authoritative presence check. Costs ~680ms, so it runs every 30s to reconcile. |
 | `~/.claude/projects/*/<sessionId>.jsonl` | The timeline, tailed incrementally by byte offset. |
-| `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the Tree view is open. |
+| `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the forest view is mounted. |
 | `tmux capture-pane` / `send-keys` | The Attach tab, and delivering your input. |
 | `~/.claude/agent-commander/rate-limits.json` | Your 5-hour and 7-day subscription quota. The only file this app **writes** — see [Claude usage](#claude-usage). |
 
@@ -521,8 +520,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 782 tests: pure logic, server, and React components
-npm run e2e        # 237 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 777 tests: pure logic, server, and React components
+npm run e2e        # 228 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

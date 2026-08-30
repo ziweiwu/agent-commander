@@ -299,7 +299,7 @@ where they can drift without making this file wrong.
 **Nothing polls what nobody is watching — and nothing re-sends what the watcher
 already has.** The first half was always here; the second was the gap, and
 `/api/tree` fell straight into it. The delegation graph is polled every three
-seconds while the tree view is open, and measured against 53 real sessions the
+seconds while the forest view is open, and measured against 53 real sessions the
 body is 54.6 KB that is *byte-identical* from one poll to the next — 0 of 55,916
 bytes differing, 64 MB an hour re-sent to a phone over Tailscale, which is the
 connection this app exists to be used from.
@@ -312,11 +312,12 @@ conditional. The server hashes the body it would send and answers a matching
 **keeps its existing trees by identity**.
 
 That last clause is load-bearing and is the half that was actually broken in the
-browser. `setTrees(body.trees)` handed every `tree` prop a new object identity
-every three seconds even when the JSON was identical, so the `memo` on
-`TreeRoot` could never hit and all 260 nodes re-rendered for data nobody had
-changed. A 304 now carries no trees at all, which makes that churn impossible to
-reintroduce rather than merely fixed.
+browser. In the standalone tree view this app used to have, `setTrees(body.trees)`
+handed every `tree` prop a new object identity every three seconds even when the
+JSON was identical, so a `memo` could never hit and all 260 nodes re-rendered for
+data nobody had changed. `useFleetTrees` holds the tag in a ref and a 304 comes
+back as `{ changed: false }`, which carries no trees for `setTrees` to be handed
+— the churn is impossible by construction rather than merely fixed.
 
 The read itself still happens on every poll — a `readdir` and a few cached
 sidecars, ~3ms for the whole fleet. It is not worth caching state that Claude
@@ -346,7 +347,7 @@ were the reason for the rules, not the rules.
 - `test/tree-routes.test.ts` — the graph is served with an `ETag`, a matching
   `If-None-Match` gets a bare 304, a real change gets a new tag and a body, and
   a stale or unknown tag is answered in full rather than with a 304
-- `test/ui/TreeRoute.test.tsx` — the first poll carries no tag and the next
+- `test/ui/ForestRoute.test.tsx` — the first poll carries no tag and the next
   carries the one just served; an unchanged answer does not blank the graph;
   and a changed one is what advances the tag
 
@@ -722,7 +723,7 @@ what it is.
 without doing anything when the socket is not open — correct, because queuing is
 the one thing INV-2 forbids — but the composer cleared the box, marked the
 message `sending…`, and twelve seconds later called it `not delivered`. The
-fleet list and the tree both caption a disconnected view; this was the one
+fleet's two renderings both caption a disconnected view; this was the one
 surface where a user *acts*, and it said nothing. It now refuses at the
 composer, keeps every character of the draft, and says so in a live region
 rather than only by greying a button.
@@ -776,7 +777,7 @@ an agent, and a tab switching views quickly is not what this guards.
 
 ## INV-13 — A delegation tree claims only what the sidecars say
 
-The tree view shows an agent's delegates, and everything under them. Its
+The forest draws an agent's delegates, and everything under them. Its
 structure is **read, not derived**: Claude Code writes one small sidecar beside
 every subagent transcript.
 
@@ -828,10 +829,14 @@ nobody could make. That tree comes back `unknown` and the view says so.
 
 **Transcript size is captioned as a size, never as a percentage.** There is no
 total for it to be a fraction of. INV-11 caught exactly this once already, with
-`tokens` displayed as spend and sorted as "most spent".
+`tokens` displayed as spend and sorted as "most spent". The forest draws no size
+at all, so today the rule is pinned at the server (`test/subagents.test.ts`
+keeps `bytes` as bytes); any surface that ever draws it again inherits the
+caption clause.
 
-Colour is never the only signal: every state chip carries a glyph and a word,
-which is what `audit:contrast` and the generated palettes both assume.
+Colour is never the only signal: every state mark carries words in its
+accessible name, which is what `audit:contrast` and the generated palettes both
+assume.
 
 - `test/subagents.test.ts` — a three-deep tree assembled from `parentAgentId`;
   an orphan raised rather than dropped; one malformed sidecar costing only its
@@ -839,7 +844,10 @@ which is what `audit:contrast` and the generated palettes both assume.
   directory returning an empty tree rather than throwing; `unknown` rather than
   empty for a CLI with no transcript; and each of the three states, including a
   delegate that is not called active while its parent is idle
-- `test/ui/TreeView.test.tsx` — a quiet delegate is not rendered as done, an
+- `test/ui/ForestView.test.tsx` — a quiet delegate is not rendered as done, an
   inferred `active` says so in words, an evidenced `done` is not marked as a
-  guess, a stopped delegate is named rather than called finished, size is
-  labelled as a size, and the two empty cases say different things
+  guess, a stopped delegate is named rather than called finished, and
+  "delegated nothing" and "cannot tell" render as different claims
+- `e2e/forest.spec.ts` — the same clauses against the real server and mock
+  sidecars, plus depth-3 nesting, the raised orphan, and no sideways scroll at
+  any width
