@@ -216,6 +216,7 @@ const EN = {
   /* help */
   help: 'Help',
   helpTitle: 'Help',
+  helpVersion: 'server {version}',
   helpIntro:
     'agent-commander shows every Claude Code session running on this machine and lets you talk to any of them.',
   helpSectionBasics: 'The basics',
@@ -516,6 +517,7 @@ const ZH: Record<Key, string> = {
   language: '语言',
   help: '帮助',
   helpTitle: '帮助',
+  helpVersion: '服务端 {version}',
   helpIntro: 'agent-commander 会列出本机所有正在运行的 Claude Code 会话，并且可以直接和它们对话。',
   helpSectionBasics: '基本用法',
   helpBasicsGroups: '代理按「需要你处理 → 运行中 → 空闲」分组，需要你处理的排在最上面。',

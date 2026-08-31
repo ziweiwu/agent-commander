@@ -166,6 +166,7 @@ pub async fn server_env_with(port: u16, runner: &dyn CommandRunner) -> ServerEnv
         tailscale,
         tmux,
         port,
+        version: env!("CARGO_PKG_VERSION").to_string(),
         platform: node_platform(),
     }
 }

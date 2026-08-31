@@ -524,7 +524,14 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
     --mock          serve fixture agents, touching nothing real
     --install-statusline
                     add the quota bridge to ~/.claude/settings.json and exit
+-V, --version       print the version and exit
 ```
+
+The version is compiled into the binary, so it cannot disagree with the thing
+printing it, and the running server reports it at `/api/env` and on the Help
+page — which is the one that matters once the Mac app is in play, because the
+app carries its own copy of the binary and it need not be the one you just
+built.
 
 `--host` is refused without `--token`. This app can type into live agents and
 approve their permission prompts, so it will not expose itself to the network
@@ -590,7 +597,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 914 tests: 507 Rust (the server) + 407 vitest (the web app)
+npm test           # 921 tests: 509 Rust (the server) + 412 vitest (the web app)
 npm run e2e        # 238 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone

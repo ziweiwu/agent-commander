@@ -2602,7 +2602,7 @@ mod tests {
             mock: fixtures == Fixtures::Mock,
             web_root: parts.web_root.path().to_path_buf(),
             token: token.map(str::to_string),
-            env: ServerEnv { tailscale: None, tmux: true, port: 0, platform: "darwin".into() },
+            env: ServerEnv { tailscale: None, tmux: true, port: 0, platform: "darwin".into(), version: env!("CARGO_PKG_VERSION").into() },
             browse_root: None,
             spawn: Arc::new(OkSpawn),
             browse: Arc::new(OkBrowse),
@@ -2868,6 +2868,7 @@ mod tests {
             }),
             tmux: true,
             port: 0,
+            version: env!("CARGO_PKG_VERSION").into(),
             platform: "darwin".into(),
         };
         // Trailing dot dropped, case folded — the header arrives either way.
@@ -2884,8 +2885,7 @@ mod tests {
                 tailscale: None,
                 tmux: true,
                 port: 0,
-                platform: "darwin".into()
-            }),
+                platform: "darwin".into(), version: env!("CARGO_PKG_VERSION").into() }),
             None
         );
     }

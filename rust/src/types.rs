@@ -142,6 +142,12 @@ pub struct ServerEnv {
     pub tmux: bool,
     pub port: u16,
     pub platform: String,
+    /// The version of the code that is answering, not of anything asking.
+    ///
+    /// Compiled in from `CARGO_PKG_VERSION`, so it cannot drift from the binary
+    /// the way a string read off disk could — and `the_two_manifests_agree`
+    /// keeps that in step with the npm package the binary ships inside.
+    pub version: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

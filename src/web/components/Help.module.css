@@ -161,3 +161,13 @@
     margin-bottom: 8px;
   }
 }
+
+/* Beside the title, quiet: it answers a question nobody asks until something is
+   wrong, and it should not compete with the heading until then. */
+.version {
+  margin-left: auto;
+  align-self: center;
+  font-size: var(--text-xs);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}

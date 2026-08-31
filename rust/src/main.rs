@@ -56,7 +56,7 @@ async fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let opts = match options::parse_args(&argv) {
         Ok(options::Parsed::Options(o)) => o,
-        Ok(options::Parsed::Help(text)) => {
+        Ok(options::Parsed::Help(text)) | Ok(options::Parsed::Version(text)) => {
             println!("{text}");
             return ExitCode::SUCCESS;
         }
