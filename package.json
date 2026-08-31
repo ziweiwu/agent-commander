@@ -1,7 +1,7 @@
 {
   "name": "@ziweiwu/agent-commander",
-  "version": "0.7.0",
-  "description": "See every Claude Code and Kiro CLI agent on your machine at a glance \u2014 status, folder, progress \u2014 and drop into any one of them from the browser.",
+  "version": "0.8.0",
+  "description": "See every Claude Code and Kiro CLI agent on your machine at a glance — status, folder, progress — and drop into any one of them from the browser.",
   "license": "MIT",
   "author": "Ziwei Wu <ziweiwu@gmail.com>",
   "keywords": [
