@@ -326,7 +326,7 @@ const HTTP_NOT_MODIFIED = 304
 /**
  * The fleet's delegation graph.
  *
- * Fetched rather than pushed, and only while the forest is mounted — INV-4's
+ * Fetched rather than pushed, and only while the fleet list is mounted — INV-4's
  * first rule is that nothing polls what nobody is watching, and a hook that
  * stops calling on unmount (`useFleetTrees`) satisfies it without adding a
  * subscription to the socket.

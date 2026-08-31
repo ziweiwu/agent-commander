@@ -7,6 +7,7 @@
  * prompts, so an unauthenticated non-loopback bind would hand that to anyone on
  * the network.
  */
+import { spawnSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -52,6 +53,7 @@ interface Options {
   mock: boolean
   mockTransitions: boolean
   installStatusline: boolean
+  installApp: boolean
   webRoot: string
   browseRoot?: string | undefined
 }
@@ -74,6 +76,7 @@ export function parseArgs(argv: string[]): Options {
     mock: false,
     mockTransitions: false,
     installStatusline: false,
+    installApp: false,
     webRoot: defaultWebRoot(),
   }
   for (let i = 0; i < argv.length; i += 1) {
@@ -110,6 +113,9 @@ export function parseArgs(argv: string[]): Options {
         break
       case '--install-statusline':
         opts.installStatusline = true
+        break
+      case '--install-app':
+        opts.installApp = true
         break
       case '--dev':
         break
@@ -206,6 +212,40 @@ function installStatusline(): boolean {
   return true
 }
 
+/**
+ * Build and install the macOS launcher app, from wherever this package lives.
+ *
+ * Here rather than only as an npm script, because `npm run app:install` needs a
+ * clone and most people have an install. The whole product already ships in the
+ * tarball — the app is a launcher around the very `cli.js` this flag is running
+ * in — so what was missing was a way to ask for it.
+ *
+ * The work itself stays in `scripts/build-mac-app.py`; this only locates it and
+ * reports what happened. Python and `iconutil` both come with the Xcode Command
+ * Line Tools, so the two requirements are really one.
+ */
+function installApp(): boolean {
+  if (process.platform !== 'darwin') {
+    process.stderr.write(`--install-app builds a macOS app; this is ${process.platform}\n`)
+    return false
+  }
+  const script = resolve(HERE, '..', '..', 'scripts', 'build-mac-app.py')
+  if (!existsSync(script)) {
+    process.stderr.write(`cannot find the builder at ${script}\n`)
+    return false
+  }
+  const built = spawnSync('python3', [script, '--install'], { stdio: 'inherit' })
+  if (built.error) {
+    process.stderr.write(
+      `could not run python3: ${built.error.message}\n` +
+        'Installing the Xcode Command Line Tools provides it, and iconutil, which this also needs:\n' +
+        '  xcode-select --install\n',
+    )
+    return false
+  }
+  return built.status === 0
+}
+
 function printHelp(): void {
   process.stdout.write(
     [
@@ -219,6 +259,7 @@ function printHelp(): void {
       '      --mock         serve fixture agents, touching nothing real',
       '      --mock-transitions  like --mock, but statuses change on a timer',
       '      --browse-root <d>  root the folder picker is confined to (default: home)',
+      '      --install-app  build the macOS launcher app into ~/Applications and exit',
       '      --install-statusline  add the quota bridge to ~/.claude/settings.json and exit',
       '      --web-root <d> directory of built web assets',
       '  -h, --help         show this help',
@@ -246,6 +287,11 @@ async function main(): Promise<void> {
   } catch (err) {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`)
     process.exit(2)
+    return
+  }
+
+  if (opts.installApp) {
+    process.exit(installApp() ? 0 : 1)
     return
   }
 

@@ -28,7 +28,6 @@ import {
   loadScheme,
   loadTheme,
   loadNotify,
-  loadView,
   saveDir,
   saveFilter,
   saveLang,
@@ -36,10 +35,8 @@ import {
   saveScheme,
   saveTheme,
   saveNotify,
-  saveView,
   type Scheme,
   type Theme,
-  type View,
 } from '../lib/prefs.ts'
 
 export type Tab = 'chat' | 'attach'
@@ -69,7 +66,6 @@ export interface AppState {
   newAgentOpen: boolean
 
   fleet: FleetState
-  view: View
   notify: boolean
   theme: Theme
   scheme: Scheme
@@ -111,7 +107,6 @@ export interface AppState {
   expectSession: string | null
 
   /* actions */
-  setView: (view: View) => void
   setNotify: (notify: boolean) => void
   setTheme: (theme: Theme) => void
   setScheme: (scheme: Scheme) => void
@@ -176,7 +171,6 @@ export const useStore = create<AppState>()((set, get) => ({
   // view, a search term is a one-off lookup that would be baffling to come back
   // to on a reload with no visible cause.
   fleet: { query: '', filter: loadFilter(), sort: loadSort(), dir: loadDir() },
-  view: loadView(),
   notify: loadNotify() === 'on',
   theme: loadTheme(),
   scheme: loadScheme(),
@@ -192,15 +186,6 @@ export const useStore = create<AppState>()((set, get) => ({
   exited: [],
   heldMode: null,
   expectSession: null,
-
-  // No `applyView` counterpart to the two below: a theme and a scheme have to
-  // reach the document because CSS selects on them, whereas the view decides
-  // which component the fleet route renders. Putting it on <html> as well would
-  // be a second copy of the same fact, free to disagree with this one.
-  setView: (view) => {
-    saveView(view)
-    set({ view })
-  },
 
   setNotify: (notify) => {
     saveNotify(notify ? 'on' : 'off')

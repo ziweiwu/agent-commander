@@ -28,6 +28,9 @@
   "files": [
     "dist",
     "scripts/statusline-bridge.mjs",
+    "scripts/build-mac-app.py",
+    "scripts/gen-icons.py",
+    "scripts/mac-app",
     "README.md",
     "INVARIANTS.md",
     "LICENSE"
@@ -46,6 +49,8 @@
     "typecheck": "tsc --noEmit",
     "verify:inv1": "tsx scripts/verify-inv1.ts",
     "serve": "tsx src/server/cli.ts",
+    "app": "npm run build && python3 scripts/build-mac-app.py",
+    "app:install": "npm run build && python3 scripts/build-mac-app.py --install",
     "audit": "npm run audit:contrast && npm run audit:a11y && npm run audit:ux && npm run audit:mobile",
     "audit:contrast": "python3 scripts/audit-contrast.py",
     "audit:a11y": "node scripts/audit-a11y.mjs",

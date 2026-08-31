@@ -57,6 +57,37 @@ const EN = {
   notAttachable: 'not attachable',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
   statusFromPane: 'quiet',
+  /* delegates — INV-13 and INV-15 in the words themselves */
+  delegatesNone: 'delegated nothing',
+  delegatesUnknown: 'delegates: cannot tell',
+  delegatesUnknownTitle:
+    'This CLI writes no record of its subagents, so whether it delegated is not something this app is able to read. That is different from having delegated nothing.',
+  delegatesOne: '1 delegate',
+  delegatesMany: '{n} delegates',
+  delegateActive: 'active',
+  delegateQuiet: 'quiet',
+  delegateDone: 'done',
+  delegateGuess: 'inferred',
+  delegateCalls: '{n} calls',
+  delegateCallsOver: '{n} calls over {t}',
+  delegateEffortTitle:
+    'What it did, measured from its transcript — not what came of it. Tool calls, and the span between its first and last record.',
+  delegateGuessTitle:
+    'A guess: its transcript grew recently and its parent is busy. Nothing reported this.',
+  delegateQuietTitle:
+    'It stopped writing. An agent that finished and one that died both do that, so this is not "done".',
+  delegateDoneTitle: 'Evidence of an ending: a recorded result, or you stopped it.',
+  delegateStopped: 'you stopped it',
+  delegateOrphan: 'parent not found',
+  delegateOrphanTitle:
+    'Its parent record is missing, so it was raised to the top rather than dropped — which would have taken this delegate and everything under it off the screen.',
+  delegatesShow: 'Show delegates',
+  delegatesHide: 'Hide delegates',
+  delegatesMoving: '{n} still moving, so this is not a stall',
+  stallQuestion: 'Nothing here has moved for {t} — still working?',
+  stallQuestionTitle:
+    'This agent is quiet because it delegated, and every delegate is quiet too. Quiet is not "finished" — nothing recorded an ending. Worth a look.',
+  trailLabel: 'Wrote for {worked}, silent for {silent}',
   helpSectionKinds: 'Other agent CLIs',
   helpKindsIntro:
     'Kiro CLI sessions appear alongside Claude Code ones, found through tmux and ' +
@@ -162,15 +193,6 @@ const EN = {
   confirmKey: 'Really send {key} to this agent?',
   /* settings */
   settings: 'Settings',
-  /* The two fleet views. "Cards" rather than "Legacy" as the visible label:
-     the code name says which one came first, which is no help at all when the
-     question is which one to look at now. The hints say what each one shows,
-     because a one-word name cannot. */
-  viewLabel: 'View',
-  viewForest: 'Forest',
-  viewForestHint: 'Every session with what it handed out, on one time axis',
-  viewLegacy: 'Cards',
-  viewLegacyHint: 'The card list, grouped by status',
   /* alerts — OS notifications for an agent that starts waiting (INV-14) */
   notifyLabel: 'Alerts',
   notifyToggle: 'Notify when an agent needs you',
@@ -277,13 +299,6 @@ const EN = {
   closing: 'Closing…',
   closedGracefully: '{name} exited.',
   closedForced: '{name} did not respond to /exit and was stopped.',
-  /* delegation — what the forest says about a family's delegates */
-  /* Absence of evidence, not evidence of absence: the files this reads are
-     written by Claude Code, so for another CLI there is nothing to read and
-     "delegated nothing" would be a claim nobody checked (INV-11). */
-  treeUnknown: '{kind} keeps no transcript, so this app cannot tell whether it has delegated.',
-  treeReparented:
-    '{name} names a parent that is not on disk. Raised to the top level rather than dropped.',
   /* clear + compact — Claude Code's own /clear and /compact */
   clearContext: 'Clear',
   clearKeep: 'Keep the conversation',
@@ -378,6 +393,33 @@ const ZH: Record<Key, string> = {
   notAttachable: '无法接入',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
   statusFromPane: '窗格静默',
+  delegatesNone: '未委派任何子代理',
+  delegatesUnknown: '子代理：无法判断',
+  delegatesUnknownTitle:
+    '此 CLI 不写入子代理记录，因此本应用无从得知它是否委派过。这与「未委派任何子代理」是两回事。',
+  delegatesOne: '1 个子代理',
+  delegatesMany: '{n} 个子代理',
+  delegateActive: '活跃',
+  delegateQuiet: '静默',
+  delegateDone: '已结束',
+  delegateGuess: '推测',
+  delegateCalls: '{n} 次工具调用',
+  delegateCallsOver: '{t} 内 {n} 次工具调用',
+  delegateEffortTitle: '这是从它的记录中量出来的「做了多少」，不是「结果如何」：工具调用次数，以及首末两条记录之间的跨度。',
+  delegateGuessTitle: '这是推测：它的记录最近有增长，且其父代理正在运行。没有任何一方如此报告。',
+  delegateQuietTitle: '它停止了写入。已完成和已死亡的代理都会如此，所以这不等于「已结束」。',
+  delegateDoneTitle: '有结束的证据：记录中有结果，或由你停止。',
+  delegateStopped: '由你停止',
+  delegateOrphan: '未找到父节点',
+  delegateOrphanTitle:
+    '它的父节点记录缺失，因此被提升到顶层而不是丢弃——丢弃会让这个子代理及其下所有节点从屏幕上消失。',
+  delegatesShow: '显示子代理',
+  delegatesHide: '隐藏子代理',
+  delegatesMoving: '仍有 {n} 个在推进，因此不是停滞',
+  stallQuestion: '已有 {t} 没有任何动静——还在运行吗？',
+  stallQuestionTitle:
+    '此代理因为委派而静默，且每个子代理也都静默。静默不等于「已完成」——没有任何记录表明它结束了。值得看一眼。',
+  trailLabel: '写入 {worked}，静默 {silent}',
   helpSectionKinds: '其他助手 CLI',
   helpKindsIntro:
     'Kiro CLI 会话会与 Claude Code 会话一同显示，通过 tmux 发现并带有标记。它们可以像其他助手一样接入终端，但没有本应用能读取的对话记录，因此没有对话、没有 token 统计，也没有“对话”标签页。',
@@ -460,11 +502,6 @@ const ZH: Record<Key, string> = {
   hintShiftTab: '切换权限模式',
   confirmKey: '确定要向这个代理发送 {key} 吗？',
   settings: '设置',
-  viewLabel: '视图',
-  viewForest: '森林',
-  viewForestHint: '在同一条时间轴上显示每个会话及其派发出去的任务',
-  viewLegacy: '卡片',
-  viewLegacyHint: '按状态分组的卡片列表',
   notifyLabel: '提醒',
   notifyToggle: '有代理需要你时通知我',
   notifyUnsupported: '此浏览器不支持通知。',
@@ -555,8 +592,6 @@ const ZH: Record<Key, string> = {
   closing: '正在关闭…',
   closedGracefully: '{name} 已退出。',
   closedForced: '{name} 未响应 /exit，已被强制结束。',
-  treeUnknown: '{kind} 不保存记录，因此无法判断它是否委派过子代理。',
-  treeReparented: '{name} 的上级不在磁盘上，已提升到顶层而不是丢弃。',
   clearContext: '清空',
   clearKeep: '保留这段对话',
   clearing: '正在清空…',

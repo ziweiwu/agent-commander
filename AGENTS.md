@@ -13,14 +13,17 @@ It is an observer of somebody else's work in progress. That is the whole design
 pressure: the sessions on screen are real, and this app is never allowed to
 disturb one.
 
-The fleet has **two renderings**, chosen in settings and stored per browser:
-`ForestView` draws each session as a family on one shared time axis, and
-`FleetList` is the grouped card list. Neither is deprecated — the list says what
-an agent is *doing*, the forest says whether anything in a family is still
-moving — so a change to one is not automatically a change to the other, and
-anything that must be true of the fleet has to be true in both. `FleetRoute`
-picks between them; the layout maths lives in `src/web/lib/forest.ts` as pure
-functions so it can be tested without a DOM.
+The fleet has **one rendering**: `FleetList`, the grouped card list. There were
+two — a `ForestView` drew each session as a family on a shared time axis — and
+the split cost more than it returned. Every property that had to be true of the
+fleet had to be proved twice, and the forest's own question ("is anything in
+this family still moving?") turned out to be answerable on the card itself, from
+the same delegation trees the forest was reading. So the trees moved onto the
+card: `AgentCard` rolls each agent's delegates into a line and opens them in
+`DelegationTree`, and the reasoning that has to survive that move is INV-13 and
+INV-15. The pure parts — what a card may claim about delegates, and the two
+lengths of its activity trail — live in `src/web/lib/delegation.ts` and
+`src/web/lib/trail.ts` so they can be tested without a DOM.
 
 ## The two constraints everything else follows from
 
@@ -52,9 +55,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 789 tests: pure logic, server, and React components
+npm test              # 800 tests: pure logic, server, and React components
 npm run build
-npm run e2e           # 233 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 238 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
@@ -80,12 +83,16 @@ when nothing under `src/`, `test/`, `scripts/` or the manifests has changed, and
 blocks at most once per tree state so a failure it cannot fix never traps the
 session.
 
-`build`, `e2e`, `audit:*`, `qa` and `verify:inv1` are deliberately **not** in
-that list. Measured on this machine: typecheck 5.0s, lint 0.9s, test ~40s,
+`build`, `e2e`, `audit:*`, `qa`, `verify:inv1` and `app` are deliberately
+**not** in that list. Measured on this machine: typecheck 5.0s, lint 0.9s, test ~40s,
 build 3.4s — the three that are in it already cost ~46s, and a Stop hook slow
 enough to resent is one that gets deleted. The others need a browser, a running
 server, or a live tmux session with a real agent in it, none of which a hook can
-assume. CI and a deliberate local run own them.
+assume. CI and a deliberate local run own them. `app` is the same argument in a
+different key: it is macOS-only, it needs a full build first, and what it guards
+is a local convenience rather than anything the app does — its three cheap
+checks already ride in `npm test`, and `scripts/mac-app/` is covered by the
+existing `scripts/` watch entry.
 
 `watch` entries are git pathspecs, not prefixes — git matches whole path
 components, so the manifests are spelled out individually. `scripts/` is on the
@@ -191,6 +198,26 @@ commit.
   attempts on one GitHub runner and passed on rerun with nothing changed. One
   red occurrence of exactly that test is worth a rerun before it is believed —
   and worth root-causing if it ever fails twice in a row on different runs.
+- **A bundled app keeps serving the code it started with.** The `.app` carries
+  its own copy of `dist/`, so reinstalling replaces the bundle and changes
+  nothing about the server already running — and the launcher's own
+  already-running check then finds a healthy server and just opens the browser,
+  so the update lands with no effect and no message. The launcher compares the
+  bundle's `cli.js` mtime against the pid file's and restarts a server it
+  started itself. **Timestamps rather than versions:** a version only moves on a
+  release, so rebuilding at `0.7.0` all afternoon would defeat a version check
+  in exactly the case that happens most.
+- **The Mac bundle has four path constraints, not two.** `defaultWebRoot` needs
+  `dist/web` beside `dist/server`, and `--install-statusline` needs
+  `scripts/statusline-bridge.mjs` two levels above it — both readable in
+  `cli.ts`. The two that are not: `dist/shared` must also be a sibling, because
+  nine files in `dist/server` import it at runtime; and
+  `Contents/Resources/app/package.json` must carry `"type": "module"`. Without
+  that last one Node finds no `package.json` anywhere up to `/`, reads the ESM
+  output as CommonJS, and dies on the first `import` before printing a
+  character — the do-nothing binary again, this time wearing a Dock icon that
+  bounces once. `scripts/build-mac-app.py` runs `--help` against the staged
+  bundle before promoting it, which is what catches all four at once.
 - **Piping a test run through `tail` eats the verdict.** `npm run e2e | tail`
   reports tail's exit code, not Playwright's, and the failure list scrolls out
   of the kept lines — a 92-failure run once read as "141 passed" that way.

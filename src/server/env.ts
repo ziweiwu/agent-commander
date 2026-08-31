@@ -60,3 +60,4 @@ export async function probeEnv(port: number): Promise<ServerEnv> {
   const [tailscale, tmux] = await Promise.all([detectTailscale(), tmuxAvailable()])
   return { tailscale, tmux, port, platform: process.platform }
 }
+

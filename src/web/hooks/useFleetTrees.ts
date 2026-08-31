@@ -6,8 +6,8 @@ import { fetchTree } from '../store/transport.ts'
  * How often to re-read the delegation graph while a view of it is open.
  *
  * Slower than the fleet's own tick because nothing here is urgent: a delegate's
- * state changes on the order of a minute, and both views that use this are
- * about the shape of the work rather than its instant.
+ * state changes on the order of a minute, and what this feeds is the shape of
+ * the work rather than its instant.
  */
 const POLL_MS = 3000
 
@@ -20,17 +20,28 @@ async function readTrees(
    * A failed read leaves the last graph on screen rather than blanking it
    * (INV-5). A view that flickered empty on one dropped request would read as
    * every session having stopped delegating at once.
+   *
+   * `try` rather than `.catch`, because the two failures are not the same
+   * shape: a dropped request rejects, but a transport that throws on the way in
+   * — an aborted signal, a module that is not what the caller thought — throws
+   * synchronously, and that one escaped the promise entirely and left the loop
+   * below with no next pass armed. A poll that dies leaves the view frozen on
+   * an old reading with nothing saying so.
    */
-  const body = await fetchTree(etag, signal).catch(() => null)
-  return body?.changed ? { etag: body.etag, trees: body.trees } : null
+  try {
+    const body = await fetchTree(etag, signal)
+    return body.changed ? { etag: body.etag, trees: body.trees } : null
+  } catch {
+    return null
+  }
 }
 
 /**
  * The fleet's delegation graph, re-read while something is watching it.
  *
- * Shared by both renderings of the fleet, because they ask the same server the
- * same question — and when they each had their own copy of this loop, the two
- * drifted within a day.
+ * One holder — the fleet list — because it is one question about the whole
+ * fleet. When each card polled for itself the answer was thirty requests for
+ * one 54 KB body.
  *
  * Polled over HTTP rather than pushed, and **only while a component holding
  * this hook is mounted**: INV-4's first rule is that nothing polls what nobody

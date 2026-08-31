@@ -1,3 +1,9 @@
+/* The card and anything hanging below it read as one object. */
+.wrap {
+  display: grid;
+  min-width: 0;
+}
+
 .card {
   text-align: left;
   width: 100%;
@@ -25,6 +31,11 @@
 .card[data-status='waiting'] {
   border-left-color: var(--waiting);
 }
+.card[data-attached='true'] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .card[aria-current='true'] {
   border-color: var(--focus);
   background: var(--panel-2);
@@ -144,11 +155,122 @@
   font-size: var(--text-sm);
 }
 
+/*
+ * How long it wrote, then how long it has been silent.
+ *
+ * Two segments of the card's own width, never of a fleet-wide axis: a session
+ * ninety seconds old and one four hours in would otherwise share a scale, and
+ * the young one collapses to nothing.
+ */
+.trail {
+  display: flex;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.worked {
+  background: var(--busy);
+  min-width: 0;
+}
+/*
+ * Deliberately not a second colour. Silence is not a state this app has
+ * measured — it is the absence of writing, and colouring it would rank it
+ * beside the states that were read.
+ */
+.silent {
+  background: var(--line);
+  min-width: 0;
+}
+
+.delegates {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 3px 8px;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  min-width: 0;
+}
+.delegates:empty {
+  display: none;
+}
+.total {
+  color: var(--text);
+}
+.count {
+  font-size: var(--text-xs);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+/* The same dashed edge as an inferred status pill: one visual language for
+   "this app worked it out", wherever the guess appears. */
+.count[data-inferred='true'] {
+  border-style: dashed;
+  border-color: currentColor;
+}
+.moving {
+  font-size: var(--text-xs);
+  color: var(--faint);
+}
+/* Absence of evidence, and it has to look different from `delegated nothing`
+   sitting in the identical slot on the card above it. */
+.cannotTell {
+  font-style: italic;
+}
+
+/*
+ * A question, and styled as one — the waiting colour without the waiting
+ * weight, because this agent is not asking for you. Nobody has checked on it,
+ * which is a different and quieter thing.
+ */
+.stall {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--waiting);
+  border-left: 2px solid color-mix(in srgb, var(--waiting) 45%, transparent);
+  padding-left: 7px;
+}
+
+.disclosure {
+  border: 1px solid var(--line-strong);
+  border-top: none;
+  background: var(--panel);
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  padding: 5px 13px;
+  cursor: pointer;
+}
+.disclosure:hover {
+  background: var(--panel-2);
+}
+.disclosure[aria-expanded='false'] {
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+
+.panel {
+  border: 1px solid var(--line-strong);
+  border-top: none;
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+  background: var(--panel);
+  padding: 8px 13px 10px;
+}
+
 @media (pointer: coarse) {
   .card {
     padding: 13px;
   }
   .card:hover {
     background: var(--panel);
+  }
+  /* A 44px target on a control that sits between two tappable cards. */
+  .disclosure {
+    padding: 12px 13px;
   }
 }

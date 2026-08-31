@@ -14,9 +14,16 @@
  *
  * Checked against 350 of them: every transcript has a sidecar and every sidecar
  * a transcript, `spawnDepth: 1` never carries `parentAgentId` and depth 2 and 3
- * always do. So a whole tree costs one `readdir` plus a few hundred bytes each,
- * with no transcript parsing at all — which is what makes this affordable to
- * poll under INV-4.
+ * always do. So the structure of a whole tree costs one `readdir` plus a few
+ * hundred bytes each.
+ *
+ * The transcripts themselves *are* read, for one thing only: how much work each
+ * delegate did (INV-13). That is affordable under INV-4 for the same reason the
+ * sidecars are cached — a delegate that has gone quiet never writes again, so
+ * its transcript is parsed once and then answered from memory forever. Only a
+ * delegate that is still growing is re-read, and it is re-read because it is
+ * the one that is changing. Measured on this machine: seven delegates, 1.9 MB,
+ * 13 ms for the first pass and nothing at all after it.
  *
  * The directory is flat: a grandchild sits beside its parent. The tree is
  * rebuilt from `parentAgentId`, never from the path.
@@ -58,6 +65,125 @@ interface Entry {
   meta: Sidecar
   lastWriteAt: number
   bytes: number
+  effort: Effort | null
+}
+
+/**
+ * What a delegate did, as opposed to what became of it.
+ *
+ * Two measurements, never a summary. `quiet` is the honest answer about a
+ * delegate's *outcome* and will stay the answer for almost all of them, so it
+ * cannot also be the only thing on the row: seven delegates all reading `quiet`
+ * say nothing. These say the one thing that is both true and useful — that this
+ * one worked for thirteen minutes and made twenty-nine tool calls, and that one
+ * died on its first.
+ */
+interface Effort {
+  calls: number
+  workedMs: number
+}
+
+/**
+ * Above this, the transcript is not parsed and the node carries no effort.
+ *
+ * A delegate that is still writing is re-read on every poll, so the cost of the
+ * biggest one is paid over and over. The largest on this machine is 321 KB;
+ * this leaves an order of magnitude of headroom and still bounds the work. A
+ * node with no effort renders without it rather than with a zero, which would
+ * be a claim that it did nothing (INV-11).
+ */
+const EFFORT_MAX_BYTES = 4 * 1024 * 1024
+
+/**
+ * Parsed transcripts, keyed by what would have to change for the answer to.
+ *
+ * Size as well as mtime, because a second-granularity clock and an append can
+ * land in the same tick.
+ */
+const efforts = new Map<string, Effort>()
+
+/** Testing seam: forget what was cached. */
+export function forgetEfforts(): void {
+  efforts.clear()
+}
+
+/**
+ * How much work is recorded in one delegate's transcript, read at most once.
+ *
+ * Every failure returns null and the node simply carries no effort: a file that
+ * vanished, one too large to keep re-reading, a transcript in a shape this does
+ * not recognise. None of them is a reason to lose the node (INV-5) — and a null
+ * is deliberately not cached, so a file being written as it was read is
+ * reconsidered rather than written off.
+ */
+async function readEffort(path: string, mtimeMs: number, bytes: number): Promise<Effort | null> {
+  if (bytes > EFFORT_MAX_BYTES) return null
+  const key = `${path}:${mtimeMs}:${bytes}`
+  const cached = efforts.get(key)
+  if (cached) return cached
+
+  let text: string
+  try {
+    text = await readFile(path, 'utf8')
+  } catch {
+    return null
+  }
+
+  const effort = measure(text)
+  if (effort) efforts.set(key, effort)
+  return effort
+}
+
+/**
+ * The counting itself, over one transcript's text.
+ *
+ * Counts `tool_use` blocks rather than messages, because a turn that read nine
+ * files and a turn that said "ok" are not the same amount of work. The span is
+ * between the first and last record carrying a timestamp — not a duration the
+ * delegate reported, which nothing does.
+ */
+function measure(text: string): Effort | null {
+  let calls = 0
+  let records = 0
+  let first = 0
+  let last = 0
+  for (const line of text.split('\n')) {
+    if (line === '') continue
+    let record: TranscriptRecord
+    try {
+      record = JSON.parse(line) as TranscriptRecord
+    } catch {
+      // A tail being appended to as it is read ends in a partial line.
+      continue
+    }
+    records += 1
+    const at = Date.parse(record.timestamp ?? '')
+    if (!Number.isNaN(at)) {
+      if (first === 0) first = at
+      last = at
+    }
+    if (record.type !== 'assistant') continue
+    for (const block of record.message?.content ?? []) {
+      if (block.type === 'tool_use') calls += 1
+    }
+  }
+
+  /*
+   * Nothing parsed, so this is not a transcript this code understands — an
+   * empty file, or a format that has moved. Reporting `0 calls` for it would
+   * say "I read it and nothing happened", which is a different and unearned
+   * claim. `0 calls` is kept for the case where a transcript really was read
+   * and really held none.
+   */
+  if (records === 0) return null
+  return { calls, workedMs: last > first ? last - first : 0 }
+}
+
+/** Only the parts of a transcript record this file looks at. */
+interface TranscriptRecord {
+  type?: string
+  timestamp?: string
+  message?: { content?: { type?: string }[] }
 }
 
 /**
@@ -114,8 +240,15 @@ async function readEntries(dir: string): Promise<Entry[]> {
     const meta = await readSidecar(join(dir, `agent-${agentId}.meta.json`))
     if (!meta) continue
     try {
-      const transcript = await stat(join(dir, name))
-      entries.push({ agentId, meta, lastWriteAt: transcript.mtimeMs, bytes: transcript.size })
+      const path = join(dir, name)
+      const transcript = await stat(path)
+      entries.push({
+        agentId,
+        meta,
+        lastWriteAt: transcript.mtimeMs,
+        bytes: transcript.size,
+        effort: await readEffort(path, transcript.mtimeMs, transcript.size),
+      })
     } catch {
       // Vanished between readdir and stat; nothing to learn from it.
     }
@@ -156,6 +289,7 @@ function toNode(entry: Entry, parentStatus: AgentStatus, now: number): SubagentN
     ...(meta.parentAgentId !== undefined ? { parentAgentId: meta.parentAgentId } : {}),
     lastWriteAt: entry.lastWriteAt,
     bytes: entry.bytes,
+    ...(entry.effort ? { calls: entry.effort.calls, workedMs: entry.effort.workedMs } : {}),
     ...stateOf(entry, parentStatus, now),
     ...(meta.stoppedByUser === true ? { stoppedByUser: true } : {}),
     children: [],

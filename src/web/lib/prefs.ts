@@ -41,15 +41,9 @@ export const DEFAULT_SCHEME: Scheme = 'graphite'
  * suits depends on the fleet in front of you — a dozen agents that delegate are
  * a forest, and six that do not are a list.
  */
-export const VIEWS = ['forest', 'legacy'] as const
-export type View = (typeof VIEWS)[number]
-
-export const DEFAULT_VIEW: View = 'forest'
-
 const THEME_KEY = 'agent-commander.theme'
 const NOTIFY_KEY = 'agent-commander.notify'
 const SCHEME_KEY = 'agent-commander.scheme'
-const VIEW_KEY = 'agent-commander.view'
 const LANG_KEY = 'agent-commander.lang'
 const FILTER_KEY = 'agent-commander.filter'
 const SORT_KEY = 'agent-commander.sort'
@@ -61,10 +55,6 @@ function isTheme(value: unknown): value is Theme {
 
 function isScheme(value: unknown): value is Scheme {
   return typeof value === 'string' && (SCHEMES as readonly string[]).includes(value)
-}
-
-function isView(value: unknown): value is View {
-  return typeof value === 'string' && (VIEWS as readonly string[]).includes(value)
 }
 
 function read(key: string): string | null {
@@ -210,15 +200,6 @@ export function loadScheme(): Scheme {
 
 export function saveScheme(scheme: Scheme): void {
   write(SCHEME_KEY, scheme)
-}
-
-export function loadView(): View {
-  const stored = read(VIEW_KEY)
-  return isView(stored) ? stored : DEFAULT_VIEW
-}
-
-export function saveView(view: View): void {
-  write(VIEW_KEY, view)
 }
 
 export function loadLang(): Lang {

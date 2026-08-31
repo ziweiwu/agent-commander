@@ -224,6 +224,17 @@ export interface SubagentNode {
   lastWriteAt: number
   /** Transcript size. A coarse "how much work", never a percentage of anything. */
   bytes: number
+  /**
+   * Tool calls recorded in its transcript, and the span it worked over.
+   *
+   * What it *did*, as against `state`, which is what became of it. Both are
+   * needed because `state` is almost always `quiet` — the honest answer, and an
+   * uninformative one on its own (INV-13). Absent when the transcript could not
+   * be read or is too large to keep re-reading; a node then renders without
+   * them rather than with a zero, which would claim it did nothing.
+   */
+  calls?: number
+  workedMs?: number
   state: SubagentState
   /**
    * The state was worked out here rather than reported (INV-11).

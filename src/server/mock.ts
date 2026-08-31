@@ -101,6 +101,34 @@ const FIXTURES: Agent[] = [
     tokens: 67_500,
   },
   {
+    sessionId: 'mock-quiet-family',
+    pid: 51204,
+    name: 'billing-migration',
+    cwd: '/Users/demo/Projects/billing-service',
+    folder: 'billing-service',
+    status: 'busy',
+    agentKind: CLAUDE_KIND,
+    kind: 'interactive',
+    startedAt: START - 2_700_000,
+    version: '2.1.232',
+    gitBranch: 'migrate-0042',
+    paneId: '%81',
+    tmuxSession: 'claude-mock-e',
+    /*
+     * INV-15's case, and the reason it needs a fixture of its own: this agent
+     * looks exactly like `mock-busy-2` on every field a card draws. Both are
+     * busy, both delegated, both have been silent for a quarter of an hour. The
+     * only difference is that nothing under this one is moving either, and
+     * without a card that says so the two are indistinguishable — which is the
+     * failure, not the fixture.
+     */
+    activity: 'Task → Rewrite the 0042 migration and its callers',
+    lastActivityAt: START - 900_000,
+    delegating: true,
+    subagents: 2,
+    tokens: 41_200,
+  },
+  {
     sessionId: 'mock-long-name',
     pid: 18731,
     name: 'agent-commander-web-dashboard-ux-review-pass',
@@ -514,6 +542,8 @@ const UNCLAIMED_TRIAGE_AGE_MS = 14 * MINUTE_MS
 const FINISHED_RESEARCH_AGE_MS = 11 * MINUTE_MS
 const FINISHED_CROSS_CHECK_AGE_MS = 13 * MINUTE_MS
 const ORPHANED_SWEEP_AGE_MS = 22 * MINUTE_MS
+const SILENT_MIGRATION_AGE_MS = 16 * MINUTE_MS
+const SILENT_CALLERS_AGE_MS = 19 * MINUTE_MS
 
 /**
  * A fixture delegate, said as an age rather than as a timestamp.
@@ -536,6 +566,11 @@ function fixtureNodes(now: number): NodeFactory {
     depth: 1,
     lastWriteAt: now - lastWroteMsAgo,
     bytes: 40_000,
+    // Effort is what separates seven identical `quiet` rows from each other, so
+    // the fixtures carry it. One node below deliberately does not, because a
+    // transcript this app cannot read has to be on screen too (INV-11).
+    calls: 12,
+    workedMs: 4 * MINUTE_MS,
     state: 'quiet',
     children: [],
     ...over,
@@ -595,6 +630,10 @@ function wrappingTriageBrief(node: NodeFactory): SubagentNode {
   return node({
     agentId: 'a6c07bfd53044168f',
     agentType: 'qa-triage',
+    // The unreadable one: no effort at all, so the row renders without it
+    // rather than claiming it did nothing.
+    calls: undefined,
+    workedMs: undefined,
     description:
       'Independent second pass over the QA report, verifying every claimed finding against the source before it is believed',
     lastWroteMsAgo: UNCLAIMED_TRIAGE_AGE_MS,
@@ -652,6 +691,31 @@ function orphanedVaultSweep(node: NodeFactory): SubagentNode {
   })
 }
 
+/**
+ * Two delegates that have both stopped writing, under a parent that has too.
+ *
+ * Neither is `done` — nothing recorded an ending for either — so the honest
+ * reading of the whole family is that nobody has checked on it, which is the
+ * question INV-15 puts on the card.
+ */
+function silentMigration(node: NodeFactory): SubagentNode[] {
+  return [
+    node({
+      agentId: 'a3f81c0b7d2e45a19',
+      description: 'Rewrite migration 0042 against the new schema',
+      lastWroteMsAgo: SILENT_MIGRATION_AGE_MS,
+      bytes: 87_000,
+    }),
+    node({
+      agentId: 'a7d20e91fc8b3a604',
+      agentType: 'Explore',
+      description: 'Find every caller of the old billing columns',
+      lastWroteMsAgo: SILENT_CALLERS_AGE_MS,
+      bytes: 24_000,
+    }),
+  ]
+}
+
 /** The sole delegate of the agent whose name is too long for its card. */
 function reviewOfTheDiff(node: NodeFactory): SubagentNode {
   return node({
@@ -668,13 +732,15 @@ function reviewOfTheDiff(node: NodeFactory): SubagentNode {
  *
  * Deliberately awkward, for the same reason the fleet itself is: a depth-3
  * chain, a delegate the user stopped, one node in each of the three states, an
- * orphan whose parent is not on disk, an agent that has delegated nothing, and
- * a CLI that cannot say either way. Every one of those is a case the view has
+ * orphan whose parent is not on disk, a whole family that has gone silent
+ * together, an agent that has delegated nothing, and a CLI that cannot say
+ * either way. Every one of those is a case the view has
  * to render correctly and none of them is the happy path.
  */
 const DELEGATES_BY_SESSION: Record<string, (node: NodeFactory) => SubagentNode[]> = {
   'mock-busy': (node) => [stoppedUxAudit(node), runningQaSweep(node), wrappingTriageBrief(node)],
   'mock-busy-2': (node) => [kissaListeningList(node), orphanedVaultSweep(node)],
+  'mock-quiet-family': (node) => silentMigration(node),
   'mock-long-name': (node) => [reviewOfTheDiff(node)],
 }
 
