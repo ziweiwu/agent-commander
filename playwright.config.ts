@@ -109,7 +109,15 @@ const PROJECTS = [
 const MOCK_SERVER: PlaywrightTestConfig['webServer'] = {
   // Built first: `--mock` serves whatever is in dist/web, and a stale bundle
   // is a test run that passed for the wrong version of the app.
-  command: `npm run build:web && npx tsx src/server/cli.ts --mock --port ${PORT}`,
+  /*
+   * The Rust backend, which is now the only one. Built first for the same
+   * reason the bundle is: a stale binary is a test run that passed for the
+   * wrong version of the server.
+   */
+  command:
+    `npm run build:web && ` +
+    `./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && ` +
+    `rust/target/release/agent-commander --mock --port ${PORT}`,
   url: `http://127.0.0.1:${PORT}/`,
   reuseExistingServer: !process.env.CI,
   timeout: 120_000,

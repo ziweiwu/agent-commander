@@ -79,24 +79,24 @@ test.describe('starting an agent', () => {
 })
 
 test.describe('acting on a running agent', () => {
-  test('INV-8 advances the permission mode through the server', async ({ page }) => {
+  test('INV-8 sends Shift+Tab through the server', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     // Two of these are on screen — the composer strip and the detail panel's
-    // control row — and they show the same setting. Scoped to the composer.
-    const button = page.getByTestId('chat-controls').getByTestId('mode-cycle')
+    // control row. Scoped to the composer.
+    const button = page.getByTestId('chat-controls').getByTestId('shift-tab')
     await expect(button).toBeEnabled()
-    const before = (await button.textContent()) ?? ''
 
     await button.click()
 
     /*
-     * The mock's control deps advance a real `MODE_CYCLE` on each key and
-     * report the mode they land on, which is what `cycleMode` reads back. One
-     * press is one step, so the label has to change — and it changes to
-     * whatever the session says, not to something the browser worked out.
+     * The confirmation is the round trip: the browser only says this once the
+     * server has answered that the key reached the pane. It deliberately names
+     * no mode — Claude Code writes its permission mode down at the end of a
+     * turn, so a session at its prompt reports nothing back and any mode on
+     * screen here would be this app inventing one (INV-11).
      */
-    await expect(button).not.toHaveText(before)
-    await expect(button).toHaveAttribute('data-unreported', 'false')
+    await expect(page.getByTestId('toast')).toContainText(/shift\+tab sent/i)
+    await expect(button).toBeEnabled()
   })
 
   test('INV-8 refuses to type at a busy agent, and says why', async ({ page }) => {
@@ -109,27 +109,24 @@ test.describe('acting on a running agent', () => {
   })
 
   /*
-   * INV-8's one exception, end to end. Mode is switched by sending `BTab` — a
-   * control key the agent handles wherever it is — rather than by typing into
-   * its prompt, so it stays available mid-run. That is the only time it is
-   * wanted: the decision that the next step needs plan mode is made while the
-   * agent is working.
+   * INV-8's one exception, end to end. This sends `BTab` — a control key the
+   * agent handles wherever it is — rather than typing into its prompt, so it
+   * stays available mid-run. That is the only time it is wanted: the decision
+   * that the next step needs plan mode is made while the agent is working.
    */
-  test('INV-8 still changes the mode of a busy agent', async ({ page }) => {
+  test('INV-8 still sends Shift+Tab to a busy agent', async ({ page }) => {
     await openAgent(page, AGENT.busy)
 
     // Two of these are on screen — the composer strip and the detail panel's
-    // control row — and they show the same setting. Scoped to the composer.
-    const button = page.getByTestId('chat-controls').getByTestId('mode-cycle')
+    // control row. Scoped to the composer.
+    const button = page.getByTestId('chat-controls').getByTestId('shift-tab')
     await expect(button).toBeEnabled()
-    const before = (await button.textContent()) ?? ''
 
     await button.click()
 
-    // Exactly as for an idle agent above: the press goes out and the label
-    // follows what the session reports. A refusal would surface as a toast.
-    await expect(button).not.toHaveText(before)
-    await expect(page.getByTestId('toast')).toHaveCount(0)
+    // Exactly as for an idle agent above. A refusal would surface here as an
+    // error toast instead of the confirmation.
+    await expect(page.getByTestId('toast')).toContainText(/shift\+tab sent/i)
   })
 
   /**

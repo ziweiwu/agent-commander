@@ -7,9 +7,8 @@ import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
-import { cycleAgentMode, interruptAndSend, sendConfirmedKey, sendMessage } from '../store/transport.ts'
+import { interruptAndSend, sendConfirmedKey, sendMessage, sendShiftTab } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
-import { MODE_KEY } from '../lib/modes.ts'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button, Chip } from './ui/Button.tsx'
@@ -150,27 +149,18 @@ export function Chat({ agent }: { agent: Agent }) {
    * not a keyboard trap (WCAG 2.1.2), but it is a binding worth knowing about.
    */
   /*
-   * Shift+Tab in the message box is the same act as the mode button beside it,
-   * and now sends the same thing: one press, no target.
+   * Shift+Tab in the message box is the same act as the button beside it, and
+   * sends the same thing: the chord, and nothing else.
    *
-   * It used to compute the *next* mode from the one the agent last reported and
-   * ask the server to reach it. That was wrong twice over — the cycle silently
-   * omits modes that are unavailable, so the arithmetic named a mode that is
-   * not next; and reaching a named mode is what made the control unreliable at
-   * all (see `cycleMode` in `src/server/control.ts`).
+   * Two earlier shapes both aimed at a mode — one named it, one waited to be
+   * told which one it had reached — and both reported failure at a press that
+   * had worked. `send_shift_tab` in `rust/src/control.rs` carries the
+   * measurement that settled it.
    */
-  const cycleMode = async () => {
+  const shiftTab = async () => {
     if (!attachable) return
-    const result = await cycleAgentMode()
-    if (!result.ok) {
-      showToast(t('controlFailed', { error: result.error }))
-      return
-    }
-    if (result.detail === undefined || result.detail === 'unverified') {
-      showToast(t('modeUnverified'))
-      return
-    }
-    showToast(t('modeSwitched', { mode: t(MODE_KEY[result.detail] ?? 'modeDefault') }))
+    const result = await sendShiftTab()
+    showToast(result.ok ? t('shiftTabSent') : t('controlFailed', { error: result.error }))
   }
 
   const rows = useMemo(() => {
@@ -431,7 +421,7 @@ export function Chat({ agent }: { agent: Agent }) {
               // The chord Claude Code uses for this, so the habit carries over.
               if (e.key === 'Tab' && e.shiftKey) {
                 e.preventDefault()
-                void cycleMode()
+                void shiftTab()
               }
             }}
           />

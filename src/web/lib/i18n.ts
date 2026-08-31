@@ -148,16 +148,14 @@ const EN = {
      claiming it landed would be exactly the assertion INV-11 forbids — this
      says what was done and what remains unknown. */
   interruptSent: 'Escape was sent. Nothing records it, so this cannot be confirmed — check the Attach tab.',
-  modeSwitched: 'Permission mode is now {mode}',
   modelQueued: '{model} is queued — it applies when the current task finishes',
-  modeUnverified: 'Shift+Tab sent; the session did not report a new mode, so it may not have switched',
-  /* The cycle button. Its visible label is a glyph and a mode name, which does
-     not say what pressing it does — so the accessible name says both halves,
-     the same way the goal toggle already does. */
-  modeCycleAction: 'Permission mode: {mode}. Press to switch to the next mode.',
-  modeCycleUnknownAction: 'Permission mode not reported. Press to switch mode.',
-  modeUnknown: 'unknown',
-  modePressed: 'pressed…',
+  /* The Shift+Tab button. It claims the key, not a mode: Claude Code writes
+     its permission mode down only at the end of a turn, so a session at its
+     prompt reports nothing back and there is no landing place to name. The
+     agent's own terminal shows the mode immediately. */
+  shiftTabSent: 'Shift+Tab sent — the agent’s terminal shows which mode it moved to',
+  shiftTabName: 'Shift+Tab',
+  shiftTabAction: 'Send Shift+Tab, the chord that cycles this agent’s permission mode',
   hintShiftTab: 'permission mode',
   confirmKey: 'Really send {key} to this agent?',
   /* settings */
@@ -450,13 +448,10 @@ const ZH: Record<Key, string> = {
   interruptTitle: '立即停止该助手正在做的事',
   interruptIdle: '无需中断 —— 该助手当前没有在工作',
   interruptSent: '已发送 Escape。该操作没有任何记录，因此无法确认是否生效 —— 请在「终端」标签页查看。',
-  modeSwitched: '权限模式已切换为 {mode}',
   modelQueued: '{model} 已排队 —— 当前任务结束后生效',
-  modeUnverified: '已发送 Shift+Tab；会话未报告新的权限模式，可能没有切换',
-  modeCycleAction: '权限模式：{mode}。按下切换到下一个模式。',
-  modeCycleUnknownAction: '未报告权限模式。按下切换模式。',
-  modeUnknown: '未知',
-  modePressed: '已按下…',
+  shiftTabSent: '已发送 Shift+Tab —— 该助手的终端会显示切换到了哪个模式',
+  shiftTabName: 'Shift+Tab',
+  shiftTabAction: '发送 Shift+Tab，即循环切换该助手权限模式的快捷键',
   hintShiftTab: '切换权限模式',
   confirmKey: '确定要向这个代理发送 {key} 吗？',
   settings: '设置',

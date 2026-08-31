@@ -44,7 +44,6 @@ export function resetStore(): void {
     pendingSeq: 0,
     frame: null,
     toast: null,
-    heldMode: null,
     expectSession: null,
   })
 }

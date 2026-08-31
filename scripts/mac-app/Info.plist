@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Agent Commander.app
+
+  __VERSION__ is substituted by scripts/build-mac-app.py from package.json. The
+  substitution is textual rather than a plistlib round trip, so that these
+  comments survive into the built bundle.
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleInfoDictionaryVersion</key> <string>6.0</string>
+  <key>CFBundlePackageType</key>           <string>APPL</string>
+  <key>CFBundleSignature</key>             <string>????</string>
+
+  <!-- LaunchServices keys everything off this, including any permission the
+       user ever grants the app. It must not change once it has shipped. -->
+  <key>CFBundleIdentifier</key>            <string>com.ziweiwu.agent-commander</string>
+  <key>CFBundleName</key>                  <string>Agent Commander</string>
+  <key>CFBundleDisplayName</key>           <string>Agent Commander</string>
+
+  <!-- Must match the filename in Contents/MacOS/ exactly. Spelled without a
+       space so it reads the same as the npm bin name in `ps` output. -->
+  <key>CFBundleExecutable</key>            <string>agent-commander</string>
+
+  <!-- Without the extension; iconutil writes AppIcon.icns into Resources/. -->
+  <key>CFBundleIconFile</key>              <string>AppIcon</string>
+
+  <key>CFBundleShortVersionString</key>    <string>__VERSION__</string>
+  <key>CFBundleVersion</key>               <string>__VERSION__</string>
+
+  <!-- Nothing here needs anything newer; osascript, open, curl and dscl are all
+       ancient. It is set only so an older Mac gets a clear refusal rather than
+       a mystery. -->
+  <key>LSMinimumSystemVersion</key>        <string>12.0</string>
+  <key>NSHighResolutionCapable</key>       <true/>
+  <key>LSApplicationCategoryType</key>     <string>public.app-category.developer-tools</string>
+  <key>NSHumanReadableCopyright</key>      <string>MIT © Ziwei Wu</string>
+
+  <!-- Sudden termination lets the system SIGKILL us, which would skip the
+       server's shutdown() and leak its tmux control client and paste staging
+       directory. Written down explicitly so nobody adds it later for speed. -->
+  <key>NSSupportsSuddenTermination</key>   <false/>
+
+  <!--
+    Three keys are deliberately absent, and each one looks like an improvement:
+
+    LSUIElement — would hide the Dock tile. The launch bounce is the only
+    feedback between the double-click and the browser opening, and this app
+    exits in about two seconds.
+
+    LSMultipleInstancesProhibited — would make LaunchServices reactivate the
+    "running" app instead of launching it again. A process that never registers
+    with the WindowServer cannot be reactivated, so the second double-click
+    would silently do nothing. Opening the dashboard when it is already up
+    depends on this script genuinely re-running every time.
+
+    LSEnvironment — would look like the fix for the PATH problem. It is baked in
+    at build time and cached hard by LaunchServices, so it would ship the
+    building machine's PATH to whatever machine ran the app. The launcher works
+    the real PATH out at runtime instead.
+  -->
+</dict>
+</plist>

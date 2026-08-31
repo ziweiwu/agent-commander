@@ -12,7 +12,7 @@ import {
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
-import { ModeButton } from './ModeButton.tsx'
+import { ShiftTabButton } from './ShiftTabButton.tsx'
 import { displayName } from '../lib/naming.ts'
 import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
 import styles from './AgentControls.module.css'
@@ -67,7 +67,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
    * what the app permits through the other. Both stay available mid-run, which
    * is when you reach for them: you notice the wrong model *while* it is being
    * used. Goal and Close still wait for idle. Mode carries its own copy of this
-   * rule inside `ModeButton`, which is shared with the composer strip.
+   * rule inside `ShiftTabButton`, which is shared with the composer strip.
    */
   const midRunDisabled = !agent.paneId || pending !== null
 
@@ -173,7 +173,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
         <>
       <div className={styles.field}>
         <span className={styles.label}>{t('modeLabel')}</span>
-        <ModeButton agent={agent} size="compact" />
+        <ShiftTabButton agent={agent} size="compact" />
       </div>
 
       <label className={styles.field}>

@@ -36,7 +36,7 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   clearAgentContext,
   compactAgentContext,
   closeAgent: vi.fn(),
-  cycleAgentMode: vi.fn(),
+  sendShiftTab: vi.fn(),
   setAgentModel: vi.fn(),
 }))
 vi.mock('../../src/web/hooks/useTokenNavigate.ts', () => ({

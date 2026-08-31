@@ -85,18 +85,6 @@ export interface AppState {
   /** Sessions whose pane the server told us has exited. */
   exited: string[]
   /**
-   * The permission mode the user just moved to, held until the agent reports it.
-   *
-   * In the store rather than in the component because **two controls show this
-   * one setting at once** — the composer strip and the detail panel's control
-   * row are both on screen — and a mode is read out of a transcript the session
-   * writes at the end of its turn. Held per component, pressing one button
-   * updated it and left the other reading the old mode two inches away, for as
-   * long as it took the enricher to catch up. An app that contradicts itself
-   * within one glance is worse than one that is briefly behind.
-   */
-  heldMode: { sessionId: string; mode: string } | null
-  /**
    * A session this app knows exists but has not seen in a fleet broadcast yet.
    *
    * `/clear` replaces a session rather than editing it, so the moment it lands
@@ -124,8 +112,6 @@ export interface AppState {
   setNewAgentOpen: (open: boolean) => void
   showToast: (message: string) => void
   markExited: (sessionId: string) => void
-  /** Hold a mode the user chose; cleared once the agent reports it back. */
-  setHeldMode: (sessionId: string, mode: string) => void
   /** Expect a session the fleet has not broadcast yet; null once it arrives. */
   setExpectSession: (sessionId: string | null) => void
   addPending: (text: string) => void
@@ -190,7 +176,6 @@ export const useStore = create<AppState>()((set, get) => ({
   frame: null,
   toast: null,
   exited: [],
-  heldMode: null,
   expectSession: null,
 
   // No `applyView` counterpart to the two below: a theme and a scheme have to
@@ -248,8 +233,6 @@ export const useStore = create<AppState>()((set, get) => ({
     toastTimer = window.setTimeout(() => set({ toast: null }), 5000)
     set({ toast })
   },
-
-  setHeldMode: (sessionId, mode) => set({ heldMode: { sessionId, mode } }),
 
   setExpectSession: (expectSession) => set({ expectSession }),
 

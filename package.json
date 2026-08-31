@@ -1,7 +1,7 @@
 {
   "name": "@ziweiwu/agent-commander",
   "version": "0.7.0",
-  "description": "See every Claude Code and Kiro CLI agent on your machine at a glance — status, folder, progress — and drop into any one of them from the browser.",
+  "description": "See every Claude Code and Kiro CLI agent on your machine at a glance \u2014 status, folder, progress \u2014 and drop into any one of them from the browser.",
   "license": "MIT",
   "author": "Ziwei Wu <ziweiwu@gmail.com>",
   "keywords": [
@@ -23,10 +23,14 @@
   },
   "type": "module",
   "bin": {
-    "agent-commander": "dist/server/cli.js"
+    "agent-commander": "scripts/launch.mjs"
   },
   "files": [
     "dist",
+    "rust/src",
+    "rust/Cargo.toml",
+    "rust/Cargo.lock",
+    "scripts/launch.mjs",
     "scripts/statusline-bridge.mjs",
     "README.md",
     "INVARIANTS.md",
@@ -34,18 +38,18 @@
   ],
   "scripts": {
     "build": "npm run build:web && npm run build:server",
-    "build:server": "tsc -p tsconfig.build.json",
+    "build:server": "./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml",
     "build:web": "vite build",
-    "dev": "tsx watch src/server/cli.ts --dev --port 4400",
-    "lint": "oxlint",
+    "dev": "./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && rust/target/release/agent-commander --dev --port 4400",
+    "lint": "oxlint && ./scripts/cargo.sh clippy --manifest-path rust/Cargo.toml -- -D warnings",
     "lint:fix": "oxlint --fix",
-    "mock": "npm run build:web && tsx src/server/cli.ts --mock --port 4400",
-    "start": "npm run build:web && tsx src/server/cli.ts",
-    "test": "vitest run",
+    "mock": "npm run build:web && ./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && rust/target/release/agent-commander --mock --port 4400",
+    "start": "npm run build:web && ./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && rust/target/release/agent-commander",
+    "test": "vitest run && ./scripts/cargo.sh test --manifest-path rust/Cargo.toml",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "verify:inv1": "tsx scripts/verify-inv1.ts",
-    "serve": "tsx src/server/cli.ts",
+    "serve": "./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && rust/target/release/agent-commander",
     "audit": "npm run audit:contrast && npm run audit:a11y && npm run audit:ux && npm run audit:mobile",
     "audit:contrast": "python3 scripts/audit-contrast.py",
     "audit:a11y": "node scripts/audit-a11y.mjs",
@@ -55,10 +59,10 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:report": "playwright show-report",
-    "themes": "python3 scripts/gen-themes.py --write"
-  },
-  "dependencies": {
-    "ws": "^8.18.0"
+    "themes": "python3 scripts/gen-themes.py --write",
+    "test:web": "vitest run",
+    "test:server": "./scripts/cargo.sh test --manifest-path rust/Cargo.toml",
+    "lint:web": "oxlint"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -67,7 +71,6 @@
     "@types/node": "^22.20.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^5.2.0",
     "@xterm/xterm": "^5.5.0",
     "jsdom": "^30.0.1",

@@ -8,11 +8,31 @@
  *
  *   npx tsx scripts/verify-inv1.ts [--port 4317]
  */
-import { clientSnapshot } from '../src/server/pane.ts'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
+
+/**
+ * Every tmux client and every pane geometry, as one comparable string.
+ *
+ * Inlined rather than imported: the server is a Rust binary now, so there is no
+ * TypeScript module to borrow this from — and this check has always been about
+ * what tmux reports from outside the server, not about the server's own code.
+ */
+async function clientSnapshot(): Promise<string> {
+  const tmux = async (args: string[]): Promise<string> =>
+    run('tmux', args)
+      .then(({ stdout }) => stdout)
+      .catch(() => '')
+  const clients = await tmux([
+    'list-clients',
+    '-F',
+    '#{client_name} #{client_width}x#{client_height} #{client_session} #{client_flags}',
+  ])
+  const panes = await tmux(['list-panes', '-a', '-F', '#{pane_id} #{pane_width}x#{pane_height}'])
+  return `${clients}\n---\n${panes}`
+}
 
 const portArg = process.argv.indexOf('--port')
 const PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : 4317

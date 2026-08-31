@@ -1,0 +1,150 @@
+{
+    "trees": [
+        {
+            "children": [],
+            "sessionId": "mock-waiting"
+        },
+        {
+            "children": [
+                {
+                    "agentId": "a58ddcc3c4b6b8989",
+                    "agentType": "ux-bar-raiser",
+                    "bytes": 412000,
+                    "children": [],
+                    "depth": 1,
+                    "description": "UX audit of the terminal system monitor",
+                    "lastWriteAt": 1788060830713,
+                    "state": "done",
+                    "stoppedByUser": true
+                },
+                {
+                    "agentId": "ac4c01953dfb1440f",
+                    "agentType": "qa-bar-raiser",
+                    "bytes": 188000,
+                    "children": [
+                        {
+                            "agentId": "ad49ce3a43efeaa2b",
+                            "agentType": "general-purpose",
+                            "bytes": 71000,
+                            "children": [],
+                            "depth": 2,
+                            "description": "Check contrast at 20 columns in both themes",
+                            "lastWriteAt": 1788061901713,
+                            "parentAgentId": "ac4c01953dfb1440f",
+                            "state": "active",
+                            "stateInferred": true
+                        }
+                    ],
+                    "depth": 1,
+                    "description": "Adversarial QA sweep across every terminal size",
+                    "lastWriteAt": 1788061906713,
+                    "state": "active",
+                    "stateInferred": true
+                },
+                {
+                    "agentId": "a6c07bfd53044168f",
+                    "agentType": "qa-triage",
+                    "bytes": 52000,
+                    "children": [],
+                    "depth": 1,
+                    "description": "Independent second pass over the QA report, verifying every claimed finding against the source before it is believed",
+                    "lastWriteAt": 1788061070713,
+                    "state": "quiet"
+                }
+            ],
+            "sessionId": "mock-busy"
+        },
+        {
+            "children": [
+                {
+                    "agentId": "a9b1181eab51efaf0",
+                    "agentType": "find-music",
+                    "bytes": 301000,
+                    "children": [
+                        {
+                            "agentId": "a69275682c401ef83",
+                            "agentType": "general-purpose",
+                            "bytes": 244000,
+                            "children": [
+                                {
+                                    "agentId": "ab481603df0bb2d1d",
+                                    "agentType": "general-purpose",
+                                    "bytes": 96000,
+                                    "children": [],
+                                    "depth": 3,
+                                    "description": "Cross-check opening hours against the venues",
+                                    "lastWriteAt": 1788061130713,
+                                    "parentAgentId": "a69275682c401ef83",
+                                    "state": "done"
+                                }
+                            ],
+                            "depth": 2,
+                            "description": "Research Benelux, Italy and Spain bars",
+                            "lastWriteAt": 1788061250713,
+                            "parentAgentId": "a9b1181eab51efaf0",
+                            "state": "done"
+                        }
+                    ],
+                    "depth": 1,
+                    "description": "Kissa listening list for Tokyo and Yokohama",
+                    "lastWriteAt": 1788061908713,
+                    "state": "active",
+                    "stateInferred": true
+                },
+                {
+                    "agentId": "ab21ff3003f5f193c",
+                    "agentType": "Explore",
+                    "bytes": 31000,
+                    "children": [],
+                    "depth": 2,
+                    "description": "Sweep the vault for existing kissa notes",
+                    "lastWriteAt": 1788060590713,
+                    "parentAgentId": "a-parent-that-is-gone",
+                    "reparented": true,
+                    "state": "quiet"
+                }
+            ],
+            "sessionId": "mock-busy-2"
+        },
+        {
+            "children": [
+                {
+                    "agentId": "af0e1cdf1ec262236",
+                    "agentType": "code-reviewer",
+                    "bytes": 118000,
+                    "children": [],
+                    "depth": 1,
+                    "description": "Review the diff for correctness",
+                    "lastWriteAt": 1788061902713,
+                    "state": "quiet"
+                }
+            ],
+            "sessionId": "mock-long-name"
+        },
+        {
+            "children": [],
+            "sessionId": "mock-idle-kb"
+        },
+        {
+            "children": [],
+            "sessionId": "mock-idle-ce"
+        },
+        {
+            "children": [],
+            "sessionId": "mock-idle-db"
+        },
+        {
+            "children": [],
+            "sessionId": "mock-fresh"
+        },
+        {
+            "children": [],
+            "sessionId": "mock-no-tmux"
+        },
+        {
+            "children": [],
+            "sessionId": "tmux:kiro-1787832510",
+            "unknown": true
+        }
+    ]
+}

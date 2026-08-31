@@ -1,17 +1,37 @@
 {
   "watch": [
     "src/",
+    "rust/",
     "test/",
     "scripts/",
     "package.json",
     "package-lock.json",
-    "tsconfig.json",
-    "tsconfig.build.json"
+    "tsconfig.json"
   ],
   "gates": [
-    ["typecheck", ["npm", "run", "typecheck"]],
-    ["lint", ["npm", "run", "lint"]],
-    ["test", ["npm", "test"]]
+    [
+      "typecheck",
+      [
+        "npm",
+        "run",
+        "typecheck"
+      ]
+    ],
+    [
+      "lint",
+      [
+        "npm",
+        "run",
+        "lint"
+      ]
+    ],
+    [
+      "test",
+      [
+        "npm",
+        "test"
+      ]
+    ]
   ],
   "timeout": 600
 }

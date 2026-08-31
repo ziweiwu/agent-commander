@@ -26,7 +26,7 @@ const transport = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   sendConfirmedKey: vi.fn(),
   interruptAndSend: vi.fn(),
-  cycleAgentMode: vi.fn(async () => ({ ok: true, detail: 'acceptEdits' } as const)),
+  sendShiftTab: vi.fn(async () => ({ ok: true, detail: 'sent' } as const)),
 }))
 
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -192,7 +192,7 @@ describe('Shift+Tab cycles the permission mode', () => {
    * ask the server to reach *that*. Wrong twice over — the cycle silently omits
    * modes that are unavailable, so the arithmetic named a mode that was not
    * next; and reaching a named mode is what made the whole control unreliable
-   * (see `cycleMode` in `src/server/control.ts`).
+   * (see `send_shift_tab` in `rust/src/control.rs`).
    */
   it('sends one press from the composer', async () => {
     const user = userEvent.setup()
@@ -201,11 +201,11 @@ describe('Shift+Tab cycles the permission mode', () => {
     screen.getByTestId('composer-input').focus()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
-    expect(transport.cycleAgentMode).toHaveBeenCalledOnce()
+    expect(transport.sendShiftTab).toHaveBeenCalledOnce()
   })
 
   /*
-   * INV-8's exception, from the keyboard. Mode sends a key rather than typing,
+   * INV-8's exception, from the keyboard. This sends a key rather than typing,
    * so unlike every other control it works mid-run — which is the only time
    * anyone reaches for it: you decide the next step needs plan mode while the
    * agent is running, not before you opened the tab.
@@ -217,7 +217,7 @@ describe('Shift+Tab cycles the permission mode', () => {
     screen.getByTestId('composer-input').focus()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
-    expect(transport.cycleAgentMode).toHaveBeenCalledOnce()
+    expect(transport.sendShiftTab).toHaveBeenCalledOnce()
   })
 
   // Nothing about the press depends on where the session currently is, which is
@@ -229,7 +229,7 @@ describe('Shift+Tab cycles the permission mode', () => {
     screen.getByTestId('composer-input').focus()
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
-    expect(transport.cycleAgentMode).toHaveBeenCalledExactlyOnceWith()
+    expect(transport.sendShiftTab).toHaveBeenCalledExactlyOnceWith()
   })
 })
 

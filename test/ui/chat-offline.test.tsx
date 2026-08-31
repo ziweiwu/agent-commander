@@ -36,7 +36,7 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   setAttached: vi.fn(),
   setAgentGoal: vi.fn(),
   clearAgentGoal: vi.fn(),
-  cycleAgentMode: vi.fn(),
+  sendShiftTab: vi.fn(),
 }))
 
 const busy = () => agent({ sessionId: 'a', status: 'busy', paneId: '%1' })

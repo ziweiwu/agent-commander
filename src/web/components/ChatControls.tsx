@@ -4,7 +4,7 @@ import { useStore } from '../store/store.ts'
 import { setAgentGoal } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
-import { ModeButton } from './ModeButton.tsx'
+import { ShiftTabButton } from './ShiftTabButton.tsx'
 import styles from './ChatControls.module.css'
 
 /**
@@ -20,7 +20,7 @@ import styles from './ChatControls.module.css'
  * INV-8 guards them differently, and the difference is what each one sends.
  * A goal is typed into the agent's own prompt, so it is refused while the agent
  * is busy. Mode sends `BTab`, a control key handled wherever the agent is, so
- * it stays available mid-run — it lives in `ModeButton`, shared with the detail
+ * it stays available mid-run — it lives in `ShiftTabButton`, shared with the detail
  * panel, and carries its own guard for that reason. The server enforces both;
  * this mirrors them so a control reads as unavailable rather than failing
  * after the click.
@@ -148,7 +148,7 @@ export function ChatControls({ agent }: { agent: Agent }) {
         </div>
       ) : (
         <div className={styles.goal}>
-          <ModeButton agent={agent} />
+          <ShiftTabButton agent={agent} />
 
           <button
             type="button"

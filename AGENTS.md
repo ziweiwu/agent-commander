@@ -22,6 +22,37 @@ anything that must be true of the fleet has to be true in both. `FleetRoute`
 picks between them; the layout maths lives in `src/web/lib/forest.ts` as pure
 functions so it can be tested without a DOM.
 
+## Two languages, and which is which
+
+**The server is Rust, in `rust/`. The browser app is TypeScript, in `src/web/`.**
+`src/shared/types.ts` is the wire contract the browser compiles against, and
+`rust/src/types.rs` is its mirror — the two are edited together or not at all,
+because nothing checks that they still agree except the tests that compare
+against a captured response.
+
+There is no `src/server/` any more. It was ~6,600 lines of TypeScript and it is
+preserved, working, on the **`old-node-backend-branch`** branch. Reach for it
+when you want to know what the old code did; do not reach for it to copy code
+back.
+
+The port is verified by three things rather than by reading:
+
+- `rust/tests/golden/*.json` — real responses captured from the Node server on
+  the mock fleet. `mock.rs`'s tests assert the Rust bytes still match them, so a
+  drift in any wire field fails a unit test rather than a browser.
+- The **233 Playwright tests**, unchanged. They drive HTTP and WebSocket and
+  never imported the server, so they arbitrate the port without knowing it
+  happened.
+- `cargo test`, which carries the invariant numbers the same way the TypeScript
+  did: `cargo test --manifest-path rust/Cargo.toml inv13`.
+
+What moved and what did not: every module in `src/server/*.ts` has a
+same-named `rust/src/*.rs`, except that `tmux-client.ts` gained
+`tmux_source.rs`/`tmux_agents.rs` beside it, `agent-kinds.ts` became
+`agent_kinds.rs` on the server side while staying TypeScript for the browser,
+and `cli.ts` split into `main.rs` (entry, statusline install) and `options.rs`
+(argument parsing, the port guards, INV-3's bind refusal).
+
 ## The two constraints everything else follows from
 
 `ARCHITECTURE.md` opens with these, and says explicitly that everything else is
@@ -52,8 +83,8 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 789 tests: pure logic, server, and React components
-npm run build
+npm test              # 906 tests: 501 Rust (the server) + 405 vitest (the web app)
+npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 233 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
@@ -66,7 +97,8 @@ of them: five gates, each answering a question the others cannot, and the note
 on why the last three stay local habits rather than CI gates.
 
 `npm test` and `npm run e2e` run on every push and pull request
-(`.github/workflows/ci.yml`), which installs both Chromium and WebKit. The
+(`.github/workflows/ci.yml`), which installs a stable Rust toolchain (cached
+with `Swatinem/rust-cache`) alongside both Chromium and WebKit. The
 second engine is not redundancy: every browser on iOS is WebKit, and for this
 app's first five releases every "iPhone" and "iPad" result it produced was
 Chromium wearing an iPhone user-agent. `ENGINE=webkit npm run audit:mobile`
@@ -90,7 +122,16 @@ assume. CI and a deliberate local run own them.
 `watch` entries are git pathspecs, not prefixes — git matches whole path
 components, so the manifests are spelled out individually. `scripts/` is on the
 list because `test/scheme.test.ts` re-runs `scripts/gen-themes.py` and fails if
-`tokens.css` no longer matches its output.
+`tokens.css` no longer matches its output, and because `scripts/cargo.sh` is how
+every gate reaches the Rust toolchain. `rust/` is on it for the obvious reason:
+it is the server.
+
+**Anything a gate shells out to must go through `scripts/cargo.sh`, never bare
+`cargo`.** `~/.cargo/bin` is put on PATH by a line in your shell profile, so it
+is present in a terminal and absent in every non-interactive shell — npm
+scripts, git hooks, and the Stop hook that runs these gates. Bare `cargo` in a
+package script passes locally and fails with `cargo: command not found` for
+everyone and everything else, which is exactly how it was first written here.
 
 ## Ports, and why there are three
 
@@ -112,7 +153,7 @@ awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
 in each of INV-13's three states, an orphan whose parent is not on disk, an
 agent that has delegated nothing, and a CLI that cannot say either way.
 Because the mock fleet runs the same server, routes and validation as the real
-one (`src/server/sources.ts` is the seam), a failure seen in mock mode is the
+one (`rust/src/sources.rs` is the seam), a failure seen in mock mode is the
 failure you would get for real.
 
 ## The invariant contract
@@ -121,7 +162,8 @@ failure you would get for real.
 INV-14, and each is greppable from a test name:
 
 ```sh
-npm test -- -t INV-3
+cargo test --manifest-path rust/Cargo.toml inv3   # the server's half
+npm run test:web -- -t INV-3                     # the browser's half
 ```
 
 When you add behaviour worth relying on, add a numbered invariant and a test
@@ -130,12 +172,16 @@ commit.
 
 ## Things that have already bitten
 
-- **`bin` points at compiled output.** Source edits do nothing until
-  `npm run build`. Worse: npm installs `bin` as a symlink, so `argv[1]` is the
-  symlink and `import.meta.url` is the real `dist/server/cli.js`. Comparing them
-  as strings made the CLI conclude it had been imported by a test and never call
-  `main()` — every global install from 0.1.0 started a process that produced no
-  output, opened no port and reported no error. Compare through `realpathSync`.
+- **`bin` points at a launcher, not at the server.** The server is a Rust
+  binary, and `bin` has to name something node can run, so
+  `scripts/launch.mjs` finds `rust/target/release/agent-commander` and execs it.
+  Source edits do nothing until `npm run build:server`. The launcher fails
+  loudly when the binary is missing, and that is deliberate: every global
+  install from 0.1.0 shipped a CLI that produced no output, opened no port and
+  reported no error, and a silent launcher would be that bug again wearing a
+  different hat. **Publishing to npm still needs per-platform prebuilds** — the
+  shim only covers a checkout that has been built and a `cargo install`ed
+  binary on PATH.
 - **A token in the URL cannot reach a subresource.** `--token` 401'd the app's
   own bundle, because `index.html`'s `<script>` and `<link>` carry neither the
   token nor a header. `GET`/`HEAD` under `/assets/` skip the token gate and
@@ -168,13 +214,27 @@ commit.
   term echoed verbatim into "No agent matches …" forced the document to 2175px.
   The review agents found that one, plus an xterm use-after-dispose crash on
   every full-screen toggle and a sort that ranked unknown values as smallest.
+- **A control whose success cannot be observed must not claim it failed.** The
+  permission-mode button was reported broken three times across two rewrites,
+  and the key was never at fault: `tmux send-keys BTab` emits `\033[Z`, and
+  three presses walk a live session `auto` → `plan` exactly as the keyboard
+  would. Claude Code writes its `permission-mode` record at the *end of a
+  turn*, so an agent at its prompt — the one usually being switched — reports
+  nothing back, and one that has not taken a turn has no transcript to report
+  from. Verifying it meant a 2.5s window with the button dead, then
+  `unverified`, then the old mode still on the label: three signals of failure
+  about something that had worked. It now sends the key and says so. Before
+  building verification onto a control, check that the CLI writes anything down
+  when the thing happens.
+
 - **A control action that carries no value still goes through `readJson`.**
   Mode, clear and compact take no argument, so the browser sends no body at all
   — and `JSON.parse('')` throws. Every unit test passed while pressing the mode
   button reported *"that did not take effect: Unexpected end of JSON input"*
-  about a control the server had never called. `test/control-routes.test.ts`
-  exists because `test/control.test.ts` calls the functions directly and
-  structurally cannot catch this.
+  about a control the server had never called. The Rust port keeps both halves
+  of that lesson: `routes::inv8_mode_and_clear_and_compact_carry_no_body` drives
+  the real HTTP handler with an empty body, because `control::tests` calls the
+  action functions directly and structurally cannot catch this.
 - **`/clear` replaces the session; it does not edit it.** Claude Code opens a
   fresh transcript under a new session id and rewrites
   `~/.claude/sessions/<pid>.json`. Anything holding the old id — a URL, a socket
@@ -182,19 +242,70 @@ commit.
   also why one fixture (`AGENT.clearable`) is reserved for the clear spec: every
   e2e project shares one mock server, and clearing a fixture another test uses
   deletes that test's agent out from under it.
-- **`npm test` is flaky under load.** `test/enrich.test.ts` (INV-4 tail counts)
-  and `test/scheme.test.ts` (a 5s timeout around spawning `python3`) both fail
-  when the machine is busy and pass on a quiet one. A red Stop hook naming only
-  those two is worth re-running before believing.
+- **`npm test` is flaky under load.** `test/scheme.test.ts` (a 5s timeout around
+  spawning `python3`) fails when the machine is busy and passes on a quiet one.
+  A red Stop hook naming only that is worth re-running before believing. The
+  INV-4 tail-count flake that used to sit beside it went away with the port:
+  `enrich.rs`'s cadence re-arms after the work instead of on a wall clock, so a
+  slow pass no longer drops a tick.
 - **The e2e `/clear` follow test flakes on slow CI runners.** `control.spec.ts`
   "INV-8 follows the agent to the session it is now running" failed both
   attempts on one GitHub runner and passed on rerun with nothing changed. One
   red occurrence of exactly that test is worth a rerun before it is believed —
   and worth root-causing if it ever fails twice in a row on different runs.
+- **The Mac bundle's path constraints went from four to one, and the one that
+  survived changed shape.** The Node bundle needed `dist/web` beside
+  `dist/server`, `scripts/statusline-bridge.mjs` two levels up, `dist/shared` as
+  a sibling, and a `package.json` carrying `"type": "module"` — without that last
+  one Node read the ESM output as CommonJS and died before printing a character,
+  a do-nothing binary wearing a Dock icon. Three of those were Node's and left
+  with it. What remains is the web root: the launcher passes `--web-root`
+  explicitly, and `Resources/web` is laid out as a sibling of `Resources/bin` so
+  `default_web_root()`'s own `../web` fallback lands in the same place for
+  anyone running the staged binary by hand. `--help` returns before anything is
+  served, so the smoke test cannot prove this one — `build-mac-app.py` checks for
+  `web/index.html` directly instead.
+
+- **`codesign` runs before the smoke test, not after.** The launched thing is a
+  Mach-O now rather than a script, and on Apple silicon an *invalid* signature is
+  a kernel kill rather than a warning. Signing first means the smoke test runs
+  the exact bytes the user will. It stays non-fatal, so a benign codesign failure
+  does not stop a build while a lethal one cannot slip past it.
+
+- **The bundle ships no `statusline-bridge.mjs`, deliberately.** A bridge path
+  written into `~/.claude/settings.json` that points inside a `.app` breaks the
+  next time the app is replaced, so `--install-statusline` belongs to the npm
+  package. Run from inside the bundle it now reports that it cannot find the
+  bridge script rather than writing a path that will rot.
+
 - **Piping a test run through `tail` eats the verdict.** `npm run e2e | tail`
   reports tail's exit code, not Playwright's, and the failure list scrolls out
   of the kept lines — a 92-failure run once read as "141 passed" that way.
   Redirect to a file and check the exit code, never pipe a gate.
+
+## The macOS bundle
+
+```sh
+npm run build                      # the Vite bundle, then cargo build --release
+python3 scripts/build-mac-app.py   # --out defaults to build/
+```
+
+One self-contained binary in `Contents/Resources/bin` plus the Vite bundle in
+`Contents/Resources/web`; `Contents/MacOS/agent-commander` is `launcher.sh`,
+which probes the port, detaches the server, opens a browser and exits. It
+detaches rather than `exec`s because launchd kills the job's process group —
+the Node bundle used `node`'s own `spawn()` for that and there is no interpreter
+left to borrow, so it forks through `/usr/bin/perl` with a logged
+plain-background fallback.
+
+`build-mac-app.py` runs the staged binary with `--help` before promoting the
+bundle. That check is why the do-nothing bundles above were caught rather than
+shipped, and it is worth keeping whatever else changes.
+
+**It is not covered by any gate.** `npm test` does not touch it, no e2e test
+builds it, and `.claude/gates.json` reaches it only through the `scripts/`
+watch entry, which triggers the three cheap gates rather than a bundle build.
+Build it by hand after changing anything it stages.
 
 ## Review agents
 

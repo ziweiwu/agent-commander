@@ -15,7 +15,7 @@ a client, a client has a size, and under `window-size latest` with
 `aggressive-resize on` a browser-shaped client reflows the pane a working agent
 is drawing into. So the terminal is polled with `capture-pane`, diffed, and
 replayed into xterm.js, and the browser's own width only ever sets a CSS
-transform. One long-lived control client now exists (`src/server/tmux-client.ts`)
+transform. One long-lived control client now exists (`rust/src/tmux_client.rs`)
 because reaching tmux costs more than anything tmux does — it carries
 `ignore-size`, which is the whole of the amendment.
 
@@ -46,26 +46,26 @@ Everything below is downstream of those two.
         poll.ts ← registry.ts, enrich.ts, limits.ts, routes.ts
 ```
 
-`src/server/poll.ts` is the odd one out in that picture: a leaf with four
+`rust/src/poll.rs` is the odd one out in that picture: a leaf with four
 callers and no dependencies of its own. It holds INV-4's cadence rule — re-arm
 after the work, never sooner than the last pass took — which was previously
 written once properly and three times as `setInterval` plus a busy flag.
 
-`src/server/subagents.ts` is a leaf beside `transcript.ts` and reads a different
+`rust/src/subagents.rs` is a leaf beside `transcript.rs` and reads a different
 thing from the same directory: the sidecars Claude Code writes for every
 delegate. It parses no transcripts at all (INV-13), which is what keeps
 `/api/tree` cheap enough to poll.
 
-`src/server/cli.ts` is the composition root: it parses argv, chooses real or
+`rust/src/main.rs` is the composition root: it parses argv, chooses real or
 mock providers, and constructs everything. It imports fourteen modules and is
-imported by none. `src/server/routes.ts` is the second hub — the HTTP and
+imported by none. `rust/src/routes.rs` is the second hub — the HTTP and
 WebSocket surface. Everything else is a leaf. The graph is acyclic and shallow.
 
-`src/server/sources.ts` is the seam that makes that possible: four interfaces —
+`rust/src/sources.rs` is the seam that makes that possible: four interfaces —
 `AgentSource` (`:5`), `PaneApi` (`:16`), `TailApi` (`:32`), `LimitsApi` (`:37`) —
-and nothing else. Real implementations are `Registry`, the `pane.ts` module
+and nothing else. Real implementations are `Registry`, the `pane.rs` module
 namespace, `TranscriptTail` and `RateLimitWatcher`; fakes are the four classes in
-`mock.ts`. That seam is why `--mock` is a genuine review gate rather than a demo:
+`mock.rs`. That seam is why `--mock` is a genuine review gate rather than a demo:
 the mock fleet runs the same server, the same routes, and the same
 `checkSpawnRequest` (`spawn.ts:73`) that the real one does, so a validation
 failure seen in mock mode is the failure you would get for real.
@@ -136,12 +136,12 @@ otherwise `unknown`. See "Where it is fragile", item 14.
 <sid>/subagents/*.meta.json      ──3s, forest view only───► AgentTree
 ```
 
-`transcript.ts` turns JSONL into events plus a `Partial<Agent>` patch. Two
+`transcript.rs` turns JSONL into events plus a `Partial<Agent>` patch. Two
 independent tails run over the same file: `FleetEnricher` every
 `TICK_MS = 5000` (`enrich.ts:14`) so cards for agents you are *not* looking at
 still move, and one per focused tab every `TIMELINE_MS = 1000` (`routes.ts:43`)
 for the conversation. They hold separate byte offsets; this is deliberate, and
-`mock.ts` documents the bug that appears when a single drain-on-read queue is
+`mock.rs` documents the bug that appears when a single drain-on-read queue is
 shared between them.
 
 The most important derivation in the app is delegation (`transcript.ts:363`). An
@@ -152,7 +152,7 @@ moving, so it overrides `lastActivityAt`. The directory is `stat`ed before it is
 read, because most agents never delegate and the common case should cost one
 syscall.
 
-`subagents.ts` reads the *other* files in that directory, and they turn the same
+`subagents.rs` reads the *other* files in that directory, and they turn the same
 count into a shape. Beside every `agent-<id>.jsonl` sits an `agent-<id>.meta.json`
 naming the delegate's type, its brief and its parent — so the whole tree is read
 rather than derived, with no transcript parsing at all (INV-13). Sidecars are
@@ -235,13 +235,17 @@ ever reaches a live prompt — models are allow-listed (`options.ts:9`), modes a
 allow-listed (`options.ts:17`), and a goal condition is rejected for control
 characters, a newline, or a leading `/`.
 
-Nothing is assumed to have worked, and each action is verified against whatever
-the CLI actually writes down — which is a different file for almost every one.
+Every action that *types* is verified against whatever the CLI actually writes
+down — which is a different file for almost every one.
 
-`cycleMode` presses `BTab` **once** and re-reads the session's reported mode. It
-used to chase a named mode over up to six presses, and having a target was the
-bug: a busy agent does not write its mode down until its turn ends, so the loop
-went blind after two presses had already landed. See INV-8.
+`sendShiftTab` is the one that verifies nothing, and that is the finding rather
+than a gap. It presses `BTab` **once** and reports that it was sent. Two earlier
+shapes chased a mode — one named it over up to six presses, one pressed once and
+waited to be told where it landed — and both reported failure at a press that had
+worked: Claude Code writes its `permission-mode` record at the end of a turn, so
+a session at its prompt answers nothing and a session that has not taken a turn
+has no transcript to answer from. The key itself is sound (`send-keys BTab`
+emits `\033[Z`); only the observation was ever missing. See INV-8.
 
 `setGoal` polls the transcript for a set-sentinel. `clearContext` watches
 `~/.claude/sessions/<pid>.json` for the session id to **turn over**, because
@@ -250,7 +254,7 @@ stops growing, which is also what a clear that never arrived looks like.
 `compactContext` verifies nothing on purpose: the one real sample took
 `durationMs: 157676`, so it returns immediately and the `compact_boundary`
 record is picked up later by the transcript tail that is already reading the
-file. `clearGoal` (`control.ts`) is the one action that cannot be verified at
+file. `clearGoal` (`control.rs`) is the one action that cannot be verified at
 all — clearing writes nothing — so the server drops its own copy and lets the
 next evaluation restore the goal if the clear never landed. That is the right
 way round for a claim this app cannot check.
@@ -274,8 +278,8 @@ Pushed: two `fs.watch` registrations, `AgentSource.onChange` and
 | `/clear` session-id turnover | 250ms for ≤6s | `control.ts:255`, `:256` |
 | `/exit` grace before kill | 500ms × 6s | `control.ts:230` |
 | Pending-agent expiry | 5m | `pending.ts:16` |
-| WebSocket heartbeat | 30s, drop after 2 missed | `routes.ts` |
-| Environment probe | once at startup | `env.ts` |
+| WebSocket heartbeat | 30s, drop after 2 missed | `routes.rs` |
+| Environment probe | once at startup | `env.rs` |
 | Delegation tree, while the forest view is open | 3s | `useFleetTrees.ts` |
 
 Three of those are conditional rather than constant. The pane capture runs only
@@ -283,8 +287,8 @@ while some tab has that agent focused *and* attached; the delegation tree is
 fetched only while the forest view is mounted, which is why it is plain HTTP
 rather than a fifth socket message — an effect that stops on unmount satisfies
 INV-4's first rule without a subscription lifecycle on the wire; and the
-fleet-wide enrichment runs only while at least one tab is connected at all — `routes.ts` reports the
-viewer count through `ServeOptions.onViewers` and `cli.ts` idles
+fleet-wide enrichment runs only while at least one tab is connected at all — `routes.rs` reports the
+viewer count through `ServeOptions.onViewers` and `main.rs` idles
 `FleetEnricher` on it. Both are INV-4's first rule, which is about who is
 watching rather than how often.
 
@@ -294,7 +298,7 @@ without a ping the server would go on polling for it until the OS noticed the
 dead connection — which can be hours.
 
 Every loop re-arms after its work rather than on a wall clock, through `Poller`
-(`poll.ts`); `PaneLoop` has its own copy of the same rule with the extra cadences
+(`poll.rs`); `PaneLoop` has its own copy of the same rule with the extra cadences
 the terminal needs. A re-entrancy guard on a `setInterval` is the shape this
 replaced: it stops the overlap but turns an overrun into ticks dropped at a rate
 nobody chose and nothing reports.
@@ -522,13 +526,13 @@ is a reasonable dependency, but it is the largest one in the system and should b
 named as such.
 
 **9. Comment density is inverted relative to risk.** The tmux layer runs 30–36%
-comments (`pane.ts` 173/478, `pane-hub.ts` 136/311, `tmux-client.ts` 128/375) and
+comments (`pane.rs` 173/478, `pane_hub.rs` 136/311, `tmux_client.rs` 128/375) and
 is also the layer with source-level assertions and a live-server verifier.
-`registry.ts` runs 11% (28/259), is consumed by every other plane, and has nothing
+`registry.rs` runs 11% (28/259), is consumed by every other plane, and has nothing
 watching it. The reasoning was recorded where it was hard-won rather than where it
 is load-bearing.
 
-**10. `isMissingTarget()` (`pane.ts`) reads tmux's prose.** Telling "this session
+**10. `isMissingTarget()` (`pane.rs`) reads tmux's prose.** Telling "this session
 does not exist" from "this question could not be put" is what stops a pending
 agent being forgotten on a machine at its process cap, and tmux only says which
 one it means in English. The wording has been stable for many years and the
@@ -544,25 +548,25 @@ their absence would otherwise read as an oversight.
 - **The heartbeat.** A half-open socket — a phone asleep on the far side of
   Tailscale — left a `Viewer` tailing a transcript once a second and, if the
   terminal was open, holding a share of a pane poller, for a browser that was not
-  there. `HEARTBEAT_MS` (`routes.ts`) pings every socket and drops one that has
+  there. `HEARTBEAT_MS` (`routes.rs`) pings every socket and drops one that has
   missed two rounds. `test/heartbeat.test.ts`.
-- **`Poller` (`poll.ts`).** INV-4's "re-arms after the work completes rather than
-  on a fixed interval" was implemented properly in `registry.ts` and as
+- **`Poller` (`poll.rs`).** INV-4's "re-arms after the work completes rather than
+  on a fixed interval" was implemented properly in `registry.rs` and as
   `setInterval` plus a busy flag in three other places, which converts an overrun
   into silently dropped ticks. All four now share one implementation.
   `test/poll.test.ts`.
 - **Nothing polls what nobody is watching.** The fleet enricher — one transcript
   tail per agent, every five seconds — ran with no browser connected at all.
-  `routes.ts` reports the viewer count and `cli.ts` idles the enricher on it.
+  `routes.rs` reports the viewer count and `main.rs` idles the enricher on it.
 - **An agent that has just started is visible now, not in thirty seconds.** A
   session id the presence check had not confirmed was skipped until the next
-  30s reconcile. `registry.ts` asks the CLI immediately, and `#asked` is what
+  30s reconcile. `registry.rs` asks the CLI immediately, and `#asked` is what
   stops a ghost turning that into a 2s loop. `test/registry-presence.test.ts`.
-- **A tmux that could not answer is not a session that has gone.** `pending.ts`
+- **A tmux that could not answer is not a session that has gone.** `pending.rs`
   spawned its own `tmux` and read any error as "the window closed", including
-  the `EAGAIN` that `pane.ts` retries four times. It now goes through `pane.ts`
+  the `EAGAIN` that `pane.rs` retries four times. It now goes through `pane.rs`
   and drops an entry only on a positive answer. `test/pending.test.ts`.
-- **The five `as never` casts** on the control path are gone: `control.ts` takes
+- **The five `as never` casts** on the control path are gone: `control.rs` takes
   `Agent | undefined` and `assertControllable` asserts `Controllable`, which
   carries the pane id in the type.
 - **The model and mode lists live once**, in `shared/types.ts`, where
@@ -585,14 +589,16 @@ Five gates, each answering a question the others cannot.
 
 | Gate | What it can see | Where it runs |
 |---|---|---|
-| `npm test` | modules, and components in jsdom | CI, Node 20 and 22 |
+| `npm test` | the server's modules (`cargo test`), and the browser's in jsdom (vitest) | CI, Node 20 and 22 |
 | `npm run e2e` | the joins: a real browser against a real `--mock` server | CI, Chromium |
 | `npm run audit` | contrast across all ten palettes, WCAG 2.2 AA, task flows, device layouts | local |
 | `npm run qa` | randomised exploration, deterministic per seed | local |
 | `npm run verify:inv1` | INV-1 against a live tmux server | local |
 
-The split between the first two is the interesting one. Vitest covers each
-module and each component; what it cannot see is a message crossing the socket,
+The split between the first two is the interesting one, and the port sharpened
+it. `cargo test` covers the server's modules and vitest covers the browser's;
+neither can see the other side at all, and what *neither* can see is a message
+crossing the socket,
 being written by the server, coming back through a transcript tail and settling
 the optimistic copy the browser drew — five modules and two processes, each
 individually tested, and every duplicate this app has ever sent lived between
@@ -616,20 +622,55 @@ finding there would fail CI for a reason that has nothing to do with the change;
 `verify:inv1` drives a real attach against a live Claude Code agent on a live
 tmux server, which does not exist on a runner at all.
 
-## The Rust port
+## The port to Rust
 
-There was one, and it is not here. `experiment/rust-backend` carries a
-15,800-line port of this server — the same surface, the same five planes, the
-same invariants, 374 passing tests — along with the four `scripts/ab-*` and
-`scripts/ws-load.mjs` tools that compared the two backends by running both in
-`--mock` against a frozen clock.
+The server is Rust. It was ~6,600 lines of TypeScript until it wasn't, and the
+TypeScript is preserved intact on **`old-node-backend-branch`**.
 
-It is on a branch rather than on main because it stopped being worked on while
-this server kept moving, and it is already behind by everything in "Fixed since
-this list was written": no `Poller`, no heartbeat, no viewer-count gating, and
-none of `PendingStore`'s distinction between a tmux that could not be reached
-and a session that has gone. Reviving it means starting from that list rather
-than from `cargo test`.
+The five planes, the module boundaries and every invariant survived the move —
+each `src/server/*.ts` has a same-named `rust/src/*.rs` — with three
+rearrangements worth knowing:
+
+- `cli.ts` split into `main.rs` (entry point, `--install-statusline`) and
+  `options.rs` (argument parsing, the 4317 refusal, INV-3's bind refusal).
+- `tmux-client.ts` gained `tmux_source.rs` and `tmux_agents.rs` beside it,
+  matching the TypeScript's own later split.
+- `agent-kinds.ts` is now in both languages: `rust/src/agent_kinds.rs` for the
+  server and `src/shared/agent-kinds.ts` for the browser. So is the wire
+  contract — `rust/src/types.rs` mirrors `src/shared/types.ts`. **Nothing checks
+  that either pair still agrees except the golden fixtures below.** That is the
+  one thing the port made structurally worse, and it is the price of the
+  browser staying TypeScript.
+
+### How the port was held to the old behaviour
+
+Not by reading. Three things, in increasing order of how much they prove:
+
+1. **Golden fixtures.** `rust/tests/golden/{agents,tree,env,dirs}.json` are real
+   responses captured from the Node server running `--mock`, and `mock.rs`
+   asserts the Rust bytes still equal them. A drift in any wire field fails a
+   unit test instead of a browser.
+2. **A live differential.** Both servers run `--mock` on different ports and
+   every route is diffed. `/api/agents` and `/api/dirs` came back byte-identical;
+   `/api/env` differs only in the port number it was told to report.
+3. **The 233 end-to-end tests, unchanged.** They drive HTTP and a WebSocket and
+   never imported a server module, so they arbitrate the port without knowing it
+   happened. They are the reason the port can be believed.
+
+### What the port cost and bought
+
+Bought: ~15-27x less memory and roughly 6x faster start, measured on a spike
+before any of this was written. **Not** bought: throughput. This server's time
+goes to tmux subprocesses, not to its own language — JS was 0.07ms per pane poll
+against a 140ms budget, where one `capture-pane` is 5.70ms spawned or 0.23ms
+through the control client. At p95 the two backends are the same speed, and
+anyone expecting the rewrite to have made the app feel faster should read INV-4
+instead: what makes it feel fast is not polling what nobody is watching.
+
+Cost: the two-language seam above; a distribution problem (`bin` now points at
+`scripts/launch.mjs`, which execs the binary — publishing to npm needs
+per-platform prebuilds that do not exist yet); and the loss of 412 TypeScript
+server tests, replaced by 503 Rust ones.
 
 It is on a branch rather than deleted because it has never been committed
 anywhere else, and a tested port is a poor thing to put through a one-way door.

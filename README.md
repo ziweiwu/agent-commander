@@ -123,7 +123,7 @@ missing, and the card says so rather than leaving a blank:
   outside, and inventing a "needs you" for either would spend the credibility of
   the one alert this dashboard exists to raise (INV-11).
 
-Mode and model controls are hidden for these agents: they work by typing Claude
+Shift+Tab and the model control are hidden for these agents: they work by typing Claude
 Code's own slash commands into the prompt, and the server refuses them for any
 other CLI rather than typing `/model opus` at something that will take it
 literally. Closing still works — it closes the tmux session instead.
@@ -196,7 +196,7 @@ keyboard has none of them.
 | `Enter` | open the focused agent |
 | `Esc` | close the agent (or clear the filter box) |
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
-| `Shift`+`Tab` | in the message box: advance the permission mode one step, mid-task included |
+| `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
 
 ## Claude usage
@@ -243,10 +243,13 @@ Two things worth knowing:
   are not on a Claude.ai subscription plan there is no reading at all and the
   meters are hidden entirely.
 
-The bridge is Node rather than Python, which is the usual default for scripts
-here. Not for speed — Python actually starts faster — but because it and
-`src/server/limits.ts` have to agree on one path and one JSON shape forever, and
-a cross-language pair is where that agreement rots.
+The bridge is Node because a Claude Code statusLine command is a command line
+Claude Code runs, and Node is the one runtime already required to build this
+app. It and `rust/src/limits.rs` have to agree on one path and one JSON shape
+forever, and that pair is now cross-language — which is exactly the arrangement
+the bridge was originally written in Node to avoid. Nothing checks the
+agreement but `limits.rs`'s parser tests, so change either side and read the
+other.
 
 There is an unofficial `GET /api/oauth/usage` endpoint that returns richer data,
 including a per-model weekly breakdown. It is not used, and should not be: it
@@ -307,20 +310,24 @@ on the card, and these names are derived *from* the directory anyway.
 
 ## Controlling a running agent
 
-The detail panel carries **Mode**, **Model**, **Compact**, **Clear** and
-**Close**. Everything except Mode types into the agent's own prompt, so those
-are enabled only while it is idle or waiting — greyed with a tooltip while it is
-busy, so a keystroke never interleaves with a tool call in flight. On a phone
-they collapse behind a `⋯` button, because the row cost 111px of a 568px screen.
+The detail panel carries **Shift+Tab**, **Model**, **Compact**, **Clear** and
+**Close**. Everything except Shift+Tab types into the agent's own prompt, so
+those are enabled only while it is idle or waiting — greyed with a tooltip while
+it is busy, so a keystroke never interleaves with a tool call in flight. On a
+phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
+screen.
 
-**Mode** is one press of Shift+Tab, the same chord the CLI's own keyboard uses,
-and the button shows where the session says it landed. It used to be a dropdown
-that named a mode and let the server hunt for it, and having a target was the
-whole problem: a working agent does not write its permission mode down until its
-turn ends, so the hunt went blind after it had already pressed twice and left
-the session somewhere nobody asked for. There is nothing to chase now. If the
-session has not reported the new mode yet the button says *pressed…* rather than
-naming one it has not read.
+**Shift+Tab** sends that chord to the agent, which is how the CLI's own keyboard
+cycles the permission mode. The button says it sent the key and nothing more —
+watch the agent's terminal to see which mode it moved to.
+
+It used to name the mode, and that is what made it look broken. Claude Code
+writes its permission mode down only at the *end of a turn*, so an agent sitting
+at its prompt — the one you are usually switching — reports nothing back, and an
+agent that has not taken a turn yet has no transcript to report from. The button
+therefore sat dead for 2.5 seconds, said it could not confirm the switch, and
+kept showing the old mode's name, all while the session had in fact moved. The
+key was never the problem; claiming to know where it landed was.
 
 **Compact** asks the agent to summarise and shorten its own context. It runs for
 minutes, so nothing waits for it — the toast says the compaction was *requested*,
@@ -340,7 +347,7 @@ goes with the old one.
 
 Directly above the message box, sharing the line with the quick replies, sit
 the switches you reach for while reading a conversation rather than before
-opening it: **Mode**, a **Goal** toggle, and the choice of what Send does to an
+opening it: **Shift+Tab**, a **Goal** toggle, and the choice of what Send does to an
 agent that is already working. Deciding that the next instruction should run in
 plan mode happens while typing that instruction. They share that line rather
 than taking one of their own because a row of their own cost 44px of a 568px
@@ -348,17 +355,16 @@ phone — enough to push the conversation itself under the layout audit's floor.
 Opening the goal field gives it the whole strip, so its Set and Cancel are
 never scrolled off the end.
 
-**Mode and model both work while the agent is working**, unlike Goal and Close,
-which still wait for idle. Those two submit an instruction that changes what the
-session does next, and one arriving mid-turn acts on a state nobody chose.
+**Shift+Tab and model both work while the agent is working**, unlike Goal and
+Close, which still wait for idle. Those two submit an instruction that changes
+what the session does next, and one arriving mid-turn acts on a state nobody
+chose.
 
-Mode is switched by sending `BTab` — a control key the agent handles wherever it
-is, exactly as it would from the keyboard of the terminal this app stands in
-for. **Shift+Tab** in the message box does the same thing as the button, the
-chord the CLI itself uses; the cost is that Shift+Tab no longer tabs backwards
-out of the box, though Tab and Escape still move focus. The two mode buttons on
-screen — this one and the detail panel's — always agree, because a setting shown
-twice that disagrees with itself is worse than one that is briefly behind.
+Shift+Tab is sent as `BTab` — a control key the agent handles wherever it is,
+exactly as it would from the keyboard of the terminal this app stands in for.
+**Shift+Tab** in the message box does the same thing as the button; the cost is
+that Shift+Tab no longer tabs backwards out of the box, though Tab and Escape
+still move focus.
 
 Model is allowed for a different reason: it types, but through the very same
 paste the message box already uses on working agents. Sending *"use opus
@@ -509,9 +515,15 @@ anyone who reached it could drive your agents.
 
 ## Development
 
-React 19 + Vite for the browser bundle, a dependency-free Node server, and
-Vitest in two projects — node for logic and server, jsdom for components.
-Node >= 20.
+React 19 + Vite for the browser bundle, and a Rust server. Vitest covers the
+browser app in two projects — node for pure logic, jsdom for components — and
+`cargo test` covers the server. Node >= 20 to build the bundle; a Rust toolchain
+(1.82 or newer) to build the server.
+
+The server used to be TypeScript. It is preserved on the
+`old-node-backend-branch` branch, and the port is held to the old one's
+behaviour by response fixtures captured from it (`rust/tests/golden/`) plus the
+end-to-end suite, which drives HTTP and a WebSocket and so never had to change.
 
 **Ports are split so development can never masquerade as production.** 4317
 serves real agents and nothing in development binds it: `--mock` on 4317 is
@@ -535,7 +547,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 789 tests: pure logic, server, and React components
+npm test           # 906 tests: 501 Rust (the server) + 405 vitest (the web app)
 npm run e2e        # 233 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
@@ -561,6 +573,34 @@ signed link back to the commit it was built from.
 ```
 npm version patch          # or minor / major
 git push --follow-tags
+```
+
+> **The npm half of this is currently broken, and pushing a tag will not fix
+> itself.** The server is a Rust binary now, and neither end of the pipeline has
+> caught up. `npm-publish.yml` installs Node but no Rust toolchain, so
+> `npm run lint` dies at `cargo: command not found` and the job fails before it
+> publishes — it fails safe, but it fails. And if that were fixed the result
+> would be worse: `files` ships `rust/src` and `Cargo.toml` but no binary, and
+> there is no `postinstall`, so `npm i -g` would install a launcher that finds
+> nothing and exits 1. That is the do-nothing install this project has shipped
+> twice before.
+>
+> Publishing needs a distribution decision first — per-platform prebuilt
+> packages the way esbuild does it, a `postinstall` that runs `cargo build`
+> and therefore requires a Rust toolchain on every installing machine, or
+> attaching the binary in the release job. `scripts/launch.mjs` documents the
+> two cases that do work today: a checkout that has run `npm run build:server`,
+> and a `cargo install`ed binary on PATH.
+>
+> Until one of those lands, release by building locally and by building the
+> macOS bundle below. **Do not push a `v*` tag.**
+
+The macOS app is built separately and is not part of the tag flow:
+
+```
+npm run build
+python3 scripts/build-mac-app.py            # --out defaults to build/
+python3 scripts/build-mac-app.py --install  # into ~/Applications
 ```
 
 Authentication is npm **trusted publishing**: the job mints a short-lived

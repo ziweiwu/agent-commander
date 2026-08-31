@@ -263,7 +263,7 @@ async function control(action: string, value?: string): Promise<ControlResponse>
  * Takes no argument on purpose. Asking for a *named* mode is what made this
  * control unreliable — see `cycleMode` in `src/server/control.ts`.
  */
-export function cycleAgentMode(): Promise<ControlResponse> {
+export function sendShiftTab(): Promise<ControlResponse> {
   return control('mode')
 }
 

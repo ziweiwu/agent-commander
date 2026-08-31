@@ -1,7 +1,18 @@
 # Invariants
 
 Properties that must hold for agent-commander to be safe to leave running.
-Each is greppable from a test name: `npm test -- -t INV-3`.
+
+Each is greppable from a test name, on both sides of the wire:
+
+```sh
+cargo test --manifest-path rust/Cargo.toml inv3   # the server (Rust)
+npm run test:web -- -t INV-3                      # the browser app (vitest)
+```
+
+Rust test names spell the number in lower case and without the hyphen
+(`inv3_refuses_a_non_loopback_bind_without_a_token`), because that is what an
+identifier can hold; the browser's keep the `INV-3` spelling in the test string.
+Both are searched by the same digits.
 
 ## INV-1 — Never disturb the real terminal
 
@@ -26,7 +37,7 @@ keep its own schedule; and on a machine at its process cap (2840 processes
 against a `kern.maxprocperuid` of 2666, which 109 panes and 33 Claude sessions
 will reach) `spawn tmux` returns EAGAIN outright.
 
-So one long-lived client is now attached, in `src/server/tmux-client.ts`. It is
+So one long-lived client is now attached, in `rust/src/tmux_client.rs`. It is
 a **control-mode** client, and that — not any flag — is what makes it safe.
 
 **The `ignore-size` flag is not the guarantee, and claiming it was is an error
@@ -65,7 +76,7 @@ view keeps the captured geometry, refuses to scale text below ~9.5px, and pans.
 `computeScale` never returns a scale above 1 — the pane is a faithful capture,
 not a canvas to stretch.
 
-- `test/safety.test.ts` — asserts `pane.ts` contains no attach/new-session
+- `tmux_client::inv1_never_passes_a_size_to_tmux` — asserts the source contains no attach/new-session
   call, that every attach in `tmux-client.ts` is `-C` (control mode), and that
   neither it nor `pane.ts` ever sends `refresh-client -C`, which is the only
   way a control client could acquire a size
@@ -148,14 +159,14 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
 
 - `test/ui/burst-send.test.tsx` — asserts one send from a burst of three, for
   Enter, for the Send button, and for a double-tapped chip
-- `test/pane-writes.test.ts` — two overlapping pastes never swap payloads,
+- `pane::tests` (the write-path group) — two overlapping pastes never swap payloads,
   writes to one pane keep their order, a load and its paste travel as one tmux
   invocation, and a spawn refused for want of a process slot is retried rather
   than dropping the character it carried
 - `test/ui/attach-typing.test.tsx` — one write in flight, a burst coalesced
   without loss or reordering, Enter flushed behind its text, and a dropped
   socket that discards rather than replays
-- `test/pane-control-path.test.ts` — a write that fails after reaching tmux is
+- `pane::tests` (the control-path group) — a write that fails after reaching tmux is
   never retried down the other path, a read that fails is, and the user's text
   never appears on a tmux command line
 - `test/chat.test.ts` — a repeated message stays visible until the transcript
@@ -237,7 +248,7 @@ than an attacker.
   refused before a line of JavaScript runs, so the reload, the bookmark and the
   link sent to a phone all dead-end. Every in-app navigation re-attaches it.
 
-- `test/origin.test.ts` — a cross-origin WebSocket and a cross-origin form POST
+- `routes::tests` (the origin group, incl. `inv3_a_rebound_host_is_refused_even_when_origin_matches_it`) — a cross-origin WebSocket and a cross-origin form POST
   are refused, a rebound `Host` is refused down a raw socket, every honest
   spelling of loopback still serves, this host's own tailnet name serves while
   another machine's does not, and the bundle is exempt from the token while the
@@ -329,22 +340,22 @@ when a frame cost two tmux round trips at p50 141ms, against a 140ms budget it
 could not meet. Through the control client a read is roughly 20ms. The numbers
 were the reason for the rules, not the rules.
 
-- `test/pane-hub.test.ts` — one poll shared between tabs, measured as a
+- `pane_hub::inv4_*` — one poll shared between tabs, measured as a
   comparison rather than asserted; a loop that cannot overlap itself; the idle
   backoff and the wake that cancels it
-- `test/poll.test.ts` — INV-4's cadence rule itself: no overlap, never sooner
+- `poll::inv4_*` — INV-4's cadence rule itself: no overlap, never sooner
   than the last pass took, survives a throwing pass, and cannot be started twice
   into two chains
-- `test/heartbeat.test.ts` — a socket that answers is kept, one that has gone
+- `routes::tests` (the heartbeat group) — a socket that answers is kept, one that has gone
   silent is dropped within two rounds, and the drop stops that viewer's
   transcript tail rather than merely closing the socket
-- `test/enrich.test.ts` — the enricher idles while no browser is connected, runs
+- `enrich::inv4_stops_tailing_while_no_browser_is_connected` — the enricher idles while no browser is connected, runs
   a pass the moment one arrives, and paces itself by the work rather than by a
   wall clock
-- `test/registry-presence.test.ts` — an unconfirmed session is asked about at
+- `registry::inv4_asks_once_for_a_ghost_not_once_per_scan` — an unconfirmed session is asked about at
   once rather than at the next 30s reconcile, and a ghost is asked about once
   rather than once per scan
-- `test/tree-routes.test.ts` — the graph is served with an `ETag`, a matching
+- `routes::the_tree_is_not_resent_when_it_has_not_changed` — the graph is served with an `ETag`, a matching
   `If-None-Match` gets a bare 304, a real change gets a new tag and a body, and
   a stale or unknown tag is answered in full rather than with a 304
 - `test/ui/ForestRoute.test.tsx` — the first poll carries no tag and the next
@@ -387,19 +398,19 @@ The terminal and the conversation degrade separately. They read different
 things — one polls tmux, the other tails a file — but both timers used to hang
 off one call, so a pane that exited froze the chat for that tab as well.
 
-- `test/limits.test.ts` — truncated and junk documents parse to `null`; a
+- `limits::tests` — truncated and junk documents parse to `None`; a
   deleted file keeps the last good value
-- `test/transcript-tail.test.ts` — a character split across two reads, a line
+- `transcript::tests` (the tail group) — a character split across two reads, a line
   split across two reads, a transcript that moves, and one that is replaced
-- `test/frame-errors.test.ts` — a dead pane ends the frames and not the
+- `routes::tests` (the frame-error group) — a dead pane ends the frames and not the
   conversation, and a run of failed reads is tolerated before either stops
-- `test/pending.test.ts` — a tmux that could not be reached keeps a just-started
+- `pending::inv5_a_tmux_that_could_not_be_reached_keeps_the_entry` — a tmux that could not be reached keeps a just-started
   agent visible, where only a positive "no such session" removes it: the same
   distinction as above, at the one moment an agent most needs to be reachable
-- `test/pane-hub.test.ts` — one poll shared between tabs, a loop that cannot
+- `pane_hub::inv4_*` — one poll shared between tabs, a loop that cannot
   overlap itself, the idle backoff and the wake that cancels it, and a failed
   read that does not end the loop
-- `test/tmux-control.test.ts` — the control-mode framing, including captured
+- `tmux_client::tests` — the control-mode framing, including captured
   pane content that looks like a protocol terminator
 
 ## INV-6 — Guard destructive keys
@@ -426,7 +437,7 @@ the UI does. What it buys is that sending one is deliberate rather than
 incidental, and that the rule lives where every other rule about reaching a live
 agent lives.
 
-- `test/destructive-keys.test.ts` — each destructive key is refused and not
+- `control::inv6_every_destructive_key_needs_confirmation` — each destructive key is refused and not
   forwarded without confirmation, is forwarded with it, and every other allowed
   key still needs none; a client that omits the flag, sends `false`, or sends a
   truthy non-`true` value gets the same refusal
@@ -457,7 +468,7 @@ argument parser, where a `:` or `.` would be read as target syntax. The
 directory is resolved and confirmed to exist and to be a directory before
 anything is spawned; a missing path is refused with an error rather than
 guessed at. Model and permission mode are checked against the fixed allow-lists
-in `src/server/options.ts`, so an unrecognised value is refused rather than
+in `rust/src/types.rs` (and re-exported by `options.rs`), so an unrecognised value is refused rather than
 becoming a flag.
 
 Mock mode runs the same validation and then does not spawn, so the failure a
@@ -470,13 +481,13 @@ dialog offered both and the route forwarded neither, so choosing "plan" and
 makes "the failure you see in `--mock` is the failure you would get for real"
 true rather than aspirational.
 
-- `test/control.test.ts` — every command, `/clear` and `/compact` included, is
+- `control::inv8_*` — every command, `/clear` and `/compact` included, is
   refused for a kind whose spec says `slashCommands: false`, and nothing is
   typed on the way to the refusal
-- `test/spawn.test.ts` — path expansion, absolute-path requirement, refusal of
+- `spawn::inv7_*` — path expansion, absolute-path requirement, refusal of
   files and missing directories, session-name sanitising, and the model and
   mode allow-lists
-- `test/new-agent.test.ts` — what the dialog chose is what reaches the spawn,
+- `routes::tests` (the new-agent group) — what the dialog chose is what reaches the spawn,
   and an unrecognised alias is a 400 rather than a 500
 - `test/ui/NewAgentDialog.test.tsx` — a rejected directory surfaces the server's
   reason and leaves the dialog open
@@ -502,62 +513,68 @@ same prompt. What it costs is immediacy: the CLI reads input that arrives
 mid-turn when the turn ends, so the caller is told the change was `queued` and
 the interface says so rather than implying it has landed.
 
-**Mode is the other exception, because it does not type.** It is switched by sending
+**Shift+Tab is the other exception, because it does not type.** It sends
 `BTab`, a control key Claude Code handles as a toggle wherever it is, exactly
 as it would from the keyboard of the terminal this app stands in for. Refusing
 it while busy made this app stricter than the thing it mirrors, and stricter in
 the one case that matters: deciding "this next step should run in plan mode"
-happens *while* the agent is running. So mode changes are permitted at any
-point in the flow, from the detail panel, from the chat strip, and from
-Shift+Tab in the composer — the same chord the CLI itself uses.
+happens *while* the agent is running. So it is permitted at any point in the
+flow, from the detail panel, from the chat strip, and from Shift+Tab in the
+composer — the same chord the CLI itself uses.
 
-**One press, and no target. The target was the bug.** This control used to be a
-`<select>`: the user named a mode and the server pressed `BTab` and re-read,
-up to six times, until the session reported it. Every failure it had came from
-having something to reach for. A busy agent does not write its permission mode
-down until its turn ends, so the reading could not move; the loop correctly
-refused to press blind and stopped — but it had already pressed twice, leaving
-a live session in a mode nobody asked for and reporting `unverified` for it.
-Two more causes had the same shape and neither was helped by pressing again: a
-session that reports no permission mode at all (they exist), and a cycle that
-silently omits `bypassPermissions` and `auto` when they are unavailable, which
-is why counting presses was never an option either. Polling for the reading
-instead of guessing a delay narrowed this and could not close it.
+**One press, and nothing claimed about where it lands. Every previous shape of
+this control claimed one, and every one of them was reported as broken.** It
+was first a `<select>`: the user named a mode, and the server pressed `BTab`
+and re-read up to six times until the session reported it. It then became a
+cycle button that pressed exactly once and waited to be told which mode it had
+reached — narrower, and still wrong in the same place.
 
-Without a target there is nothing to chase. `cycleMode` sends exactly one
-`BTab` and reports where the session says it landed. The app now mirrors the
-CLI, which also only cycles — INV-7's "one command shape" applied to the one
-control that had grown a second one.
+The second version was not wrong about the key. Measured against a live
+session, three `BTab` presses walk it `auto` → `plan` exactly as the keyboard
+would, and `tmux send-keys BTab` emits `\033[Z`, which is precisely what a
+terminal sends for Shift+Tab. **What no version could do is observe it.** Claude
+Code writes its `permission-mode` record at the *end of a turn*, so a session
+sitting at its prompt — the one usually being switched — writes nothing in
+response to the press, and a session that has not yet taken a turn has no
+transcript file to write it to.
 
-The press is still verified, and the distinction it draws is the whole of what
-is left. A reading that moved is reported. A reading that did not is reported
-as *unobserved*: the key reached the pane, so this is not a failure — only the
-observation is missing, and saying the switch failed asserts something nobody
-checked (INV-11). The interface says *pressed…* rather than naming a mode.
+So each press bought a 2.5-second settle window with the control disabled, then
+reported `unverified`, then left the old mode's name on the button. Three
+signals that nothing had happened, about something that had. A control that
+works but reports that it did not is indistinguishable from a broken one.
 
-**Two controls show this one setting at once** — the composer strip and the
-detail panel's control row are both on screen — so the mode a user has just
-moved to is held in the store rather than per component. Held locally, pressing
-one button updated it and left the other reading the old mode two inches away
-until the enricher caught up. An app that contradicts itself within one glance
-is worse than one that is briefly behind.
+**Sending the key is now the whole action.** `sendShiftTab` presses `BTab` and
+reports that it was sent. There is no target to miss, no window to wait out,
+and no mode named anywhere in the interface — the agent's own terminal shows
+the mode immediately, which is where a user reads it in any case. This is INV-11
+applied to the one control that never had a way to check itself: the key either
+reached the pane or the call failed loudly at tmux, and there is no third
+outcome for an observation to discover.
 
-**Neither switch is observable when it is made.** Both are read back out of the
-transcript, which a busy session writes at the end of its turn, so a control
-bound to the reported value repaints the old one on the next fleet broadcast and
-reads as a click that did nothing. The interface holds what the user chose until
-the agent reports it back. `assertAttachable` is the guard it uses — agent exists,
-pane reachable — and `assertControllable` remains the guard for everything
-that types.
+**Two of these controls are on screen at once** — the composer strip and the
+detail panel's control row — which is why the button is one shared component
+rather than two. When it still displayed a mode, that display had to be held in
+the store: pressing one left the other reading the old mode two inches away
+until the enricher caught up, and an app that contradicts itself within one
+glance is worse than one that is briefly behind. Binding to nothing removed
+that whole class of problem along with the hold.
+
+**Model, which does still report, remains observable only late.** It is read
+back out of the transcript, which a busy session writes at the end of its turn,
+so a control bound to the reported value repaints the old one on the next fleet
+broadcast and reads as a click that did nothing. The interface holds what the
+user chose until the agent reports it back. `assertAttachable` is the guard
+Shift+Tab uses — agent exists, pane reachable — and `assertControllable`
+remains the guard for everything that types.
 
 - **Close** asks first, in the UI, naming the agent. It sends `/exit`, which is
   Claude Code's own shutdown path, and only kills the tmux session if the pane
   is still alive after a grace period.
 - **Model** is set with the CLI's `/model <alias>`, the alias checked against the
   allow-list before anything is typed.
-- **Mode** is advanced by sending one `BTab` and re-reading the mode the session
-  reports. It never presses twice and never aims at a named mode; see above for
-  why both of those were the same bug.
+- **Shift+Tab** sends one `BTab` and reports that it was sent. It never presses
+  twice, never aims at a named mode, and never claims one; see above for why
+  each of those was the same bug wearing a different shape.
 
 - **Clear** asks first, in the UI, naming the agent, because there is no undo.
   It sends `/clear`, and it is **verified by watching the session id turn over**
@@ -607,15 +624,16 @@ to a live session, and `pending` is React state that does not land until React
 flushes, so the composer's goal field guards the send with a ref the same way
 the message box does.
 
-`test/control.test.ts` covers each guard, the allow-lists, the single press and
-its unobserved case, the clear's rotation and *its* unobserved case, the
+`control::tests` covers each guard, the allow-lists, the single press and the
+fact that it types nothing, the clear's rotation and its unobserved case, the
 compaction that does not wait, and the goal's validation and verification.
-`test/control-routes.test.ts` covers the same actions over HTTP — mode, clear
+`routes::inv8_mode_and_clear_and_compact_carry_no_body` covers the same actions over HTTP — mode, clear
 and compact carry no body at all, and `JSON.parse('')` throws, which surfaced as
 "that did not take effect" about a control the server had never called.
 `test/ui/ChatControls.test.tsx` and `test/ui/AgentControls.test.tsx` cover the
-browser's half: the burst case, the two mode buttons agreeing, the confirm
-before a clear, and following the session id afterwards.
+browser's half: the burst case, the button naming no mode whatever the agent
+last reported, the confirm before a clear, and following the session id
+afterwards.
 
 ## INV-9 — The folder browser cannot leave its root
 
@@ -627,7 +645,7 @@ string prefix, so `/abc` is not treated as inside `/a`.
 
 Listing is metadata only — names and directory-ness. It never reads a file.
 
-`test/browse.test.ts` covers traversal, an escaping symlink, and the
+`browse::inv9_*` covers traversal, an escaping symlink, and the
 prefix-collision case.
 
 ## INV-10 — The statusline bridge cannot break a Claude Code session
@@ -656,9 +674,9 @@ percent-encoded, so a checkout under `~/My Projects` never matches its own
 argv, `main` never runs, and the meters simply never appear. The comparison is
 made on resolved paths, and even asking the question is wrapped in a catch.
 
-- `test/limits.test.ts` — asserts the entrypoint is wrapped in a catch, that an
+- `limits::tests` — asserts the entrypoint is wrapped in a catch, that an
   absent `rate_limits` leaves an existing cache intact, that the bridge and
-  `src/server/limits.ts` name the same file, and that a copy of the bridge run
+  `rust/src/limits.rs` name the same file, and that a copy of the bridge run
   from a path containing a space still writes the cache
 
 ## INV-11 — The dashboard never asserts more than it knows
@@ -679,7 +697,7 @@ prompt and an agent that has finished both sit there emitting nothing; no
 timestamp separates them. Guessing would put a fabricated "needs you" next to
 the real ones, and the whole product rests on that alert being worth walking
 across the room for. `tmux-agents.ts` can return `busy`, `idle` or `unknown`
-and has no branch that returns `waiting`; `test/tmux-agents.test.ts` pins it
+and has no branch that returns `waiting`; `tmux_agents::inv11_an_inferred_status_is_never_waiting` pins it
 across every age of pane from one second to a day.
 
 The same reasoning removes a feature rather than adding one: the Prune button
@@ -770,7 +788,7 @@ disagree about the same paste: one is about memory, the other about intent.
 `focus` and `attach` are not charged. They cost this server work but never reach
 an agent, and a tab switching views quickly is not what this guards.
 
-- `test/input-budget.test.ts` — a 5,000-message flood no longer arrives in full
+- `control::inv12_a_flood_does_not_all_reach_the_agent` — a 5,000-message flood no longer arrives in full
   and is reported once rather than 5,000 times; a briskly typed sentence is
   never refused; the budget refills after a burst; and an oversized frame is
   refused before it is parsed
@@ -830,7 +848,7 @@ nobody could make. That tree comes back `unknown` and the view says so.
 **Transcript size is captioned as a size, never as a percentage.** There is no
 total for it to be a fraction of. INV-11 caught exactly this once already, with
 `tokens` displayed as spend and sorted as "most spent". The forest draws no size
-at all, so today the rule is pinned at the server (`test/subagents.test.ts`
+at all, so today the rule is pinned at the server (`subagents::inv13_*`
 keeps `bytes` as bytes); any surface that ever draws it again inherits the
 caption clause.
 
@@ -838,7 +856,7 @@ Colour is never the only signal: every state mark carries words in its
 accessible name, which is what `audit:contrast` and the generated palettes both
 assume.
 
-- `test/subagents.test.ts` — a three-deep tree assembled from `parentAgentId`;
+- `subagents::inv13_*` — a three-deep tree assembled from `parentAgentId`;
   an orphan raised rather than dropped; one malformed sidecar costing only its
   own node; the `isFork` and `stoppedByUser` variants; a missing `subagents/`
   directory returning an empty tree rather than throwing; `unknown` rather than

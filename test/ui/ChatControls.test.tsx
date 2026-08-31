@@ -1,12 +1,12 @@
 /**
- * The two switches that sit above the message box: permission mode, and the
- * session goal (`/goal`).
+ * The two controls that sit above the message box: Shift+Tab, and the session
+ * goal (`/goal`).
  *
  * The two are guarded differently, and INV-8 says why. Setting a goal types
- * into the agent's own prompt, so a busy agent is refused. Switching mode sends
+ * into the agent's own prompt, so a busy agent is refused. Shift+Tab sends
  * `BTab`, a control key the agent handles wherever it is, so it stays available
  * mid-run — which is the only time anyone reaches for it. INV-2's "exactly
- * once" applies to the goal either way: it is an instruction to a live session,
+ * once" applies to both either way: each is an instruction to a live session,
  * however small the control that sends it looks.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -18,42 +18,42 @@ import { agent, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 
 const setAgentGoal = vi.hoisted(() => vi.fn(async () => ({ ok: true }) as const))
-const cycleAgentMode = vi.hoisted(() =>
-  vi.fn(async () => ({ ok: true, detail: 'plan' }) as { ok: true; detail?: string }),
+const sendShiftTab = vi.hoisted(() =>
+  vi.fn(async () => ({ ok: true, detail: 'sent' }) as { ok: true; detail?: string }),
 )
-vi.mock('../../src/web/store/transport.ts', () => ({ setAgentGoal, cycleAgentMode }))
+vi.mock('../../src/web/store/transport.ts', () => ({ setAgentGoal, sendShiftTab }))
 
 const GOAL = { condition: 'every test passes', met: false, at: 1_786_000_000_000 }
 
 beforeEach(() => {
   resetStore()
   setAgentGoal.mockClear()
-  cycleAgentMode.mockClear()
-  cycleAgentMode.mockResolvedValue({ ok: true, detail: 'plan' })
+  sendShiftTab.mockClear()
+  sendShiftTab.mockResolvedValue({ ok: true, detail: 'sent' })
 })
 
-describe('mode', () => {
+describe('shift+tab', () => {
   /*
-   * This was a `<select>` and is now one button, because asking for a *named*
-   * mode is what made the control unreliable — see `ModeButton` and `cycleMode`
-   * in `src/server/control.ts`. The cases below are about a press and a
-   * reading, which is all there is left to get wrong.
+   * Two earlier shapes of this control both aimed at a *mode* — a `<select>`
+   * that named one, then a button that pressed once and waited to be told
+   * which one it reached — and both were reported as broken. Neither was wrong
+   * about the key: `BTab` moves a live session exactly as it should. What
+   * neither could do is see it, because Claude Code writes its permission mode
+   * down at the end of a turn and a session at its prompt writes nothing.
+   * `send_shift_tab` in `rust/src/control.rs` carries the measurement.
+   *
+   * So what is left to get wrong is the press, and only the press.
    */
 
-  it('shows the mode the session is actually in', () => {
-    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
-    expect(screen.getByTestId('mode-cycle').textContent).toContain('Plan')
-  })
-
-  it('advances one step from the chat, without opening the panel row', async () => {
+  it('sends the chord from the chat, without opening the panel row', async () => {
     const user = userEvent.setup()
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
-    await user.click(screen.getByTestId('mode-cycle'))
-    expect(cycleAgentMode).toHaveBeenCalledOnce()
+    await user.click(screen.getByTestId('shift-tab'))
+    expect(sendShiftTab).toHaveBeenCalledOnce()
   })
 
   /*
-   * INV-8's exception. Mode sends `BTab` — a control key the agent handles
+   * INV-8's exception. This sends `BTab` — a control key the agent handles
    * wherever it is — rather than typing into its prompt, so it is the one
    * control that stays available mid-run. That is when it is wanted: the
    * decision that the next step needs plan mode is made while the agent works.
@@ -63,27 +63,36 @@ describe('mode', () => {
     renderApp(
       <ChatControls agent={agent({ sessionId: 'a', status: 'busy', permissionMode: 'default' })} />,
     )
-    const button = screen.getByTestId('mode-cycle') as HTMLButtonElement
+    const button = screen.getByTestId('shift-tab') as HTMLButtonElement
     expect(button.disabled).toBe(false)
 
     await user.click(button)
-    expect(cycleAgentMode).toHaveBeenCalledOnce()
+    expect(sendShiftTab).toHaveBeenCalledOnce()
   })
 
   /*
-   * The label is bound to the mode the *agent* reports, which comes out of a
-   * transcript a busy session writes only when its turn ends. Without holding
-   * the server's answer, the next fleet broadcast repainted the old value a
-   * second later and the click read as though it had done nothing.
+   * INV-11, and the whole reason this control was rewritten. The button is
+   * bound to nothing the agent reports, so there is no stale mode name on it
+   * to contradict the terminal and no claim about where the session landed.
    */
-  it('holds the new mode until the agent confirms it', async () => {
+  it('never names a mode, whatever the agent last reported', async () => {
     const user = userEvent.setup()
-    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'acceptEdits' })
+    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
+
+    const button = screen.getByTestId('shift-tab')
+    expect(button.textContent).not.toMatch(/plan/i)
+
+    await user.click(button)
+    expect(button.textContent).not.toMatch(/plan/i)
+    expect(useStore.getState().toast).not.toMatch(/plan/i)
+  })
+
+  // It still says the key went out, because that much is known.
+  it('confirms the press', async () => {
+    const user = userEvent.setup()
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
-
-    await user.click(screen.getByTestId('mode-cycle'))
-
-    expect(screen.getByTestId('mode-cycle').textContent).toContain('Accept edits')
+    await user.click(screen.getByTestId('shift-tab'))
+    expect(useStore.getState().toast).toMatch(/shift\+tab sent/i)
   })
 
   /*
@@ -93,32 +102,14 @@ describe('mode', () => {
    */
   it('sends one press from a double click', async () => {
     const user = userEvent.setup()
-    cycleAgentMode.mockReturnValue(new Promise(() => {}) as never)
+    sendShiftTab.mockReturnValue(new Promise(() => {}) as never)
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
 
-    const button = screen.getByTestId('mode-cycle')
+    const button = screen.getByTestId('shift-tab')
     await user.click(button)
     await user.click(button)
 
-    expect(cycleAgentMode).toHaveBeenCalledOnce()
-  })
-
-  /*
-   * The press went out and the session has not written a mode down. Saying
-   * nothing would report an unconfirmed switch as a clean success, and showing
-   * a mode would claim one this app never read (INV-11).
-   */
-  it('says the press was not reported rather than naming a mode', async () => {
-    const user = userEvent.setup()
-    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'unverified' })
-    renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />)
-
-    await user.click(screen.getByTestId('mode-cycle'))
-
-    expect(useStore.getState().toast).toBeTruthy()
-    const button = screen.getByTestId('mode-cycle')
-    expect(button.getAttribute('data-unreported')).toBe('true')
-    expect(button.textContent).toContain('pressed')
+    expect(sendShiftTab).toHaveBeenCalledOnce()
   })
 
   // Reachability is still required: no pane, nothing to send the key to.
@@ -126,58 +117,15 @@ describe('mode', () => {
     const noPane = agent({ sessionId: 'a', status: 'busy' })
     delete (noPane as { paneId?: string }).paneId
     renderApp(<ChatControls agent={noPane} />)
-    expect((screen.getByTestId('mode-cycle') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('shift-tab') as HTMLButtonElement).disabled).toBe(true)
   })
 
-  /*
-   * Two of these are on screen at once — the composer strip and the detail
-   * panel's control row — and they show one setting. Held per component,
-   * pressing one updated it and left the other reading the old mode two inches
-   * away until the enricher caught up. An app that contradicts itself within
-   * one glance is worse than one that is briefly behind.
-   */
-  it('agrees with the other mode button on screen', async () => {
-    const user = userEvent.setup()
-    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'acceptEdits' })
-    const a = agent({ sessionId: 'a', permissionMode: 'default' })
-    renderApp(
-      <>
-        <ChatControls agent={a} />
-        <ChatControls agent={a} />
-      </>,
-    )
-
-    const [first, second] = screen.getAllByTestId('mode-cycle')
-    await user.click(first as HTMLElement)
-
-    expect(first?.textContent).toContain('Accept edits')
-    expect(second?.textContent).toContain('Accept edits')
-  })
-
-  // A hold belongs to the agent it was made on, not to the next one opened.
-  it('does not carry a held mode onto another agent', async () => {
-    const user = userEvent.setup()
-    cycleAgentMode.mockResolvedValue({ ok: true, detail: 'acceptEdits' })
-    renderApp(
-      <>
-        <ChatControls agent={agent({ sessionId: 'a', permissionMode: 'default' })} />
-        <ChatControls agent={agent({ sessionId: 'b', permissionMode: 'plan' })} />
-      </>,
-    )
-
-    const [first, second] = screen.getAllByTestId('mode-cycle')
-    await user.click(first as HTMLElement)
-
-    expect(first?.textContent).toContain('Accept edits')
-    expect(second?.textContent).toContain('Plan')
-  })
-
-  // The glyph and a mode name do not say what pressing will do.
-  it('names both halves of the action for a screen reader', () => {
+  // The glyph alone does not say what pressing it will do.
+  it('says what the chord does for a screen reader', () => {
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
-    const label = screen.getByTestId('mode-cycle').getAttribute('aria-label') ?? ''
-    expect(label).toContain('Plan')
-    expect(label).toMatch(/next mode/i)
+    const label = screen.getByTestId('shift-tab').getAttribute('aria-label') ?? ''
+    expect(label).toMatch(/shift\+tab/i)
+    expect(label).toMatch(/permission mode/i)
   })
 })
 
@@ -206,16 +154,16 @@ describe('goal toggle', () => {
   })
 
   /*
-   * On a 390px phone the mode select pushed Set and Cancel off the end of the
+   * On a 390px phone the mode control pushed Set and Cancel off the end of the
    * strip's scroller, leaving no visible way to finish typing a goal.
    */
   it('gives the whole strip to the goal field while it is open', async () => {
     const user = userEvent.setup()
     renderApp(<ChatControls agent={agent({ sessionId: 'a', permissionMode: 'plan' })} />)
     await user.click(screen.getByTestId('goal-toggle'))
-    expect(screen.queryByTestId('mode-cycle')).toBeNull()
+    expect(screen.queryByTestId('shift-tab')).toBeNull()
     await user.click(screen.getByTestId('goal-cancel'))
-    expect(screen.getByTestId('mode-cycle')).toBeTruthy()
+    expect(screen.getByTestId('shift-tab')).toBeTruthy()
   })
 
   it('cancels without sending, and forgets the draft', async () => {

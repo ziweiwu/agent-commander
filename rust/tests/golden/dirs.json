@@ -1,0 +1,167 @@
+{
+    "entries": [
+        {
+            "hidden": false,
+            "name": "Applications",
+            "path": "/Users/ziweiwu/Applications"
+        },
+        {
+            "hidden": false,
+            "name": "bin",
+            "path": "/Users/ziweiwu/bin"
+        },
+        {
+            "hidden": false,
+            "name": "Calibre Library",
+            "path": "/Users/ziweiwu/Calibre Library"
+        },
+        {
+            "hidden": false,
+            "name": "claude-context",
+            "path": "/Users/ziweiwu/claude-context"
+        },
+        {
+            "hidden": false,
+            "name": "Desktop",
+            "path": "/Users/ziweiwu/Desktop"
+        },
+        {
+            "hidden": false,
+            "name": "Documents",
+            "path": "/Users/ziweiwu/Documents"
+        },
+        {
+            "hidden": false,
+            "name": "Downloads",
+            "path": "/Users/ziweiwu/Downloads"
+        },
+        {
+            "hidden": false,
+            "name": "dwhelper",
+            "path": "/Users/ziweiwu/dwhelper"
+        },
+        {
+            "hidden": false,
+            "name": "fusion-hig-prototyping",
+            "path": "/Users/ziweiwu/fusion-hig-prototyping"
+        },
+        {
+            "hidden": false,
+            "name": "khoj",
+            "path": "/Users/ziweiwu/khoj"
+        },
+        {
+            "hidden": false,
+            "name": "learning",
+            "path": "/Users/ziweiwu/learning"
+        },
+        {
+            "hidden": false,
+            "name": "learnings",
+            "path": "/Users/ziweiwu/learnings"
+        },
+        {
+            "hidden": false,
+            "name": "Library",
+            "path": "/Users/ziweiwu/Library"
+        },
+        {
+            "hidden": false,
+            "name": "LLM-inference-class",
+            "path": "/Users/ziweiwu/LLM-inference-class"
+        },
+        {
+            "hidden": false,
+            "name": "mcp-server-synology",
+            "path": "/Users/ziweiwu/mcp-server-synology"
+        },
+        {
+            "hidden": false,
+            "name": "Movies",
+            "path": "/Users/ziweiwu/Movies"
+        },
+        {
+            "hidden": false,
+            "name": "Music",
+            "path": "/Users/ziweiwu/Music"
+        },
+        {
+            "hidden": false,
+            "name": "my-project",
+            "path": "/Users/ziweiwu/my-project"
+        },
+        {
+            "hidden": false,
+            "name": "org",
+            "path": "/Users/ziweiwu/org"
+        },
+        {
+            "hidden": false,
+            "name": "photo_cleanup_analyzer",
+            "path": "/Users/ziweiwu/photo_cleanup_analyzer"
+        },
+        {
+            "hidden": false,
+            "name": "Pictures",
+            "path": "/Users/ziweiwu/Pictures"
+        },
+        {
+            "hidden": false,
+            "name": "Project",
+            "path": "/Users/ziweiwu/Project"
+        },
+        {
+            "hidden": false,
+            "name": "Projects",
+            "path": "/Users/ziweiwu/Projects"
+        },
+        {
+            "hidden": false,
+            "name": "Public",
+            "path": "/Users/ziweiwu/Public"
+        },
+        {
+            "hidden": false,
+            "name": "school",
+            "path": "/Users/ziweiwu/school"
+        },
+        {
+            "hidden": false,
+            "name": "scripts",
+            "path": "/Users/ziweiwu/scripts"
+        },
+        {
+            "hidden": false,
+            "name": "spotify-mcp-server",
+            "path": "/Users/ziweiwu/spotify-mcp-server"
+        },
+        {
+            "hidden": false,
+            "name": "SynologyDrive",
+            "path": "/Users/ziweiwu/SynologyDrive"
+        },
+        {
+            "hidden": false,
+            "name": "tax",
+            "path": "/Users/ziweiwu/tax"
+        },
+        {
+            "hidden": false,
+            "name": "unsplash-curator",
+            "path": "/Users/ziweiwu/unsplash-curator"
+        },
+        {
+            "hidden": false,
+            "name": "vault-git",
+            "path": "/Users/ziweiwu/vault-git"
+        },
+        {
+            "hidden": false,
+            "name": "ziwei-scripts",
+            "path": "/Users/ziweiwu/ziwei-scripts"
+        }
+    ],
+    "parent": null,
+    "path": "/Users/ziweiwu",
+    "root": "/Users/ziweiwu"
+}

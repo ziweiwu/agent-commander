@@ -57,6 +57,12 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
 
       - run: npm run typecheck
       - run: npm run lint
@@ -86,11 +92,17 @@ jobs:
       # mismatch in a devDependency as a warning rather than a failure. What
       # must work here is everything below this line.
       - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
 
       - run: npm run build
 
       - name: the built CLI starts
-        run: node dist/server/cli.js --help
+        run: rust/target/release/agent-commander --help
 
   e2e:
     runs-on: ubuntu-latest
@@ -105,6 +117,12 @@ jobs:
           cache: npm
 
       - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
 
       # The mock server still probes the real machine for `ServerEnv`, and the
       # New Agent dialog refuses to offer the form when tmux is absent — which
