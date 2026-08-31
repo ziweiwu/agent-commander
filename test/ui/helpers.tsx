@@ -2,20 +2,8 @@ import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { render, type RenderOptions } from '@testing-library/react'
 import { useStore } from '../../src/web/store/store.ts'
-import type { Agent } from '../../src/shared/types.ts'
 
-export const agent = (over: Partial<Agent> & { sessionId: string }): Agent => ({
-  pid: 4421,
-  name: over.sessionId,
-  cwd: '/Users/me/Projects/thing',
-  folder: 'thing',
-  status: 'idle',
-  agentKind: 'claude',
-  kind: 'interactive',
-  startedAt: Date.now() - 3_600_000,
-  paneId: '%77',
-  ...over,
-})
+export { agent } from '../helpers/agent.ts'
 
 /** Put the store back to a known state; component tests share the singleton. */
 export function resetStore(): void {

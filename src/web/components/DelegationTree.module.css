@@ -1,0 +1,119 @@
+.tree {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 3px;
+}
+
+/* Nested lists indent behind a guide line, which is the only thing carrying
+   depth once a brief wraps on a phone. */
+.tree .tree {
+  margin-left: 7px;
+  padding-left: 9px;
+  border-left: 1px solid var(--line);
+}
+
+.item {
+  min-width: 0;
+}
+
+.node {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  font-size: var(--text-sm);
+  color: var(--dim);
+  min-width: 0;
+}
+
+.type {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+  color: var(--text);
+  flex: none;
+}
+
+/*
+ * The brief wins the row's spare width, and the metadata after it wraps to a
+ * second line rather than squeezing it. It is the best description of what a
+ * delegate did that this app has — better than anything recoverable from the
+ * transcript (INV-13) — so truncating it to buy room for a number is the wrong
+ * way round.
+ */
+.brief {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* A floor rather than zero: without it a brief that *nearly* fits shrinks to
+     an ellipsis instead of pushing the metadata onto its own line, so one row
+     in a tree truncates while its neighbours do not. Low enough that a phone
+     still wraps rather than scrolling sideways, which e2e checks. */
+  min-width: 12ch;
+  flex: 1 1 20ch;
+}
+
+.state {
+  flex: none;
+  font-size: var(--text-xs);
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+.state[data-state='active'] {
+  color: var(--busy);
+  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
+}
+/*
+ * `done` gets no colour of its own on purpose. A green "done" beside a grey
+ * "quiet" reads as a progress bar filling up, and the whole point of INV-13 is
+ * that quiet is not an earlier stage of done — it is a different answer.
+ */
+.state[data-state='done'] {
+  color: var(--text);
+}
+
+/* The same dashed edge the fleet card's status pill uses for an inferred
+   status, because it is the same claim about the same kind of guess. */
+.state[data-inferred='true'] {
+  border-style: dashed;
+  border-color: currentColor;
+}
+
+/* Alongside the state, not instead of it: one says what became of the delegate
+   and the other what it did, and neither answers for the other. */
+.effort {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.note,
+.orphan {
+  flex: none;
+  font-size: var(--text-xs);
+}
+.orphan {
+  color: var(--waiting);
+}
+
+/* Effort and the last-write time move as one, pushed to the right of whatever
+   space the brief leaves. */
+.tail {
+  margin-left: auto;
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.when {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}

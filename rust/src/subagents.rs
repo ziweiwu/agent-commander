@@ -31,7 +31,7 @@ use std::time::UNIX_EPOCH;
 use serde_json::Value;
 
 use crate::agent_kinds::has_transcripts;
-use crate::transcript::{find_transcript, projects_dir};
+use crate::transcript::{find_transcript, parse_iso8601_ms, projects_dir};
 use crate::types::{Agent, AgentStatus, AgentTree, SubagentNode, SubagentState};
 
 /// A delegate that has written this recently is treated as still running.
@@ -127,6 +127,131 @@ struct Entry {
     meta: Sidecar,
     last_write_at: i64,
     bytes: u64,
+    effort: Option<Effort>,
+}
+
+/// What a delegate did, as opposed to what became of it.
+///
+/// Two measurements, never a summary. `Quiet` is the honest answer about a
+/// delegate's *outcome* and will stay the answer for almost all of them, so it
+/// cannot also be the only thing on the row: seven delegates all reading
+/// `quiet` say nothing. These say the one thing that is both true and useful —
+/// that this one worked for thirteen minutes and made twenty-nine tool calls,
+/// and that one died on its first.
+#[derive(Debug, Clone, Copy)]
+struct Effort {
+    calls: u32,
+    worked_ms: i64,
+}
+
+/// Above this the transcript is not parsed and the node carries no effort.
+///
+/// A delegate that is still writing is re-read on every poll, so the cost of
+/// the biggest one is paid over and over. The largest seen on a real machine is
+/// 321 KB; this leaves an order of magnitude of headroom and still bounds the
+/// work.
+const EFFORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Parsed transcripts, keyed by what would have to change for the answer to.
+///
+/// Size as well as mtime, because a second-granularity clock and an append can
+/// land in the same tick. This is what keeps the parsing inside INV-4: a
+/// delegate that has gone quiet never writes again, so it is read once and
+/// answered from memory forever, and only one that is still growing is re-read.
+fn effort_cache() -> &'static Mutex<HashMap<String, Effort>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Effort>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Testing seam: forget what was cached.
+pub fn forget_efforts() {
+    if let Ok(mut cache) = effort_cache().lock() {
+        cache.clear();
+    }
+}
+
+/// How much work is recorded in one delegate's transcript, read at most once.
+///
+/// Every failure yields `None` and the node simply carries no effort: a file
+/// that vanished, one too large to keep re-reading, a transcript in a shape
+/// this does not recognise. None of them is a reason to lose the node (INV-5) —
+/// and a `None` is deliberately not cached, so a file being written as it was
+/// read is reconsidered rather than written off.
+async fn read_effort(path: &Path, last_write_at: i64, bytes: u64) -> Option<Effort> {
+    if bytes > EFFORT_MAX_BYTES {
+        return None;
+    }
+    let key = format!("{}:{last_write_at}:{bytes}", path.display());
+    if let Ok(cache) = effort_cache().lock() {
+        if let Some(hit) = cache.get(&key) {
+            return Some(*hit);
+        }
+    }
+
+    let text = tokio::fs::read_to_string(path).await.ok()?;
+    let effort = measure(&text)?;
+    if let Ok(mut cache) = effort_cache().lock() {
+        cache.insert(key, effort);
+    }
+    Some(effort)
+}
+
+/// The counting itself, over one transcript's text.
+///
+/// Counts `tool_use` blocks rather than messages, because a turn that read nine
+/// files and a turn that said "ok" are not the same amount of work. The span is
+/// between the first and last record carrying a timestamp — not a duration the
+/// delegate reported, which nothing does.
+/// One record's contribution: its timestamp, and how many tools it called.
+fn contribution(line: &str) -> Option<(Option<i64>, u32)> {
+    // A tail being appended to as it is read ends in a partial line.
+    let record = serde_json::from_str::<Value>(line).ok()?;
+    let at = record.get("timestamp").and_then(Value::as_str).and_then(parse_iso8601_ms);
+    if record.get("type").and_then(Value::as_str) != Some("assistant") {
+        return Some((at, 0));
+    }
+    let calls = record
+        .pointer("/message/content")
+        .and_then(Value::as_array)
+        .map(|blocks| {
+            blocks
+                .iter()
+                .filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use"))
+                .count() as u32
+        })
+        .unwrap_or(0);
+    Some((at, calls))
+}
+
+fn measure(text: &str) -> Option<Effort> {
+    let mut calls: u32 = 0;
+    let mut records: u32 = 0;
+    let mut first: i64 = 0;
+    let mut last: i64 = 0;
+
+    for line in text.lines().filter(|l| !l.is_empty()) {
+        let Some((at, tools)) = contribution(line) else { continue };
+        records += 1;
+        calls += tools;
+        if let Some(at) = at {
+            if first == 0 {
+                first = at;
+            }
+            last = at;
+        }
+    }
+
+    /*
+     * Nothing parsed, so this is not a transcript this code understands — an
+     * empty file, or a format that has moved. Reporting `0 calls` for it would
+     * say "I read it and nothing happened", which is a different and unearned
+     * claim. `0` is kept for the case where a transcript really was read and
+     * really held none.
+     */
+    if records == 0 {
+        return None;
+    }
+    Some(Effort { calls, worked_ms: if last > first { last - first } else { 0 } })
 }
 
 /// `agent-<id>.jsonl` -> `<id>`, and nothing else.
@@ -169,7 +294,9 @@ async fn read_entries(dir: &Path) -> Vec<Entry> {
             .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as i64)
             .unwrap_or(0);
-        entries.push(Entry { agent_id, meta, last_write_at, bytes: stat.len() });
+        let bytes = stat.len();
+        let effort = read_effort(&dir.join(name), last_write_at, bytes).await;
+        entries.push(Entry { agent_id, meta, last_write_at, bytes, effort });
     }
     entries
 }
@@ -211,6 +338,8 @@ fn to_node(entry: &Entry, parent_status: AgentStatus, now: i64) -> SubagentNode 
         depth: meta.spawn_depth.unwrap_or(1),
         parent_agent_id: meta.parent_agent_id.clone(),
         last_write_at: entry.last_write_at,
+        calls: entry.effort.map(|e| e.calls),
+        worked_ms: entry.effort.map(|e| e.worked_ms),
         bytes: entry.bytes,
         state,
         state_inferred,
@@ -414,6 +543,7 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         forget_sidecars();
+        forget_efforts();
         guard
     }
 
@@ -939,6 +1069,8 @@ mod tests {
             parent_agent_id: None,
             last_write_at: 1_788_061_902_713,
             bytes: 118_000,
+            calls: None,
+            worked_ms: None,
             state: SubagentState::Quiet,
             state_inferred: None,
             stopped_by_user: None,
@@ -993,5 +1125,140 @@ mod tests {
         forget_sidecars();
         let fresh = read_tree_at(&agent(), Some(&transcript), NOW).await;
         assert_eq!(fresh.children[0].agent_type, "second");
+    }
+    /* ---------------------------------------------------------------------
+     * INV-13: what a delegate *did*, as against what became of it.
+     *
+     * `quiet` is the honest answer about almost every delegate's outcome and
+     * will stay that way — nothing on disk separates finished from dead. That
+     * makes it uninformative on its own: a tree of seven quiet rows says
+     * nothing. These measurements are what stop the row being empty of meaning,
+     * and the whole point of them is that they are measurements: every case
+     * here is about refusing to report a number that was not read.
+     *
+     * Mirrors `test/delegate-effort.test.ts`.
+     * ------------------------------------------------------------------ */
+
+    /// One session with one delegate whose transcript is exactly `lines`.
+    fn with_transcript(lines: &[String]) -> (tempfile::TempDir, PathBuf) {
+        let root = tempfile::tempdir().expect("temp dir");
+        let transcript = root.path().join("sess-1.jsonl");
+        std::fs::write(&transcript, b"").expect("transcript");
+        let dir = root.path().join("sess-1").join("subagents");
+        std::fs::create_dir_all(&dir).expect("subagents dir");
+        std::fs::write(dir.join("agent-a1.jsonl"), lines.join("\n")).expect("delegate");
+        std::fs::write(
+            dir.join("agent-a1.meta.json"),
+            json!({ "agentType": "Explore", "description": "look", "spawnDepth": 1 }).to_string(),
+        )
+        .expect("sidecar");
+        (root, transcript)
+    }
+
+    /// How many tool calls each fixture turn records. Named because the
+    /// assertions below compare against them rather than against literals.
+    const TOOLS_IN_A_BUSY_TURN: usize = 9;
+    const TOOLS_IN_A_CACHED_TURN: usize = 3;
+    const TOOLS_BEFORE_A_TRUNCATED_LINE: usize = 2;
+    const A_THIRTEEN_MINUTE_SPAN_MS: i64 = 13 * 60_000;
+    const PINNED_MTIME_MS: i64 = 1_788_000_000_000;
+
+    fn turn(iso: &str, tools: usize) -> String {
+        let content: Vec<Value> =
+            std::iter::repeat_with(|| json!({ "type": "tool_use" })).take(tools).collect();
+        json!({ "timestamp": iso, "type": "assistant", "message": { "content": content } })
+            .to_string()
+    }
+
+    async fn only_delegate(lines: &[String]) -> SubagentNode {
+        let (_keep, transcript) = with_transcript(lines);
+        let tree = read_tree_at(&agent(), Some(&transcript), NOW).await;
+        tree.children.into_iter().next().expect("one delegate")
+    }
+
+    #[tokio::test]
+    async fn inv13_counts_tool_calls_rather_than_turns() {
+        let _guard = isolated();
+        // One turn that called nine tools and one that called none are not the
+        // same amount of work, and counting messages would say they were.
+        let node = only_delegate(&[
+            turn("2026-08-30T12:00:00.000Z", TOOLS_IN_A_BUSY_TURN),
+            turn("2026-08-30T12:01:00.000Z", 0),
+        ])
+        .await;
+        assert_eq!(node.calls, Some(TOOLS_IN_A_BUSY_TURN as u32));
+    }
+
+    #[tokio::test]
+    async fn inv13_measures_the_span_between_first_and_last_record() {
+        let _guard = isolated();
+        let node = only_delegate(&[
+            json!({ "timestamp": "2026-08-30T12:00:00.000Z", "type": "user" }).to_string(),
+            turn("2026-08-30T12:13:00.000Z", 1),
+        ])
+        .await;
+        assert_eq!(node.worked_ms, Some(A_THIRTEEN_MINUTE_SPAN_MS));
+    }
+
+    /// The distinction the whole feature turns on. `0 calls` says "I read the
+    /// transcript and there were none"; nothing at all says "I could not read
+    /// it". Collapsing them would put a confident zero under a delegate that
+    /// may have done a great deal.
+    #[tokio::test]
+    async fn inv11_says_nothing_for_a_transcript_it_cannot_parse() {
+        let _guard = isolated();
+        let node =
+            only_delegate(&["this is not json".to_string(), "neither is this".to_string()]).await;
+        assert_eq!(node.calls, None);
+        assert_eq!(node.worked_ms, None);
+    }
+
+    #[tokio::test]
+    async fn inv11_still_reports_zero_when_zero_was_read() {
+        let _guard = isolated();
+        let node = only_delegate(&[
+            json!({ "timestamp": "2026-08-30T12:00:00.000Z", "type": "user" }).to_string(),
+        ])
+        .await;
+        assert_eq!(node.calls, Some(0));
+    }
+
+    /// A half-written last line is the normal state of a file being appended to.
+    #[tokio::test]
+    async fn inv11_survives_a_partial_trailing_line() {
+        let _guard = isolated();
+        let node = only_delegate(&[
+            turn("2026-08-30T12:00:00.000Z", TOOLS_BEFORE_A_TRUNCATED_LINE),
+            "{\"type\":\"assis".to_string(),
+        ])
+        .await;
+        assert_eq!(node.calls, Some(TOOLS_BEFORE_A_TRUNCATED_LINE as u32));
+    }
+
+    /// The affordability argument (INV-4). A delegate that has gone quiet never
+    /// writes again, so it is parsed once and answered from memory. Proven by
+    /// rewriting the file without disturbing either half of the cache key.
+    #[tokio::test]
+    async fn inv4_answers_from_cache_while_mtime_and_size_are_unchanged() {
+        let _guard = isolated();
+        let (keep, transcript) = with_transcript(&[turn("2026-08-30T12:00:00.000Z", TOOLS_IN_A_CACHED_TURN)]);
+        let jsonl = keep.path().join("sess-1").join("subagents").join("agent-a1.jsonl");
+        // Pinned before anything reads it: a file written normally gets a
+        // sub-millisecond mtime that cannot be restored exactly.
+        set_mtime(&jsonl, PINNED_MTIME_MS);
+
+        let first = read_tree_at(&agent(), Some(&transcript), NOW).await;
+        assert_eq!(first.children[0].calls, Some(TOOLS_IN_A_CACHED_TURN as u32));
+
+        let replaced = turn("2026-08-30T12:00:00.000Z", TOOLS_IN_A_CACHED_TURN).replace("tool_use", "tool_USE");
+        std::fs::write(&jsonl, &replaced).expect("rewrite");
+        set_mtime(&jsonl, PINNED_MTIME_MS);
+
+        let again = read_tree_at(&agent(), Some(&transcript), NOW).await;
+        assert_eq!(again.children[0].calls, Some(TOOLS_IN_A_CACHED_TURN as u32), "a cached answer must not move");
+
+        forget_efforts();
+        let fresh = read_tree_at(&agent(), Some(&transcript), NOW).await;
+        assert_eq!(fresh.children[0].calls, Some(0), "and a dropped cache re-reads");
     }
 }

@@ -66,6 +66,7 @@ const WAITING_PID: i64 = 28707;
 const BUSY_PID: i64 = 4421;
 const DELEGATING_PID: i64 = 47117;
 const LONG_NAME_PID: i64 = 18731;
+const QUIET_FAMILY_PID: i64 = 51204;
 const IDLE_KB_PID: i64 = 34625;
 const IDLE_CE_PID: i64 = 50893;
 const IDLE_DB_PID: i64 = 53848;
@@ -89,6 +90,7 @@ fn fixtures() -> Vec<Agent> {
         blocked_on_a_dialog(),
         working_towards_a_rejected_goal(),
         parked_on_a_subagent(),
+        a_family_that_has_gone_quiet(),
         name_too_long_for_its_card(),
         idle_in_the_home_directory(),
         idle_under_a_title_it_wrote_itself(),
@@ -196,6 +198,37 @@ fn parked_on_a_subagent() -> Agent {
 
 /// The name that does not fit its card, on an agent writing to a path that
 /// does not fit either.
+/// INV-15's case, and it needs a fixture of its own because it looks exactly
+/// like `parked_on_a_subagent` on every field a card draws.
+///
+/// Both are busy, both delegated, both have been silent for a quarter of an
+/// hour. The only difference is that nothing under this one is moving either,
+/// and without a card that says so the two are indistinguishable — which is the
+/// failure, not the fixture.
+fn a_family_that_has_gone_quiet() -> Agent {
+    Agent {
+        session_id: "mock-quiet-family".into(),
+        pid: QUIET_FAMILY_PID,
+        name: "billing-migration".into(),
+        cwd: "/Users/demo/Projects/billing-service".into(),
+        folder: "billing-service".into(),
+        status: AgentStatus::Busy,
+        kind: "interactive".into(),
+        started_at: START - 2_700_000,
+        version: Some("2.1.232".into()),
+        git_branch: Some("migrate-0042".into()),
+        pane_id: Some("%81".into()),
+        tmux_session: Some("claude-mock-e".into()),
+        activity: Some("Task → Rewrite the 0042 migration and its callers".into()),
+        last_activity_at: Some(START - 900_000),
+        delegating: Some(true),
+        subagents: Some(2),
+        tokens: Some(41_200),
+        agent_kind: CLAUDE_KIND.into(),
+        ..Default::default()
+    }
+}
+
 fn name_too_long_for_its_card() -> Agent {
     Agent {
         session_id: "mock-long-name".into(),
@@ -1078,7 +1111,15 @@ mod tests {
 
     /// Where the never-prompted fixture sits in the fleet, which is what proves
     /// `enrich` patched in place rather than reordering.
-    const FRESH_FIXTURE_POSITION: usize = 7;
+    /// Derived rather than written down: a hardcoded index silently points at
+    /// the wrong agent the moment a fixture is added ahead of it, and this one
+    /// already did.
+    fn fresh_fixture_position() -> usize {
+        fixtures()
+            .iter()
+            .position(|a| a.session_id == "mock-fresh")
+            .expect("the never-prompted fixture")
+    }
 
     /// One reading per branch the meter has: ok, warn, critical, spent.
     const METER_BRANCHES: usize = 4;
@@ -1102,6 +1143,14 @@ mod tests {
     /// Kept as a file rather than a literal so it can be regenerated and
     /// diffed. It is the oracle for the whole port: if these bytes differ, the
     /// React client and the Playwright suite are looking at a different server.
+    /// The fixture fleet, recorded.
+    ///
+    /// These were captured from the Node server while the port was in progress,
+    /// to prove it faithful. That comparison is over — the Node server is gone
+    /// and the fixtures have since grown a case it never had — so what they pin
+    /// now is the wire shape itself: absent fields absent rather than null, key
+    /// names unchanged, and no fixture quietly added or dropped. Regenerate
+    /// them deliberately, never to make a red test green.
     const NODE_MOCK_AGENTS: &str = include_str!("../tests/golden/agents.json");
 
     /// Captured from the same Node server as the fleet. Node ages are relative
@@ -1128,7 +1177,7 @@ mod tests {
     }
 
     #[test]
-    fn inv13_the_fixture_forest_matches_the_node_server() {
+    fn inv13_the_fixture_trees_match_what_is_recorded() {
         let want = without_write_times(serde_json::from_str(NODE_MOCK_TREE).unwrap());
         let trees: Vec<_> = fixtures().iter().map(|a| mock_tree(a, now_ms())).collect();
         let got = without_write_times(serde_json::json!({ "trees": trees }));
@@ -1153,7 +1202,7 @@ mod tests {
     }
 
     #[test]
-    fn fixtures_serialise_exactly_as_the_node_server_does() {
+    fn fixtures_serialise_to_the_recorded_wire_shape() {
         // The capture is the whole `/api/agents` body; the fleet is under
         // `agents`, exactly as the route serves it.
         let want: serde_json::Value = serde_json::from_str(NODE_MOCK_AGENTS).unwrap();
@@ -1169,7 +1218,7 @@ mod tests {
     }
 
     #[test]
-    fn fixture_roster_matches_the_ts_source() {
+    fn the_fixture_roster_is_exactly_what_is_recorded() {
         let ids: Vec<String> = fixtures().into_iter().map(|a| a.session_id).collect();
         assert_eq!(
             ids,
@@ -1177,6 +1226,7 @@ mod tests {
                 "mock-waiting",
                 "mock-busy",
                 "mock-busy-2",
+                "mock-quiet-family",
                 "mock-long-name",
                 "mock-idle-kb",
                 "mock-idle-ce",
@@ -1202,6 +1252,7 @@ mod tests {
                 (WAITING_PID, Some("%76")),
                 (BUSY_PID, Some("%77")),
                 (DELEGATING_PID, Some("%75")),
+                (QUIET_FAMILY_PID, Some("%81")),
                 (LONG_NAME_PID, Some("%79")),
                 (IDLE_KB_PID, Some("%72")),
                 (IDLE_CE_PID, Some("%73")),
@@ -1338,6 +1389,7 @@ mod tests {
                 Some(48_120),
                 Some(111_800),
                 Some(67_500),
+                Some(41_200),
                 Some(23_900),
                 Some(59_800),
                 Some(31_900),
@@ -1463,7 +1515,7 @@ mod tests {
     async fn a_static_source_never_moves() {
         let s = MockSource::new(false);
         s.start().await.unwrap();
-        assert_eq!(s.list().len(), 10);
+        assert_eq!(s.list().len(), fixtures().len());
         assert_eq!(s.get("mock-waiting").unwrap().status, AgentStatus::Waiting);
         assert!(s.get("nope").is_none());
         s.stop();
@@ -1498,10 +1550,10 @@ mod tests {
             s.get("mock-fresh").unwrap().activity.as_deref(),
             Some("Read: notes.md")
         );
-        assert_eq!(s.list()[FRESH_FIXTURE_POSITION].session_id, "mock-fresh");
+        assert_eq!(s.list()[fresh_fixture_position()].session_id, "mock-fresh");
         // A patch for an unknown session is a no-op, not a new agent.
         s.enrich("ghost", AgentPatch::default());
-        assert_eq!(s.list().len(), 10);
+        assert_eq!(s.list().len(), fixtures().len());
     }
 }
 
@@ -1523,6 +1575,10 @@ const FINISHED_RESEARCH_AGE_MS: i64 = 11 * MINUTE_MS;
 const FINISHED_CROSS_CHECK_AGE_MS: i64 = 13 * MINUTE_MS;
 const ORPHANED_SWEEP_AGE_MS: i64 = 22 * MINUTE_MS;
 const SILENT_MIGRATION_AGE_MS: i64 = 16 * MINUTE_MS;
+/// What a fixture delegate reports having done. Any plausible pair works; what
+/// matters is that most nodes carry one and one deliberately does not.
+const FIXTURE_CALLS: u32 = 12;
+const FIXTURE_WORKED_MS: i64 = 4 * MINUTE_MS;
 const SILENT_CALLERS_AGE_MS: i64 = 19 * MINUTE_MS;
 
 /// The defaults every fixture node starts from, so each one below states only
@@ -1536,6 +1592,12 @@ fn node(agent_id: &str, description: &str, wrote_ms_ago: i64, now: i64) -> Subag
         parent_agent_id: None,
         last_write_at: now - wrote_ms_ago,
         bytes: 40_000,
+        // Effort is what separates seven identical `quiet` rows from each
+        // other, so the fixtures carry it. One node below deliberately does
+        // not, because a transcript this app cannot read has to be on screen
+        // too (INV-11).
+        calls: Some(FIXTURE_CALLS),
+        worked_ms: Some(FIXTURE_WORKED_MS),
         state: SubagentState::Quiet,
         state_inferred: None,
         stopped_by_user: None,
@@ -1627,6 +1689,10 @@ fn wrapping_triage_brief(now: i64) -> SubagentNode {
     SubagentNode {
         agent_type: "qa-triage".into(),
         bytes: 52_000,
+        // The unreadable one: no effort at all, so the row renders without it
+        // rather than claiming it did nothing.
+        calls: None,
+        worked_ms: None,
         ..node(
             "a6c07bfd53044168f",
             "Independent second pass over the QA report, verifying every \

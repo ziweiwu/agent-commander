@@ -7,6 +7,7 @@ import type { Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
 import { relative } from '../lib/format.ts'
+import { useFleetTrees } from '../hooks/useFleetTrees.ts'
 import { AgentCard } from './AgentCard.tsx'
 import { Button } from './ui/Button.tsx'
 import { SearchBar } from './SearchBar.tsx'
@@ -42,6 +43,20 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const [pruning, setPruning] = useState(false)
 
   const groups = useMemo(() => grouped(agents, fleet), [agents, fleet])
+
+  /*
+   * The delegation graph, polled only while this list is mounted (INV-4).
+   *
+   * Read here rather than in each card so there is one poll for the fleet
+   * rather than one per card, and looked up by session id below: the array is
+   * replaced only when the graph actually changed, so a card's `tree` keeps its
+   * identity — and its memo — through every poll that found nothing new.
+   */
+  const trees = useFleetTrees()
+  const treeOf = useMemo(
+    () => new Map(trees.map((tree) => [tree.sessionId, tree])),
+    [trees],
+  )
 
   /*
    * Sessions opened and never prompted, counted over the whole fleet rather
@@ -175,6 +190,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                   <AgentCard
                     key={agent.sessionId}
                     agent={agent}
+                    tree={treeOf.get(agent.sessionId)}
                     selected={agent.sessionId === selected}
                     onSelect={onSelect}
                   />

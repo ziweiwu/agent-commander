@@ -21,7 +21,50 @@ npx @ziweiwu/agent-commander        # run it
 
 npm install                         # or from a clone
 npm start          # builds the web bundle, then serves on http://127.0.0.1:4317
+
+npm run app:install                 # macOS: put an icon in ~/Applications
 ```
+
+The Mac app is a **launcher**. It starts the same server on the same port,
+opens your browser at it, and gets out of the way — so the server keeps running
+after the app's icon disappears. That is deliberate: a `.app` whose executable
+is a shell script can never receive ⌘Q, and a Quit it cannot hear would arrive
+as a kill that skipped the server's own cleanup. When you do want to stop it:
+
+```
+pkill -f 'Agent Commander.app.*bin/agent-commander'
+```
+
+That matches the command line rather than reading a stored process id, which
+cannot go stale: a pid file written by a launch three days ago may by now name
+something else entirely.
+
+Unlike the npm package it needs nothing installed to *run* — the bundle carries
+the compiled server, which has no interpreter and no runtime dependencies.
+Building it is another matter: it needs a Rust toolchain, and the Xcode Command
+Line Tools for `iconutil` and the `python3` the builder runs under
+(`xcode-select --install`). It is built on your machine and unsigned, so it runs
+there without ceremony — locally created files are never quarantined — but
+copying it to another Mac will trip Gatekeeper. That is a consequence of not
+signing it, not a fault. Its log is at
+`~/Library/Logs/agent-commander/server.log`.
+
+**Updating it** is the same command again. The app carries its own copy of the
+binary, so the running server keeps serving what it started with until it is
+replaced. The launcher notices — if the bundled binary is newer than the server
+it started, it stops that one and starts the new one rather than opening a
+dashboard that is quietly out of date. It will only ever replace a server it
+started itself: a copy you ran from a terminal is opened, never killed.
+
+`npm run app` builds into `build/mac/` without installing.
+
+There is no `npx` route to the app, and no `npx` route to the server either
+yet: the published package carries the Rust source rather than a compiled
+binary, so `npx @ziweiwu/agent-commander` finds nothing to run until you have
+built it (`npm run build:server`) or installed it (`cargo install --path
+rust`). Shipping prebuilt binaries needs one npm package per platform and a
+release pipeline to fill them, which is a distribution decision this port has
+not made.
 
 A blocked agent opens straight onto the terminal that can answer it, and the
 whole thing works from a phone over Tailscale:
@@ -37,29 +80,13 @@ whole thing works from a phone over Tailscale:
 
 </details>
 
-## Two views over one fleet
+## One view over the fleet
 
-There are two ways to read the same machine, chosen in the settings menu and
-remembered per browser.
-
-**Forest** — the default — draws every session as a *family*: itself, and
-everything it has handed out, all on one shared time axis with **now at the
-right-hand edge**. A family with a mark on the right is working, whoever in it
-is doing the writing. That is the question a list structurally cannot answer,
-because an agent that delegates stops writing its own transcript and looks
-exactly like one that died. The summary names the straggler as well as the
-count — `3 of 5 writing · one quiet 40m` — because a family is only as healthy
-as its slowest member, and a card that reported only its freshest would go on
-looking fine while one delegate had been silent for an hour.
-
-Anything with no history at all gets **no mark**, rather than one at the far
-left: a session that has never been prompted has no duration, and a mark at the
-old end of the axis would claim it had been silent for hours (INV-11).
-
-**Cards** is the grouped list below, unchanged. It is not deprecated — it
-answers a different question. The list says what each agent is *doing*, in a
-line of its own; the forest says whether anything in a family is still moving.
-Neither can hide an agent the other shows.
+There used to be two, chosen in settings: a *forest* that drew each session as a
+family on a shared time axis, and the card list. The split cost more than it
+returned — every property that had to be true of the fleet had to be proved
+twice — and the forest's real question turned out to be answerable on the card
+itself. So the delegation trees moved onto the cards, and the forest is gone.
 
 ## What the card list shows
 
@@ -76,28 +103,45 @@ own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
 
-### The delegation lanes
+### Delegates
 
-The forest draws every agent's family: everything it has handed out, one lane
-per delegate, nested as deep as the work actually goes. Claude Code writes the
-graph down — one small file beside each subagent's transcript naming its type,
-its brief and its parent — so this is read rather than guessed at.
+Every card carries a line about what the agent handed out — `4 delegates ·
+1 active · 2 quiet · 1 done` — and **Show delegates** opens the tree beneath it,
+nested as deep as the work actually goes. Claude Code writes the graph down, one
+small file beside each subagent's transcript naming its type, its brief and its
+parent, so this is read rather than guessed at.
 
-Each delegate's mark carries one of three states. They are three rather than
-two on purpose:
+Each delegate carries one of three states. They are three rather than two on
+purpose:
 
-- **done** — something recorded the ending. You stopped it, or the parent logged
-  its result.
+- **done** — something recorded the ending. In practice that means *you stopped
+  it*: a delegate that finished normally leaves no record saying so.
 - **active · inferred** — its transcript grew recently and the parent is working.
   A good guess, and it says that it is one.
-- **quiet · 22m** — nothing has been written for a while and nothing recorded an
-  ending. It may have finished; it may have died. There is no way to tell from
-  here, so the lane says how long rather than picking one.
+- **quiet** — nothing has been written for a while and nothing recorded an
+  ending. It may have finished; it may have died. Nothing here can tell, so it
+  says neither.
+
+Because almost everything ends up **quiet**, the state cannot be the only thing
+on the row — a tree of seven identical `quiet` rows says nothing. So each
+delegate also shows *what it did*: `29 calls over 12m`, counted from its own
+transcript. That is a measurement, not a summary, and it is what separates a
+delegate that worked for twelve minutes from one that died on its first call. A
+delegate whose transcript cannot be read shows no numbers at all rather than a
+zero, which would be a confident claim that it did nothing.
 
 A delegate whose parent is missing from disk is shown at the top level and
 marked, rather than disappearing along with everything beneath it. An agent
 whose CLI keeps no transcript says the app *cannot tell* whether it delegated —
 which is a different thing from having delegated nothing.
+
+**A family that has gone quiet gets asked about.** When an agent is parked on
+its delegates and none of them is moving either, nothing in that family has
+budged and nobody has checked — a shape a status board hides, because the card
+reads a confident `busy · delegated` for as long as you leave it. The card says
+*"Nothing here has moved for 9m — still working?"*. A question, because quiet
+genuinely does not distinguish finished from dead. One delegate still moving and
+the card says the opposite, in the same place.
 
 ### Other agent CLIs
 
@@ -129,9 +173,8 @@ other CLI rather than typing `/model opus` at something that will take it
 literally. Closing still works — it closes the tmux session instead.
 
 Filter with the search box (name, folder, branch, activity or status) or by
-clicking a status chip in the header — the query, the chips and the sort apply
-to whichever rendering is on, so the forest and the cards always agree about
-which agents exist. When an agent starts waiting on you, the browser tab title
+clicking a status chip in the header — the query, the chips and the sort all
+narrow the same list. When an agent starts waiting on you, the browser tab title
 becomes `(1) agent-commander`.
 
 ### Notifications
@@ -462,7 +505,7 @@ memory rather than a reading (INV-11).
 | `~/.claude/sessions/<pid>.json` | Session list, status, cwd, and the tmux pane id. Read every 2s. |
 | `claude agents --json` | Authoritative presence check. Costs ~680ms, so it runs every 30s to reconcile. |
 | `~/.claude/projects/*/<sessionId>.jsonl` | The timeline, tailed incrementally by byte offset. |
-| `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the forest view is mounted. |
+| `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the fleet list is mounted. |
 | `tmux capture-pane` / `send-keys` | The Attach tab, and delivering your input. |
 | `~/.claude/agent-commander/rate-limits.json` | Your 5-hour and 7-day subscription quota. The only file this app **writes** — see [Claude usage](#claude-usage). |
 
@@ -547,8 +590,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 906 tests: 501 Rust (the server) + 405 vitest (the web app)
-npm run e2e        # 233 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 914 tests: 507 Rust (the server) + 407 vitest (the web app)
+npm run e2e        # 238 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

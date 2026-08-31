@@ -90,8 +90,7 @@ function Address() {
 /*
  * Pinned to the card list on purpose. What this file asserts — that the token
  * survives the first navigation, in the address bar as well as on requests —
- * is the same in either view, and the assertions below reach for a card. The
- * default view is a preference; this file should not silently follow it.
+ * reaches for a card, which the fleet always renders.
  */
 async function appAt(
   url: string,
@@ -112,7 +111,7 @@ async function appAt(
   }))
   const { App, FleetRoute } = await import('../../src/web/components/App.tsx')
   const { useStore } = await import('../../src/web/store/store.ts')
-  useStore.setState({ view: 'legacy', ...state })
+  useStore.setState(state)
   render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>

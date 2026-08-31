@@ -310,7 +310,7 @@ where they can drift without making this file wrong.
 **Nothing polls what nobody is watching — and nothing re-sends what the watcher
 already has.** The first half was always here; the second was the gap, and
 `/api/tree` fell straight into it. The delegation graph is polled every three
-seconds while the forest view is open, and measured against 53 real sessions the
+seconds while the fleet list is mounted, and measured against 53 real sessions the
 body is 54.6 KB that is *byte-identical* from one poll to the next — 0 of 55,916
 bytes differing, 64 MB an hour re-sent to a phone over Tailscale, which is the
 connection this app exists to be used from.
@@ -326,7 +326,9 @@ That last clause is load-bearing and is the half that was actually broken in the
 browser. In the standalone tree view this app used to have, `setTrees(body.trees)`
 handed every `tree` prop a new object identity every three seconds even when the
 JSON was identical, so a `memo` could never hit and all 260 nodes re-rendered for
-data nobody had changed. `useFleetTrees` holds the tag in a ref and a 304 comes
+data nobody had changed. It matters more now than it did then: the graph feeds
+every fleet card, and each card's `memo` is what keeps a broadcast from
+re-rendering the whole list. `useFleetTrees` holds the tag in a ref and a 304 comes
 back as `{ changed: false }`, which carries no trees for `setTrees` to be handed
 — the churn is impossible by construction rather than merely fixed.
 
@@ -358,9 +360,10 @@ were the reason for the rules, not the rules.
 - `routes::the_tree_is_not_resent_when_it_has_not_changed` — the graph is served with an `ETag`, a matching
   `If-None-Match` gets a bare 304, a real change gets a new tag and a body, and
   a stale or unknown tag is answered in full rather than with a 304
-- `test/ui/ForestRoute.test.tsx` — the first poll carries no tag and the next
-  carries the one just served; an unchanged answer does not blank the graph;
-  and a changed one is what advances the tag
+- `test/ui/fleet-trees.test.tsx` — the first poll carries no tag and the next
+  carries the one just served; an unchanged answer does not blank a card's
+  delegates; a changed one advances the tag; and unmounting the list stops the
+  poll
 
 ## INV-5 — Degrade, don't error
 
@@ -749,6 +752,24 @@ rather than only by greying a button.
 - `test/ui/chat-offline.test.tsx` — the draft survives, nothing is sent, nothing
   is replayed on reconnect, and the explanation is reachable by keyboard
 
+**A card's activity trail is measured or it is absent.** The two lengths a card
+draws — writing, then silent — come from `startedAt` and `lastActivityAt`, and
+the second field means two different things depending on where it came from: a
+transcript write, or a pane that produced output. The trail draws the first as
+"it was working until here", which is a claim the second cannot support, since a
+pane goes quiet when a TUI stops repainting rather than only when the agent
+stops. So an agent whose CLI writes no transcript gets no trail at all rather
+than a weaker claim wearing the same shape — and neither does one with no last
+write, where a full-width silence would assert that nothing has happened since
+it started. A delegate cannot even be passed to it: `SubagentNode` carries no
+start time, so the tree draws a mark with nothing leading up to it.
+
+- `test/trail.test.ts` — the split; nothing drawn without a start or a last
+  write; a write reported outside the session's life clamped rather than
+  overflowing the row
+- `test/ui/fleet-delegates.test.tsx` — no trail for an agent whose CLI writes no
+  transcript, even when it reports a last activity
+
 **A dead pane was a five-second toast.** With no pty to report an exit (INV-1),
 the only signal was a notice that expired while the terminal went on showing its
 last frame as though it were live. The exit is now carried on the wire as
@@ -795,7 +816,7 @@ an agent, and a tab switching views quickly is not what this guards.
 
 ## INV-13 — A delegation tree claims only what the sidecars say
 
-The forest draws an agent's delegates, and everything under them. Its
+The fleet card draws an agent's delegates, and everything under them. Their
 structure is **read, not derived**: Claude Code writes one small sidecar beside
 every subagent transcript.
 
@@ -826,17 +847,42 @@ lying about the shape of the work.
 delegate rather than to an agent, and the ordering is evidence, then a marked
 guess, then an admission:
 
-- `done` is claimed **only on evidence** — the sidecar says `stoppedByUser`, or
-  the parent's transcript carries a result for this delegate's `toolUseId`.
-  Something recorded the ending.
+- `done` is claimed **only on evidence**, and today there is exactly one piece
+  of it: the sidecar says `stoppedByUser`. Something recorded the ending because
+  a person caused it.
+
+  **This is narrower than it sounds, and the word oversells it.** A delegate
+  that finished its work normally is *not* `done` — it is `quiet`, forever,
+  along with one that died. `done` in practice means "you stopped it". This
+  file previously also claimed the state could be reached from a result for the
+  delegate's `toolUseId` in the parent's transcript; that was never implemented
+  — `toolUseId` is named in the sidecar but read nowhere in `src/` — and saying
+  so was the same overclaiming this invariant exists to prevent, committed by
+  the document rather than by the app.
 - `active` is a guess: the transcript grew recently *and* the parent is busy. It
   is marked `stateInferred` and renders as `active · inferred` with a dashed
   edge — the same device a fleet card already uses for a status this app worked
   out rather than read. On its own a recent write says nothing, because a
   delegate that finished half a second ago also wrote half a second ago.
-- `quiet` is everything else, and **a quiet node is never drawn as done.** An
-  agent that finished and an agent that died both stop writing; no timestamp
-  separates them. This is the same absence-of-evidence trap that removed the
+- `quiet` is everything else — which, per the above, is nearly everything. **A
+  quiet node is never drawn as done.** An agent that finished and an agent that
+  died both stop writing; no timestamp separates them.
+
+  Because `quiet` carries so much, it must not be the only thing on the row.
+  It answers "is it still going" and is silent about what happened, and a tree
+  of seven delegates all reading `quiet` tells a reader nothing at all. So each
+  node also carries **what it did**, as a measurement rather than a claim: the
+  number of tool calls in its transcript and the span between its first and
+  last record. That separates a delegate that worked for thirteen minutes
+  before going quiet from one that died on its first call — a distinction
+  `quiet` alone flattens, and the one a reader actually wants.
+
+  It is deliberately not a summary. Three heuristics were tried against seven
+  real delegates — the first line of the final message, the first substantive
+  line, the last tool call — and each produced something useless on at least
+  one of them ("Here is the mock.", a mangled fence, and "Bash" seven times
+  over). The brief the parent gave is a better description of the work than
+  anything recoverable from the transcript, and the tree already shows it. This is the same absence-of-evidence trap that removed the
   Prune button's reach in INV-11, and it is the failure this invariant exists to
   prevent: telling somebody their work completed when nothing checked.
 
@@ -847,10 +893,11 @@ nobody could make. That tree comes back `unknown` and the view says so.
 
 **Transcript size is captioned as a size, never as a percentage.** There is no
 total for it to be a fraction of. INV-11 caught exactly this once already, with
-`tokens` displayed as spend and sorted as "most spent". The forest draws no size
-at all, so today the rule is pinned at the server (`subagents::inv13_*`
-keeps `bytes` as bytes); any surface that ever draws it again inherits the
-caption clause.
+`tokens` displayed as spend and sorted as "most spent". No view draws a size at
+all, so the rule is pinned at the server (`subagents::inv13_*` keeps `bytes` as
+bytes) and at the tree (`test/ui/fleet-delegates.test.tsx` asserts nothing
+size-shaped reaches the screen); any surface that ever draws it again inherits
+the caption clause.
 
 Colour is never the only signal: every state mark carries words in its
 accessible name, which is what `audit:contrast` and the generated palettes both
@@ -862,13 +909,38 @@ assume.
   directory returning an empty tree rather than throwing; `unknown` rather than
   empty for a CLI with no transcript; and each of the three states, including a
   delegate that is not called active while its parent is idle
-- `test/ui/ForestView.test.tsx` — a quiet delegate is not rendered as done, an
-  inferred `active` says so in words, an evidenced `done` is not marked as a
-  guess, a stopped delegate is named rather than called finished, and
-  "delegated nothing" and "cannot tell" render as different claims
-- `e2e/forest.spec.ts` — the same clauses against the real server and mock
-  sidecars, plus depth-3 nesting, the raised orphan, and no sideways scroll at
-  any width
+**The card that everybody reads is where this has to hold.** The tree used to
+be drawn only in the forest, which was a place you had to go; it is now rolled
+up onto the fleet card, and a rollup is where distinctions go to die. Four
+claims share one line and all four are different sentences: `unread` — the
+graph has not arrived, so the line is absent rather than briefly saying
+"delegated nothing" on every card at load; `none`; `unknown`; and the counts.
+A count of zero renders nothing, which is exactly why `none` and `unknown`
+cannot be left to a count.
+
+**`done` may never be reached from an inference, and that is a rule rather
+than a description of the server.** `done` is the one state a reader acts on —
+it is what makes them stop checking — so `isGuess` ignores `stateInferred` on
+it entirely. `quiet` is not marked as a guess either: it is the honest answer,
+and marking it would imply a better one exists.
+
+- `test/delegate-effort.test.ts` — tool calls counted rather than turns; the
+  span read off the records and not off the file's mtime; nothing reported at
+  all for a transcript that could not be parsed, distinct from a real zero; and
+  a transcript that cannot have changed is not re-read
+- `test/delegation-claim.test.ts` — the four claims; counts across every depth;
+  a raised orphan counted rather than dropped; `done` refused as a guess even
+  when the flag says otherwise
+- `test/ui/fleet-delegates.test.tsx` — effort renders beside the state rather
+  than instead of it, a span too short to name is dropped rather than shown as
+  "0m", an unreadable transcript renders no numbers while a real zero still
+  does; a quiet delegate is not rendered as done,
+  an inferred `active` says so in words, a stopped delegate is named rather
+  than called finished, a raised orphan says it was raised, a grandchild is
+  drawn, no transcript size reaches the screen, and the disclosure is kept
+  outside the card's own button
+- `e2e/delegates.spec.ts` — the same clauses against the real server and mock
+  sidecars, plus depth-3 nesting and no sideways scroll at any width
 
 ## INV-14 — A notification is a transition, not a state
 
@@ -904,3 +976,44 @@ as intent rather than ambience.
   again; tracking continues while disabled so enabling later dumps nothing; a
   visible tab stays silent; a revoked permission wins over the stored
   preference
+
+## INV-15 — A silent family is a question, never a verdict
+
+An agent that delegated stops writing. That is not a failure — it is the point,
+and it is why `delegating` exists — but it means its own clock says nothing
+about whether anything is happening. The delegates are the thing still moving.
+
+So when a delegating agent is quiet **and every one of its delegates is quiet
+too**, nothing in the family has moved and nobody has checked. That is the
+shape a status board hides best: the card reads a confident `busy · delegated`
+for as long as you leave it there, and every number on it agrees.
+
+**It is surfaced, and it is surfaced as a question.** Every delegate in that
+state is `quiet`, and quiet is precisely the state that does not separate
+finished from dead (INV-13). The strongest true sentence is "nothing here has
+moved for 9m — still working?", and the card says that rather than "stalled".
+A verdict would be the INV-11 failure this whole file exists to prevent,
+committed one level up: asserting about a family what could only be asserted
+about a delegate.
+
+**One delegate called active is enough to keep a family off the list, and the
+card says so where the question would otherwise be** — `2 still moving, so this
+is not a stall`. That claim is itself only a guess (INV-13 marks `active` as
+inferred), and erring towards "still working" is the safe direction: the cost
+is a question nobody was asked, where the other direction costs a stall nobody
+noticed.
+
+**The question needs a duration or it is not asked.** Without a number it is
+an insinuation rather than a question, so an agent with no readable last write
+gets nothing.
+
+**Absence of a tree is not a silent tree.** `unread` and `unknown` never
+qualify, for the same reason `none` does not: there is nothing to have gone
+quiet.
+
+- `test/delegation-claim.test.ts` — a quiet family asks; one inferred-active
+  delegate silences it; an agent working itself never qualifies; neither does
+  an unread, unknown or empty tree
+- `test/ui/fleet-delegates.test.tsx` — the question renders as a question, the
+  "not a stall" note takes the same slot when a delegate is moving, and the
+  question is withheld when no duration can be named

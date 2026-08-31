@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/store.ts'
 import { LANGUAGES, LANGUAGE_NAMES } from '../lib/i18n.ts'
-import { SCHEMES, THEMES, VIEWS, type Scheme, type Theme, type View } from '../lib/prefs.ts'
+import { SCHEMES, THEMES, type Scheme, type Theme } from '../lib/prefs.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './SettingsMenu.module.css'
@@ -16,27 +16,6 @@ const THEME_ICON: Record<Theme, string> = { system: '◐', light: '☀', dark: '
 
 /** How close the menu may come to the edge of the window before it flips. */
 const VIEWPORT_MARGIN = 8
-
-const VIEW_KEY = {
-  forest: 'viewForest',
-  legacy: 'viewLegacy',
-} as const
-
-/*
- * A name alone does not distinguish these two. "Forest" and "Cards" both sound
- * plausible for either, and picking the wrong one replaces the whole dashboard
- * — so each row carries a line saying what it actually shows, as its tooltip
- * and its accessible description at once.
- */
-const VIEW_HINT = {
-  forest: 'viewForestHint',
-  legacy: 'viewLegacyHint',
-} as const
-
-/* Box-drawing over anything more pictorial: `├` is the branch a delegation tree
-   is already drawn with in a terminal, and `☰` is a list of rows. Both are as
-   widely available in fallback fonts as the theme glyphs beside them. */
-const VIEW_ICON: Record<View, string> = { forest: '├', legacy: '☰' }
 
 const SCHEME_KEY = {
   graphite: 'schemeGraphite',
@@ -72,23 +51,18 @@ function Swatch({ scheme }: { scheme: Scheme }) {
 }
 
 /**
- * View, theme, colours and language.
- *
- * The view group comes first because it is the largest of the four choices:
- * which colour the dashboard is matters less than which dashboard it is.
+ * Alerts, theme, colours and language.
  *
  * Theme and language close the menu on a choice, so the result is visible
- * immediately, which is what every other menu on the platform does. View and
- * colours stay open — both are choices made by comparing, not by knowing.
+ * immediately, which is what every other menu on the platform does. Colours
+ * stay open — a choice made by comparing, not by knowing.
  */
 export function SettingsMenu() {
   const t = useTranslate()
-  const view = useStore((s) => s.view)
   const theme = useStore((s) => s.theme)
   const scheme = useStore((s) => s.scheme)
   const lang = useStore((s) => s.lang)
   const notify = useStore((s) => s.notify)
-  const setView = useStore((s) => s.setView)
   const setTheme = useStore((s) => s.setTheme)
   const setScheme = useStore((s) => s.setScheme)
   const setLang = useStore((s) => s.setLang)
@@ -194,31 +168,6 @@ export function SettingsMenu() {
           ref={menuRef}
           role="menu"
         >
-          <div className={styles.group}>
-            <span className={styles.label}>{t('viewLabel')}</span>
-            {VIEWS.map((option) => (
-              <button
-                key={option}
-                type="button"
-                role="menuitemradio"
-                className={styles.item}
-                data-testid={`view-${option}`}
-                title={t(VIEW_HINT[option])}
-                aria-checked={view === option}
-                aria-pressed={view === option}
-                onClick={() => {
-                  setView(option)
-                  // Left open, for the reason the colour schemes are: the two
-                  // views are worth flipping between to see which suits the
-                  // fleet on screen, and that is two clicks rather than four.
-                }}
-              >
-                <span className={styles.icon}>{VIEW_ICON[option]}</span>
-                {t(VIEW_KEY[option])}
-              </button>
-            ))}
-          </div>
-
           <div className={styles.group}>
             <span className={styles.label}>{t('notifyLabel')}</span>
             <button

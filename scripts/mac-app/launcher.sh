@@ -45,6 +45,7 @@ PATHCACHE="$STATE/path"
 LOG_MAX_BYTES=1048576
 READY_TRIES=100
 READY_SLEEP=0.2
+STOP_TRIES=25
 HARVEST_TRIES=60
 HARVEST_SLEEP=0.1
 CURL_REFUSED=7
@@ -325,9 +326,77 @@ if [ ! -x "$BIN" ] || [ ! -f "$WEBROOT/index.html" ]; then
   exit 1
 fi
 
+# --- replacing a server this app started, after a reinstall -------------------
+
+# Only ever a server *we* started, identified by the pid we wrote down and by
+# its command line still naming this bundle.
+#
+# The narrowness is the point. Something else on 4317 answering /api/env is
+# almost certainly a copy started from a terminal or a clone, and killing it
+# because a build is newer would be this app reaching outside itself to stop
+# somebody's work. It gets opened, not replaced.
+ours_to_replace() {
+  [ -r "$PIDFILE" ] || return 1
+  pid=$(/bin/cat "$PIDFILE" 2>/dev/null) || return 1
+  case "$pid" in "" | *[!0-9]*) return 1 ;; esac
+  /bin/kill -0 "$pid" 2>/dev/null || return 1
+  cmd=$(/bin/ps -o command= -p "$pid" 2>/dev/null) || return 1
+  case "$cmd" in *"$BUNDLE"*) return 0 ;; esac
+  return 1
+}
+
+# Is the bundle's binary newer than the server that is running it?
+#
+# Compared as timestamps rather than as versions, because a version only moves
+# on a release: rebuild and reinstall at the same version all afternoon and
+# every build calls itself the same, so a version check would miss exactly the
+# case that happens most. The binary carries the mtime cargo gave it, which the
+# install preserves, and the pid file is written when the server is launched.
+# A binary newer than the launch means an install landed underneath a server
+# still running what it started with — which is otherwise silent: the probe
+# above finds a healthy server and simply opens it, so the update never lands
+# and nothing says so.
+stale_running() {
+  [ -f "$BIN" ] && [ -f "$PIDFILE" ] || return 1
+  built=$(/usr/bin/stat -f %m "$BIN" 2>/dev/null) || return 1
+  started=$(/usr/bin/stat -f %m "$PIDFILE" 2>/dev/null) || return 1
+  [ "$built" -gt "$started" ]
+}
+
+stop_ours() {
+  pid=$(/bin/cat "$PIDFILE" 2>/dev/null) || return 1
+  say "replacing pid $pid: the app was reinstalled after that server started"
+  # SIGTERM only. The server cleans up its tmux control client and its paste
+  # staging directory on the way out, and a KILL would skip both.
+  /bin/kill -TERM "$pid" 2>/dev/null || return 1
+  i=0
+  while [ "$i" -lt "$STOP_TRIES" ] && /bin/kill -0 "$pid" 2>/dev/null; do
+    /bin/sleep "$READY_SLEEP"
+    i=$((i + 1))
+  done
+  /bin/kill -0 "$pid" 2>/dev/null && return 1
+  return 0
+}
+
 probe
 case $? in
-  0) /usr/bin/open "$URL"; exit 0 ;;
+  0)
+    # Ours, and up to date -- or ours but somebody else's copy, which is not
+    # this app's to restart. Either way: show it.
+    if stale_running && ours_to_replace; then
+      if ! stop_ours; then
+        alert "Agent Commander could not restart" \
+"The running server is older than the app, and it did not stop when asked.
+
+It is not being force-quit, because that would leave a tmux control client and a
+temporary directory behind. Its log is at ~/Library/Logs/agent-commander/server.log"
+        exit 1
+      fi
+    else
+      /usr/bin/open "$URL"
+      exit 0
+    fi
+    ;;
   3) alert "Agent Commander is already running with a token" \
 "A copy is listening on port $PORT and asking for a token, so this launcher cannot open it for you.
 

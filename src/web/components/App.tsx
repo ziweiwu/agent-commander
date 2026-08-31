@@ -8,7 +8,6 @@ import { useIsNarrow } from '../hooks/useMediaQuery.ts'
 import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { FleetList } from './FleetList.tsx'
-import { ForestRoute } from './ForestRoute.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
 import { NewAgentDialog } from './NewAgentDialog.tsx'
 import { SettingsMenu } from './SettingsMenu.tsx'
@@ -246,7 +245,6 @@ export function FleetRoute() {
   const expectSession = useStore((s) => s.expectSession)
   const setExpectSession = useStore((s) => s.setExpectSession)
   const tab = useStore((s) => s.tab)
-  const view = useStore((s) => s.view)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const wantTab = location.pathname.endsWith('/term') ? 'attach' : 'chat'
@@ -308,26 +306,14 @@ export function FleetRoute() {
 
   return (
     <main className={`${styles.layout} ${showDetail ? '' : styles.solo}`}>
-      {/*
-        Two views over the same fleet, chosen in Settings and remembered per
-        browser. Not a migration: the card list is not deprecated, it answers a
-        different question — what each agent is doing — where the forest answers
-        whether anything in a family is still moving at all. The forest is the
-        default because a session that delegates stops writing its own
-        transcript, and a list has to bolt a word onto a card to explain that
-        silence.
-      */}
-      {!(narrow && showDetail) &&
-        (view === 'forest' ? (
-          <ForestRoute searchRef={searchRef} />
-        ) : (
-          <FleetList
-            tiled={!showDetail}
-            selected={selected}
-            searchRef={searchRef}
-            onSelect={(id) => navigate(`/agent/${id}`)}
-          />
-        ))}
+      {!(narrow && showDetail) && (
+        <FleetList
+          tiled={!showDetail}
+          selected={selected}
+          searchRef={searchRef}
+          onSelect={(id) => navigate(`/agent/${id}`)}
+        />
+      )}
       {agent && (
         <AgentDetail
           agent={agent}
