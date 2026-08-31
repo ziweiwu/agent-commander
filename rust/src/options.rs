@@ -85,6 +85,9 @@ impl Default for Options {
 pub enum Parsed {
     Options(Options),
     Help(String),
+    /// `--version`: the one question a running binary could not previously be
+    /// asked. Compiled in, so it cannot disagree with the binary that prints it.
+    Version(String),
 }
 
 /* ------------------------------------------------------------------ paths */
@@ -253,6 +256,7 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             "--install-statusline" => opts.install_statusline = true,
             "--dev" => opts.dev = true,
             "--help" | "-h" => return Ok(Parsed::Help(help_text())),
+            "--version" | "-V" => return Ok(Parsed::Version(version_text())),
             _ if arg.starts_with('-') => return Err(format!("unknown flag: {arg}")),
             _ => {}
         }
@@ -334,6 +338,12 @@ fn refuse_an_open_bind_without_a_token(opts: &Options) -> Result<(), String> {
     Ok(())
 }
 
+/// Capital `-V`, because lowercase `-v` reads as "verbose" to everyone who has
+/// used a unix tool, and this binary has no verbose mode to confuse it with.
+pub fn version_text() -> String {
+    format!("agent-commander {}", env!("CARGO_PKG_VERSION"))
+}
+
 pub fn help_text() -> String {
     [
         "agent-commander — see and steer every Claude Code agent on this machine".to_string(),
@@ -351,6 +361,7 @@ pub fn help_text() -> String {
         "      --install-statusline  add the quota bridge to ~/.claude/settings.json and exit"
             .to_string(),
         "      --web-root <d> directory of built web assets".to_string(),
+        "  -V, --version      show the version and exit".to_string(),
         "  -h, --help         show this help".to_string(),
         String::new(),
     ]
@@ -383,6 +394,7 @@ mod tests {
         match parse_args(&args(argv))? {
             Parsed::Options(o) => Ok(o),
             Parsed::Help(_) => panic!("expected options, got help"),
+            Parsed::Version(_) => panic!("expected options, got a version"),
         }
     }
 
@@ -494,8 +506,35 @@ mod tests {
             match parse_args(&args(&[flag])).unwrap() {
                 Parsed::Help(text) => assert!(text.contains("Usage: agent-commander")),
                 Parsed::Options(_) => panic!("{flag} should ask for help"),
+                // The other side of `version_is_not_the_help_text`: neither
+                // answer may stand in for the other.
+                Parsed::Version(_) => panic!("{flag} should ask for help, not a version"),
             }
         }
+    }
+
+    /// The question a running binary could not previously be asked.
+    ///
+    /// Compiled in rather than read off disk, so it cannot disagree with the
+    /// binary printing it — and `test/version.test.ts` keeps the crate in step
+    /// with the npm package that ships it.
+    #[test]
+    fn version_reports_the_compiled_in_version() {
+        for flag in ["--version", "-V"] {
+            let parsed = parse_args(&args(&[flag])).unwrap();
+            let Parsed::Version(text) = parsed else { panic!("{flag} should print a version") };
+            assert!(text.contains(env!("CARGO_PKG_VERSION")), "{text}");
+        }
+    }
+
+    /// Separate from `--help` on purpose: "what am I running" and "how do I use
+    /// this" are different questions, and one answering the other is a bug.
+    #[test]
+    fn version_is_not_the_help_text() {
+        let Parsed::Version(version) = parse_args(&args(&["--version"])).unwrap() else {
+            panic!("expected a version")
+        };
+        assert!(!version.contains("Usage:"), "{version}");
     }
 
     /// `--help` short-circuits, so a combination that would otherwise be

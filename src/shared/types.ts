@@ -141,6 +141,14 @@ export interface ServerEnv {
   tmux: boolean
   port: number
   platform: string
+  /**
+   * The version of the server answering, compiled into it.
+   *
+   * Optional on the wire because a server built before this existed answers
+   * without it, and a dashboard that showed "undefined" would be worse than one
+   * that shows nothing.
+   */
+  version?: string
 }
 
 export interface NewAgentRequest {
