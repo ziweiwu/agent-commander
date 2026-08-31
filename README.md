@@ -58,13 +58,13 @@ started itself: a copy you ran from a terminal is opened, never killed.
 
 `npm run app` builds into `build/mac/` without installing.
 
-There is no `npx` route to the app, and no `npx` route to the server either
-yet: the published package carries the Rust source rather than a compiled
-binary, so `npx @ziweiwu/agent-commander` finds nothing to run until you have
-built it (`npm run build:server`) or installed it (`cargo install --path
-rust`). Shipping prebuilt binaries needs one npm package per platform and a
-release pipeline to fill them, which is a distribution decision this port has
-not made.
+There is no `npx` route to the *app* — npm does not put icons in `~/Applications`
+— but `npx @ziweiwu/agent-commander` is the whole story for the server. The
+published package carries a prebuilt binary for each of macOS arm64, macOS x64,
+Linux x64 and Linux arm64; nothing compiles at install time, and a Rust
+toolchain is needed only to work on it. Windows is not among them, because the
+Attach tab is tmux. See [Releasing](#releasing) for why all four ride in one
+package rather than one package each.
 
 A blocked agent opens straight onto the terminal that can answer it, and the
 whole thing works from a phone over Tailscale:
@@ -609,54 +609,74 @@ below for what the second one covers that the first cannot.
 Pushing a `v*` tag triggers `.github/workflows/npm-publish.yml`, which refuses
 to run if the tag and `package.json` disagree — a mismatch means the thing
 published is not the thing the tag names, and npm versions are immutable once
-they land. It then runs typecheck, lint, the test suite and a full build before
-publishing. Provenance comes with trusted publishing, so the npm page carries a
-signed link back to the commit it was built from.
+they land.
 
 ```
 npm version patch          # or minor / major
 git push --follow-tags
 ```
 
-> **The npm half of this is currently broken, and pushing a tag will not fix
-> itself.** The server is a Rust binary now, and neither end of the pipeline has
-> caught up. `npm-publish.yml` installs Node but no Rust toolchain, so
-> `npm run lint` dies at `cargo: command not found` and the job fails before it
-> publishes — it fails safe, but it fails. And if that were fixed the result
-> would be worse: `files` ships `rust/src` and `Cargo.toml` but no binary, and
-> there is no `postinstall`, so `npm i -g` would install a launcher that finds
-> nothing and exits 1. That is the do-nothing install this project has shipped
-> twice before.
->
-> Publishing needs a distribution decision first — per-platform prebuilt
-> packages the way esbuild does it, a `postinstall` that runs `cargo build`
-> and therefore requires a Rust toolchain on every installing machine, or
-> attaching the binary in the release job. `scripts/launch.mjs` documents the
-> two cases that do work today: a checkout that has run `npm run build:server`,
-> and a `cargo install`ed binary on PATH.
->
-> Until one of those lands, release by building locally and by building the
-> macOS bundle below. **Do not push a `v*` tag.**
+The tag check is its own job and takes about fifteen seconds, because everything
+after it is expensive. Then the tag fans out: one job per target —
+`darwin-arm64`, `darwin-x64`, `linux-x64`, `linux-arm64` — each building a
+server binary and running `--help` against it where the runner can execute what
+it just built, alongside one job running the deterministic gates once
+(typecheck, lint, `npm test`, the web build) rather than four times on four
+platforms to answer a question that does not vary by platform. A final job
+collects the four binaries into `dist/bin/<platform>-<arch>/agent-commander`,
+builds the web bundle beside them, and publishes **once**.
 
-The macOS app is built separately and is not part of the tag flow:
+That last job is where the paranoia lives. It refuses to publish unless all four
+binaries arrived, are non-empty, and are mode 0755; it runs the linux-x64 one it
+just assembled to prove the upload/download round trip did not corrupt anything;
+and it asks `npm pack --dry-run` what is actually in the tarball, because
+`files` and an ignore rule can drop a binary after every other check has passed.
+A package that installs cleanly and then cannot start is the failure this whole
+shape exists to prevent.
+
+Everything ships in one package rather than the `optionalDependencies` matrix
+esbuild and Biome use. That costs ~7.5 MB of binary in a tarball most people
+will only ever install one quarter of, and buys the thing that matters more
+here: the six-package layout publishes a platform package and a parent that
+depends on it as separate registry writes, and between those writes an `npm i
+-g` resolves an install with no server in it. This is a global CLI installed
+deliberately, not a transitive dependency pulled a thousand times a day, so the
+bytes are cheap and the broken window is not. It also means one trusted-publisher
+configuration instead of six, and nothing to reconcile if a matrix job fails.
+
+There is no `postinstall` and nothing is downloaded at install time. The
+directory each binary lands in is named exactly `${process.platform}-${process.arch}`,
+which is the whole trick: `scripts/launch.mjs` computes that string and looks
+there, so there is no mapping table to fall out of step with the release job's
+own names. When it finds nothing it prints every path it tried and the platform
+it is running on. A launcher that fails silently is the do-nothing install this
+project has already shipped twice, and it does not get a third.
+
+**Windows is not a target**, and that is not an oversight to be fixed later.
+The Attach tab is `tmux capture-pane` and `send-keys`. A Windows build would
+install cleanly and then have nothing to command.
+
+Authentication is npm **trusted publishing**: the job mints a short-lived
+OIDC token and npm exchanges it for publish rights, matched against the trusted
+publisher configured for this package on npmjs.com. There is no `NPM_TOKEN` in
+repo secrets to leak, rotate or forget, and no one-time password to type.
+Provenance comes with it, so the npm page carries a signed link back to the
+commit the package was built from. It also means the runner needs npm >= 11.5.1,
+which `ubuntu-latest` does not ship, hence the `npm install -g npm@latest` step.
+
+The browser audits stay out of the release path on purpose. They need a running
+server and a real Chromium, and font rendering differs enough between macOS and
+`ubuntu-latest` that a layout finding there would block a release for a reason
+that has nothing to do with the release. Run them locally before tagging.
+
+The macOS app is not part of any of this. It is built on your machine, from a
+clone, and never by the tag:
 
 ```
 npm run build
 python3 scripts/build-mac-app.py            # --out defaults to build/
 python3 scripts/build-mac-app.py --install  # into ~/Applications
 ```
-
-Authentication is npm **trusted publishing**: the job mints a short-lived
-OIDC token and npm exchanges it for publish rights, matched against the trusted
-publisher configured for this package on npmjs.com. There is no `NPM_TOKEN` in
-repo secrets to leak, rotate or forget, and no one-time password to type. It
-also means the runner needs npm >= 11.5.1, which `ubuntu-latest` does not ship,
-hence the `npm install -g npm@latest` step.
-
-The browser audits stay out of the release path on purpose. They need a running
-server and a real Chromium, and font rendering differs enough between macOS and
-`ubuntu-latest` that a layout finding there would block a release for a reason
-that has nothing to do with the release. Run them locally before tagging.
 
 ### Review agents
 

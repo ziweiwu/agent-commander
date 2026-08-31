@@ -186,9 +186,19 @@ commit.
   loudly when the binary is missing, and that is deliberate: every global
   install from 0.1.0 shipped a CLI that produced no output, opened no port and
   reported no error, and a silent launcher would be that bug again wearing a
-  different hat. **Publishing to npm still needs per-platform prebuilds** — the
-  shim only covers a checkout that has been built and a `cargo install`ed
-  binary on PATH.
+  different hat. The published package now carries prebuilt binaries so the
+  launcher has something to find — see **Shipping it to npm** below.
+- **The do-nothing install has shipped twice, and the fat package is the third
+  attempt to stop it.** First the `realpathSync` bug, where a symlinked `bin`
+  made the CLI decide it had been imported and never call `main()`. Then the
+  port, where `files` shipped `rust/src` and no binary. Neither failed with a
+  message; both installed cleanly, ran, and produced nothing. That history is
+  why `launch.mjs` prints every path it tried and the host it is on before
+  exiting 1, why the release publishes one package instead of a matrix that has
+  a window where a platform package is missing, and why `build-mac-app.py`
+  smoke-tests the staged bundle. When you change anything on the path from a
+  tag to an installed binary, the question to ask is not "does it work" but
+  "how would I find out if it did not".
 - **A token in the URL cannot reach a subresource.** `--token` 401'd the app's
   own bundle, because `index.html`'s `<script>` and `<link>` carry neither the
   token nor a header. `GET`/`HEAD` under `/assets/` skip the token gate and
@@ -297,10 +307,96 @@ commit.
   pid file it wrote *and* whose command line names this bundle, so a copy you
   started from a clone is opened, never killed.
 
+- **`actions/upload-artifact` does not preserve the executable bit.** It zips
+  what it is given, and the zip carries no mode, so a binary that left the build
+  job at 0755 comes back from `download-artifact` at 0644 and `execFileSync`
+  raises `EACCES`. Nothing in the release job notices — the tarball is
+  well-formed, the publish succeeds, and the first person to run `npx` gets the
+  failure. `npm-publish.yml` therefore `chmod 755`es each binary as it lays it
+  out and then asserts the mode came back 755 before publishing. Both lines are
+  load-bearing rather than defensive. This is the one entry here that has not
+  bitten yet; it is on the list because its failure mode is the do-nothing
+  install for the third time, and because a `chmod` with no comment on it is
+  exactly the line someone tidies away.
 - **Piping a test run through `tail` eats the verdict.** `npm run e2e | tail`
   reports tail's exit code, not Playwright's, and the failure list scrolls out
   of the kept lines — a 92-failure run once read as "141 passed" that way.
   Redirect to a file and check the exit code, never pipe a gate.
+
+## Shipping it to npm
+
+One package carries every binary:
+
+```
+dist/bin/darwin-arm64/agent-commander
+dist/bin/darwin-x64/agent-commander
+dist/bin/linux-x64/agent-commander
+dist/bin/linux-arm64/agent-commander
+dist/web/…                              the Vite bundle, unchanged
+```
+
+`.github/workflows/npm-publish.yml` builds one binary per matrix job and a final
+job collects the four, marks them executable, and publishes once. Four binaries
+is ~7.5 MB, and that is the deliberate trade: the `optionalDependencies` matrix
+esbuild and Biome use would ship a quarter of the bytes but has a window during a
+release where the platform package a user resolves is not on the registry yet,
+and what they get is an install with no server in it. This is a global CLI
+installed on purpose, not a transitive dependency; the bytes are cheap and that
+window is not. One package also means one trusted-publisher configuration and
+nothing to reconcile when a matrix job fails.
+
+**The directory name is exactly `${process.platform}-${process.arch}`.** Not a
+convention that happens to line up — `scripts/launch.mjs` interpolates those two
+values and looks there, so there is no mapping table to maintain and no way for
+the launcher's names and the release job's names to drift apart. Rust's target
+triples (`aarch64-apple-darwin` and friends) appear only inside the workflow,
+where the translation to a directory name is written down once. Adding a target
+means adding a matrix row; nothing in the resolver changes.
+
+**Windows is deliberately not a target, and not a gap to be closed later.** The
+Attach tab is `tmux capture-pane` and `send-keys`, and the fleet is read out of
+`~/.claude/sessions/<pid>.json`. A Windows build would install cleanly, start,
+and command nothing. Adding one is not a matrix row, it is a second
+implementation of INV-1.
+
+**`npm run build:server` still writes `rust/target/release`, and must keep doing
+so.** Eight things read the binary from that path: `npm run dev`, `mock`,
+`start` and `serve`; `playwright.config.ts`'s `webServer`;
+`scripts/build-mac-app.py`; `scripts/dist-bin.sh`; and `launch.mjs`'s own second
+candidate, which is what makes a checkout runnable without a publish ever having
+happened. `dist/bin` is a layout assembled out of four separate runners' output
+— not something any one machine's build produces in full. Repointing
+`build:server` at it would break all eight to save one copy.
+
+`npm run build:dist-bin` (`scripts/dist-bin.sh`) assembles that layout from
+whatever the local `rust/target` happens to hold, which is how a packaging
+change gets verified without a tag: build, run it, `npm pack`, read the tarball.
+Note the two shapes it handles — a cross-compile lands in
+`rust/target/<triple>/release` while the host's own build lands in
+`rust/target/release` with no triple at all.
+
+**Delete `dist/bin` when you are done with it.** It is the launcher's *first*
+candidate, so one left behind in a checkout shadows `rust/target/release`: from
+then on `npm run build:server` changes the binary the e2e harness and every
+`npm run` server use, while the one `bin` runs stays whatever you assembled that
+afternoon, and nothing says so. `dist/` is gitignored, so git will not remind you — and `files`
+ships `dist` wholesale, which is the same trap the `.gitignore` comment on
+`build/` already names.
+
+There is no `postinstall`, nothing is downloaded at install time, and a Rust
+toolchain is needed only to work on the server. Never verify by publishing a
+throwaway version: npm versions are immutable, so the only way to withdraw a bad
+one is to burn the next number.
+
+`npm-publish.yml` is commented at length and those comments are the reference,
+not this section. Two of them decide things you would otherwise change by
+accident: the Linux legs are pinned to `ubuntu-22.04` rather than
+`ubuntu-latest` because a glibc-linked binary runs on the glibc it was built
+against or newer and never older, so bumping the runner raises the floor under
+every user at once — on their machine, after publish, where CI cannot see it.
+And `darwin-x64` is the one target nothing in CI executes, because an arm64
+macOS runner has no guaranteed Rosetta; it is built and shipped unrun, and the
+publish job's mode and tarball checks are what stand in for a smoke test there.
 
 ## The macOS bundle
 

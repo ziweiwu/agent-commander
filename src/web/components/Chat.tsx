@@ -177,12 +177,25 @@ export function Chat({ agent }: { agent: Agent }) {
     return out
   }, [messages, lang])
 
-  // Follow the conversation only while the user is already at the bottom.
+  /*
+   * Follow the conversation only while the user is already at the bottom.
+   *
+   * `busy` is in the deps because the working indicator is drawn *below* the
+   * last message and is not one, so it grows the scroller without changing
+   * `messages.length`. Keyed on the messages alone, an agent that started
+   * working appended a row nobody scrolled to: the indicator was there, one
+   * row past the fold, and the only way to see it was to switch to the
+   * terminal tab and back — which remounts this component, resets `pinned` and
+   * re-runs this effect. It read as the status never arriving.
+   *
+   * Anything else that renders after the last message has to be listed here
+   * for the same reason.
+   */
   useLayoutEffect(() => {
     if (pinned && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages.length, pinned])
+  }, [messages.length, busy, pinned])
 
   // Opening an agent should let you reply without another click — but not on a
   // phone, where focusing pops the keyboard over the conversation.

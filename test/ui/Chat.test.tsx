@@ -17,6 +17,9 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   setAttached: vi.fn(),
 }))
 
+/** Any non-zero height: jsdom has no layout, so the value only has to be read back. */
+const FILLED_SCROLLER_PX = 500
+
 const seed = () =>
   buildMessages([
     { id: 'e1', at: Date.now() - 60_000, kind: 'user', text: 'add dark mode' },
@@ -90,6 +93,34 @@ describe('Chat', () => {
 
     rerender(<Chat agent={agent({ sessionId: 'a', status: 'idle' })} />)
     expect(screen.queryByTestId('working-indicator')).toBeNull()
+  })
+
+  /*
+   * Reported from real use: after sending, the working indicator did not appear
+   * until you switched to the terminal tab and back.
+   *
+   * It was never a data problem — the fleet broadcast arrived and the indicator
+   * rendered. It rendered *below the fold*. The follow-the-conversation effect
+   * keyed on `messages.length`, and the indicator is not a message, so appending
+   * it grew the scroll content without re-pinning to the bottom. Switching tabs
+   * remounted the whole component, which reset `pinned` and re-ran the effect,
+   * which is why a round trip through the terminal "fixed" it.
+   */
+  it('scrolls the working indicator into view when the agent starts working', () => {
+    useStore.setState({ messages: seed() })
+    const { rerender } = renderApp(<Chat agent={agent({ sessionId: 'a', status: 'idle' })} />)
+
+    const scroller = screen.getByTestId('chat-scroll')
+    // jsdom reports zero for all layout. `setup.ts` redefines these as writable
+    // for exactly this reason; `Object.assign` is how a test says so past the
+    // DOM types, which still call `scrollHeight` read-only.
+    Object.assign(scroller, { scrollHeight: FILLED_SCROLLER_PX })
+    scroller.scrollTop = 0
+
+    rerender(<Chat agent={agent({ sessionId: 'a', status: 'busy' })} />)
+
+    expect(screen.queryByTestId('working-indicator')).not.toBeNull()
+    expect(scroller.scrollTop).toBe(FILLED_SCROLLER_PX)
   })
 
   it('renders a pending message as sending', () => {

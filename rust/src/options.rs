@@ -187,6 +187,21 @@ pub fn default_web_root(here: &Path) -> PathBuf {
     if in_target_deps {
         return normalize(&here.join("../../../../dist/web"));
     }
+    /*
+     * The npm package: `dist/bin/<platform>-<arch>/agent-commander`, with the
+     * bundle beside `bin` at `dist/web`.
+     *
+     * Without this the fall-through below resolves `dist/bin/web`, which does
+     * not exist, and the binary starts, binds, prints a URL and answers 404 for
+     * `/`. That is the do-nothing install in its third costume, and neither
+     * guard in the release pipeline can see it: `--help` returns before
+     * anything is served, and the tarball check only proves the files are
+     * present. The one directory level is the whole difference.
+     */
+    let in_packaged_bin = here.parent().is_some_and(|p| p.ends_with("bin"));
+    if in_packaged_bin {
+        return normalize(&here.join("../../web"));
+    }
     normalize(&here.join("../web"))
 }
 
@@ -529,6 +544,25 @@ mod tests {
             default_web_root(Path::new("/app/rust/target/release/deps")),
             PathBuf::from("/app/dist/web")
         );
+    }
+
+    /// The npm package's layout, and the reason it needs a case of its own.
+    ///
+    /// A published install runs `dist/bin/<platform>-<arch>/agent-commander`
+    /// while the bundle sits at `dist/web`. The fall-through rule would answer
+    /// `dist/bin/web`, and the binary would start, bind, print a URL and serve
+    /// 404 for `/` — found by running the packaged binary and asking for the
+    /// index, because `--help` returns before anything is served and cannot
+    /// show it.
+    #[test]
+    fn default_web_root_finds_the_bundle_from_the_packaged_bin_layout() {
+        for host in ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"] {
+            assert_eq!(
+                default_web_root(&Path::new("/pkg/dist/bin").join(host)),
+                PathBuf::from("/pkg/dist/web"),
+                "{host}"
+            );
+        }
     }
 
     #[test]

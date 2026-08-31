@@ -1,9 +1,23 @@
 # Publish to npm when a v* tag is pushed.
 #
-# The tag is the trigger and the source of truth for the version: the job
+# The tag is the trigger and the source of truth for the version: the release
 # refuses to run if the tag and package.json disagree, because a mismatch means
 # whatever gets published is not the thing the tag names, and npm versions are
 # immutable once they land.
+#
+# Since the server became a Rust binary this is a fan-out/fan-in release rather
+# than one job. Four runners each build one target; one publish job downloads
+# all four, lays them out as `dist/bin/<platform>-<arch>/agent-commander`, and
+# publishes a single package containing every binary. No optionalDependencies,
+# no postinstall, no download at install time — `scripts/launch.mjs` picks the
+# directory named `${process.platform}-${process.arch}` out of the tarball it
+# was installed from.
+#
+# The failure this whole shape exists to prevent is a package that installs
+# cleanly and then cannot start. Every guard below is pointed at that: the tag
+# check runs before any runner is spent, the gates run once on real code, and
+# the publish job refuses to publish unless all four binaries are present,
+# non-empty, executable, and actually in the tarball npm is about to upload.
 name: Publish
 
 on:
@@ -11,8 +25,185 @@ on:
     tags:
       - 'v*'
 
+# Deliberately no `workflow_dispatch`. A manual trigger on this file would be a
+# button that publishes an immutable version from whatever ref happened to be
+# selected, with no tag to check it against.
+
+permissions:
+  contents: read
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Fails in ~15 seconds, before four build runners and the full gate suite are
+  # spent on a release that must not be published anyway.
+  # ---------------------------------------------------------------------------
+  guard:
+    name: Tag must match package.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # No `npm ci`, no toolchain: `node -p` against package.json is the whole
+      # job, and every other job in this workflow waits on it.
+      - name: Tag must match package.json
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p 'require("./package.json").version')"
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag $GITHUB_REF_NAME says $tag, package.json says $pkg" >&2
+            exit 1
+          fi
+          echo "publishing $pkg"
+
+  # ---------------------------------------------------------------------------
+  # The deterministic gates, once. They were four steps inside the old single
+  # publish job; running them inside the build matrix instead would run them
+  # four times on four platforms to answer a question that does not vary by
+  # platform. `npm test` alone is ~40s of vitest plus the whole Rust suite, and
+  # a release that pays that four times is a release nobody waits for.
+  #
+  # The browser audits (contrast, a11y, ux, mobile) and the randomised sweep
+  # deliberately stay out of the release path: they need a running server and a
+  # real Chromium, and font rendering differs enough between macOS and
+  # ubuntu-latest that a layout finding here would block a release for a reason
+  # that has nothing to do with the release.
+  # ---------------------------------------------------------------------------
+  gates:
+    name: typecheck, lint, test, build
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # `npm run lint` shells out to `cargo clippy` and `npm test` to
+      # `cargo test`, both via `scripts/cargo.sh`. Without a toolchain here they
+      # do not fail an assertion — they die with `cargo: command not found`,
+      # which is exactly how this workflow was broken before the port landed.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # One binary per target. `dir` is the directory the binary ships in, and it is
+  # exactly `${process.platform}-${process.arch}` as node reports it — the
+  # launcher does no mapping, so a typo here is invisible until someone installs
+  # the package on that platform and gets nothing.
+  # ---------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.dir }}
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # One target failing should not hide whether the other three build. The
+      # publish job will not run unless all four succeed regardless.
+      fail-fast: false
+      matrix:
+        include:
+          # Both macOS targets come off one arm64 runner. Apple's toolchain
+          # cross-links to x86_64 with nothing more than `rustup target add`
+          # (the SDK is universal), so an Intel runner buys nothing — and this
+          # crate is pure Rust plus libc, with no build script that needs to run
+          # host-architecture code.
+          - target: aarch64-apple-darwin
+            dir: darwin-arm64
+            os: macos-latest
+            smoke: true
+          - target: x86_64-apple-darwin
+            dir: darwin-x64
+            os: macos-latest
+            # The only target CI cannot execute: an arm64 macOS runner has no
+            # guaranteed Rosetta 2. It is built and shipped without ever being
+            # run, which is the weakest link in this workflow — see the publish
+            # job's guard for what is checked about it instead.
+            smoke: false
+
+          # Both Linux targets are pinned to 22.04 rather than `ubuntu-latest`,
+          # because a glibc-linked binary runs on the glibc it was built against
+          # or newer, never older. 24.04 would raise the floor to glibc 2.39 and
+          # silently drop every user on Debian 12, Ubuntu 22.04 LTS or Amazon
+          # Linux 2023 — a failure that happens on their machine, after publish,
+          # where this workflow cannot see it. 22.04 puts the floor at 2.35.
+          # Risk: GitHub retires runner images. When 22.04 goes, these two jobs
+          # fail at queue time with an unknown-label error, which is loud and
+          # happens at release rather than at install; the fix is to bump both
+          # lines together and accept the higher floor.
+          - target: x86_64-unknown-linux-gnu
+            dir: linux-x64
+            os: ubuntu-22.04
+            smoke: true
+
+          # arm64 Linux is built on a *native* arm64 runner rather than
+          # cross-linked from x86_64. GitHub's hosted arm64 Linux runners are
+          # free for public repositories, which this one is, and native means
+          # the binary is compiled and then executed by the same job — a cross
+          # build would ship a binary that nothing in CI can run, which is the
+          # do-nothing-install failure mode wearing a different hat.
+          # Risk, and it is real: `ubuntu-22.04-arm` is a separate runner label
+          # with a separate availability story. If this repository ever goes
+          # private on a plan without arm64 minutes, or the label is retired,
+          # this job does not fail fast — it queues until it times out. The
+          # fallback is `apt-get install gcc-aarch64-linux-gnu` plus
+          # CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER on an x86_64 runner,
+          # which builds fine and gives up the smoke test.
+          - target: aarch64-unknown-linux-gnu
+            dir: linux-arm64
+            os: ubuntu-22.04-arm
+            smoke: true
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          # Two matrix legs share one macOS runner image; without the target in
+          # the key they would fight over one cache entry.
+          key: ${{ matrix.target }}
+
+      # `--locked` because a release must build the dependency versions that
+      # were tested, not whatever resolves on the day. `scripts/cargo.sh`
+      # rather than bare `cargo` for the reason AGENTS.md gives: every other
+      # path into the toolchain in this repo goes through it.
+      - name: cargo build --release --target ${{ matrix.target }}
+        run: ./scripts/cargo.sh build --release --locked --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+
+      - name: the built binary starts
+        if: matrix.smoke
+        run: rust/target/${{ matrix.target }}/release/agent-commander --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.dir }}
+          path: rust/target/${{ matrix.target }}/release/agent-commander
+          if-no-files-found: error
+          # These are release artifacts for one publish job that runs minutes
+          # later, not something anyone comes back to.
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # Assemble and publish. One package, four binaries, one version.
+  # ---------------------------------------------------------------------------
   publish:
+    needs: [guard, gates, build]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -38,25 +229,127 @@ jobs:
 
       - run: npm ci
 
-      - name: Tag must match package.json
+      # Only the web half of `npm run build`. The server half is what the four
+      # matrix jobs already produced; running it here would build a fifth binary
+      # for this runner's own architecture and put nothing in the package.
+      - run: npm run build:web
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: artifacts
+
+      - name: Lay out dist/bin, and refuse to publish a partial package
         run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg="$(node -p 'require("./package.json").version')"
-          if [ "$tag" != "$pkg" ]; then
-            echo "tag $GITHUB_REF_NAME says $tag, package.json says $pkg" >&2
+          set -euo pipefail
+
+          # This list is the contract, not a copy of the matrix. If a target is
+          # ever dropped from the matrix by accident, this loop is what notices:
+          # the publish fails rather than shipping a package that installs and
+          # then cannot start on that platform. Each name is exactly
+          # `${process.platform}-${process.arch}`, which is the only thing
+          # scripts/launch.mjs looks for.
+          missing=""
+          for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            src="artifacts/binary-$dir/agent-commander"
+            if [ ! -s "$src" ]; then
+              missing="$missing $dir"
+              continue
+            fi
+            mkdir -p "dist/bin/$dir"
+            cp "$src" "dist/bin/$dir/agent-commander"
+
+            # actions/upload-artifact does not preserve the executable bit: the
+            # binary comes back mode 0644 and `npm pack` faithfully ships it
+            # that way, so the install succeeds and the first run dies with
+            # EACCES. Restoring 0755 here — before `npm pack` reads the mode off
+            # disk — is the fix, and the check below is what proves it took.
+            chmod 755 "dist/bin/$dir/agent-commander"
+          done
+
+          if [ -n "$missing" ]; then
+            echo "no binary for:$missing" >&2
+            echo "a package missing a platform installs cleanly and then cannot start" >&2
             exit 1
           fi
-          echo "publishing $pkg"
 
-      # The deterministic gates. The browser audits (contrast, a11y, ux, mobile)
-      # deliberately stay out of the release path: they need a running server
-      # and a real Chromium, and font rendering differs enough between macOS and
-      # ubuntu-latest that a layout finding here would block a release for a
-      # reason that has nothing to do with the release.
-      - run: npm run typecheck
-      - run: npm run lint
-      - run: npm test
-      - run: npm run build
+          # Non-empty, executable, and mode exactly 0755 — asserted rather than
+          # assumed, because every failure here is silent until an install.
+          for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            bin="dist/bin/$dir/agent-commander"
+            mode="$(stat -c '%a' "$bin")"
+            if [ ! -x "$bin" ] || [ "$mode" != "755" ]; then
+              echo "$bin is mode $mode, expected 755" >&2
+              exit 1
+            fi
+          done
+
+          # The web bundle is as load-bearing as the binaries: without it the
+          # server starts and serves nothing.
+          test -s dist/web/index.html || { echo "dist/web/index.html missing" >&2; exit 1; }
+
+          ls -l dist/bin/*/agent-commander
+
+      # The artifact round-trip, end to end: this binary was built on another
+      # runner, uploaded, downloaded, copied and chmod'd, and it still runs.
+      # Only linux-x64 can be checked here — the publish runner's own platform.
+      - name: the packaged linux-x64 binary starts
+        run: dist/bin/linux-x64/agent-commander --help
+
+      # `--help` returns before anything is served, so it cannot see the bug it
+      # is most likely to be covering for: the binary sits at
+      # dist/bin/<platform>-<arch>/ and has to resolve its web root two levels
+      # up, at dist/web. Get that wrong and the server starts, binds, prints a
+      # URL and answers 404 for `/` — an install that looks perfect until
+      # somebody opens it. That shipped as a 404 during development and was
+      # caught by asking for the index, which is therefore what happens here.
+      # --mock so nothing looks for real agents on a runner that has none.
+      - name: the packaged binary actually serves the bundle
+        run: |
+          set -euo pipefail
+          dist/bin/linux-x64/agent-commander --mock --port 4599 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:4599/api/env"; then break; fi
+            sleep 1
+          done
+          index=$(curl -fsS "http://127.0.0.1:4599/")
+          printf %s "$index" | grep -q '<div id="root"' \
+            || { echo "served an index without the app root" >&2; exit 1; }
+          asset=$(printf %s "$index" | grep -o '/assets/[^"]*\.js' | head -1)
+          test -n "$asset" || { echo "index references no bundle" >&2; exit 1; }
+          curl -fsS -o /dev/null "http://127.0.0.1:4599$asset"
+          echo "served the index and $asset"
+
+      # `files` in package.json decides what is in the tarball, and an ignore
+      # rule or a missing entry there would drop the binaries after every check
+      # above has passed. So the last thing asserted is npm's own answer to
+      # "what are you about to upload" — including the mode it read off disk for
+      # each binary, which is the executable bit as the published tarball will
+      # actually carry it.
+      - name: the tarball actually contains all four binaries
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json > /tmp/pack.json
+          node -e '
+            const packed = JSON.parse(require("fs").readFileSync("/tmp/pack.json", "utf8"));
+            const modes = new Map(packed[0].files.map((f) => [f.path, f.mode]));
+            const wanted = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"]
+              .map((d) => `dist/bin/${d}/agent-commander`);
+            const absent = wanted.filter((f) => !modes.has(f));
+            if (absent.length) {
+              console.error("npm pack would not ship:", absent.join(", "));
+              console.error("check the `files` field in package.json and any ignore rules");
+              process.exit(1);
+            }
+            const unrunnable = wanted.filter((f) => typeof modes.get(f) === "number" && !(modes.get(f) & 0o111));
+            if (unrunnable.length) {
+              console.error("packed without the executable bit:", unrunnable.join(", "));
+              process.exit(1);
+            }
+            console.log(`tarball: ${packed[0].entryCount} files, ${(packed[0].unpackedSize / 1e6).toFixed(1)} MB unpacked`);
+          '
 
       # No token: rights come from the OIDC exchange above, which npm matches
       # against the trusted publisher configured for this package.

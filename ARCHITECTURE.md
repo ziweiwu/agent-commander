@@ -667,13 +667,23 @@ through the control client. At p95 the two backends are the same speed, and
 anyone expecting the rewrite to have made the app feel faster should read INV-4
 instead: what makes it feel fast is not polling what nobody is watching.
 
-Cost: the two-language seam above; a distribution problem (`bin` now points at
-`scripts/launch.mjs`, which execs the binary — publishing to npm needs
-per-platform prebuilds that do not exist yet); and the loss of 412 TypeScript
-server tests, replaced by 503 Rust ones.
+Cost: the two-language seam above; a distribution problem, now solved but not
+for free (`bin` points at `scripts/launch.mjs`, which resolves a prebuilt
+binary out of `dist/bin/<platform>-<arch>` — so the release is a four-target
+build matrix rather than one job, and every future release carries that
+matrix); and the loss of 412 TypeScript server tests, replaced by 501 Rust
+ones.
 
-It is on a branch rather than deleted because it has never been committed
-anywhere else, and a tested port is a poor thing to put through a one-way door.
+The distribution shape was chosen against the alternative the ecosystem
+usually reaches for. esbuild, Biome and swc publish one npm package per
+platform and pull them in as `optionalDependencies`, which is right when a tool
+is a transitive dependency installed thousands of times and every megabyte
+multiplies. This one is a global CLI installed deliberately, so it ships all
+four binaries in a single package: ~4 MB packed instead of ~1 MB, in exchange
+for one package to own, one trusted-publisher configuration, and no window in
+which a half-published matrix resolves to an install with no server. README
+§"Releasing" carries the pipeline; AGENTS.md §"Shipping it to npm" carries what
+must not be changed by accident.
 `rust/README.md` on that branch says the rest.
 
 Nothing on this line references it: not `package.json`, not the CI workflows,

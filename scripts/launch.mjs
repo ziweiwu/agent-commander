@@ -7,11 +7,12 @@
  * inherited stdio rather than a spawn, so signals, exit codes and the terminal
  * all behave as if the binary had been invoked directly.
  *
- * Why a shim and not a per-platform package: publishing prebuilt binaries the
- * way esbuild does needs one npm package per platform plus a release pipeline
- * to fill them, which is a distribution decision rather than a porting one.
- * Until that exists this supports the two cases that work today — a checkout
- * that has run `npm run build:server`, and a `cargo install`ed binary on PATH.
+ * Why one package carrying every binary rather than a package per platform:
+ * the esbuild layout needs an optionalDependency per target published in
+ * lockstep, and a half-published set resolves to an install with no server in
+ * it. Everything ships here instead, under a directory named exactly
+ * `${process.platform}-${process.arch}` so this lookup needs no mapping table
+ * and cannot disagree with the one the release pipeline used.
  *
  * It fails loudly. A launcher that cannot find its binary and says nothing is
  * exactly the do-nothing install this project has shipped before.
@@ -21,22 +22,28 @@ import { existsSync, realpathSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const here = dirname(realpathSync(fileURLToPath(import.meta.url)))
+const packageRoot = join(dirname(realpathSync(fileURLToPath(import.meta.url))), '..')
+const host = `${process.platform}-${process.arch}`
 
-/** Built output first, then anything already on PATH. */
+/** What the published package carries, so a host outside it can be told why. */
+const shippedPlatforms = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64']
+
+/** A published package first, then a built checkout, then `cargo install`. */
 const candidates = [
-  join(here, '..', 'rust', 'target', 'release', 'agent-commander'),
-  join(here, '..', 'bin', 'agent-commander'),
+  join(packageRoot, 'dist', 'bin', host, 'agent-commander'),
+  join(packageRoot, 'rust', 'target', 'release', 'agent-commander'),
+  join(packageRoot, 'bin', 'agent-commander'),
 ]
 
-const found = candidates.find((p) => existsSync(p))
+const found = candidates.find((candidate) => existsSync(candidate))
 if (!found) {
   process.stderr.write(
-    'agent-commander: could not find the server binary.\n' +
+    `agent-commander: could not find the server binary for ${host}.\n` +
       'Looked in:\n' +
-      candidates.map((p) => `  ${p}\n`).join('') +
-      'Build it with `npm run build:server` (needs a Rust toolchain), ' +
-      'or install it with `cargo install --path rust`.\n',
+      candidates.map((candidate) => `  ${candidate}\n`).join('') +
+      `This package ships binaries for: ${shippedPlatforms.join(', ')}.\n` +
+      'From a checkout, build one with `npm run build:server` (needs a Rust ' +
+      'toolchain); otherwise `cargo install --path rust`.\n',
   )
   process.exit(1)
 }

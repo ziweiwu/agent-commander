@@ -27,14 +27,8 @@
   },
   "files": [
     "dist",
-    "rust/src",
-    "rust/Cargo.toml",
-    "rust/Cargo.lock",
     "scripts/launch.mjs",
     "scripts/statusline-bridge.mjs",
-    "scripts/build-mac-app.py",
-    "scripts/gen-icons.py",
-    "scripts/mac-app",
     "README.md",
     "INVARIANTS.md",
     "LICENSE"
@@ -42,6 +36,7 @@
   "scripts": {
     "build": "npm run build:web && npm run build:server",
     "build:server": "./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml",
+    "build:dist-bin": "./scripts/dist-bin.sh",
     "build:web": "vite build",
     "dev": "./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && rust/target/release/agent-commander --dev --port 4400",
     "lint": "oxlint && ./scripts/cargo.sh clippy --manifest-path rust/Cargo.toml -- -D warnings",
