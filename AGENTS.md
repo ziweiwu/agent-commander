@@ -318,6 +318,19 @@ commit.
   bitten yet; it is on the list because its failure mode is the do-nothing
   install for the third time, and because a `chmod` with no comment on it is
   exactly the line someone tidies away.
+- **`npm pack --dry-run --json` does not have a stable shape, and it broke the
+  first release it was guarding.** The publish job asserted the four binaries
+  were really in the tarball by parsing that JSON as an array — verified locally
+  against npm 11.17, where it is one. The workflow's own `npm install -g
+  npm@latest` step then handed the runner a newer npm whose output it could not
+  read, so `packed[0].files` threw and the job died *inside the guard*, with the
+  package itself perfectly fine. It failed safe, which is the one good thing
+  about it. The guard now runs `npm pack` for real and reads the archive with
+  `tar -tzvf`: the tarball is the artifact being uploaded and its format does
+  not move between npm releases, and the listing carries the executable bit
+  directly. **A check that parses another tool's optional output format is a
+  check that can fail for reasons unrelated to what it is checking.**
+
 - **Piping a test run through `tail` eats the verdict.** `npm run e2e | tail`
   reports tail's exit code, not Playwright's, and the failure list scrolls out
   of the kept lines — a 92-failure run once read as "141 passed" that way.

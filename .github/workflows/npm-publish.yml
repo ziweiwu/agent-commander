@@ -331,25 +331,36 @@ jobs:
       - name: the tarball actually contains all four binaries
         run: |
           set -euo pipefail
-          npm pack --dry-run --json > /tmp/pack.json
-          node -e '
-            const packed = JSON.parse(require("fs").readFileSync("/tmp/pack.json", "utf8"));
-            const modes = new Map(packed[0].files.map((f) => [f.path, f.mode]));
-            const wanted = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"]
-              .map((d) => `dist/bin/${d}/agent-commander`);
-            const absent = wanted.filter((f) => !modes.has(f));
-            if (absent.length) {
-              console.error("npm pack would not ship:", absent.join(", "));
-              console.error("check the `files` field in package.json and any ignore rules");
-              process.exit(1);
-            }
-            const unrunnable = wanted.filter((f) => typeof modes.get(f) === "number" && !(modes.get(f) & 0o111));
-            if (unrunnable.length) {
-              console.error("packed without the executable bit:", unrunnable.join(", "));
-              process.exit(1);
-            }
-            console.log(`tarball: ${packed[0].entryCount} files, ${(packed[0].unpackedSize / 1e6).toFixed(1)} MB unpacked`);
-          '
+          # Pack for real and read the archive, rather than asking npm to
+          # describe it. `npm pack --dry-run --json` was the obvious way to do
+          # this and it broke the first release it guarded: the workflow
+          # upgrades to npm@latest, whose JSON no longer had the array shape
+          # this parsed, so the guard threw instead of reporting. The tarball
+          # itself has a stable format and is the thing being uploaded, so it
+          # is what gets inspected — including the mode, which is the executable
+          # bit as the published archive will really carry it.
+          tarball=$(npm pack --silent | tail -1)
+          echo "packed $tarball"
+          listing=$(tar -tzvf "$tarball")
+          missing=""
+          for dir in darwin-arm64 darwin-x64 linux-x64 linux-arm64; do
+            path="package/dist/bin/$dir/agent-commander"
+            line=$(printf '%s\n' "$listing" | awk -v p="$path" '$NF == p' || true)
+            if [ -z "$line" ]; then missing="$missing $path"; continue; fi
+            case "$line" in
+              -rwx*) echo "  ok  $path" ;;
+              *) echo "packed without the executable bit: $line" >&2; exit 1 ;;
+            esac
+          done
+          if [ -n "$missing" ]; then
+            echo "npm pack would not ship:$missing" >&2
+            echo "check the \`files\` field in package.json and any ignore rules" >&2
+            exit 1
+          fi
+          printf '%s\n' "$listing" | awk '$NF == "package/dist/web/index.html"' | grep -q . \
+            || { echo "the tarball carries no web bundle" >&2; exit 1; }
+          echo "  ok  package/dist/web/index.html"
+          rm -f "$tarball"
 
       # npm moves `latest` on every publish that does not say otherwise — it
       # does NOT read the version string and infer that 0.8.1-rc.0 is a

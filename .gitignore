@@ -28,3 +28,6 @@ blob-report/
 
 # Python bytecode from the generator and the audit scripts
 __pycache__/
+
+# `npm pack` drops the tarball in the repo root; the publish guard packs for real.
+*.tgz
