@@ -351,7 +351,26 @@ jobs:
             console.log(`tarball: ${packed[0].entryCount} files, ${(packed[0].unpackedSize / 1e6).toFixed(1)} MB unpacked`);
           '
 
+      # npm moves `latest` on every publish that does not say otherwise — it
+      # does NOT read the version string and infer that 0.8.1-rc.0 is a
+      # prerelease. Publishing an RC bare would therefore hand it to everyone
+      # running `npm i -g`, which is the exact opposite of what tagging an RC
+      # is for. So the dist-tag is derived from the version rather than
+      # defaulted: anything with a prerelease part goes to `next`, and only a
+      # clean x.y.z becomes `latest`.
+      - name: Choose the dist-tag from the version
+        id: disttag
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          case "$version" in
+            *-*) tag=next ;;
+            *)   tag=latest ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publishing $version to dist-tag $tag"
+
       # No token: rights come from the OIDC exchange above, which npm matches
       # against the trusted publisher configured for this package.
       - name: Publish
-        run: npm publish --access public
+        run: npm publish --access public --tag "${{ steps.disttag.outputs.tag }}"
