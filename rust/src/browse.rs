@@ -8,9 +8,13 @@
 //! so an endpoint that enumerates directories deserves a hard boundary rather
 //! than a string-prefix check on an unresolved path.
 //!
+//! The check happens once, in `resolve_inside_root`, and its result is a
+//! [`WithinRoot`] rather than a `PathBuf`. Everything downstream takes that
+//! type, so a path that was never checked is not a value those functions can
+//! be handed. The boundary is the type, and the runtime check is its only
+//! constructor.
+//!
 //! Listing is metadata only: names and directory-ness. It never reads a file.
-
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 
@@ -71,13 +75,70 @@ pub fn is_inside(root: &Path, candidate: &Path) -> bool {
     candidate.starts_with(root)
 }
 
+/// A resolved path that has been proven to sit inside a browse root, together
+/// with the root it was proven against.
+///
+/// The only constructor is [`resolve_inside_root`]. A function that takes one
+/// therefore has INV-9 in its signature rather than in a check each caller has
+/// to remember: handing it a path that never went through the resolver does
+/// not compile. Before this type, the resolver returned a bare `PathBuf`, and
+/// both the parent computation and the label carried a runtime branch for "the
+/// path is outside the root" — a state that, with the check done once, no
+/// caller could reach and no test could tell from a real one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithinRoot {
+    path: PathBuf,
+    root: PathBuf,
+}
+
+impl WithinRoot {
+    /// The resolved path, inside `root()`.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The resolved root this path was checked against.
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// The ".." button's destination, offered only below the root — this
+    /// control must not be the way out of it.
+    ///
+    /// No containment check: the parent of a path strictly inside the root is
+    /// the root or something beneath it, so the result is `WithinRoot` by
+    /// construction rather than by testing.
+    pub fn parent(&self) -> Option<WithinRoot> {
+        if self.path == self.root {
+            return None;
+        }
+        let path = crate::options::normalize(&self.path.join(".."));
+        Some(WithinRoot { path, root: self.root.clone() })
+    }
+
+    /// `~` for the root itself and `~/…` beneath it, so the picker can say
+    /// where you are without putting the absolute path of somebody's home on
+    /// screen.
+    pub fn label(&self) -> String {
+        match self.path.strip_prefix(&self.root) {
+            Ok(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+            Ok(rest) => format!("~/{}", rest.to_string_lossy()),
+            // Unreachable by construction; a reader who somehow got here is
+            // told they are at the root rather than shown a path.
+            Err(_) => "~".to_string(),
+        }
+    }
+}
+
 /// Resolve a requested path and refuse anything outside the root.
 ///
 /// Resolution happens before the check, so `~/link-to-slash` is judged by
 /// where it points rather than by what it is called. Doing it the other way
 /// round — check the string, then follow it — is the bug this ordering exists
 /// to prevent.
-pub async fn resolve_inside_root(requested: Option<&str>, root: &Path) -> Res<PathBuf> {
+///
+/// This is the one place a [`WithinRoot`] is made.
+pub async fn resolve_inside_root(requested: Option<&str>, root: &Path) -> Res<WithinRoot> {
     let real_root = tokio::fs::canonicalize(root)
         .await
         .map_err(|_| BrowseError::root(format!("no such directory: {}", root.display())))?;
@@ -94,7 +155,7 @@ pub async fn resolve_inside_root(requested: Option<&str>, root: &Path) -> Res<Pa
     if !is_inside(&real_root, &real) {
         return Err(BrowseError::new("that directory is outside the browsable root"));
     }
-    Ok(real)
+    Ok(WithinRoot { path: real, root: real_root })
 }
 
 /// The root the picker is confined to when none was configured.
@@ -122,12 +183,10 @@ pub async fn list_dirs(
     dot_dirs: DotDirs,
 ) -> Res<DirListing> {
     let configured = root.map(Path::to_path_buf).unwrap_or_else(default_root);
-    let root = tokio::fs::canonicalize(&configured)
-        .await
-        .map_err(|_| BrowseError::root(format!("no such directory: {}", configured.display())))?;
-    let path = resolve_inside_root(requested, &root).await?;
+    let within = resolve_inside_root(requested, &configured).await?;
+    let path = within.path();
 
-    let metadata = tokio::fs::metadata(&path)
+    let metadata = tokio::fs::metadata(path)
         .await
         .map_err(|_| BrowseError::new(format!("no such directory: {}", path.display())))?;
     if !metadata.is_dir() {
@@ -136,14 +195,19 @@ pub async fn list_dirs(
 
     Ok(DirListing {
         path: path.to_string_lossy().into_owned(),
-        parent: parent_within(&root, &path),
-        root: root.to_string_lossy().into_owned(),
-        entries: subdirectories_of(&path, dot_dirs).await?,
+        parent: within.parent().map(|up| up.path().to_string_lossy().into_owned()),
+        root: within.root().to_string_lossy().into_owned(),
+        entries: subdirectories_of(&within, dot_dirs).await?,
     })
 }
 
-/// The subdirectories of `path`, in the order the picker draws them.
-async fn subdirectories_of(path: &Path, dot_dirs: DotDirs) -> Res<Vec<DirEntryDto>> {
+/// The subdirectories of a contained path, in the order the picker draws them.
+///
+/// The children are offered by name and not checked here: a child of a
+/// contained directory is contained, except through a symlink, and a symlink
+/// is judged by where it points when the picker asks to enter it.
+async fn subdirectories_of(within: &WithinRoot, dot_dirs: DotDirs) -> Res<Vec<DirEntryDto>> {
+    let path = within.path();
     let unreadable =
         || BrowseError::new(format!("cannot read directory: {}", path.display()));
     let mut read = tokio::fs::read_dir(path).await.map_err(|_| unreadable())?;
@@ -191,30 +255,6 @@ async fn is_listable_dir(child: &Path) -> bool {
     matches!(tokio::fs::metadata(child).await, Ok(meta) if meta.is_dir())
 }
 
-/// The ".." button's destination, offered only when it is still inside the
-/// root — this control must not be the way out of it.
-fn parent_within(root: &Path, path: &Path) -> Option<String> {
-    let parent_path = crate::options::normalize(&path.join(".."));
-    if path == root || !is_inside(root, &parent_path) {
-        return None;
-    }
-    Some(parent_path.to_string_lossy().into_owned())
-}
-
-/// `~` for the root itself and `~/…` beneath it, so the picker can say where
-/// you are without putting the absolute path of somebody's home on screen.
-pub fn label_for(path: &Path, root: &Path) -> String {
-    if path == root {
-        return "~".to_string();
-    }
-    match path.strip_prefix(root) {
-        Ok(rest) => format!("~/{}", rest.to_string_lossy()),
-        Err(_) => path
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_else(|| path.to_string_lossy().into_owned()),
-    }
-}
 
 /* ------------------------------------------------------------------ tests */
 
@@ -288,10 +328,10 @@ mod tests {
     #[tokio::test]
     async fn resolve_defaults_to_the_root() {
         let r = root();
-        assert_eq!(resolve_inside_root(None, &r.path).await.unwrap(), r.path);
+        assert_eq!(resolve_inside_root(None, &r.path).await.unwrap().path(), r.path);
         // An empty or whitespace-only request is the same as none.
         for blank in ["", "   "] {
-            assert_eq!(resolve_inside_root(Some(blank), &r.path).await.unwrap(), r.path);
+            assert_eq!(resolve_inside_root(Some(blank), &r.path).await.unwrap().path(), r.path);
         }
     }
 
@@ -300,7 +340,7 @@ mod tests {
         let r = root();
         let want = r.path.join("Projects");
         let got = resolve_inside_root(Some(want.to_str().unwrap()), &r.path).await.unwrap();
-        assert_eq!(got, want);
+        assert_eq!(got.path(), want);
     }
 
     #[tokio::test]
@@ -516,18 +556,31 @@ mod tests {
 
     /* ---- label_for ---- */
 
-    #[test]
-    fn shows_the_root_as_tilde_and_descendants_relative_to_it() {
-        assert_eq!(label_for(&path_of("/home/me"), &path_of("/home/me")), "~");
-        assert_eq!(label_for(&path_of("/home/me/Projects"), &path_of("/home/me")), "~/Projects");
-        assert_eq!(label_for(&path_of("/home/me/a/b"), &path_of("/home/me")), "~/a/b");
+    /// Built directly, which only this module can do. There used to be a second
+    /// test here for a path *outside* the root showing as a bare name; that
+    /// input is no longer a `WithinRoot` anyone can construct, so the case is
+    /// gone rather than asserted.
+    fn within(path: &str, root: &str) -> WithinRoot {
+        WithinRoot { path: path_of(path), root: path_of(root) }
     }
 
-    /// A path outside the root has no relative form, so it shows as its own
-    /// basename rather than leaking the rest of the machine's layout.
     #[test]
-    fn shows_a_path_outside_the_root_as_a_bare_name() {
-        assert_eq!(label_for(&path_of("/etc/ssh"), &path_of("/home/me")), "ssh");
-        assert_eq!(label_for(&path_of("/home/melissa/x"), &path_of("/home/me")), "x");
+    fn shows_the_root_as_tilde_and_descendants_relative_to_it() {
+        assert_eq!(within("/home/me", "/home/me").label(), "~");
+        assert_eq!(within("/home/me/Projects", "/home/me").label(), "~/Projects");
+        assert_eq!(within("/home/me/a/b", "/home/me").label(), "~/a/b");
+    }
+
+    /// INV-9 by type: the parent of a contained path is contained, and the
+    /// root has none. No `is_inside` runs here — there is nothing left for it
+    /// to refuse.
+    #[test]
+    fn inv9_a_parent_is_within_the_same_root_or_absent() {
+        assert!(within("/home/me", "/home/me").parent().is_none());
+        let up = within("/home/me/a/b", "/home/me").parent().unwrap();
+        assert_eq!(up.path(), path_of("/home/me/a"));
+        assert_eq!(up.root(), path_of("/home/me"));
+        assert_eq!(up.parent().unwrap().path(), path_of("/home/me"));
+        assert!(up.parent().unwrap().parent().is_none());
     }
 }

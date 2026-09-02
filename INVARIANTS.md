@@ -721,10 +721,22 @@ confirmed to sit inside the root (the home directory by default, or
 points, not by what it is called. Containment uses a path-segment check, not a
 string prefix, so `/abc` is not treated as inside `/a`.
 
+The check runs once. `browse::resolve_inside_root` is the only function that
+can produce a `WithinRoot`, and everything downstream — the listing, the `..`
+destination, the `~/…` label — takes a `WithinRoot` rather than a `Path`. So a
+path that never went through the check is not a value those functions can be
+handed: the compiler refuses it, not a test. Two runtime branches went with the
+change. The parent of a contained path used to be checked for containment
+again, and a label used to have a form for a path outside the root; neither
+state can now be written down, so neither is asserted.
+
 Listing is metadata only — names and directory-ness. It never reads a file.
 
 `browse::inv9_*` covers traversal, an escaping symlink, and the
-prefix-collision case.
+prefix-collision case at the constructor, and
+`inv9_a_parent_is_within_the_same_root_or_absent` shows the one place the type
+does the work: no containment check runs, because there is nothing left for it
+to refuse.
 
 ## INV-10 — The statusline bridge cannot break a Claude Code session
 

@@ -27,14 +27,11 @@ Turn runtime-checked properties into ones the compiler enforces. This is the
 only technique here that costs nothing at runtime and cannot drift, and Rust is
 already the language of the half that needs it.
 
-Three candidates, smallest first:
+Three candidates, smallest first. **INV-9 is done** — `browse::WithinRoot` is
+constructible only by `resolve_inside_root`, the parent computation lost its
+second containment check and the label lost its outside-the-root form, and
+INV-9 in `INVARIANTS.md` now describes the type. The two below remain.
 
-- **INV-9 — the folder browser cannot leave its root.** `browse::resolve_inside_root`
-  (`rust/src/browse.rs:80`) returns a bare `PathBuf`, so nothing stops a later
-  caller passing a path that never went through it. Return a `WithinRoot(PathBuf)`
-  newtype constructible *only* by that function, and make every browse API take
-  `WithinRoot` rather than `Path`. `browse::is_inside` (`:65`) stays as its
-  implementation. Traversal stops being a test and becomes a compile error.
 - **INV-6 — destructive keys need confirmation.** The `confirmed` flag on the
   `key` message is a `bool` checked at the boundary. A `Confirmed<Key>` that can
   only be built by the checking function moves the rule from "every call site
@@ -47,14 +44,9 @@ Three candidates, smallest first:
   in principle re-take; encoded as types, retrying down the other path stops
   compiling.
 
-**Start with INV-9.** It is self-contained, it is the shortest invariant in the
-file, and it is the honest demo: if it works, a test gets *deleted* because the
-compiler took the job.
-
-**Done when:** `npm run lint` and `npm test` pass, and at least one assertion in
-`browse::inv9_*` is gone because it is now unrepresentable rather than merely
-unobserved. Update INV-9 in `INVARIANTS.md` in the same commit — it currently
-describes a runtime check.
+**Done when:** `npm run lint` and `npm test` pass, and a runtime check is gone
+because it is now unrepresentable rather than merely unobserved. Update the
+invariant in `INVARIANTS.md` in the same commit.
 
 ### 2. Generate the wire contract instead of mirroring it
 
