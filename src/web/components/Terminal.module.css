@@ -23,7 +23,7 @@
   border-radius: var(--radius-md);
   overflow: hidden;
   position: relative;
-  max-width: 100%;
+  align-self: flex-start;
 }
 /* A pane wider than the screen stays readable and pans instead of shrinking. */
 .pannable {
@@ -144,62 +144,14 @@
   pointer-events: none;
 }
 
-/* ---- full page ---- */
-
-.fullscreen {
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  background: var(--bg);
-  display: flex;
-  flex-direction: column;
-  padding: max(10px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right))
-    max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
-  gap: 8px;
-}
-.fullscreenHead {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex: none;
-  min-width: 0;
-}
-.fullscreenTitle {
-  font-weight: 650;
-  font-size: var(--text-md);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.fullscreenBody {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-}
-.fullscreenBody /*
- * The pane's measuring parent.
- *
- * rescale() sizes the terminal from this element's width, so it must always
- * report the space actually available. Centring the pane with `align-items`
- * on an ancestor made this shrink-wrap to the pane instead, and the scale then
- * fed back on its own previous value — 0.83 on every screen size.
+/*
+ * The pane's measuring parent is `.host`'s own parent — the detail panel's
+ * pane, or the full-screen body — and both are bounded by the layout. That is
+ * load-bearing for `heightBudget()` in `term.ts`: it reads the box's height
+ * and takes everything else in it off, so a box sized by its content would
+ * read back whatever the last rescale wrote, and the pane would never grow
+ * again after once shrinking.
  */
-.host {
-  width: 100%;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-}
-
-.wrap {
-  align-self: flex-start;
-}
-.spacer {
-  margin-left: auto;
-}
 
 @media (max-width: 900px) {
   .keybar,

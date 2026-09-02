@@ -23,6 +23,13 @@ const MIN_EFFECTIVE_FONT = 9.5
 const DISPOSE_DELAY_MS = 250
 /** Below this, a scale is 1:1 for every purpose a reader has. */
 const SCALE_EPSILON = 0.001
+/**
+ * How far the wanted font may drift from the rendered one before xterm is asked
+ * to re-render. Cell widths round to device pixels, so a re-measure after a font
+ * change never comes back exactly proportional; without a dead band the two
+ * would chase each other by fractions of a pixel for ever.
+ */
+const FONT_HYSTERESIS = 0.6
 
 export type ZoomMode = 'readable' | 'fit'
 
@@ -42,6 +49,14 @@ export interface ScaleInput {
    */
   naturalHeight?: number
   availableHeight?: number
+  /**
+   * Height inside the container that the capture does not get: the key bar
+   * below it, and for a pane that has ended the notice and caption above it.
+   * Measuring the container alone budgets for room the capture will never have,
+   * and at a ceiling above 1 that pushes the Enter / Esc / Ctrl-C row — how a
+   * phone answers a blocked agent — out of the box.
+   */
+  reservedHeight?: number
   zoom: ZoomMode
   /**
    * Largest scale allowed. 1 inside the detail panel, where the pane sits
@@ -82,6 +97,7 @@ export function computeScale({
   available,
   naturalHeight,
   availableHeight,
+  reservedHeight,
   zoom,
   maxScale,
 }: ScaleInput): ScaleResult {
@@ -90,10 +106,12 @@ export function computeScale({
   }
   const ceiling = maxScale ?? 1
   // Only constrains when both are known and real; a caller that measured
-  // nothing is left exactly where it was.
+  // nothing is left exactly where it was — and so is one whose container is
+  // already spoken for by everything else in it.
+  const room = (availableHeight ?? 0) - (reservedHeight ?? 0)
   const heightFit =
-    naturalHeight !== undefined && availableHeight !== undefined && naturalHeight > 0 && availableHeight > 0
-      ? availableHeight / naturalHeight
+    naturalHeight !== undefined && naturalHeight > 0 && room > 0
+      ? room / naturalHeight
       : Number.POSITIVE_INFINITY
   const fit = Math.min(ceiling, available / naturalWidth, heightFit)
   const floor = MIN_EFFECTIVE_FONT / BASE_FONT
@@ -125,10 +143,15 @@ export class PaneTerm {
    */
   #disposed = false
   #rafs: number[] = []
+  /** One measurement in flight at a time; a resize drag would queue hundreds. */
+  #measuring = false
   #cols = 0
   #rows = 0
   #host: HTMLElement | null = null
   #scaler: HTMLElement | null = null
+  #observer: ResizeObserver | null = null
+  /** The font xterm is rendering at. Enlarging changes it; shrinking never does. */
+  #font = BASE_FONT
 
   constructor(onKey: (key: string) => void, onText: (text: string) => void, onExit: () => void) {
     this.term = new Terminal({
@@ -189,6 +212,27 @@ export class PaneTerm {
     this.#host = host
     this.#scaler = scaler
     this.term.open(scaler)
+    this.#observeContainer(host)
+  }
+
+  /**
+   * Re-fit whenever the box the pane lives in changes shape.
+   *
+   * Without this, `rescale` ran from exactly three places — mount, a frame
+   * whose geometry changed, and the zoom controls — so dragging the window
+   * narrower, rotating a phone, the sheet opening beside the list, or a mobile
+   * URL bar collapsing left the pane at whatever scale it was given on mount.
+   * A quiet agent was the worst case: no redraw means no geometry change, so
+   * nothing ever recovered it.
+   *
+   * The *parent* is observed, never `host`: `rescale` writes `host`'s own
+   * width and height, so observing the element it sizes is a feedback loop.
+   */
+  #observeContainer(host: HTMLElement): void {
+    const box = host.parentElement
+    if (!box || typeof ResizeObserver === 'undefined') return
+    this.#observer = new ResizeObserver(() => this.scheduleRescale())
+    this.#observer.observe(box)
   }
 
   focus(): void {
@@ -212,6 +256,8 @@ export class PaneTerm {
   dispose(): void {
     if (this.#disposed) return
     this.#disposed = true
+    this.#observer?.disconnect()
+    this.#observer = null
     for (const handle of this.#rafs) cancelAnimationFrame(handle)
     this.#rafs = []
     const term = this.term
@@ -260,14 +306,22 @@ export class PaneTerm {
    * terminal would keep its default box forever.
    */
   scheduleRescale(): void {
-    if (this.#disposed) return
+    if (this.#disposed || this.#measuring) return
+    this.#measuring = true
     // Handles are tracked so dispose can cancel them; otherwise a queued
     // measurement runs against a terminal that no longer exists.
     this.#rafs.push(
       requestAnimationFrame(() => {
         this.rescale()
         // A web font landing late can change the cell size once more.
-        this.#rafs.push(requestAnimationFrame(() => this.rescale()))
+        this.#rafs.push(
+          requestAnimationFrame(() => {
+            // Cleared before measuring, so a resize that lands during this
+            // frame schedules the next one rather than being lost.
+            this.#measuring = false
+            this.rescale()
+          }),
+        )
       }),
     )
   }
@@ -290,25 +344,46 @@ export class PaneTerm {
     const width = screen?.offsetWidth ?? 0
     const height = screen?.offsetHeight ?? 0
     if (!width || !height) return
+    // xterm is drawing at whatever font the last decision chose. Normalise to
+    // the base font so this decision is about the capture, not about the last
+    // decision — otherwise an enlarged pane would measure as a bigger capture
+    // and be enlarged again.
+    const atBase = BASE_FONT / this.#font
+    const naturalWidth = width * atBase
+    const naturalHeight = height * atBase
 
     // Measure the container, not the box itself — the box is resized below.
     const available = host.parentElement?.clientWidth ?? host.clientWidth
     if (!available) return
-    const availableHeight = host.parentElement?.clientHeight ?? 0
+    const budget = heightBudget(host)
 
     const { scale: k, overflowing } = computeScale({
-      naturalWidth: width,
+      naturalWidth,
       available,
-      naturalHeight: height,
-      availableHeight,
+      naturalHeight,
+      availableHeight: budget.available,
+      reservedHeight: budget.reserved,
       zoom: this.#zoom,
       maxScale: this.#maxScale,
     })
 
-    scaler.style.transform = `scale(${k})`
-    const scaledWidth = Math.round(width * k)
-    host.style.width = overflowing ? '100%' : `${scaledWidth}px`
-    host.style.height = `${Math.round(height * k)}px`
+    // Enlarging re-renders at a bigger font, so glyphs stay crisp at any size;
+    // shrinking stays a transform, because below MIN_EFFECTIVE_FONT nothing is
+    // readable however it is drawn, and the readable/fit split needs the scale
+    // to be continuous. Changing the font changes the cell metrics, so a
+    // re-measure follows it — the same double frame a geometry change gets.
+    const wantedFont = k > 1 ? BASE_FONT * k : BASE_FONT
+    const font = Math.round(wantedFont)
+    if (font !== this.#font && Math.abs(wantedFont - this.#font) > FONT_HYSTERESIS) {
+      this.#font = font
+      this.term.options.fontSize = font
+      this.scheduleRescale()
+    }
+    const transform = k > 1 ? wantedFont / this.#font : k
+
+    scaler.style.transform = `scale(${transform})`
+    host.style.width = overflowing ? '100%' : `${Math.round(naturalWidth * k)}px`
+    host.style.height = `${Math.round(naturalHeight * k)}px`
     host.classList.toggle('pannable', overflowing)
     this.#overflowing = overflowing
     this.#scale = k
@@ -329,7 +404,12 @@ export class PaneTerm {
    * two to live with is the reader's call, not this component's.
    */
   get scaled(): boolean {
-    return Math.abs(this.#scale - 1) > SCALE_EPSILON
+    return Math.abs(this.#scale - 1) > SCALE_EPSILON || this.#font !== BASE_FONT
+  }
+
+  /** The font xterm is rendering at, for tests and for reasoning about crispness. */
+  get font(): number {
+    return this.#font
   }
 
   get zoom(): ZoomMode {
@@ -341,12 +421,65 @@ export class PaneTerm {
     this.rescale()
   }
 
-  /** Raised in full screen, where the pane is the only thing on the display. */
-  setMaxScale(max: number): void {
+  /**
+   * The largest text the capture may be enlarged to, in CSS pixels.
+   *
+   * A font size rather than a multiplier, because that is the thing a reader
+   * cares about: "26px text" means the same on a laptop and a 4K display, where
+   * "2.5×" of an 80-column capture leaves most of the screen empty on one and
+   * fills the other. Raised in full screen, where the pane is the only thing on
+   * the display.
+   */
+  setMaxFont(px: number): void {
+    const max = px / BASE_FONT
     if (this.#maxScale === max) return
     this.#maxScale = max
     this.rescale()
   }
+}
+
+/** The vertical room a container has for the capture, and what else is in it. */
+export interface HeightBudget {
+  /** The bounded box's inner height. 0 when nothing bounded was found. */
+  available: number
+  /** Height in that box that is not the capture's: siblings, and padding. */
+  reserved: number
+}
+
+/**
+ * How tall the capture may be.
+ *
+ * The capture (`wrap`) sits in the terminal's root beside the key bar — and,
+ * for a pane that has ended, below a notice and a caption — and that root sits
+ * in a box the layout bounds: the detail panel's pane, or the full-screen
+ * body. The root itself is sized by its content, so measuring it would read
+ * back whatever the last rescale wrote. The box is measured instead, and
+ * everything in it that is not the capture is taken off.
+ */
+export function heightBudget(wrap: HTMLElement): HeightBudget {
+  const root = wrap.parentElement
+  const box = root?.parentElement
+  if (!root || !box) return { available: 0, reserved: 0 }
+  const style = getComputedStyle(box)
+  const padding = pixels(style.paddingTop) + pixels(style.paddingBottom)
+  const reserved = padding + outerHeightOfOthers(box, root) + outerHeightOfOthers(root, wrap)
+  return { available: box.clientHeight, reserved }
+}
+
+/** The vertical space every child of `parent` other than `except` takes up. */
+function outerHeightOfOthers(parent: HTMLElement, except: HTMLElement): number {
+  let total = 0
+  for (const child of Array.from(parent.children)) {
+    if (child === except || !(child instanceof HTMLElement)) continue
+    const style = getComputedStyle(child)
+    total += child.offsetHeight + pixels(style.marginTop) + pixels(style.marginBottom)
+  }
+  return total
+}
+
+function pixels(value: string): number {
+  const n = Number.parseFloat(value)
+  return Number.isFinite(n) ? n : 0
 }
 
 /** Map a keydown to a tmux key name from ALLOWED_KEYS, or null for plain text. */

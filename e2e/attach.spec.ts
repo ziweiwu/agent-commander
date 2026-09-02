@@ -43,6 +43,26 @@ test.describe('the terminal', () => {
     expect(await cols()).toBe(before)
   })
 
+  test('re-fits the capture when the window changes shape @desktop', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/\S/, {
+      timeout: 15_000,
+    })
+    const rendered = async () => {
+      const wrap = await page.getByTestId('term-wrap').boundingBox()
+      return wrap?.width ?? 0
+    }
+    const wide = await rendered()
+    expect(wide).toBeGreaterThan(0)
+
+    // Narrower than the capture needs at its current size. Nothing redraws the
+    // pane — the fixture is idle — so only the container observer can re-fit it.
+    await page.setViewportSize({ width: 600, height: 700 })
+    await expect.poll(rendered, { timeout: 5_000 }).toBeLessThan(wide)
+    expect(await rendered()).toBeLessThanOrEqual(600)
+  })
+
   test('INV-6 asks before sending a key that discards work', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()

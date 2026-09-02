@@ -159,6 +159,58 @@ describe('computeScale (height)', () => {
     expect(r.scale).toBe(2)
   })
 
+  /*
+   * The box the pane lives in also holds the key bar — and, once the pane has
+   * ended, a notice and a caption above it. Budgeting the whole box for the
+   * capture enlarged it into room the key bar was standing in, and pushed the
+   * Enter / Esc / Ctrl-C row out of the panel: on a phone, the row that answers
+   * a blocked agent.
+   */
+  it('does not budget for the room the key bar is standing in', () => {
+    const shared = {
+      naturalWidth: 600,
+      available: 1800,
+      naturalHeight: 400,
+      availableHeight: 600,
+      zoom: 'readable' as const,
+      maxScale: 2.5,
+    }
+    // Alone in the box, the capture may take all of it.
+    expect(computeScale(shared).scale).toBeCloseTo(1.5)
+    // Sharing it with a 200px key bar, only what is left.
+    expect(computeScale({ ...shared, reservedHeight: 200 }).scale).toBeCloseTo(1.0)
+  })
+
+  it('never yields a scale that needs the whole box when something else is in it', () => {
+    for (const reserved of [1, 50, 120, 300]) {
+      const r = computeScale({
+        naturalWidth: 600,
+        available: 3000,
+        naturalHeight: 400,
+        availableHeight: 800,
+        reservedHeight: reserved,
+        zoom: 'readable',
+        maxScale: 4,
+      })
+      expect(r.scale * 400 + reserved).toBeLessThanOrEqual(800 + 1e-9)
+    }
+  })
+
+  // A box already filled by everything else has no height budget to offer, and
+  // that must read as "unconstrained", not as "shrink to nothing".
+  it('ignores height when the rest of the box has already used it up', () => {
+    const r = computeScale({
+      naturalWidth: 600,
+      available: 900,
+      naturalHeight: 400,
+      availableHeight: 300,
+      reservedHeight: 300,
+      zoom: 'readable',
+      maxScale: 2,
+    })
+    expect(r.scale).toBeCloseTo(1.5)
+  })
+
   // Shrinking was always height-safe; adding the constraint must not make a
   // pane that has to be panned suddenly smaller than it was.
   it('does not shrink a panned pane any further for height', () => {

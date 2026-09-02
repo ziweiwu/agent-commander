@@ -10,19 +10,28 @@ import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './Terminal.module.css'
 
-/** How far the capture may be enlarged in full screen. */
-const FULLSCREEN_MAX_SCALE = 2.5
+/**
+ * The largest text the capture is enlarged to in full screen, in CSS pixels.
+ *
+ * A font size rather than a multiplier: the old ceilings (2.5× and 2×) were
+ * picked against 80- and 150-column captures on one machine, and an 80-column
+ * pane full screen on a 4K display still left most of it empty. What a reader
+ * cares about is how big the text is, and that number does not need a new
+ * guess per display. Enlarging re-renders xterm at this size rather than
+ * stretching a 13px canvas, so it is crisp at any of them.
+ */
+const FULLSCREEN_MAX_FONT = 32
 
 /**
- * How far it may be enlarged inside the detail panel.
+ * The same ceiling inside the detail panel.
  *
  * Lower than full screen because the panel shares the window with the fleet
- * list, but not 1: an 80-column capture pinned at 1:1 rendered ~700px wide in a
- * panel with half again that much room, which reads as the terminal being
- * broken rather than faithful. The height fit in `computeScale` is what keeps
- * this from pushing rows off the bottom.
+ * list, but not the base size: an 80-column capture pinned at 1:1 rendered
+ * ~700px wide in a panel with half again that much room, which reads as the
+ * terminal being broken rather than faithful. The height budget in
+ * `computeScale` is what keeps this from pushing the key bar out of the panel.
  */
-const PANEL_MAX_SCALE = 2
+const PANEL_MAX_FONT = 26
 
 /** How many animation frames a zero-width container gets before it is opened anyway. */
 const MAX_SIZING_ATTEMPTS = 30
@@ -167,7 +176,7 @@ function openWhenSized(
       return
     }
     term.mount(wrap, scale)
-    term.setMaxScale(viewport.fullscreen ? FULLSCREEN_MAX_SCALE : PANEL_MAX_SCALE)
+    term.setMaxFont(viewport.fullscreen ? FULLSCREEN_MAX_FONT : PANEL_MAX_FONT)
     // Always measure after mounting. The usual trigger is the first frame
     // changing geometry, but a frame that arrives before this deferred mount
     // finds no host to measure and is silently skipped — leaving the pane
@@ -252,6 +261,19 @@ function useBlurAfterExit(
 }
 
 /**
+ * The notice and caption a dead pane gains sit above the capture, inside the
+ * same box, so the room the capture has just shrank — and the box itself did
+ * not change size, so the observer that would otherwise notice has nothing to
+ * report. Measure again by hand.
+ */
+function useRefitAfterExit(options: PaneTermOptions, termRef: RefObject<PaneTerm | null>): void {
+  const { exited } = options
+  useEffect(() => {
+    if (exited) termRef.current?.scheduleRescale()
+  }, [exited, termRef])
+}
+
+/**
  * The one place React meets an imperative library.
  *
  * PaneTerm owns xterm and the scaling maths; this component owns its lifetime
@@ -281,6 +303,7 @@ function usePaneTerm(options: PaneTermOptions) {
   usePaneLifecycle(options, { wrapRef, scaleRef, termRef }, handlers)
   usePaneFrames(options, termRef)
   useBlurAfterExit(options, wrapRef)
+  useRefitAfterExit(options, termRef)
 
   return { wrapRef, scaleRef, term: termRef.current, guarded }
 }

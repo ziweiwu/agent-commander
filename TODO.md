@@ -99,89 +99,22 @@ deliberate local run owns it.
 
 ## Tier 3 — the surface that is hardest to read
 
-### 5. The attach view: make it bigger, and make it re-fit when the window moves
+### 5. The attach view: make it bigger, and make it re-fit when the window moves — done
 
-**Filed as a feature request, 2026-09-02.** The Attach tab reads small on a
-large display, and — the sharper half — it does not re-fit when the box it
-lives in changes shape. Four separate causes: the first two are defects, the
-other two are ceilings picked against a smaller screen than people now use.
-
-Everything below is a CSS transform or an xterm font size on the *capture*.
-INV-1 is untouched by all of it: `cols` and `rows` never travel back to tmux,
-and nothing here may make them start. `npm run verify:inv1` is the check that
-this stayed true.
-
-**a. Nothing observes the container, so a resize is never noticed.**
-`PaneTerm.rescale` (`src/web/lib/term.ts:279`) runs from exactly three places:
-`mount` via `openWhenSized` (`src/web/components/Terminal.tsx:175`), a frame
-whose `cols`/`rows` changed (`term.ts:239`), and `setZoom`/`setMaxScale`
-(`term.ts:337`, `:343`). There is no `ResizeObserver` and no `resize` listener
-in `src/web` outside `SettingsMenu.tsx:145`. So dragging the desktop window
-narrower, rotating a phone, the sheet opening beside the list, the key bar
-wrapping from one row onto two, or a mobile URL bar collapsing all leave the
-pane at whatever scale it was given on mount. A *quiet* agent is the worst
-case: no redraw means no geometry change, so nothing ever recovers it, and the
-pane stays clipped or shrunken until the tab is reopened.
-
-Fix: observe `host.parentElement` in `mount` and call `scheduleRescale()`;
-disconnect in `dispose()` beside the rAF cancellation. Two traps —
-
-- Observe the **parent**, never `host`. `rescale` writes `host.style.width` and
-  `host.style.height` (`term.ts:308`), so observing the element it sizes is a
-  feedback loop.
-- `scheduleRescale` queues *two* rAFs per call (`term.ts:260`) and tracks every
-  handle for `dispose`. A resize drag would push hundreds. Coalesce: keep one
-  pending schedule at a time.
-
-**b. The height budget counts the key bar as if it were pane.** `rescale` reads
-`host.parentElement.clientHeight` (`term.ts:295`), but `.host` holds the capture
-*and* the key bar — and, for a pane that has ended, the notice and the caption
-above it too (`Terminal.tsx:400-418`). The height fit is therefore computed
-against more room than the capture actually gets, so at `PANEL_MAX_SCALE = 2`
-an enlarged pane can push the Enter / Esc / Ctrl-C row out of the panel — read
-from the code rather than observed, so reproduce it before fixing it. That row
-is how a phone answers a blocked agent, so this is the one item here with a
-consequence beyond legibility. Fix: measure what the capture may have —
-subtract the siblings, or give `.wrap` a bounded flex parent and measure that
-instead.
-
-**c. Enlarging upscales a 13px canvas rather than re-rendering.** `BASE_FONT` is
-13 (`term.ts:13`) and growth is a `scale()` transform, which is why `PaneTerm`
-carries `scaled` at all and why its comment says enlarged text is "slightly
-soft". Raising xterm's own `fontSize` for the *enlarge* direction is INV-1-safe
-and gives crisp glyphs at any size. Keep shrinking as a transform: below
-`MIN_EFFECTIVE_FONT` nothing is readable however it is rendered, and the
-`readable`/`fit` split depends on scale being continuous. Watch: changing
-`fontSize` changes the cell metrics, so every measurement in `rescale` must
-re-run after xterm has laid out again — the existing double-rAF exists for
-exactly this reason, and a font change needs the same treatment.
-
-**d. The ceilings are guesses.** `FULLSCREEN_MAX_SCALE = 2.5` and
-`PANEL_MAX_SCALE = 2` (`Terminal.tsx:14`, `:25`) were picked against 80- and
-150-column captures on this machine. An 80-column pane full screen on a 4K
-display still leaves most of the screen empty at 2.5. If (c) lands, express the
-ceiling as a target effective font size rather than a multiplier — that is the
-thing the reader actually cares about, and it stops the number needing a new
-guess per display.
-
-**While you are in the file:** `.wrap` declares `max-width: 100%` twice
-(`Terminal.module.css:20` and `:26`).
-
-**Done when:**
-
-- `test/term-scale.test.ts` gains cases for the corrected height budget — a
-  container whose height is shared with a key bar must not yield a scale that
-  needs all of it.
-- A test proves a container resize rescales with no new frame. `test/ui/setup.ts`
-  stubs `clientHeight` to 0 for every element and jsdom has no `ResizeObserver`,
-  so this needs both stubbed; a `PaneTerm` unit test is likely cheaper than a
-  component one.
-- `e2e/attach.spec.ts` resizes the viewport and asserts the transform on
-  `term-scale` changed.
-- `npm test`, `npm run e2e` and `npm run audit` pass, and `npm run verify:inv1`
-  still passes against a real pane.
-
----
+All four causes addressed. `PaneTerm.mount` observes the terminal root's
+*parent* — the detail panel's pane or the full-screen body, both bounded by the
+layout — and coalesces a resize drag into one measurement at a time. The
+height budget is that box less everything else in it (`heightBudget` in
+`term.ts`: padding, the key bar, a dead pane's notice and caption), so an
+enlarged pane can no longer push the Enter / Esc / Ctrl-C row out of the panel.
+Enlarging re-renders xterm at a bigger whole-pixel font with a residual
+transform, so glyphs stay crisp; shrinking stays a transform. The ceilings are
+font sizes (`FULLSCREEN_MAX_FONT` 32px, `PANEL_MAX_FONT` 26px) rather than
+multipliers. Tests: `test/term-scale.test.ts` (the budget),
+`test/ui/term-resize.test.tsx` (resize without a frame, coalescing, disconnect,
+font-based enlarge), `e2e/attach.spec.ts` "re-fits the capture when the window
+changes shape". `npm run verify:inv1` is the check that `cols`/`rows` still
+never travel back to tmux; run it against a real pane before a release.
 
 ## Not doing
 
