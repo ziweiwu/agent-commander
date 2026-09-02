@@ -35,6 +35,8 @@ mod mock;
 mod options;
 mod pane;
 mod pane_hub;
+#[cfg(test)]
+mod pane_props;
 mod pending;
 mod poll;
 mod registry;

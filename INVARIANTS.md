@@ -194,6 +194,16 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
 - `pane::tests` (the control-path group) — a write that fails after reaching tmux is
   never retried down the other path, a read that fails is, and the user's text
   never appears on a tmux command line
+- `pane_props::inv2_every_interleaving_delivers_each_text_once_to_its_pane_in_order`
+  — the same four clauses as a stateful property rather than a list of
+  examples: generated sequences of pastes and keys, two at a time, down either
+  path, with tmux refusing before a write or failing after one, against a
+  reference model of what each pane should have received and a tmux in
+  miniature whose one buffer table is reachable both ways. Reverting the
+  per-paste buffer name makes it fail on exactly the historical shape — two
+  overlapping pastes on two panes — shrunk to that in under a second. A
+  failure is written to `rust/proptest-regressions/`, which is the regression
+  test.
 - `types::tests` (`inv2_a_prompt_id_changes_with_every_field_a_reader_reads`,
   `inv2_field_boundaries_cannot_be_shifted_to_forge_a_match`) — the id moves
   with the question, the agent, and the position in a multi-question set

@@ -61,28 +61,14 @@ stale checkout. `src/shared/types.ts` re-exports it and adds `ModelAlias` and
 
 ## Tier 2 — model the thing that is genuinely a protocol
 
-### 3. Stateful property tests for INV-2's write path
+### 3. Stateful property tests for INV-2's write path — done
 
-INV-2 is the one invariant here whose failures are *interleavings* rather than
-wrong values, and it records a real one: one shared tmux buffer name meant two
-overlapping pastes ran `load(A) → load(B) → paste(into A)`, and A's agent
-received B's text.
-
-Use `proptest-state-machine` (Rust) against the real write path in
-`rust/src/pane.rs`. The model is a map of pane id → the bytes that pane should
-have received; the operations are overlapping pastes, queued writes to one pane,
-key sends, and a failure injected *after* the write reached tmux. Assert INV-2's
-four clauses: exactly once, that text, that agent, in the order typed.
-
-**Why this and not TLA+:** a TLA+ spec proves the *spec* correct and has no link
-to `pane.rs`; property tests run against the real code, ride in `npm test`, and
-shrink a failure to a minimal sequence you can paste in as a regression test.
-The existing `pane::tests` write-path group already covers the known cases by
-example — this generalises them.
-
-**Done when:** the harness runs in the existing suite inside the `npm test`
-budget (~46s for all three gates today, so keep the case count modest), and the
-historical buffer-name bug is reproducible by reverting the fix.
+`rust/src/pane_props.rs`, `cfg(test)` only: `proptest-state-machine` over the
+real `Panes` with a tmux in miniature whose single buffer table is reachable
+down both paths. 96 cases of up to 10 steps run in well under a second, so it
+rides in `npm test`; reverting the per-paste buffer name fails it on the
+historical two-pane overlap, shrunk to exactly that. `INVARIANTS.md` INV-2
+lists it.
 
 ### 4. Kani proofs for the pure predicates
 

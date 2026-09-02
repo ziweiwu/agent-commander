@@ -93,7 +93,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1014 tests: 553 Rust (the server) + 461 vitest (the web app)
+npm test              # 1015 tests: 554 Rust (the server) + 461 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 263 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit

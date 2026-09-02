@@ -116,7 +116,7 @@ impl PaneError {
     pub fn msg(message: impl Into<String>) -> Self {
         PaneError { message: message.into(), eagain: false, enoent: false }
     }
-    fn eagain(message: impl Into<String>) -> Self {
+    pub(crate) fn eagain(message: impl Into<String>) -> Self {
         PaneError { message: message.into(), eagain: true, enoent: false }
     }
     fn enoent(message: impl Into<String>) -> Self {
@@ -411,7 +411,7 @@ impl Control for LiveControl {
 /// sessions will do it — spawning returns `EAGAIN` readily, and it did so twice
 /// while this path was being measured. Before this, one `EAGAIN` dropped the
 /// character the user had just typed, or stopped their terminal outright.
-const SPAWN_RETRIES: usize = 4;
+pub(crate) const SPAWN_RETRIES: usize = 4;
 const SPAWN_RETRY_BASE_MS: u64 = 20;
 
 /* ------------------------------------------------------------- write ordering */

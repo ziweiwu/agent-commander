@@ -39,6 +39,8 @@ tempfile = "3"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio-tungstenite = "0.24"
 ts-rs = "12"
+proptest = "1.9.0"
+proptest-state-machine = "0.6.0"
 
 [profile.release]
 opt-level = 3
