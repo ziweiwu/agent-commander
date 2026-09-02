@@ -16,7 +16,7 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   setAttached: vi.fn(),
 }))
 
-const env = { tailscale: null, tmux: true, port: 4317, platform: 'darwin' }
+const env = { tailscale: null, tmux: true, port: 4317, platform: 'darwin', version: '0.0.0-test' }
 
 beforeEach(() => {
   resetStore()

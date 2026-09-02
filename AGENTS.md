@@ -28,10 +28,17 @@ lengths of its activity trail — live in `src/web/lib/delegation.ts` and
 ## Two languages, and which is which
 
 **The server is Rust, in `rust/`. The browser app is TypeScript, in `src/web/`.**
-`src/shared/types.ts` is the wire contract the browser compiles against, and
-`rust/src/types.rs` is its mirror — the two are edited together or not at all,
-because nothing checks that they still agree except the tests that compare
-against a captured response.
+`rust/src/types.rs` is the wire contract, and `src/shared/wire.ts` is
+**generated from it** by `npm run gen:types` — types and the option lists both,
+because `ALLOWED_KEYS`, `MODEL_ALIASES` and friends are what make "the server
+validates against them and the browser offers exactly them" true, and a
+type-only export would have left that half to drift. Edit the Rust, run the
+script, commit both. `types::tests::the_checked_in_wire_contract_is_current`
+fails `npm test` on a checkout where they disagree, so forgetting the second
+step is a red gate rather than a browser bug. `src/shared/types.ts` is the
+hand-written remainder: it re-exports `wire.ts` and adds the two union types
+the browser derives from the lists. The derive is `cfg_attr(test)` and `ts-rs`
+is a dev-dependency, so none of it reaches the release binary.
 
 There is no `src/server/` any more. It was ~6,600 lines of TypeScript and it is
 preserved, working, on the **`old-node-backend-branch`** branch. Reach for it
@@ -86,7 +93,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1013 tests: 552 Rust (the server) + 461 vitest (the web app)
+npm test              # 1014 tests: 553 Rust (the server) + 461 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 263 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit

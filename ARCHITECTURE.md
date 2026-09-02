@@ -70,12 +70,15 @@ the mock fleet runs the same server, the same routes, and the same
 `checkSpawnRequest` (`spawn.ts:73`) that the real one does, so a validation
 failure seen in mock mode is the failure you would get for real.
 
-`src/shared/types.ts` is the only module both sides import, and everything that
-has to mean the same thing in the browser and on the server lives there: the wire
-types, `ALLOWED_KEYS` and `DESTRUCTIVE_KEYS`, and the option lists —
-`MODEL_ALIASES`, `MODE_CYCLE` and `SPAWN_MODES`. The server validates against
-them and the browser offers exactly them, which is the only arrangement in which
-a model cannot be offered-and-rejected or accepted-and-invisible.
+`src/shared/types.ts` is the only module the browser imports for anything that
+has to mean the same thing on both sides: the wire types, `ALLOWED_KEYS` and
+`DESTRUCTIVE_KEYS`, and the option lists — `MODEL_ALIASES`, `MODE_CYCLE` and
+`SPAWN_MODES`. It re-exports `src/shared/wire.ts`, which is generated from
+`rust/src/types.rs` by `npm run gen:types`, so the server validates against the
+same lists the browser offers by construction rather than by discipline — the
+only arrangement in which a model cannot be offered-and-rejected or
+accepted-and-invisible. A stale `wire.ts` fails
+`types::tests::the_checked_in_wire_contract_is_current`.
 
 ## The five planes
 
@@ -662,11 +665,13 @@ rearrangements worth knowing:
 - `tmux-client.ts` gained `tmux_source.rs` and `tmux_agents.rs` beside it,
   matching the TypeScript's own later split.
 - `agent-kinds.ts` is now in both languages: `rust/src/agent_kinds.rs` for the
-  server and `src/shared/agent-kinds.ts` for the browser. So is the wire
-  contract — `rust/src/types.rs` mirrors `src/shared/types.ts`. **Nothing checks
-  that either pair still agrees except the golden fixtures below.** That is the
-  one thing the port made structurally worse, and it is the price of the
-  browser staying TypeScript.
+  server and `src/shared/agent-kinds.ts` for the browser. **Nothing checks that
+  pair still agrees except the golden fixtures below.** The wire contract used
+  to be in the same position — `rust/src/types.rs` mirrored
+  `src/shared/types.ts` by hand — and is not any more: `src/shared/wire.ts` is
+  generated from the Rust (`npm run gen:types`) and a unit test fails when the
+  checked-in copy is stale. `agent-kinds` is the remaining hand-held pair, and
+  it is the price of the browser staying TypeScript.
 
 ### How the port was held to the old behaviour
 

@@ -8,6 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentStatus {
@@ -20,6 +21,7 @@ pub enum AgentStatus {
 }
 
 /// One Claude Code session, as presented to the UI.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Agent {
@@ -88,6 +90,7 @@ pub struct Agent {
 }
 
 /// A Claude Code session goal, as recorded by `/goal` in the transcript.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalState {
@@ -103,6 +106,7 @@ pub struct GoalState {
 }
 
 /// One quota window, as a percentage used and when it refills.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageWindow {
@@ -113,6 +117,7 @@ pub struct UsageWindow {
 }
 
 /// Account-level subscription usage, bridged out of Claude Code's statusLine.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimits {
@@ -124,6 +129,7 @@ pub struct RateLimits {
     pub at: i64,
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TailscaleEnv {
@@ -134,6 +140,7 @@ pub struct TailscaleEnv {
 }
 
 /// Facts about the host machine, used by the help page.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerEnv {
@@ -150,6 +157,7 @@ pub struct ServerEnv {
     pub version: String,
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewAgentRequest {
@@ -162,6 +170,7 @@ pub struct NewAgentRequest {
     pub permission_mode: Option<String>,
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirEntryDto {
@@ -170,6 +179,7 @@ pub struct DirEntryDto {
     pub hidden: bool,
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirListing {
@@ -180,15 +190,19 @@ pub struct DirListing {
 }
 
 /// `{ ok: true, detail? } | { ok: false, error }`
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum ControlResponse {
     Ok {
+        #[cfg_attr(test, ts(type = "true"))]
         ok: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         detail: Option<String>,
     },
     Err {
+        #[cfg_attr(test, ts(type = "false"))]
         ok: bool,
         error: String,
     },
@@ -204,16 +218,19 @@ impl ControlResponse {
 }
 
 /// `{ ok: true, tmuxSession, cwd } | { ok: false, error }`
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 pub enum NewAgentResponse {
     Ok {
+        #[cfg_attr(test, ts(type = "true"))]
         ok: bool,
         #[serde(rename = "tmuxSession")]
         tmux_session: String,
         cwd: String,
     },
     Err {
+        #[cfg_attr(test, ts(type = "false"))]
         ok: bool,
         error: String,
     },
@@ -228,6 +245,7 @@ impl NewAgentResponse {
     }
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TimelineKind {
@@ -238,6 +256,7 @@ pub enum TimelineKind {
     Notice,
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TimelineEvent {
@@ -264,6 +283,7 @@ pub struct TimelineEvent {
 }
 
 /// One choice in a prompt the agent is blocked on.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptOption {
@@ -285,6 +305,7 @@ pub struct PromptOption {
 /// permission request writes the tool and its input but not the numbered list.
 /// For those `options` stays empty and the interface offers keys rather than
 /// labels it would have had to invent.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingPrompt {
@@ -293,8 +314,9 @@ pub struct PendingPrompt {
     /// The question, where the transcript states one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<String>,
-    /// Only ever what the transcript named. Empty means "not knowable here".
+    /// Only ever what the transcript named. Absent means "not knowable here".
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    #[cfg_attr(test, ts(as = "Option<Vec<PromptOption>>", optional))]
     pub options: Vec<PromptOption>,
     /// True when the picker takes several answers, so one digit cannot finish it.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -312,6 +334,7 @@ pub struct PendingPrompt {
     /// under a browser that stayed open. Filled by `with_id` on the way out;
     /// empty on a prompt that has not been sent.
     #[serde(skip_serializing_if = "String::is_empty", default)]
+    #[cfg_attr(test, ts(as = "Option<String>", optional))]
     pub id: String,
 }
 
@@ -354,6 +377,7 @@ impl PendingPrompt {
 }
 
 /// Which compaction notice a `Notice` event is reporting.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NoticeKind {
@@ -361,6 +385,7 @@ pub enum NoticeKind {
     CompactedAuto,
 }
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangedRow {
@@ -369,6 +394,7 @@ pub struct ChangedRow {
 }
 
 /// A rendered snapshot of a tmux pane.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Frame {
@@ -396,6 +422,7 @@ pub struct Geom {
 
 /* ---- client -> server ---- */
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ClientMessage {
@@ -419,6 +446,7 @@ pub enum ClientMessage {
         text: String,
         submit: bool,
         #[serde(default)]
+        #[cfg_attr(test, ts(optional))]
         seq: Option<i64>,
     },
     /// `confirmed` is set only when the user answered a confirmation dialog for
@@ -430,6 +458,7 @@ pub enum ClientMessage {
         session_id: String,
         key: String,
         #[serde(default)]
+        #[cfg_attr(test, ts(optional))]
         confirmed: Option<bool>,
     },
     /// Answer the prompt an agent is blocked on, named by its id.
@@ -456,6 +485,7 @@ pub enum ClientMessage {
 
 /* ---- server -> client ---- */
 
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type")]
 pub enum ServerMessage {
@@ -475,6 +505,7 @@ pub enum ServerMessage {
         /// goes out for every agent many times a minute, and this is only ever
         /// wanted for the one being read.
         #[serde(rename = "prompt", skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         prompt: Option<PendingPrompt>,
     },
     #[serde(rename = "frame")]
@@ -490,17 +521,20 @@ pub enum ServerMessage {
     #[serde(rename = "error")]
     Error {
         #[serde(rename = "sessionId", skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         session_id: Option<String>,
         message: String,
         /// `kind` names the condition; `message` is only how to say it. The
         /// pane-exit case is the one state a viewer must react to
         /// structurally, because INV-1 means there is no pty to report it.
         #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
         kind: Option<ErrorKind>,
     },
 }
 
 /// Structured error conditions a client may branch on.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorKind {
@@ -518,6 +552,7 @@ pub enum ErrorKind {
  */
 
 /// What a delegate is doing, and how much of that this app actually knows.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum SubagentState {
@@ -527,6 +562,7 @@ pub enum SubagentState {
 }
 
 /// One delegate in an agent's tree, and everything below it.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubagentNode {
@@ -547,8 +583,8 @@ pub struct SubagentNode {
     /// Tool calls recorded in its transcript, and the span it worked over.
     ///
     /// What it *did*, as against `state`, which is what became of it. Both are
-    /// needed because `state` is almost always `Quiet` — the honest answer, and
-    /// an uninformative one on its own (INV-13). `None` when the transcript
+    /// needed because `state` is almost always `quiet` — the honest answer, and
+    /// an uninformative one on its own (INV-13). Absent when the transcript
     /// could not be read or is too large to keep re-reading; a node then
     /// renders without them rather than with a zero, which would claim it did
     /// nothing.
@@ -558,11 +594,11 @@ pub struct SubagentNode {
     pub worked_ms: Option<i64>,
     pub state: SubagentState,
     /// The state was worked out here rather than reported (INV-11). Set on
-    /// `Active`, which is a guess from a recent write and a busy parent, and
-    /// never on `Done`, which is only ever claimed on evidence.
+    /// `active`, which is a guess from a recent write and a busy parent, and
+    /// never on `done`, which is only ever claimed on evidence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state_inferred: Option<bool>,
-    /// The user stopped it. Evidence of an ending, so the state is `Done`.
+    /// The user stopped it. Evidence of an ending, so the state is `done`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stopped_by_user: Option<bool>,
     /// Its parent id named a delegate that is not on disk, so it was raised to
@@ -573,6 +609,7 @@ pub struct SubagentNode {
 }
 
 /// One agent's delegates. `children` is empty for an agent that never delegated.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentTree {
@@ -588,6 +625,7 @@ pub struct AgentTree {
 }
 
 /// The whole fleet's delegation graph, as served by `GET /api/tree`.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FleetTree {
     pub trees: Vec<AgentTree>,
@@ -662,9 +700,123 @@ pub fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// The TypeScript side of this file, generated from it.
+///
+/// `src/shared/wire.ts` used to be written by hand as a mirror of these types,
+/// and `AGENTS.md` said the two were "edited together or not at all, because
+/// nothing checks that they still agree". Now something does: the file is
+/// rendered from the Rust by `npm run gen:types`, and
+/// `the_checked_in_wire_contract_is_current` fails `npm test` when a checkout
+/// carries a stale one. The value lists travel too — they are what makes "the
+/// server validates against them and the browser offers exactly them" true, so
+/// a type-only export would have left that half to drift.
+///
+/// Test-only: `ts_rs` is a dev-dependency and every derive above is behind
+/// `cfg_attr(test)`, so the release binary carries none of it.
+#[cfg(test)]
+pub mod wire {
+    use super::*;
+    use std::sync::OnceLock;
+
+    /// Where the browser reads the contract from, relative to the crate root.
+    pub const TS_PATH: &str = "../src/shared/wire.ts";
+
+    const HEADER: &str = "\
+/*
+ * Wire types shared by the server and the browser client.
+ *
+ * GENERATED from rust/src/types.rs by `npm run gen:types` — do not edit.
+ * `types::tests::the_checked_in_wire_contract_is_current` fails when this
+ * file and the Rust disagree. The doc comments are the Rust doc comments;
+ * change them there.
+ */
+";
+
+    /// The whole file, rendered once per process.
+    ///
+    /// Once, because ts-rs keeps a process-wide record of what it has already
+    /// written to each path and a second export to the same file would come
+    /// back partial.
+    pub fn render() -> &'static str {
+        static RENDERED: OnceLock<String> = OnceLock::new();
+        RENDERED.get_or_init(|| render_once().expect("the wire contract renders"))
+    }
+
+    fn render_once() -> Result<String, Box<dyn std::error::Error>> {
+        use ts_rs::TS;
+        let dir = tempfile::tempdir()?;
+        let cfg = ts_rs::Config::new().with_out_dir(dir.path()).with_large_int("number");
+        // Every root type; each brings in what it references.
+        ServerMessage::export_all(&cfg)?;
+        ClientMessage::export_all(&cfg)?;
+        ServerEnv::export_all(&cfg)?;
+        NewAgentRequest::export_all(&cfg)?;
+        DirListing::export_all(&cfg)?;
+        ControlResponse::export_all(&cfg)?;
+        NewAgentResponse::export_all(&cfg)?;
+        FleetTree::export_all(&cfg)?;
+        let types = std::fs::read_to_string(dir.path().join("wire.ts"))?;
+        Ok(format!("{HEADER}\n{}\n\n{}", types.trim_end(), values()))
+    }
+
+    /// The option lists, as `as const` arrays so the browser can derive union
+    /// types from them (`ModelAlias`, `PermissionMode`).
+    fn values() -> String {
+        format!(
+            "/**
+ * Control keys the server will forward. Anything else is rejected (INV-2).
+ * The digits are how a numbered choice is answered.
+ */
+export const ALLOWED_KEYS = {} as const
+
+/** Keys that can destroy work, so the UI must confirm before sending (INV-6). */
+export const DESTRUCTIVE_KEYS = new Set({})
+
+/** Model aliases the CLI accepts, and the only ones this app will pass on. */
+export const MODEL_ALIASES = {} as const
+
+/** Permission modes in the order Shift+Tab cycles them. */
+export const MODE_CYCLE = {} as const
+
+/** Modes settable at spawn time. `dontAsk` is reachable by flag but never cycles. */
+export const SPAWN_MODES = {} as const
+",
+            ts_list(ALLOWED_KEYS),
+            ts_list(DESTRUCTIVE_KEYS),
+            ts_list(MODEL_ALIASES),
+            ts_list(MODE_CYCLE),
+            ts_list(SPAWN_MODES),
+        )
+    }
+
+    fn ts_list(items: &[&str]) -> String {
+        let quoted: Vec<String> = items.iter().map(|item| format!("{item:?}")).collect();
+        format!("[{}]", quoted.join(", "))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `src/shared/wire.ts` is what the browser compiles against, and it is
+    /// generated from this file. A checkout where the two disagree fails here
+    /// rather than in a browser; `npm run gen:types` (this test with
+    /// `WIRE_WRITE=1`) rewrites it.
+    #[test]
+    fn the_checked_in_wire_contract_is_current() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(wire::TS_PATH);
+        let rendered = wire::render();
+        if std::env::var_os("WIRE_WRITE").is_some() {
+            std::fs::write(&path, rendered).expect("write the wire contract");
+            return;
+        }
+        let on_disk = std::fs::read_to_string(&path).unwrap_or_default();
+        assert!(
+            on_disk == rendered,
+            "src/shared/wire.ts does not match rust/src/types.rs — run `npm run gen:types`"
+        );
+    }
 
     fn question(text: &str) -> PendingPrompt {
         PendingPrompt {

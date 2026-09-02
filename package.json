@@ -62,6 +62,7 @@
     "themes": "python3 scripts/gen-themes.py --write",
     "test:web": "vitest run",
     "test:server": "./scripts/cargo.sh test --manifest-path rust/Cargo.toml",
+    "gen:types": "WIRE_WRITE=1 ./scripts/cargo.sh test --manifest-path rust/Cargo.toml the_checked_in_wire_contract_is_current",
     "lint:web": "oxlint"
   },
   "devDependencies": {
