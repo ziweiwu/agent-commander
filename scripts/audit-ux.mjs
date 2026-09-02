@@ -59,10 +59,21 @@ for (const scheme of ['light', 'dark']) {
 
   await page.click(T('agent-card'))
   await page.waitForSelector(T('agent-detail'))
-  const tab = await page.getAttribute(T('tab-attach'), 'aria-selected')
-  if (tab !== 'true') add('high', 'taskC', 'blocked agent does not open on the terminal tab')
+  /*
+   * A blocked agent used to be forced onto the terminal tab, and this checked
+   * for it. It now opens on the conversation, because the Chat tab can answer
+   * the question itself when the transcript names it (INV-16) — so what has to
+   * be true is that the block is *explained* and *actionable*, not which tab is
+   * showing. The terminal is still one click away, and is still the answer for
+   * a prompt whose choices nothing wrote down.
+   */
   if (!(await page.$(T('blocked-banner')))) add('high', 'taskC', 'no banner explaining the block')
-  if (!(await page.$(T('unblock-button')))) add('med', 'taskC', 'no action to resolve the block')
+  const answerable = (await page.$(T('answer-card'))) !== null
+  const escapeHatch = (await page.$(T('unblock-button'))) !== null
+  if (!answerable && !escapeHatch) add('high', 'taskC', 'no way to resolve the block')
+  if (answerable && (await page.$$(T('answer-option'))).length === 0) {
+    add('med', 'taskC', 'answer card offers no way to answer')
+  }
   if (!page.url().includes('/agent/')) add('high', 'routing', `opening an agent did not change the URL (${page.url()})`)
   await page.screenshot({ path: `${OUT}/02-blocked-${scheme}.png`, fullPage: true })
 

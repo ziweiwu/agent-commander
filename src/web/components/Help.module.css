@@ -113,6 +113,13 @@
   padding: 8px 11px;
   border-radius: var(--radius-md);
   margin: 10px 0 14px;
+  /* The reveal button shares this line. Wrapping rather than shrinking, because
+     a tailnet name is long and the narrow screens are the ones that read this
+     page most. */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .detected code {
   font: 12.5px ui-monospace, Menlo, monospace;

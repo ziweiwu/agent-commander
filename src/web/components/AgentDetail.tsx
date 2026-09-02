@@ -228,12 +228,24 @@ function BlockedBanner({
   const t = useTranslate()
   const key = agent.waitingFor ? REASON_KEY[agent.waitingFor] : undefined
   const reason = key ? t(key) : (agent.waitingFor ?? t('blockedReasonFallback'))
+  /*
+   * The Chat tab can now answer some of these itself (INV-16), and when it is
+   * about to, "answer it in the terminal below" is the app contradicting itself
+   * two inches above the buttons that do the job.
+   */
+  const answerable = useStore((s) => s.prompt) !== null
 
   return (
     <div className={styles.blocked} data-testid="blocked-banner">
       <div className={styles.blockedText}>
         <strong>{t('blockedTitle', { reason })}</strong>
-        {t(agent.paneId ? 'blockedBodyAttachable' : 'blockedBodyNotAttachable')}
+        {t(
+          !agent.paneId
+            ? 'blockedBodyNotAttachable'
+            : answerable && tab === 'chat'
+              ? 'blockedBodyAnswerable'
+              : 'blockedBodyAttachable',
+        )}
       </div>
       {agent.paneId && (
         <Button

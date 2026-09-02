@@ -1,17 +1,21 @@
 /**
- * The token has to survive the first navigation, in both places it lives.
+ * The page no longer carries the token, and that is the property under test.
  *
- * It arrives as `?token=…` on the URL that opens the dashboard, and the router
- * does not carry a query string through `navigate('/agent/x')`. That breaks two
- * separate things, and remembering the token in sessionStorage only fixes one:
+ * It used to. The token arrived as `?token=…`, was remembered in
+ * sessionStorage, was appended to every request, and was re-attached to every
+ * in-app navigation — because the router replaces the whole location and a
+ * *document* request for `/agent/x` without the query was refused before a line
+ * of JavaScript ran. The cost was that the secret lived in the address bar
+ * permanently, and therefore in history, in `document.referrer`, and in the
+ * access log of whatever proxy was in front.
  *
- *   - Requests the page makes. Covered by the first block; the module is loaded
- *     by the time any of them run, so recalling the token is enough.
- *   - The address bar. Covered by the second. Nothing the page remembers can
- *     help here — the *document* request for `/agent/x` is refused with
- *     `unauthorized: append ?token=…` before a line of JavaScript runs, so a
- *     reload, a bookmark or a link sent to a phone all dead-end. That is the
- *     phone-over-Tailscale flow the token exists for in the first place.
+ * The server now trades that first `?token=` for an `HttpOnly` cookie and
+ * redirects to the same path without it (`cookie_exchange`). The browser sends
+ * the cookie on every request and on the WebSocket handshake — which could
+ * never carry an `Authorization` header, and was the whole reason for the query
+ * parameter. So the client needs no token code at all, and these tests assert
+ * that none came back: a URL is built without one, and navigation does not
+ * re-add one.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
@@ -48,27 +52,24 @@ beforeEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('the token outlives the query string it arrived in', () => {
-  it('sends the token given in the URL', async () => {
+describe('INV-3: the page never puts the token on a request', () => {
+  // Even when one is sitting right there in the URL it was opened at. The
+  // cookie is what authenticates, and it is HttpOnly, so this code cannot read
+  // it and does not need to.
+  it('sends no token even when the URL it loaded at had one', async () => {
     const { tokenOnRequest } = await loadTransportAt('/?token=s3cret')
-    expect(tokenOnRequest()).toBe('s3cret')
+    expect(tokenOnRequest()).toBeNull()
   })
 
-  // The failing case: the router has since rewritten the URL to /agent/<id>.
-  it('still sends it after a reload onto a URL with no query string', async () => {
-    await loadTransportAt('/?token=s3cret')
+  it('sends none on an ordinary URL either', async () => {
     const { tokenOnRequest } = await loadTransportAt('/agent/mock-busy')
-    expect(tokenOnRequest()).toBe('s3cret')
+    expect(tokenOnRequest()).toBeNull()
   })
 
-  it('prefers a token in the URL over the one it remembered', async () => {
-    await loadTransportAt('/?token=old')
-    const { tokenOnRequest } = await loadTransportAt('/?token=rotated')
-    expect(tokenOnRequest()).toBe('rotated')
-  })
-
-  // A server with no token at all must not have one invented for it.
-  it('sends nothing when none was ever supplied', async () => {
+  // The old client stored it here across loads. Nothing should now.
+  it('remembers nothing across a reload', async () => {
+    await loadTransportAt('/?token=s3cret')
+    expect(Object.keys(sessionStorage)).toEqual([])
     const { tokenOnRequest } = await loadTransportAt('/')
     expect(tokenOnRequest()).toBeNull()
   })
@@ -136,30 +137,31 @@ async function appAt(
 const address = (): string => screen.getByTestId('address').textContent ?? ''
 const FLEET = [agent({ sessionId: 'mock-busy' })]
 
-describe('the token stays in the address bar', () => {
+describe('INV-3: the token does not follow the router into the address bar', () => {
   beforeEach(() => {
     resetStore()
     // The unstub above this block takes setup.ts's matchMedia with it.
     setViewport(() => false)
   })
 
-  it('keeps it when opening an agent', async () => {
+  // The reload this used to protect is now served by the cookie, so dropping
+  // the query is correct rather than a regression.
+  it('drops it when opening an agent', async () => {
     const user = userEvent.setup()
     await appAt('/?token=s3cret', { agents: FLEET })
 
     await user.click(screen.getAllByTestId('agent-card')[0] as HTMLElement)
 
-    // Without this the URL reads /agent/mock-busy, which 401s on reload.
-    expect(address()).toBe('/agent/mock-busy?token=s3cret')
+    expect(address()).toBe('/agent/mock-busy')
   })
 
-  it('keeps it when closing one again', async () => {
+  it('drops it when closing one again', async () => {
     const user = userEvent.setup()
     await appAt('/agent/mock-busy?token=s3cret', { agents: FLEET, selected: 'mock-busy' })
 
     await user.keyboard('{Shift>}{Escape}{/Shift}')
 
-    expect(address()).toBe('/?token=s3cret')
+    expect(address()).toBe('/')
   })
 
   it('adds no query string when the server has no token', async () => {

@@ -1,6 +1,7 @@
 import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
-import { render, type RenderOptions } from '@testing-library/react'
+import { render, screen, type RenderOptions } from '@testing-library/react'
+import type userEvent from '@testing-library/user-event'
 import { useStore } from '../../src/web/store/store.ts'
 
 export { agent } from '../helpers/agent.ts'
@@ -46,4 +47,23 @@ export function resetStore(): void {
  */
 export function renderApp(ui: ReactElement, options?: RenderOptions) {
   return render(ui, { wrapper: MemoryRouter, ...options })
+}
+
+/**
+ * Answer the confirmation in front of a destructive control.
+ *
+ * These actions used to be guarded by `window.confirm`, which a test could
+ * stub. They are now guarded by a real dialog — because `confirm()` cannot
+ * name the specific agent or the specific loss, is unthemed and untranslatable,
+ * and is the least reliable dialog surface on a phone. So the tests click the
+ * verb, which is also what pins that the guard is still there at all.
+ *
+ * Shared, because two surfaces now raise the same dialog: the detail panel's
+ * control row and the composer strip.
+ */
+export async function answer(
+  user: ReturnType<typeof userEvent.setup>,
+  verb: 'accept' | 'cancel',
+): Promise<void> {
+  await user.click(await screen.findByTestId(`confirm-${verb}`))
 }

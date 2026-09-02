@@ -44,7 +44,54 @@
   min-width: 0;
 }
 
+/* Separator only. `gap` already spaces the row, so this needs none of its own. */
+.sep {
+  color: var(--faint);
+  flex: none;
+}
+
+/*
+ * The mode the session last recorded.
+ *
+ * Weighted below the button's own name because it is a readout rather than part
+ * of what the button does. The width cap is load-bearing rather than tidiness:
+ * `modeLabel` echoes an unrecognised mode verbatim, this button is `flex: none`
+ * inside a `nowrap` row, and the empty state is where widths break here before
+ * — a 300-character search term once forced the document to 2175px. A mode this
+ * build has never heard of gets an ellipsis instead of a horizontal scrollbar.
+ */
+.current {
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 12ch;
+}
+
 .compact {
   min-height: 36px;
   padding: 5px 10px;
+}
+
+/*
+ * This is a bare `<button>` rather than the shared `Button`, so it does not
+ * inherit that component's touch sizing and was the one control in the composer
+ * strip the device audit could still find under 40px.
+ *
+ * By width as well as by pointer type, for the reason `ChatControls` gives: a
+ * phone-sized viewport in a desktop browser reports `pointer: fine`, and the
+ * tap target is a property of the screen it will be used on rather than of the
+ * pointer the audit happens to emulate. The strip is already this tall for the
+ * chips beside it, so this costs no height.
+ */
+@media (pointer: coarse) {
+  .mode {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 560px) {
+  .mode {
+    min-height: 44px;
+  }
 }

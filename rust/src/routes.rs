@@ -39,7 +39,7 @@ use tokio::task::JoinHandle;
 
 use crate::browse::DotDirs;
 use crate::frames::{build_frame, is_noop};
-use crate::options::Options;
+use crate::options::{Grant, Grants, Options};
 use crate::pane_hub::HubEvent;
 use crate::pending::SpawnedSession;
 use crate::sources::{Deps, PaneApi, PaneSample, Submit, TailApi, Unsubscribe};
@@ -262,6 +262,12 @@ pub struct App {
     /// Read once at startup: the CLI probe is a subprocess (see
     /// `own_tailnet_name`), and this cannot change under us.
     pub tailnet: Option<String>,
+    /// Non-loopback names this server answers to, lowercased. Empty without a
+    /// token — see `origin_names` and `is_allowed_name`.
+    pub origin_names: Vec<String>,
+    /// What this server's credential may do. `Grants::ALL` unless `--grant`
+    /// narrowed it.
+    pub grants: Grants,
 }
 
 /* -------------------------------------------------------------------------
@@ -400,12 +406,15 @@ fn is_loopback_name(hostname: &str) -> bool {
 ///     origin then matches the host perfectly — both say `evil.example`, and
 ///     only the fact that it is not a loopback name gives it away.
 ///
-/// Only tokenless servers are gated. A configured token is already proof of
-/// intent that neither a cross-origin page nor a rebound name can produce: it
-/// lives in the URL of the real origin, and an attacker who cannot read that
-/// origin cannot supply it. That is also what keeps the Tailscale flow
-/// working, where the app is legitimately reached at a name that is not
-/// loopback and INV-3 already requires `--token`.
+/// Every server is gated, token or not. A token says who is calling; this says
+/// the call was meant. Treating the first as proof of the second was safe only
+/// while the token lived in a URL the attacking page could not read — a
+/// credential the browser attaches by itself, such as a cookie, rides along on
+/// a cross-origin request and proves nothing about intent.
+///
+/// What keeps the Tailscale flow working is `tailnet_origin`: the name the
+/// proxy forwards is accepted as an origin, while the token — which INV-3
+/// already requires for anything off-box — is what authenticates the caller.
 /// This host's Tailscale name, lowercased and trailing dot removed, if up.
 ///
 /// Read from the Tailscale CLI at startup rather than from anything a caller
@@ -420,40 +429,171 @@ pub fn own_tailnet_name(env: &ServerEnv) -> Option<String> {
     (!name.is_empty()).then_some(name)
 }
 
-/// This machine addressed by its own Tailscale name, which is still this
-/// machine (INV-3).
+/// The non-loopback names this server may legitimately be reached at (INV-3).
 ///
-/// `tailscale serve` terminates TLS and proxies to the loopback port,
-/// forwarding the name the caller asked for. That name is not a loopback one,
-/// so the origin check refused it and a tokenless server was unreachable from
-/// the phone it had been reached from before the check existed.
+/// Two ways one gets here, and both are a name the *operator* chose rather than
+/// anything a caller supplied:
 ///
-/// Trusting it is narrower than it looks: one exact name, this host's own
-/// `DNSName`, on a private network the user administers. A visited web page
-/// still cannot use it — its `Origin` is its own domain, which is neither
-/// loopback nor this name. Nor can a rebound host, refused for the same reason.
-fn is_own_tailnet_name(hostname: &str, tailnet: Option<&str>) -> bool {
-    matches!(tailnet, Some(name) if hostname == name)
+///   * the address `--host` bound, because asking to be reachable there is
+///     asking for that name to work;
+///   * this host's own Tailscale `DNSName`, because `tailscale serve`
+///     terminates TLS and proxies to the loopback port forwarding the name the
+///     caller dialled — which is ours.
+///
+/// Both are gathered only when a token is configured, and that is the whole
+/// point. Neither name identifies a *caller*: every tailnet peer's request
+/// arrives wearing this host's name, and nothing in this gate looks at the peer
+/// address. So the name says the request reached the right server, and the
+/// token says who sent it. A visited web page still cannot use either — its
+/// `Origin` is its own domain — and nor can a rebound host, refused for the
+/// same reason.
+fn is_allowed_name(hostname: &str, allowed: &[String]) -> bool {
+    allowed.iter().any(|name| hostname == name)
 }
 
-fn is_self_name(hostname: &str, tailnet: Option<&str>) -> bool {
-    is_loopback_name(hostname) || is_own_tailnet_name(hostname, tailnet)
+/// The set `is_allowed_name` checks, assembled once at startup.
+///
+/// Empty without a token, and that is the invariant that matters: a tokenless
+/// server answers to loopback and to nothing else. `--host` cannot reach here
+/// without one — `refuse_an_open_bind_without_a_token` rejects that at parse
+/// time — but the Tailscale name can, because `tailscale serve` needs no
+/// `--host` at all, and accepting it tokenless would publish the app to every
+/// peer on the tailnet.
+pub fn origin_names(host: &str, tailnet: Option<String>, token: Option<&str>) -> Vec<String> {
+    if token.is_none() {
+        return Vec::new();
+    }
+    let bound = host.trim_matches(['[', ']']).to_ascii_lowercase();
+    let mut names = Vec::new();
+    if !is_loopback_name(&bound) {
+        names.push(bound);
+    }
+    names.extend(tailnet.filter(|name| !names.contains(name)));
+    names
 }
 
-fn same_origin_request(headers: &HeaderMap, tailnet: Option<&str>) -> bool {
+fn is_self_name(hostname: &str, allowed: &[String]) -> bool {
+    is_loopback_name(hostname) || is_allowed_name(hostname, allowed)
+}
+
+fn same_origin_request(headers: &HeaderMap, allowed: &[String]) -> bool {
     if let Some(origin) = headers.get(header::ORIGIN) {
         // A sandboxed iframe or a file:// page sends the literal "null". It
         // parses as a hostname of that name, which is not one of ours, so it
         // is refused by the same line as anything else foreign.
         match hostname_of(origin.to_str().ok()) {
-            Some(from) if is_self_name(&from, tailnet) => {}
+            Some(from) if is_self_name(&from, allowed) => {}
             _ => return false,
         }
     }
     match hostname_of(headers.get(header::HOST).and_then(|v| v.to_str().ok())) {
-        Some(asked) => is_self_name(&asked, tailnet),
+        Some(asked) => is_self_name(&asked, allowed),
         None => false,
     }
+}
+
+/// The cookie the token is exchanged for.
+pub const SESSION_COOKIE: &str = "ac_session";
+
+/// How long a browser keeps it. Thirty days.
+///
+/// This is the *session's* lifetime, not the credential's. The token itself is
+/// long-lived and stable (see `token_file`) so a bookmark keeps working; what
+/// ages out is one browser's right to skip presenting it. Revocation is
+/// `--rotate-token`, which invalidates every cookie at once because the cookie
+/// carries the token.
+const SESSION_MAX_AGE: u32 = 60 * 60 * 24 * 30;
+
+/// One cookie's value out of a `Cookie:` header.
+///
+/// Hand-rolled rather than reusing `query_param`: cookie values are not
+/// percent-encoded by the same rules — `+` is a literal plus here, not a space
+/// — and decoding one as if it were a query component would corrupt any token
+/// containing it.
+fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
+    let header = headers.get(header::COOKIE)?.to_str().ok()?;
+    for pair in header.split(';') {
+        let (key, value) = pair.split_once('=')?;
+        if key.trim() == name {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
+}
+
+/// The query string with `token` removed, so the redirect drops only that.
+fn query_without_token(query: &str) -> String {
+    let kept: Vec<&str> = query
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .filter(|pair| {
+            let (key, _) = pair.split_once('=').unwrap_or((pair, ""));
+            decode_component(key) != "token"
+        })
+        .collect();
+    kept.join("&")
+}
+
+/// Trade a token in the URL for a cookie, once, and get it out of the address bar.
+///
+/// A token in the query string is copied into browser history, into
+/// `document.referrer` on any outbound link, and into the access log of
+/// whatever proxy is in front — and this app's own client used to re-attach it
+/// to every in-app navigation, so it was in the address bar permanently. None
+/// of that is reachable by a page that must not have it, but all of it outlives
+/// the moment the user meant to grant access.
+///
+/// Only a browser navigation is redirected: `Accept: text/html` is what a
+/// document request sends and what `fetch` and curl do not, so a script using
+/// `?token=` or `Authorization` keeps working untouched.
+///
+/// `SameSite=Strict` keeps the cookie off cross-site requests, and the origin
+/// gate — which INV-3 no longer lets a token switch off — is what stands
+/// behind it. That ordering matters: a cookie travels without the user's
+/// intent, so this change would introduce the CSRF hole `permitted` was
+/// rewritten to close.
+fn cookie_exchange(app: &App, gate: &Gate<'_>) -> Option<Response> {
+    let token = app.token.as_deref()?;
+    if gate.upgrading || (gate.method != Method::GET && gate.method != Method::HEAD) {
+        return None;
+    }
+    // Nothing to move out of the URL unless the URL is carrying it.
+    query_param(gate.query, "token")?;
+    let wants_document = gate
+        .headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|accept| accept.contains("text/html"));
+    if !wants_document {
+        return None;
+    }
+
+    let rest = query_without_token(gate.query);
+    let location =
+        if rest.is_empty() { gate.path.to_string() } else { format!("{}?{}", gate.path, rest) };
+
+    // Behind `tailscale serve` the browser's leg is TLS even though ours is
+    // not, and a cookie marked Secure there is both correct and required for
+    // `__Host`-grade handling later. Loopback http is a secure context in
+    // every current browser, so the flag is simply not needed on that leg.
+    let https = gate
+        .headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|proto| proto.eq_ignore_ascii_case("https"));
+    let secure = if https { "; Secure" } else { "" };
+    let cookie = format!(
+        "{SESSION_COOKIE}={token}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Strict{secure}"
+    );
+
+    Some(
+        (
+            StatusCode::FOUND,
+            [(header::LOCATION, location), (header::SET_COOKIE, cookie)],
+            "",
+        )
+            .into_response(),
+    )
 }
 
 /// The built bundle, which the token cannot reach and does not need to.
@@ -485,15 +625,26 @@ impl App {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.strip_prefix("Bearer "))
             .map(str::to_string);
-        match from_query.or(from_header) {
+        // The cookie is what the browser actually sends, on every request and
+        // on the WebSocket handshake — which cannot carry an `Authorization`
+        // header at all, and is the reason the query parameter existed. The
+        // query is now only the first request of a session, before the
+        // exchange below has run.
+        let from_cookie = cookie_value(headers, SESSION_COOKIE);
+        match from_query.or(from_header).or(from_cookie) {
             Some(supplied) => safe_equal(&supplied, token),
             None => false,
         }
     }
 
-    /// True when this request may act at all: the token, or this machine itself.
+    /// True when this request may act at all.
+    ///
+    /// The origin gate is never skipped. It answers a different question from
+    /// the token — not "who is calling" but "is a browser being used as a
+    /// confused deputy" — and a credential the browser attaches on its own
+    /// cannot answer it.
     fn permitted(&self, headers: &HeaderMap) -> bool {
-        self.token.is_some() || same_origin_request(headers, self.tailnet.as_deref())
+        same_origin_request(headers, &self.origin_names)
     }
 }
 
@@ -506,6 +657,11 @@ pub fn router(app: Arc<App>) -> Router {
 }
 
 fn text(status: StatusCode, body: &'static str) -> Response {
+    (status, [(header::CONTENT_TYPE, "text/plain")], body).into_response()
+}
+
+/// `text`, for a body that names what the caller was refused.
+fn owned_text(status: StatusCode, body: String) -> Response {
     (status, [(header::CONTENT_TYPE, "text/plain")], body).into_response()
 }
 
@@ -536,12 +692,34 @@ fn is_upgrade(headers: &HeaderMap) -> bool {
 ///
 /// One value rather than five arguments threaded side by side: the gates are
 /// the one place that needs all of them, and they need them together.
+#[derive(Clone, Copy)]
 struct Gate<'a> {
     method: &'a Method,
     path: &'a str,
     query: &'a str,
     headers: &'a HeaderMap,
     upgrading: bool,
+}
+
+/// Which power a request is asking for, or `None` for the app's own bundle.
+///
+/// Named per route rather than per handler so the whole surface is readable in
+/// one place: a route that is not listed here is a read, which is the safe
+/// default to be wrong about.
+fn grant_for(method: &Method, path: &str) -> Grant {
+    if path == "/api/agents" && method == Method::POST {
+        return Grant::Spawn;
+    }
+    if path == "/api/dirs" {
+        return Grant::Spawn;
+    }
+    if control_route(path).is_some() {
+        // `/clear` destroys a conversation, `mode` can cycle onto a permission
+        // mode that stops asking, and `close` kills the session. All of them
+        // are the agent being driven rather than read.
+        return Grant::Drive;
+    }
+    Grant::Read
 }
 
 /// The refusal this request earns, if any, before anything is routed.
@@ -564,6 +742,21 @@ fn refusal(app: &App, gate: Gate<'_>) -> Option<Response> {
             "forbidden: this server answers only same-origin requests from localhost.\n\
              Reach it at http://127.0.0.1, or start it with --token to use another name.",
         ));
+    }
+    // Last, because "you may not do this" is only worth saying to a caller who
+    // has already proved it is allowed to ask.
+    if !public_asset {
+        let needed = grant_for(gate.method, gate.path);
+        if !app.grants.allows(needed) {
+            return Some(owned_text(
+                StatusCode::FORBIDDEN,
+                format!(
+                    "forbidden: this server was started with --grant {} and this needs {:?}.",
+                    app.grants.names(),
+                    needed
+                ),
+            ));
+        }
     }
     None
 }
@@ -599,6 +792,12 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
         Gate { method: &method, path: &path, query: &query, headers: &parts.headers, upgrading };
     if let Some(refused) = refusal(&app, gate) {
         return refused;
+    }
+    // After the gate, not before: an exchange is only worth doing for a request
+    // that was going to be allowed, and the redirect must never be a way to
+    // learn whether a token was right.
+    if let Some(redirect) = cookie_exchange(&app, &gate) {
+        return redirect;
     }
     if path == "/ws" && upgrading {
         return upgrade_to_socket(app.clone(), &mut parts).await;
@@ -1290,6 +1489,17 @@ struct KeyRequest {
 }
 
 async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    // The socket is checked per message rather than at the handshake: one
+    // connection carries reads, answers and arbitrary keystrokes, so a grant
+    // decided once at upgrade time could only be the widest of them.
+    let needed = grant_for_message(&msg);
+    if !app.grants.allows(needed) {
+        viewer.error(
+            session_of(&msg).unwrap_or_default(),
+            format!("this server was started with --grant {}", app.grants.names()),
+        );
+        return;
+    }
     match msg {
         ClientMessage::Focus { session_id } => on_focus(session_id, viewer, app),
         ClientMessage::Attach { session_id, on } => {
@@ -1302,7 +1512,98 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
         ClientMessage::Key { session_id, key, confirmed } => {
             on_key(KeyRequest { session_id, key, confirmed }, viewer, app).await;
         }
+        ClientMessage::Answer { session_id, prompt_id, choice } => {
+            on_answer(&Answer { session_id, prompt_id, choice }, viewer, app).await;
+        }
     }
+}
+
+/// Which power a socket message is asking for.
+///
+/// The split that matters is `Answer` from `Key`. Answering a prompt is what
+/// the phone is for; arbitrary keystrokes are how an agent gets driven. They
+/// used to be the same message — a bare digit — so there was no way to hand out
+/// one without the other.
+fn session_of(message: &ClientMessage) -> Option<&str> {
+    match message {
+        ClientMessage::Focus { session_id } => session_id.as_deref(),
+        ClientMessage::Attach { session_id, .. }
+        | ClientMessage::Paste { session_id, .. }
+        | ClientMessage::Key { session_id, .. }
+        | ClientMessage::Answer { session_id, .. } => Some(session_id),
+    }
+}
+
+fn grant_for_message(message: &ClientMessage) -> Grant {
+    match message {
+        ClientMessage::Focus { .. } | ClientMessage::Attach { .. } => Grant::Read,
+        ClientMessage::Answer { .. } => Grant::Respond,
+        ClientMessage::Paste { .. } | ClientMessage::Key { .. } => Grant::Drive,
+    }
+}
+
+/// Answer the question the agent is actually blocked on, or refuse.
+///
+/// The check is a re-read, not a lookup of what was sent: between the card
+/// being drawn and the tap arriving, the agent may have been answered from the
+/// terminal, moved to the next question in the same `AskUserQuestion` set, or
+/// been replaced by a different prompt entirely. Comparing the id the client
+/// echoed against the prompt on disk *now* is what makes "yes, edit that file"
+/// unable to land on "yes, run that command".
+///
+/// The keystroke is composed here. The browser sends an index into the options
+/// the transcript named, and nothing it sends becomes an argv entry.
+async fn on_answer(answer: &Answer, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    let session_id = answer.session_id.as_str();
+    if !afford(viewer, session_id) {
+        return;
+    }
+    let Some(agent) = app.deps.source.get(session_id) else { return };
+    let (pane_id, key) = match answer_keystroke(&agent, answer, app).await {
+        Ok(found) => found,
+        Err(why) => {
+            viewer.error(session_id, why.to_string());
+            return;
+        }
+    };
+    if let Err(e) = app.deps.panes.key(&pane_id, &key).await {
+        viewer.error(session_id, format!("could not answer: {e}"));
+    }
+}
+
+/// The fields of a `ClientMessage::Answer`, together because they are checked
+/// together: the id says which question, the choice says which of its options.
+struct Answer {
+    session_id: String,
+    prompt_id: String,
+    choice: usize,
+}
+
+const CANNOT_READ_TRANSCRIPT: &str = "cannot read this agent's transcript";
+
+/// The pane to answer into and the digit that answers — or why nothing may be
+/// sent, in the words the client shows.
+async fn answer_keystroke(
+    agent: &Agent,
+    answer: &Answer,
+    app: &App,
+) -> Result<(String, String), &'static str> {
+    // A tail of its own, read fresh. The viewer's tail has its own byte offset
+    // and its own schedule; what matters here is what is on disk at the instant
+    // the answer arrived, not what was true when the card was drawn.
+    let Some(mut tail) = (app.deps.tail_for)(agent) else { return Err(CANNOT_READ_TRANSCRIPT) };
+    let Ok(read) = tail.read().await else { return Err(CANNOT_READ_TRANSCRIPT) };
+    let current = read.prompt.ok_or("that question has already been answered")?;
+    if current.fingerprint(&answer.session_id) != answer.prompt_id {
+        return Err("the agent is asking something else now — the answer was not sent");
+    }
+    // One-based, because that is what the picker's own numbering is. An index
+    // past the options it named is a client bug, not a keystroke to invent.
+    if answer.choice >= current.options.len().max(1) {
+        return Err("no such option");
+    }
+    let pane_id = agent.pane_id.clone().ok_or("agent is no longer available")?;
+    Ok((pane_id, (answer.choice + 1).to_string()))
 }
 
 fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
@@ -1475,11 +1776,20 @@ async fn pump_timeline(
     if !read.patch.is_empty() {
         app.deps.source.enrich(session_id, read.patch);
     }
-    if !read.events.is_empty() || read.first {
+    /*
+     * `prompt_changed` is its own reason to send. Answering a question writes a
+     * `tool_result`, which is plumbing rather than a message and produces no
+     * event — so without it the card offering the answer would have nothing to
+     * retire it.
+     */
+    if !read.events.is_empty() || read.first || read.prompt_changed {
         viewer.send(ServerMessage::Timeline {
             session_id: session_id.to_string(),
             events: read.events,
             reset: read.first,
+            // The id travels with the question and is echoed back on the
+            // answer, so a reply cannot land on a prompt that has moved on.
+            prompt: read.prompt.map(|p| p.with_id(session_id)),
         });
     }
 }
@@ -2067,6 +2377,7 @@ async fn build_app(
     // Read once, before `env` is moved into the App: the CLI probe is a
     // subprocess and this cannot change under us.
     let tailnet = own_tailnet_name(&env);
+    let origin_names = origin_names(&opts.host, tailnet.clone(), opts.token.as_deref());
     Arc::new(App {
         deps,
         hub,
@@ -2080,6 +2391,8 @@ async fn build_app(
         control,
         pending: Some(pending),
         tailnet,
+        origin_names,
+        grants: opts.grants,
         tree: Some(tree_reader(opts)),
     })
 }
@@ -2098,11 +2411,36 @@ async fn bind(opts: &Options) -> anyhow::Result<tokio::net::TcpListener> {
     })
 }
 
+const MASK_VISIBLE_CHARS: usize = 4;
+
+/// Enough of a token to recognise it, not enough to use it.
+///
+/// Four leading characters out of thirty-two: it distinguishes "the token I
+/// bookmarked" from "a different one" while leaving 112 bits unsaid. A token
+/// too short to keep a secret after this is too short to keep one at all.
+fn masked(token: &str) -> String {
+    let head: String = token.chars().take(MASK_VISIBLE_CHARS).collect();
+    format!("{head}…")
+}
+
 /// The two lines a user reads to know what they are looking at.
+///
+/// The token is masked. This banner is not only read by a person at a terminal:
+/// under the Mac app stdout is `~/Library/Logs/agent-commander/server.log`, so
+/// printing the secret in full wrote it to disk on every start, in a file
+/// nothing rotates. `--print-url` asks for it in full, and `--rotate-token`
+/// prints it because that is the command's entire output.
 fn announce(opts: &Options, count: usize) {
     let shown = if opts.host == "::1" { "[::1]".to_string() } else { opts.host.clone() };
-    let query = opts.token.as_deref().map(|t| format!("?token={t}")).unwrap_or_default();
+    let query = opts
+        .token
+        .as_deref()
+        .map(|t| format!("?token={}", if opts.print_url { t.to_string() } else { masked(t) }))
+        .unwrap_or_default();
     println!("agent-commander on http://{shown}:{}/{query}", opts.port);
+    if opts.token.is_some() && !opts.print_url {
+        println!("  token masked — run with --print-url for the whole link");
+    }
     if opts.mock {
         println!("  mock mode — no real agent is touched");
     } else {
@@ -2211,7 +2549,9 @@ pub async fn run(app: Arc<App>, listener: tokio::net::TcpListener) -> anyhow::Re
 mod tests {
     use super::*;
     use crate::sources::{AgentPatch, AgentSource, LimitsApi, PaneMeta, TailRead};
-    use crate::types::{AgentStatus, RateLimits, TimelineEvent, TimelineKind};
+    use crate::types::{
+        AgentStatus, PendingPrompt, PromptOption, RateLimits, TimelineEvent, TimelineKind,
+    };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -2234,6 +2574,10 @@ mod tests {
     /// An arbitrary sequence number, echoed back in the acknowledgement.
     const PASTE_SEQ: i64 = 7;
     const SESSION: &str = "mock-busy";
+    /// The mock fixture that is parked on an `AskUserQuestion`.
+    const BLOCKED: &str = SESSION;
+    /// Long enough for one answer to have reached the fake pane.
+    const ANSWER_SETTLE: Duration = Duration::from_millis(300);
     const PANE: &str = "%1";
     const DOC: &str = "<!doctype html>\n<html lang=\"en\">\n<body><div id=\"root\"></div></body>\n</html>\n";
 
@@ -2389,6 +2733,13 @@ mod tests {
 
     struct FakeTail {
         n: usize,
+        /// What this tail says the agent is blocked on, re-read every call.
+        ///
+        /// Re-read rather than sent once, because that is the property
+        /// `on_answer` depends on: it opens its own tail to ask what is on disk
+        /// *now*, and a fake that answered from memory would pass whether or
+        /// not the check was there.
+        prompt: Option<PendingPrompt>,
     }
 
     #[async_trait]
@@ -2409,6 +2760,8 @@ mod tests {
                 }],
                 patch: AgentPatch::default(),
                 first: self.n == 1,
+                prompt: self.prompt.clone(),
+                ..Default::default()
             })
         }
     }
@@ -2586,7 +2939,30 @@ mod tests {
 
     /// A fake tail that never runs dry, for a server that has no transcripts.
     fn fake_tails() -> Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync> {
-        Arc::new(|_agent: &Agent| Some(Box::new(FakeTail { n: 0 }) as Box<dyn TailApi>))
+        Arc::new(|_agent: &Agent| Some(Box::new(FakeTail { n: 0, prompt: None }) as Box<dyn TailApi>))
+    }
+
+    /// The `AskUserQuestion` the binding tests answer, as the transcript states
+    /// it: two labelled options, and a second question behind this one.
+    fn blocked_prompt() -> PendingPrompt {
+        PendingPrompt {
+            tool: "AskUserQuestion".into(),
+            question: Some("Which migration should run first?".into()),
+            options: vec![
+                PromptOption { label: "Backfill the index".into(), description: None },
+                PromptOption { label: "Swap the table".into(), description: None },
+            ],
+            multi_select: None,
+            more_questions: Some(1),
+            detail: None,
+            id: String::new(),
+        }
+    }
+
+    fn tails_reporting_a_prompt() -> Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync> {
+        Arc::new(|_agent: &Agent| {
+            Some(Box::new(FakeTail { n: 0, prompt: Some(blocked_prompt()) }) as Box<dyn TailApi>)
+        })
     }
 
     /// The harness `App`: every seam faked, no Tailscale, no real fleet.
@@ -2611,6 +2987,8 @@ mod tests {
             // No Tailscale in the harness: the tests address this server as
             // loopback, which is the gate's other half.
             tailnet: None,
+            origin_names: Vec::new(),
+            grants: Grants::ALL,
             tree: None,
         })
     }
@@ -2649,6 +3027,20 @@ mod tests {
 
     async fn plain(panes: Arc<FakePanes>) -> Harness {
         start(None, panes, Fixtures::Real).await
+    }
+
+    /// A server whose agents are all parked on `blocked_prompt`.
+    async fn blocked(panes: Arc<FakePanes>) -> Harness {
+        let parts = harness_parts(panes);
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        Arc::get_mut(&mut app).expect("sole owner").deps.tail_for = tails_reporting_a_prompt();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let HarnessParts { panes, source, control, web_root } = parts;
+        Harness { port, panes, source, control, web_root }
     }
 
     /* ---- raw HTTP, because `Host` is not a header a real client will set ---- */
@@ -2757,9 +3149,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_token_replaces_the_origin_gate() {
-        // The Tailscale flow: a legitimate name that is not loopback, which
-        // INV-3 already requires `--token` for.
+    async fn a_token_does_not_replace_the_origin_gate() {
+        // A correct token is not a licence to answer any name. The gates ask
+        // different questions, and only `origin_names` widens the second one.
         let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
         let res = raw(
             h.port,
@@ -2767,7 +3159,167 @@ mod tests {
              Origin: http://laptop.tailnet.ts.net\r\nConnection: close\r\n\r\n",
         )
         .await;
+        assert!(status(&res).contains("403"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn a_token_still_serves_the_loopback_origin_it_is_reached_at() {
+        // The gate above must not have cost the ordinary token flow.
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = get(h.port, "/api/agents?token=s3cret", "").await;
         assert!(status(&res).contains("200"), "{}", status(&res));
+    }
+
+    #[test]
+    fn inv3_a_tokenless_server_answers_to_no_name_but_loopback() {
+        // The hole this closed: `tailscale serve` forwards the name the caller
+        // dialled, which is ours, so accepting it without a token let any peer
+        // on the tailnet drive the fleet. A token is now the price of every
+        // name that is not loopback.
+        let tailnet = Some("box.tail1234.ts.net".to_string());
+        assert!(origin_names("127.0.0.1", tailnet.clone(), None).is_empty());
+        assert_eq!(
+            origin_names("127.0.0.1", tailnet.clone(), Some("s3cret")),
+            vec!["box.tail1234.ts.net".to_string()]
+        );
+    }
+
+    #[test]
+    fn inv3_the_bound_host_is_a_name_this_server_answers_to() {
+        // `--host 100.x.y.z --token auto` is a documented recipe. Asking to be
+        // reachable there is asking for that name to work, so it joins the set
+        // — but only alongside the token that `--host` already demands.
+        let tailnet = Some("box.tail1234.ts.net".to_string());
+        assert_eq!(
+            origin_names("100.64.0.1", tailnet.clone(), Some("s3cret")),
+            vec!["100.64.0.1".to_string(), "box.tail1234.ts.net".to_string()]
+        );
+        // Loopback is already covered by `is_loopback_name`, so it is not
+        // repeated, and neither is a bound host that is the tailnet name.
+        assert_eq!(origin_names("localhost", None, Some("s3cret")), Vec::<String>::new());
+        assert_eq!(
+            origin_names("box.tail1234.ts.net", tailnet, Some("s3cret")),
+            vec!["box.tail1234.ts.net".to_string()]
+        );
+    }
+
+    /* ---- INV-3: the token is exchanged for a cookie, once ---- */
+
+    #[tokio::test]
+    async fn a_document_request_trades_the_token_for_a_cookie() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = raw(
+            h.port,
+            "GET /?token=s3cret HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/html\r\n\
+             Connection: close\r\n\r\n",
+        )
+        .await;
+        assert!(status(&res).contains("302"), "{}", status(&res));
+        let lower = res.to_ascii_lowercase();
+        assert!(lower.contains("location: /"), "{res}");
+        assert!(lower.contains("ac_session=s3cret"), "{res}");
+        assert!(lower.contains("httponly"), "{res}");
+        assert!(lower.contains("samesite=strict"), "{res}");
+        // Loopback http is already a secure context; the flag is for the
+        // browser's TLS leg behind `tailscale serve`.
+        assert!(!lower.contains("secure"), "{res}");
+    }
+
+    #[tokio::test]
+    async fn the_redirect_keeps_every_query_parameter_but_the_token() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = raw(
+            h.port,
+            "GET /agent/x?token=s3cret&tab=attach HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Accept: text/html\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        assert!(res.to_ascii_lowercase().contains("location: /agent/x?tab=attach"), "{res}");
+    }
+
+    #[tokio::test]
+    async fn the_cookie_is_marked_secure_behind_a_tls_proxy() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = raw(
+            h.port,
+            "GET /?token=s3cret HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: text/html\r\n\
+             X-Forwarded-Proto: https\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        assert!(res.to_ascii_lowercase().contains("secure"), "{res}");
+    }
+
+    #[tokio::test]
+    async fn the_cookie_then_stands_in_for_the_token() {
+        // The point of the exchange: the next request carries no token at all.
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = raw(
+            h.port,
+            "GET /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Cookie: ac_session=s3cret\r\nConnection: close\r\n\r\n",
+        )
+        .await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn a_wrong_cookie_is_refused_like_a_wrong_token() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        for wrong in ["s3cre", "s3cretx", "S3CRET", ""] {
+            let res = raw(
+                h.port,
+                &format!(
+                    "GET /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+                     Cookie: ac_session={wrong}\r\nConnection: close\r\n\r\n"
+                ),
+            )
+            .await;
+            assert!(status(&res).contains("401"), "{wrong}: {}", status(&res));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_cookie_does_not_buy_a_foreign_origin_anything() {
+        // The reason `permitted` had to stop honouring `token.is_some()` first:
+        // the browser attaches this cookie to a cross-site request without the
+        // user having asked for anything.
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = raw(
+            h.port,
+            "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Origin: https://evil.example\r\nCookie: ac_session=s3cret\r\n\
+             Content-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+        )
+        .await;
+        assert!(status(&res).contains("403"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn a_script_using_the_token_is_not_redirected() {
+        // curl and `fetch` send no `Accept: text/html`, and a 302 they did not
+        // ask for would break every documented scripted use of `?token=`.
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = get(h.port, "/api/agents?token=s3cret", "").await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+    }
+
+    #[test]
+    fn a_cookie_value_is_not_decoded_as_a_query_component() {
+        // `+` is a literal plus in a cookie and a space in a query string.
+        // Sharing `query_param` here would corrupt any token containing one.
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, "ac_session=a+b; other=z".parse().unwrap());
+        assert_eq!(cookie_value(&headers, SESSION_COOKIE).as_deref(), Some("a+b"));
+        assert_eq!(cookie_value(&headers, "missing"), None);
+    }
+
+    #[test]
+    fn stripping_the_token_leaves_the_rest_of_the_query_alone() {
+        assert_eq!(query_without_token("token=x"), "");
+        assert_eq!(query_without_token("a=1&token=x&b=2"), "a=1&b=2");
+        assert_eq!(query_without_token(""), "");
+        // A parameter that merely starts with the same letters is not the token.
+        assert_eq!(query_without_token("tokenish=1"), "tokenish=1");
     }
 
     /* ---- INV-3: the origin gate on a tokenless server ---- */
@@ -2891,19 +3443,22 @@ mod tests {
     }
 
     #[test]
-    fn inv3_only_this_hosts_own_tailnet_name_counts_as_self() {
-        let ours = Some("box.tail1234.ts.net");
-        assert!(is_self_name("box.tail1234.ts.net", ours));
-        assert!(is_self_name("127.0.0.1", ours));
-        assert!(is_self_name("localhost", ours));
-        // Another machine on the same tailnet is not this machine.
-        assert!(!is_self_name("laptop.tail1234.ts.net", ours));
+    fn inv3_only_an_allowed_name_counts_as_self() {
+        let ours = vec!["box.tail1234.ts.net".to_string()];
+        assert!(is_self_name("box.tail1234.ts.net", &ours));
+        assert!(is_self_name("127.0.0.1", &ours));
+        assert!(is_self_name("localhost", &ours));
+        // Another machine's name is not one we answer to. Note this is not
+        // what protects the tailnet: a peer dials *our* name, so it is the
+        // token, not this line, that tells the two apart.
+        assert!(!is_self_name("laptop.tail1234.ts.net", &ours));
         // A visited page's own domain, and a rebound host, are refused by the
         // same line — neither is loopback and neither is our name.
-        assert!(!is_self_name("evil.example", ours));
-        assert!(!is_self_name("null", ours));
-        // With Tailscale down, the name buys nothing.
-        assert!(!is_self_name("box.tail1234.ts.net", None));
+        assert!(!is_self_name("evil.example", &ours));
+        assert!(!is_self_name("null", &ours));
+        // With nothing allowed — a tokenless server — only loopback serves.
+        assert!(!is_self_name("box.tail1234.ts.net", &[]));
+        assert!(is_self_name("127.0.0.1", &[]));
     }
 
     #[test]
@@ -2914,7 +3469,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::ORIGIN, "http://evil.example".parse().unwrap());
         headers.insert(header::HOST, "evil.example".parse().unwrap());
-        assert!(!same_origin_request(&headers, Some("box.tail1234.ts.net")));
+        assert!(!same_origin_request(&headers, &["box.tail1234.ts.net".to_string()]));
     }
 
     /* ---- the bundle is exempt from the token, and only the bundle ---- */
@@ -3377,6 +3932,182 @@ mod tests {
             }
         }
         assert!(ended, "an oversized frame must end the connection, not be answered");
+        assert_eq!(h.panes.writes(), 0);
+    }
+
+    /* ---- authorization: what a credential is allowed to do ---- */
+
+    /// A server with a narrowed grant set, otherwise the blocked harness.
+    async fn granting(grants: Grants, panes: Arc<FakePanes>) -> Harness {
+        let parts = harness_parts(panes);
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        {
+            let app = Arc::get_mut(&mut app).expect("sole owner");
+            app.deps.tail_for = tails_reporting_a_prompt();
+            app.grants = grants;
+        }
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let HarnessParts { panes, source, control, web_root } = parts;
+        Harness { port, panes, source, control, web_root }
+    }
+
+    #[test]
+    fn every_power_implies_being_able_to_read() {
+        // Answering a question you cannot see would be a worse thing to hand
+        // someone than the whole token.
+        for name in ["respond", "drive", "spawn"] {
+            assert!(Grants::parse(name).unwrap().allows(Grant::Read), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_typo_in_a_grant_is_refused_rather_than_guessed_at() {
+        assert!(Grants::parse("reed").is_err());
+        assert!(Grants::parse("").is_err());
+        assert!(Grants::parse("read,drive").unwrap().allows(Grant::Drive));
+        assert!(!Grants::parse("read,drive").unwrap().allows(Grant::Spawn));
+    }
+
+    #[tokio::test]
+    async fn a_read_only_credential_cannot_spawn_an_agent() {
+        let h = granting(Grants::parse("read").unwrap(), FakePanes::new()).await;
+        let res = post(h.port, "/api/agents", "", Some("{}")).await;
+        assert!(status(&res).contains("403"), "{}", status(&res));
+        // ...but the fleet it is for still serves.
+        let listing = get(h.port, "/api/agents", "").await;
+        assert!(status(&listing).contains("200"), "{}", status(&listing));
+    }
+
+    #[tokio::test]
+    async fn a_respond_credential_answers_a_prompt_but_cannot_type() {
+        // The split the phone flow is for: answer the question that is
+        // blocking an agent, without being able to paste a command into it.
+        let h = granting(Grants::parse("respond").unwrap(), FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        let id = prompt_id_for(&mut client).await;
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"key","sessionId":BLOCKED,"key":"Up"}),
+        )
+        .await;
+        let refused = next_msg(&mut client, |m| {
+            is_type(m, "error") && m["message"].as_str().is_some_and(|s| s.contains("--grant"))
+        })
+        .await;
+        assert!(refused.is_some(), "a keystroke needs drive");
+        assert_eq!(h.panes.writes(), 0);
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":0}),
+        )
+        .await;
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(h.panes.writes(), 1, "answering is exactly what it may do");
+    }
+
+    #[tokio::test]
+    async fn a_drive_credential_cannot_answer_by_the_back_door() {
+        // `drive` is wider than `respond` in every practical sense, but the
+        // check is per message: it must not be possible to reach one power by
+        // asking for the name of the other.
+        let h = granting(Grants::parse("drive").unwrap(), FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        let id = prompt_id_for(&mut client).await;
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":0}),
+        )
+        .await;
+        let refused = next_msg(&mut client, |m| {
+            is_type(m, "error") && m["message"].as_str().is_some_and(|s| s.contains("--grant"))
+        })
+        .await;
+        assert!(refused.is_some());
+        assert_eq!(h.panes.writes(), 0);
+    }
+
+    #[tokio::test]
+    async fn the_default_grants_everything_so_nothing_changes_unasked() {
+        let h = blocked(FakePanes::new()).await;
+        let res = post(h.port, "/api/agents", "", Some("{}")).await;
+        assert!(!status(&res).contains("403"), "{}", status(&res));
+    }
+
+    /* ---- INV-2: an answer is bound to the question it was given for ---- */
+
+    /// Focus the blocked fixture and return the prompt id the server sent.
+    async fn prompt_id_for(client: &mut Client) -> String {
+        send_json(client, serde_json::json!({"type":"focus","sessionId":BLOCKED})).await;
+        let msg = next_msg(client, |m| is_type(m, "timeline") && m["prompt"].is_object())
+            .await
+            .expect("the blocked fixture reports a prompt");
+        msg["prompt"]["id"].as_str().expect("the prompt carries an id").to_string()
+    }
+
+    #[tokio::test]
+    async fn inv2_an_answer_naming_the_current_prompt_reaches_the_agent() {
+        let h = blocked(FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        let id = prompt_id_for(&mut client).await;
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":1}),
+        )
+        .await;
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(h.panes.writes(), 1, "the answer reaches the pane");
+    }
+
+    #[tokio::test]
+    async fn inv2_an_answer_to_a_question_that_has_moved_on_is_refused() {
+        // The hazard this exists for: a stale tab, a duplicated frame, or the
+        // next question in the same `AskUserQuestion` set. A bare digit would
+        // answer whatever the pane is showing when tmux receives it.
+        let h = blocked(FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        let id = prompt_id_for(&mut client).await;
+        let stale = format!("{id}-but-not-really");
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":stale,"choice":1}),
+        )
+        .await;
+        let err = next_msg(&mut client, |m| {
+            is_type(m, "error")
+                && m["message"].as_str().is_some_and(|s| s.contains("asking something else"))
+        })
+        .await;
+        assert!(err.is_some(), "the client is told why nothing was sent");
+        assert_eq!(h.panes.writes(), 0, "nothing reached the agent");
+    }
+
+    #[tokio::test]
+    async fn inv2_an_option_the_transcript_never_named_is_refused() {
+        // The keystroke is composed here, so an index past what was offered is
+        // a client bug rather than a digit to invent and send.
+        let h = blocked(FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        let id = prompt_id_for(&mut client).await;
+        const PAST_EVERY_OPTION: usize = 99;
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":PAST_EVERY_OPTION}),
+        )
+        .await;
+        let err = next_msg(&mut client, |m| {
+            is_type(m, "error") && m["message"].as_str().is_some_and(|s| s.contains("no such option"))
+        })
+        .await;
+        assert!(err.is_some());
         assert_eq!(h.panes.writes(), 0);
     }
 

@@ -21,6 +21,8 @@ const MIN_EFFECTIVE_FONT = 9.5
 
 /** Long enough to outlast xterm's own queued viewport callbacks. */
 const DISPOSE_DELAY_MS = 250
+/** Below this, a scale is 1:1 for every purpose a reader has. */
+const SCALE_EPSILON = 0.001
 
 export type ZoomMode = 'readable' | 'fit'
 
@@ -29,6 +31,17 @@ export interface ScaleInput {
   naturalWidth: number
   /** Pixel width of the container it has to live in. */
   available: number
+  /**
+   * Natural pixel height of the rendered pane, and of its container.
+   *
+   * Optional because width alone decided this for as long as the ceiling was 1:
+   * a capture could only ever shrink, and shrinking to fit the width always fit
+   * the height too. Enlarging breaks that — growing on width alone pushes rows
+   * off the bottom and turns "too small to read" into "cut off", which is
+   * worse. Given both, the smaller of the two fits wins.
+   */
+  naturalHeight?: number
+  availableHeight?: number
   zoom: ZoomMode
   /**
    * Largest scale allowed. 1 inside the detail panel, where the pane sits
@@ -57,15 +70,32 @@ export interface ScaleResult {
  * "fit" always shrinks to the container. "readable" refuses to go below
  * MIN_EFFECTIVE_FONT — a 150-column pane in a 390px phone would otherwise
  * render at about 4.6px — and reports that the result must be panned instead.
- * Neither mode ever scales up past 1: the pane is a faithful capture, not a
- * canvas to stretch.
+ * Neither mode scales up past `maxScale`, which defaults to 1: on that default
+ * the pane is a faithful capture rather than a canvas to stretch.
+ *
+ * This is a CSS transform on the capture either way. INV-1 is untouched: `cols`
+ * and `rows` never travel back to tmux, so the real pane is not resized by any
+ * of it.
  */
-export function computeScale({ naturalWidth, available, zoom, maxScale }: ScaleInput): ScaleResult {
+export function computeScale({
+  naturalWidth,
+  available,
+  naturalHeight,
+  availableHeight,
+  zoom,
+  maxScale,
+}: ScaleInput): ScaleResult {
   if (naturalWidth <= 0 || available <= 0) {
     return { scale: 1, overflowing: false, effectiveFont: BASE_FONT }
   }
   const ceiling = maxScale ?? 1
-  const fit = Math.min(ceiling, available / naturalWidth)
+  // Only constrains when both are known and real; a caller that measured
+  // nothing is left exactly where it was.
+  const heightFit =
+    naturalHeight !== undefined && availableHeight !== undefined && naturalHeight > 0 && availableHeight > 0
+      ? availableHeight / naturalHeight
+      : Number.POSITIVE_INFINITY
+  const fit = Math.min(ceiling, available / naturalWidth, heightFit)
   const floor = MIN_EFFECTIVE_FONT / BASE_FONT
   const scale = zoom === 'fit' ? fit : Math.min(ceiling, Math.max(fit, floor))
   return {
@@ -85,6 +115,7 @@ export class PaneTerm {
   #zoom: ZoomMode = 'readable'
   #maxScale = 1
   #overflowing = false
+  #scale = 1
   #onZoomChange: (() => void) | null = null
   /**
    * xterm throws from its own Viewport if anything touches it after dispose —
@@ -263,10 +294,13 @@ export class PaneTerm {
     // Measure the container, not the box itself — the box is resized below.
     const available = host.parentElement?.clientWidth ?? host.clientWidth
     if (!available) return
+    const availableHeight = host.parentElement?.clientHeight ?? 0
 
     const { scale: k, overflowing } = computeScale({
       naturalWidth: width,
       available,
+      naturalHeight: height,
+      availableHeight,
       zoom: this.#zoom,
       maxScale: this.#maxScale,
     })
@@ -277,12 +311,25 @@ export class PaneTerm {
     host.style.height = `${Math.round(height * k)}px`
     host.classList.toggle('pannable', overflowing)
     this.#overflowing = overflowing
+    this.#scale = k
     this.#onZoomChange?.()
   }
 
   /** True when the pane is wider than its container and must be panned. */
   get overflowing(): boolean {
     return this.#overflowing
+  }
+
+  /**
+   * True when what is on screen is not the capture at its own size.
+   *
+   * Shrunk or enlarged both count. The control that offers 1:1 back was shown
+   * only while the pane was too *big*, so an enlarged one had no way back to a
+   * crisp capture — scaled-up canvas text is slightly soft, and which of the
+   * two to live with is the reader's call, not this component's.
+   */
+  get scaled(): boolean {
+    return Math.abs(this.#scale - 1) > SCALE_EPSILON
   }
 
   get zoom(): ZoomMode {

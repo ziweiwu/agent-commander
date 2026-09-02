@@ -263,6 +263,96 @@ pub struct TimelineEvent {
     pub tokens_after: Option<i64>,
 }
 
+/// One choice in a prompt the agent is blocked on.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromptOption {
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// A question the agent is waiting on, read out of its own transcript.
+///
+/// Claude Code flushes a tool call before the dialog it raises is answered, so
+/// an `AskUserQuestion` still waiting for a reply is on disk in full — question,
+/// options, and whether it takes more than one. That is the only reason this
+/// app may name an option at all: it is *read*, never inferred from the screen
+/// (INV-16).
+///
+/// The other two blocked shapes are deliberately thinner. `ExitPlanMode` writes
+/// its plan but not the three approval choices, which the CLI composes; a tool
+/// permission request writes the tool and its input but not the numbered list.
+/// For those `options` stays empty and the interface offers keys rather than
+/// labels it would have had to invent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingPrompt {
+    /// The tool that raised it — `AskUserQuestion`, `ExitPlanMode`, or another.
+    pub tool: String,
+    /// The question, where the transcript states one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question: Option<String>,
+    /// Only ever what the transcript named. Empty means "not knowable here".
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub options: Vec<PromptOption>,
+    /// True when the picker takes several answers, so one digit cannot finish it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub multi_select: Option<bool>,
+    /// How many questions this one call asks, when it asks more than one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub more_questions: Option<usize>,
+    /// Reference text: the plan under review, or the command being asked about.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// Identity of *this* question, for binding an answer to it (INV-2).
+    ///
+    /// Derived from the content rather than stored anywhere: the transcript
+    /// issues no id, and a counter would not survive the server restarting
+    /// under a browser that stayed open. Filled by `with_id` on the way out;
+    /// empty on a prompt that has not been sent.
+    #[serde(skip_serializing_if = "String::is_empty", default)]
+    pub id: String,
+}
+
+impl PendingPrompt {
+    /// A short, stable name for the exact question on screen.
+    ///
+    /// Every field a user reads before deciding goes in, so an answer is bound
+    /// to the question it was given for. `more_questions` is included because
+    /// question two of an `AskUserQuestion` set is a *different* question from
+    /// question one even when both read identically, and answering the wrong
+    /// one is the failure this exists to stop. The session id is in it so a
+    /// prompt cannot be answered on the wrong agent.
+    pub fn fingerprint(&self, session_id: &str) -> String {
+        use sha1::Digest;
+        let mut hasher = sha1::Sha1::new();
+        for part in [
+            session_id,
+            &self.tool,
+            self.question.as_deref().unwrap_or(""),
+            self.detail.as_deref().unwrap_or(""),
+            &self.more_questions.map(|n| n.to_string()).unwrap_or_default(),
+        ] {
+            // Length-prefixed, so ("ab", "c") and ("a", "bc") differ.
+            hasher.update((part.len() as u64).to_le_bytes());
+            hasher.update(part.as_bytes());
+        }
+        for option in &self.options {
+            hasher.update((option.label.len() as u64).to_le_bytes());
+            hasher.update(option.label.as_bytes());
+        }
+        let digest = hasher.finalize();
+        base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, digest)
+    }
+
+    /// The same prompt, carrying the id the client must echo back.
+    pub fn with_id(mut self, session_id: &str) -> Self {
+        self.id = self.fingerprint(session_id);
+        self
+    }
+}
+
 /// Which compaction notice a `Notice` event is reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -342,6 +432,26 @@ pub enum ClientMessage {
         #[serde(default)]
         confirmed: Option<bool>,
     },
+    /// Answer the prompt an agent is blocked on, named by its id.
+    ///
+    /// Separate from `Key` because answering is not typing. A bare digit is
+    /// whatever the pane happens to be showing when tmux receives it: a stale
+    /// tab, a duplicated frame, or a second question in the same
+    /// `AskUserQuestion` set all turn "yes, edit that file" into an answer to
+    /// something else. `prompt_id` is `PendingPrompt::fingerprint` echoed back,
+    /// and the server refuses the answer if the question has moved on.
+    ///
+    /// `choice` is an index into the options the transcript named, so the
+    /// keystroke is composed here rather than sent by the browser (INV-2: the
+    /// client's view of the keyboard is a convenience, not the boundary).
+    #[serde(rename = "answer")]
+    Answer {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "promptId")]
+        prompt_id: String,
+        choice: usize,
+    },
 }
 
 /* ---- server -> client ---- */
@@ -359,6 +469,13 @@ pub enum ServerMessage {
         session_id: String,
         events: Vec<TimelineEvent>,
         reset: bool,
+        /// What this agent is blocked on, when its transcript says.
+        ///
+        /// Sent with the conversation rather than on the fleet frame: the fleet
+        /// goes out for every agent many times a minute, and this is only ever
+        /// wanted for the one being read.
+        #[serde(rename = "prompt", skip_serializing_if = "Option::is_none")]
+        prompt: Option<PendingPrompt>,
     },
     #[serde(rename = "frame")]
     Frame { frame: Frame },
@@ -512,9 +629,17 @@ pub fn is_spawn_mode(value: &str) -> bool {
 }
 
 /// Control keys the server will forward. Anything else is rejected (INV-2).
+///
+/// The digits are how a numbered choice is answered. Claude Code's pickers are
+/// numbered, and a digit selects the option it labels wherever the cursor
+/// happens to be sitting — which is the whole reason they are here rather than
+/// arrow keys: a relative move has to assume where the highlight started, and
+/// being wrong about that answers a different question than the one the user
+/// read. `1`–`9` only; there is no tenth option and `0` selects nothing.
 pub const ALLOWED_KEYS: &[&str] = &[
     "Enter", "Escape", "Tab", "BSpace", "Space", "Up", "Down", "Left", "Right", "Home", "End",
-    "PageUp", "PageDown", "C-c", "C-d", "C-o", "C-r", "C-u",
+    "PageUp", "PageDown", "C-c", "C-d", "C-o", "C-r", "C-u", "1", "2", "3", "4", "5", "6", "7",
+    "8", "9",
 ];
 
 /// Keys that can destroy work, so the UI must confirm before sending (INV-6).
@@ -535,4 +660,75 @@ pub fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn question(text: &str) -> PendingPrompt {
+        PendingPrompt {
+            tool: "AskUserQuestion".into(),
+            question: Some(text.into()),
+            options: vec![
+                PromptOption { label: "Yes".into(), description: None },
+                PromptOption { label: "No".into(), description: None },
+            ],
+            multi_select: None,
+            more_questions: None,
+            detail: None,
+            id: String::new(),
+        }
+    }
+
+    #[test]
+    fn inv2_a_prompt_id_changes_with_every_field_a_reader_reads() {
+        let base = question("Delete the table?");
+        let id = base.fingerprint("s1");
+
+        // The question itself.
+        assert_ne!(question("Edit one file?").fingerprint("s1"), id);
+        // The agent it belongs to: an answer must not cross sessions.
+        assert_ne!(base.fingerprint("s2"), id);
+
+        let mut other_tool = base.clone();
+        other_tool.tool = "ExitPlanMode".into();
+        assert_ne!(other_tool.fingerprint("s1"), id);
+
+        let mut other_detail = base.clone();
+        other_detail.detail = Some("rm -rf /".into());
+        assert_ne!(other_detail.fingerprint("s1"), id);
+
+        let mut other_options = base.clone();
+        other_options.options[1].label = "Never".into();
+        assert_ne!(other_options.fingerprint("s1"), id);
+
+        // The sharp one: question two of a set reads identically to question
+        // one often enough, and answering the wrong one is the whole hazard.
+        let mut later = base.clone();
+        later.more_questions = Some(1);
+        assert_ne!(later.fingerprint("s1"), id);
+
+        // Stable across calls, or the client could never echo it back.
+        assert_eq!(base.fingerprint("s1"), id);
+    }
+
+    #[test]
+    fn inv2_field_boundaries_cannot_be_shifted_to_forge_a_match() {
+        // Without length prefixes, ("ab", "") and ("a", "b") hash the same, so
+        // a question could be made to match a different one by moving a
+        // character across a field boundary.
+        let mut split = question("ab");
+        split.detail = None;
+        let mut shifted = question("a");
+        shifted.detail = Some("b".into());
+        assert_ne!(split.fingerprint("s1"), shifted.fingerprint("s1"));
+    }
+
+    #[test]
+    fn with_id_fills_the_field_the_client_echoes_back() {
+        let sent = question("Proceed?").with_id("s1");
+        assert!(!sent.id.is_empty());
+        assert_eq!(sent.id, question("Proceed?").fingerprint("s1"));
+    }
 }

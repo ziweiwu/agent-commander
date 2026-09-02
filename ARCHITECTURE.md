@@ -361,10 +361,18 @@ The client's real architecture is its duplicate suppression, all of it INV-2:
 - a 1s guard on quick prompts — a double-tap is ~100ms apart, which no
   same-batch check catches.
 - the pending-message timer — an unconfirmed message is marked *not delivered*
-  after 12s rather than resent.
-- `sendingRef` in `ModeButton.tsx` and in `AgentControls.tsx` — the same lesson
-  again, and for clear it is the one with the highest stakes: a second press
-  would discard the fresh session the first one had just created.
+  after 12s rather than resent. The 12s is counted only across time the agent
+  was **not** working: a message queued behind a live turn cannot be confirmed
+  until that turn ends, so counting through one marked every correctly queued
+  message as undelivered. It reads *queued* until the agent stops.
+- `sendingRef` in `ShiftTabButton.tsx` and in `useContextActions.ts` — the same
+  lesson again, and for clear it is the one with the highest stakes: a second
+  press would discard the fresh session the first one had just created. The hook
+  is shared by the detail panel and the composer strip, so that guard exists
+  once rather than once per surface.
+- `sendingRef` in `AnswerCard.tsx` — the sharpest case, because a second press
+  is not a duplicate at all: `AskUserQuestion` asks its questions one at a time,
+  so it would answer the *next* question rather than repeat this answer.
 - paste-ack flow control (`transport.ts:90`) — exactly one paste in flight,
   everything typed meanwhile coalesced into the next. Not a debounce: a guessed
   window is wrong at both ends, whereas the ack makes the chunk size a function of
@@ -486,21 +494,39 @@ interval at its steady rate. The keystroke case is no longer the victim of this 
 outstanding — but the steady cadence has never been re-derived from what a read
 now costs.
 
-**6a. The origin gate answers to two names.** `sameOriginRequest` measures both
-`Origin` and `Host` against loopback *plus* this host's own Tailscale `DNSName`
-(`routes.ts:229`), read from the CLI probe at startup. Without the second one a
-tokenless server is unreachable through `tailscale serve`, which forwards the
-name the caller asked for. It is one exact name, not the tailnet: another
-machine on it is refused, as is any rebound host.
+**6a. The origin gate's extra names are earned by a token, not by Tailscale.**
+`same_origin_request` measures both `Origin` and `Host` against loopback plus
+whatever `origin_names` gathered (`routes.rs`): the address `--host` bound, and
+this host's own Tailscale `DNSName` from the CLI probe at startup. That list is
+empty without a token, so a tokenless server answers to loopback and nothing
+else.
 
-**6. A configured token replaces the origin gate rather than adding to it.**
-`permitted = !!opts.token || sameOriginRequest(req)` (`routes.ts:387`). The
-reasoning above `sameOriginRequest` is sound — a token lives in the URL of the
-real origin and an attacker who cannot read that origin cannot supply it. The
-unstated consequence is that the token is both the credential *and* the exemption
-from rebinding protection, and it travels in the query string and is printed to
-stdout at startup: scrollback, shell history and `Referer` are all places it can
-escape to.
+This used to accept the Tailscale name unconditionally, and the reasoning —
+recorded here and in `INVARIANTS.md` — was that the name meant "this machine".
+It does not. `tailscale serve` forwards the name the caller *dialled*, which is
+ours, so every tailnet peer's request arrives wearing it, and nothing in the
+gate reads the peer address. The name meant "anyone on the tailnet". The unit
+test that seemed to prove otherwise checked that *another machine's* name is not
+a self-name, which no peer ever sends.
+
+**6. The token no longer replaces the origin gate.** `permitted` is now
+`same_origin_request(headers, &self.origin_names)` with no `token.is_some()`
+short-circuit. The old form made the token both the credential *and* the
+exemption from rebinding protection. That was survivable only while the token
+lived in a query string an attacking page could not read — it does not survive
+a credential the browser attaches on its own, which is the direction this is
+heading. The two gates answer different questions: the name says the request
+reached the right server, the token says who sent it.
+
+No longer true, and worth recording because it was the motive for the rest:
+the token used to travel in the query string on every request and every
+navigation, and `announce` printed it in full at startup. Scrollback, shell
+history, `Referer` and `~/Library/Logs/agent-commander/server.log` all held it.
+`cookie_exchange` now trades it for an `HttpOnly` cookie on the first document
+request and redirects the query away, `announce` masks to four characters
+unless asked with `--print-url`, and the token itself lives in a 0600 file
+rather than in argv. What remains deliberate: `--token <literal>` is still
+visible to `ps`, because an explicit override is one the operator chose.
 
 The same "it lives in the URL" property is also what the token cannot do, and
 `isPublicAsset` (`routes.ts:365`) is the concession: a URL the user opened says

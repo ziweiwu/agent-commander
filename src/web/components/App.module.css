@@ -96,6 +96,33 @@
   grid-template-columns: 1fr;
 }
 
+/*
+ * Desktop is one screenful, and the two columns scroll inside it.
+ *
+ * It used to be one document scroll with the detail panel stuck to the top,
+ * and the cost was measured at 1600x900 with the mock fleet: the document was
+ * 1985px tall, the fleet column 1870 of it, and the detail panel 583 — so
+ * everything right of the list below y=682 was ~1300px of nothing, and reading
+ * the bottom of the fleet scrolled the conversation off the screen with it.
+ *
+ * `align-items: start` was what held the panel to its content height; stretch
+ * hands it the row instead. The mobile sheet already worked this way (`.sheet`
+ * is flex-column at `height: 100%`), so this is the desktop half catching up
+ * rather than a new idea — which is why the breakpoint is spelled the same as
+ * `useIsNarrow`, 900px. Below it nothing here applies and the sheet still owns
+ * the screen.
+ */
+@media (min-width: 901px) {
+  .app {
+    height: 100dvh;
+    overflow: hidden;
+  }
+  .layout {
+    align-items: stretch;
+    overflow: hidden;
+  }
+}
+
 .toast {
   position: fixed;
   overflow-wrap: anywhere;

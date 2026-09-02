@@ -1,0 +1,110 @@
+/*
+ * Sits above the conversation, where the answer is wanted, rather than in a
+ * dialog: the question is already modal for the agent, and a modal here would
+ * cover the transcript that gives it context.
+ */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--waiting);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+}
+
+.question {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.label {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+
+/*
+ * The plan or command, as written. `pre` because a plan is markdown with its
+ * own line breaks and a command is a command; reflowing either changes what the
+ * user is being asked to approve.
+ */
+.detail {
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/*
+ * Full width and left-aligned: these are sentences, not verbs, and a row of
+ * centred pills reads as a toolbar rather than as a set of answers.
+ */
+.option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+}
+
+/* The key that is actually sent, so this card and the terminal cannot disagree
+   about which option is which. */
+.digit {
+  grid-row: 1 / span 2;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--line);
+  color: var(--dim);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.optionLabel {
+  font-size: var(--text-sm);
+  color: var(--text);
+}
+
+.description {
+  grid-column: 2;
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+
+.note {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+
+.keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+@media (max-width: 560px) {
+  .card {
+    padding: 10px;
+    gap: 8px;
+  }
+  .detail {
+    max-height: 120px;
+  }
+}

@@ -16,7 +16,6 @@
  */
 import type { Agent } from '../../shared/types.ts'
 import { translate, type Lang } from './i18n.ts'
-import { withTokenPath } from './token.ts'
 
 /**
  * `null` until the first frame has been seen: everything in that frame is
@@ -73,7 +72,7 @@ export function notifyBlocked(agents: Agent[], env: NotifyEnv): void {
         // A full navigation rather than the router: this runs outside React,
         // and the page was hidden anyway — there is no in-progress state on
         // screen for a reload to lose.
-        window.location.assign(withTokenPath(`/agent/${encodeURIComponent(agent.sessionId)}`))
+        window.location.assign(`/agent/${encodeURIComponent(agent.sessionId)}`)
       }
     } catch {
       // A refused constructor (browser quirk, permission revoked mid-loop) is

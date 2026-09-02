@@ -99,3 +99,77 @@ describe('computeScale (full screen)', () => {
     expect(r.scale).toBeLessThan(1)
   })
 })
+
+/*
+ * Height only started mattering when the ceiling rose above 1.
+ *
+ * While a capture could only shrink, fitting the width fitted the height too,
+ * so `computeScale` never measured it. Enlarging breaks that: growing a wide
+ * short container's pane on width alone pushes rows off the bottom, and a
+ * terminal you cannot see the last line of is worse than one that is small.
+ */
+describe('computeScale (height)', () => {
+  it('is limited by height when that is the tighter fit', () => {
+    const r = computeScale({
+      naturalWidth: 600,
+      available: 1800, // 3x on width alone
+      naturalHeight: 400,
+      availableHeight: 600, // but only 1.5x on height
+      zoom: 'readable',
+      maxScale: 2.5,
+    })
+    expect(r.scale).toBeCloseTo(1.5)
+  })
+
+  it('is limited by width when that is the tighter fit', () => {
+    const r = computeScale({
+      naturalWidth: 600,
+      available: 900,
+      naturalHeight: 400,
+      availableHeight: 4000,
+      zoom: 'readable',
+      maxScale: 2.5,
+    })
+    expect(r.scale).toBeCloseTo(1.5)
+  })
+
+  it('still obeys the ceiling when both axes have room to spare', () => {
+    const r = computeScale({
+      naturalWidth: 200,
+      available: 2000,
+      naturalHeight: 100,
+      availableHeight: 2000,
+      zoom: 'readable',
+      maxScale: 2,
+    })
+    expect(r.scale).toBe(2)
+  })
+
+  // A caller that measured no height is left exactly where it was, which is
+  // what keeps every existing call site honest.
+  it('ignores height when it was not measured', () => {
+    const r = computeScale({
+      naturalWidth: 600,
+      available: 1800,
+      naturalHeight: 0,
+      availableHeight: 0,
+      zoom: 'readable',
+      maxScale: 2,
+    })
+    expect(r.scale).toBe(2)
+  })
+
+  // Shrinking was always height-safe; adding the constraint must not make a
+  // pane that has to be panned suddenly smaller than it was.
+  it('does not shrink a panned pane any further for height', () => {
+    const r = computeScale({
+      naturalWidth: 1174,
+      available: 366,
+      naturalHeight: 400,
+      availableHeight: 4000,
+      zoom: 'fit',
+      maxScale: 2.5,
+    })
+    expect(r.scale).toBeCloseTo(366 / 1174)
+  })
+})

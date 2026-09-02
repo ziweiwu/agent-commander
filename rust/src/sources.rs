@@ -5,7 +5,7 @@
 //! goes through these, which is what lets `--mock` be a real substitution
 //! rather than a pile of conditionals.
 
-use crate::types::{Agent, RateLimits, TimelineEvent};
+use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -167,6 +167,14 @@ pub struct TailRead {
     pub events: Vec<TimelineEvent>,
     pub patch: AgentPatch,
     pub first: bool,
+    /// What the agent is blocked on, where the transcript says (INV-16).
+    pub prompt: Option<PendingPrompt>,
+    /// True when `prompt` differs from the last read.
+    ///
+    /// Needed because answering a question writes a `tool_result`, which is
+    /// plumbing rather than a message and so produces no timeline event. Without
+    /// this the card that offered the answer would have nothing to retire it.
+    pub prompt_changed: bool,
 }
 
 #[async_trait]

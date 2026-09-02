@@ -17,6 +17,7 @@ import { MemoryRouter } from 'react-router-dom'
 import { AgentDetail } from '../../src/web/components/AgentDetail.tsx'
 import { FullscreenView } from '../../src/web/components/FullscreenView.tsx'
 import { AgentControls } from '../../src/web/components/AgentControls.tsx'
+import { ChatControls } from '../../src/web/components/ChatControls.tsx'
 import { agent, resetStore } from './helpers.tsx'
 import type { Agent } from '../../src/shared/types.ts'
 
@@ -126,5 +127,21 @@ describe('controls that would type a Claude command are not offered', () => {
     expect(screen.queryByTestId('model-select')).not.toBeNull()
     expect(screen.queryByTestId('clear-agent')).not.toBeNull()
     expect(screen.queryByTestId('compact-agent')).not.toBeNull()
+  })
+
+  /*
+   * The composer strip carries its own copy of these, so it needs its own copy
+   * of the rule. Gating one surface and not its sibling is the exact shape of
+   * bug this file was written for.
+   */
+  it('hides them in the composer strip too', () => {
+    resetStore()
+    render(
+      <MemoryRouter>
+        <ChatControls agent={kiro({ status: 'idle' })} />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByTestId('clear-agent')).toBeNull()
+    expect(screen.queryByTestId('compact-agent')).toBeNull()
   })
 })

@@ -86,9 +86,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 921 tests: 509 Rust (the server) + 412 vitest (the web app)
+npm test              # 1013 tests: 552 Rust (the server) + 461 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 238 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 263 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
@@ -166,7 +166,7 @@ failure you would get for real.
 ## The invariant contract
 
 `INVARIANTS.md` numbers every property this app is built against, INV-1 through
-INV-14, and each is greppable from a test name:
+INV-16, and each is greppable from a test name:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml inv3   # the server's half
@@ -205,11 +205,15 @@ commit.
   nothing else does — so nothing under that prefix may ever serve agent state.
   The same assumption broke the address bar: the router replaces the whole
   location, so navigation has to re-attach the token.
-- **A configured token *replaces* the origin gate rather than adding to it**
-  (`routes.ts:387`). It is the credential and the exemption from rebinding
-  protection at once, and it travels in the query string and is printed to
-  stdout. See `ARCHITECTURE.md` §"Where it is fragile" 6 and 6a before touching
-  either gate.
+- **The two gates are independent, and the origin one is never skipped.**
+  `permitted` is `same_origin_request(headers, &self.origin_names)`. A token no
+  longer exempts a request from rebinding protection — it used to, which made
+  the token the credential and the exemption at once. `origin_names` is empty
+  without a token, so a tokenless server answers to loopback alone; the
+  Tailscale name buys nothing on its own, because `tailscale serve` hands every
+  tailnet peer the same name. The token still travels in the query string and
+  is still printed in full by `announce`. See `ARCHITECTURE.md` §"Where it is
+  fragile" 6 and 6a before touching either gate.
 - **Development used to default to 4317.** A fixture fleet on the production
   port is indistinguishable from your real one having vanished, and the composer
   on that page types into nothing.
@@ -259,8 +263,14 @@ commit.
   also why one fixture (`AGENT.clearable`) is reserved for the clear spec: every
   e2e project shares one mock server, and clearing a fixture another test uses
   deletes that test's agent out from under it.
-- **`npm test` is flaky under load.** `test/scheme.test.ts` (a 5s timeout around
-  spawning `python3`) fails when the machine is busy and passes on a quiet one.
+- **`npm test` is flaky under load, and `scheme` is not the only one.**
+  `test/scheme.test.ts` (a 5s timeout around spawning `python3`) fails when the
+  machine is busy and passes on a quiet one. `test/ui/token.test.tsx`
+  ("keeps it when opening an agent" / "…closing one again") does the same:
+  measured on a clean `main` with nothing else changed, it failed 3 runs out of
+  6 back-to-back and passed 8 of 8 when run on its own. Both are load, not
+  regressions — but check that way round before believing either, because a red
+  run that names only these is the cheapest kind of false alarm to chase.
   A red Stop hook naming only that is worth re-running before believing. The
   INV-4 tail-count flake that used to sit beside it went away with the port:
   `enrich.rs`'s cadence re-arms after the work instead of on a wall clock, so a
@@ -334,7 +344,31 @@ commit.
 - **Piping a test run through `tail` eats the verdict.** `npm run e2e | tail`
   reports tail's exit code, not Playwright's, and the failure list scrolls out
   of the kept lines — a 92-failure run once read as "141 passed" that way.
-  Redirect to a file and check the exit code, never pipe a gate.
+  Redirect to a file and check the exit code, never pipe a gate. Backgrounding
+  one has the same shape: `cmd > log &` followed by `echo $?` reports the
+  *backgrounding*, not the run. Put the `echo` inside the backgrounded shell, or
+  read the verdict out of the log — a 5-failure run read as "exit 0" that way.
+
+- **A redirect can outlive the reason for it.** Opening a blocked agent jumped
+  straight to the Attach tab, on the stated grounds that it was "the only tab
+  that can answer its dialog". Once the Chat tab could answer one (INV-16), that
+  premise was false and the redirect was actively carrying users away from the
+  better surface — but it kept working, so nothing failed. Its own comment is
+  what gave it away. When you add a capability, grep for the comments that
+  assert it is impossible.
+
+- **`openAgent` waits for a first message, and not every fixture has one.**
+  `e2e/helpers.ts` blocks on `getByTestId('message')`, so it can never open the
+  two fixtures that were never prompted — including `mock-waiting`, which is
+  exactly the one a blocked-agent test wants. That is a real shape rather than a
+  quirk: an agent asks for permission on its first tool call, before it has said
+  anything. Navigate directly for those.
+
+- **A `vi.fn(() => …)` cannot be `new`-ed.** Stubbing `globalThis.WebSocket`
+  with an arrow function makes `new WebSocket(url)` throw "not a constructor"
+  *before* the body runs, so the mock records zero calls while the code under
+  test still sees a throw — which looks exactly like the code never calling it.
+  Use `vi.fn(function () { … })` for anything constructed.
 
 ## Shipping it to npm
 
@@ -449,10 +483,16 @@ lists what they have caught.
   each thing fails. Trim an entry when it is fixed; the record of trimmed ones
   is §"Fixed since this list was written". §"How it is checked" is the gate
   design.
-- **`INVARIANTS.md`** — INV-1 … INV-14, each with the tests that prove it.
+- **`INVARIANTS.md`** — INV-1 … INV-16, each with the tests that prove it.
 
 `README.md` is for the person using the app. These two are for the person
 changing it.
+
+`TODO.md` is queued work, written to be executed cold by whoever picks it up:
+what the change is, the call sites as they stood, and what "done" is checked
+against. Take an item or leave it, but read it before proposing one of your own
+— it also records what was considered and deliberately rejected, so a rejected
+idea does not get re-proposed as a new one.
 
 ## Commits
 

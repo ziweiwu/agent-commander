@@ -28,6 +28,17 @@ export interface ChatMessage {
   grouped: boolean
   /** Sent from this browser but not yet echoed back by the transcript. */
   pending?: boolean
+  /**
+   * Sent to an agent that was working, and waiting its turn at the prompt.
+   *
+   * Claude Code writes a prompt into its transcript when it *processes* it, not
+   * when it arrives, so a message queued behind a long turn is unconfirmable
+   * for as long as that turn lasts — which is minutes, not seconds. Counting it
+   * down like an ordinary send marked correctly-delivered messages as failed;
+   * this is the state that says "waiting", and the countdown does not start
+   * until the agent stops working.
+   */
+  queued?: boolean
   failed?: boolean
   /**
    * How many copies of this exact text were already in the conversation when
@@ -114,6 +125,7 @@ export function pendingMessage(
   at: number,
   seq: number,
   priorCopies = 0,
+  queued = false,
 ): ChatMessage {
   return {
     id: `pending-${seq}`,
@@ -123,6 +135,7 @@ export function pendingMessage(
     tools: [],
     grouped: false,
     pending: true,
+    ...(queued ? { queued: true } : {}),
     priorCopies,
   }
 }

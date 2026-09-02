@@ -7,7 +7,15 @@
  * expressed as a React effect.
  */
 import { create } from 'zustand'
-import type { Agent, Frame, NewAgentResponse, RateLimits, ServerEnv, TimelineEvent } from '../../shared/types.ts'
+import type {
+  Agent,
+  Frame,
+  NewAgentResponse,
+  PendingPrompt,
+  RateLimits,
+  ServerEnv,
+  TimelineEvent,
+} from '../../shared/types.ts'
 import {
   buildMessages,
   countSaid,
@@ -75,6 +83,13 @@ export interface AppState {
   messages: ChatMessage[]
   pending: ChatMessage[]
   pendingSeq: number
+  /**
+   * What the focused agent is blocked on, when its transcript says (INV-16).
+   *
+   * Only ever set from a `timeline` frame, so it belongs to the conversation on
+   * screen and is dropped with it.
+   */
+  prompt: PendingPrompt | null
 
   frame: Frame | null
   toast: string | null
@@ -110,6 +125,13 @@ export interface AppState {
   /** Expect a session the fleet has not broadcast yet; null once it arrives. */
   setExpectSession: (sessionId: string | null) => void
   addPending: (text: string) => void
+  /**
+   * Re-decide which echoes may be counting down, after a status change.
+   *
+   * Called when a fleet frame lands, because that is where "the agent stopped
+   * working" arrives.
+   */
+  syncDelivery: () => void
   rebuildChat: () => void
   resetConversation: () => void
   t: (key: Key, vars?: Record<string, string | number>) => string
@@ -118,9 +140,15 @@ export interface AppState {
 /**
  * How long a locally-echoed message waits for the transcript to confirm it.
  *
- * Generous on purpose: the transcript is read by polling and a busy agent can
- * take a moment to write the prompt out. This only has to be shorter than the
- * point at which a user decides the app is broken.
+ * Generous on purpose: the transcript is read by polling and an agent can take
+ * a moment to write the prompt out. This only has to be shorter than the point
+ * at which a user decides the app is broken.
+ *
+ * It is measured only across time the agent was **not** working. Claude Code
+ * writes a prompt into its transcript when it processes it, so a message queued
+ * behind a turn cannot be confirmed until that turn ends — and turns run for
+ * minutes. Counting this down through one marked every correctly-queued message
+ * "not delivered", which is the default path for the composer's Queue mode.
  */
 const CONFIRM_TIMEOUT_MS = 12_000
 
@@ -131,6 +159,45 @@ function clearPendingTimer(id: string): void {
   if (timer === undefined) return
   window.clearTimeout(timer)
   pendingTimers.delete(id)
+}
+
+/** Is the agent this conversation belongs to still working? */
+function focusedIsBusy(state: Pick<AppState, 'agents' | 'selected'>): boolean {
+  const agent = state.agents.find((a) => a.sessionId === state.selected)
+  return agent?.status === 'busy'
+}
+
+/**
+ * Start the countdown after which an unconfirmed message is called undelivered.
+ *
+ * INV-2 forbids resending, so this only ever *marks* the message. Left alone it
+ * said "sending…" for ever, which reads as "still on its way" rather than "this
+ * may never have arrived" — so the user waits instead of checking the terminal.
+ * Marking it is the honest end state: the message stays visible and unsent, and
+ * sending it again is the user's call.
+ */
+function armDelivery(
+  id: string,
+  get: () => AppState,
+  set: (partial: Partial<AppState> | ((s: AppState) => Partial<AppState>)) => void,
+): void {
+  clearPendingTimer(id)
+  pendingTimers.set(
+    id,
+    window.setTimeout(() => {
+      pendingTimers.delete(id)
+      if (!get().pending.some((p) => p.id === id)) return
+      set((s) => ({
+        // `pending` comes off as `failed` goes on: they are two states, not two
+        // flags, and leaving both set left the message relying on CSS
+        // declaration order to render the right one.
+        pending: s.pending.map((p) =>
+          p.id === id ? { ...p, pending: false, queued: false, failed: true } : p,
+        ),
+      }))
+      get().rebuildChat()
+    }, CONFIRM_TIMEOUT_MS),
+  )
 }
 
 let toastTimer: number | undefined
@@ -166,6 +233,7 @@ export const useStore = create<AppState>()((set, get) => ({
   messages: [],
   pending: [],
   pendingSeq: 0,
+  prompt: null,
 
   frame: null,
   toast: null,
@@ -229,31 +297,35 @@ export const useStore = create<AppState>()((set, get) => ({
     // identical one earlier. `messages` is the right list to count: it holds
     // the confirmed conversation plus any echo still in flight, which is
     // exactly what this copy has to outnumber. See `reconcile`.
-    const echo = pendingMessage(text, Date.now(), seq, countSaid(messages, text))
+    const working = focusedIsBusy(get())
+    const echo = pendingMessage(text, Date.now(), seq, countSaid(messages, text), working)
     set((s) => ({ pending: [...s.pending, echo], pendingSeq: seq + 1 }))
     get().rebuildChat()
+    // A message queued behind a live turn is not late, it is waiting. Its
+    // countdown starts when the agent stops working — see `syncDelivery`.
+    if (!working) armDelivery(echo.id, get, set)
+  },
 
-    // INV-2 forbids resending, so this only ever *marks* the message. Left
-    // alone it said "sending…" for ever, which reads as "still on its way"
-    // rather than "this may never have arrived" — so the user waits instead of
-    // checking the terminal. Marking it is the honest end state: the message
-    // stays visible and unsent, and sending it again is the user's call.
-    pendingTimers.set(
-      echo.id,
-      window.setTimeout(() => {
-        pendingTimers.delete(echo.id)
-        if (!get().pending.some((p) => p.id === echo.id)) return
-        set((s) => ({
-          // `pending` comes off as `failed` goes on: they are two states, not
-          // two flags, and leaving both set left the message relying on CSS
-          // declaration order to render the right one.
-          pending: s.pending.map((p) =>
-            p.id === echo.id ? { ...p, pending: false, failed: true } : p,
-          ),
-        }))
-        get().rebuildChat()
-      }, CONFIRM_TIMEOUT_MS),
-    )
+  /*
+   * The agent's status changed, so what each echo is waiting for changed with
+   * it. Going busy suspends a countdown rather than resetting it to failed;
+   * going idle starts one for anything that was queued.
+   */
+  syncDelivery: () => {
+    const working = focusedIsBusy(get())
+    for (const p of get().pending) {
+      if (p.failed) continue
+      if (working) {
+        clearPendingTimer(p.id)
+      } else if (!pendingTimers.has(p.id)) {
+        armDelivery(p.id, get, set)
+      }
+    }
+    // A queued message that is now merely pending should stop saying "queued".
+    if (!working && get().pending.some((p) => p.queued)) {
+      set((s) => ({ pending: s.pending.map((p) => (p.queued ? { ...p, queued: false } : p)) }))
+      get().rebuildChat()
+    }
   },
 
   rebuildChat: () => {
@@ -270,7 +342,7 @@ export const useStore = create<AppState>()((set, get) => ({
   resetConversation: () => {
     for (const timer of pendingTimers.values()) window.clearTimeout(timer)
     pendingTimers.clear()
-    set({ events: [], messages: [], pending: [], frame: null })
+    set({ events: [], messages: [], pending: [], frame: null, prompt: null })
   },
 
   t: (key, vars) => translate(get().lang, key, vars),

@@ -21,6 +21,23 @@
   height: 100%;
 }
 
+/*
+ * The cap is what a conversation needs when the page scrolls behind it: past
+ * 56vh the transcript would grow the document rather than scroll itself. The
+ * desktop shell no longer scrolls, so the cap now does the opposite of its job
+ * — it was holding the panel to 583px of a 900px viewport and leaving the rest
+ * blank. `.region` is `flex: 1; min-height: 0` above it, so lifting the cap
+ * hands the transcript everything the header, tabs and composer did not take.
+ *
+ * Left in place below 900px, where the sheet's own `.pane` is the scroller and
+ * the visual viewport moves under an on-screen keyboard.
+ */
+@media (min-width: 901px) {
+  .scroll {
+    max-height: none;
+  }
+}
+
 .list {
   display: flex;
   flex-direction: column;
@@ -353,5 +370,20 @@
   }
   .stopLabel {
     display: none;
+  }
+}
+
+/*
+ * Above the conversation rather than inside the scroller: a question the agent
+ * is stopped on must not scroll out of reach of the person answering it.
+ */
+.answer {
+  flex: none;
+  padding: 8px 12px 0;
+}
+
+@media (max-width: 560px) {
+  .answer {
+    padding: 6px 8px 0;
   }
 }

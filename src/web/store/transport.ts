@@ -17,7 +17,6 @@ import type {
   ServerEnv,
   ServerMessage,
 } from '../../shared/types.ts'
-import { withToken } from '../lib/token.ts'
 import { notifyBlocked } from '../lib/notify.ts'
 import { useStore } from './store.ts'
 
@@ -168,6 +167,20 @@ export function interruptAndSend(text: string): void {
 }
 
 /** Send a control key that cannot destroy work. */
+/**
+ * Answer the prompt an agent is blocked on, by index into its named options.
+ *
+ * Deliberately not `sendKey`. A digit means "whatever the pane is showing when
+ * tmux receives it"; this carries the id of the question that was on screen,
+ * and the server refuses it if the agent has moved on. Targets the session by
+ * name rather than by whatever is selected, so a card in a list cannot answer
+ * for a different agent.
+ */
+export function answerPrompt(sessionId: string, promptId: string, choice: number): void {
+  if (promptId === '') return
+  send({ type: 'answer', sessionId, promptId, choice })
+}
+
 export function sendKey(key: string): void {
   const { selected } = useStore.getState()
   if (!selected) return
@@ -202,7 +215,7 @@ export function sendText(text: string): void {
 
 export async function loadEnv(): Promise<void> {
   try {
-    const env = (await (await fetch(withToken('/api/env'))).json()) as ServerEnv
+    const env = (await (await fetch('/api/env')).json()) as ServerEnv
     useStore.setState({ env })
   } catch {
     // The help page falls back to generic instructions.
@@ -214,7 +227,7 @@ export async function startAgent(
   options: { name?: string; model?: string; permissionMode?: string } = {},
 ): Promise<NewAgentResponse> {
   try {
-    const res = await fetch(withToken('/api/agents'), {
+    const res = await fetch('/api/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ cwd, ...options }),
@@ -239,7 +252,7 @@ async function controlAgent(
   value?: string,
 ): Promise<ControlResponse> {
   try {
-    const res = await fetch(withToken(`/api/agents/${encodeURIComponent(sessionId)}/${action}`), {
+    const res = await fetch(`/api/agents/${encodeURIComponent(sessionId)}/${action}`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       ...(value === undefined ? {} : { body: JSON.stringify({ value }) }),
@@ -300,7 +313,7 @@ export const setAgentGoal = (condition: string): Promise<ControlResponse> =>
 
 /** Directory listing for the folder picker; the server confines it to a root. */
 export async function browseDirs(path?: string, hidden = false): Promise<DirListing> {
-  const url = withToken('/api/dirs')
+  const url = new URL('/api/dirs', location.href)
   if (path) url.searchParams.set('path', path)
   if (hidden) url.searchParams.set('hidden', '1')
   const res = await fetch(url)
@@ -342,7 +355,7 @@ const HTTP_NOT_MODIFIED = 304
  * than being turned back into a 200 from a store we are not managing.
  */
 export async function fetchTree(etag: string | null, signal?: AbortSignal): Promise<TreeResult> {
-  const res = await fetch(withToken('/api/tree'), {
+  const res = await fetch('/api/tree', {
     cache: 'no-store',
     ...(etag === null ? {} : { headers: { 'if-none-match': etag } }),
     ...(signal ? { signal } : {}),
@@ -358,6 +371,9 @@ function handle(msg: ServerMessage): void {
   switch (msg.type) {
     case 'fleet': {
       useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt: Date.now() })
+      // A status change decides whether an echo may be counting down: a message
+      // queued behind a live turn is waiting, not late.
+      useStore.getState().syncDelivery()
       announceBlocked(msg.agents)
       notifyBlocked(msg.agents, { enabled: state.notify, lang: state.lang })
       return
@@ -368,7 +384,14 @@ function handle(msg: ServerMessage): void {
     }
     case 'timeline': {
       if (msg.sessionId !== state.selected) return
-      useStore.setState({ events: msg.reset ? msg.events : [...state.events, ...msg.events] })
+      useStore.setState({
+        events: msg.reset ? msg.events : [...state.events, ...msg.events],
+        // Absent means nothing is open. Carried on every timeline frame rather
+        // than only when it appears, so answering a question clears the card
+        // that offered it — the `tool_result` that closes one is plumbing and
+        // produces no event of its own.
+        prompt: msg.prompt ?? null,
+      })
       useStore.getState().rebuildChat()
       return
     }
@@ -405,22 +428,53 @@ function announceBlocked(agents: Agent[]): void {
   if (region) region.textContent = `${fresh.length}: ${fresh.map((a) => a.name).join(', ')}`
 }
 
-export function connect(): void {
-  const url = withToken('/ws')
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+/** Wait, then try again. The one place the backoff is advanced. */
+function retryLater(): void {
+  window.setTimeout(connect, retry)
+  retry = Math.min(retry * 2, 10_000)
+}
 
-  const ws = new WebSocket(url)
+/**
+ * A socket to `/ws`, or `null` when the constructor itself refused.
+ *
+ * It throws synchronously rather than firing an event: mixed content on an
+ * https page, or a token that will not go through `URL`. No socket means no
+ * `close` event, and `close` is the only thing that schedules the next attempt
+ * — so a caller that treats `null` as anything but "retry" ends the chain here,
+ * and the composer is disabled for the life of the page, captioned
+ * "reconnecting…" about a reconnection nothing is attempting.
+ */
+function openSocket(): WebSocket | null {
+  try {
+    const url = new URL('/ws', location.href)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    return new WebSocket(url)
+  } catch {
+    return null
+  }
+}
+
+/** Re-establish what the page was looking at before the socket dropped. */
+function onOpen(): void {
+  retry = 500
+  useStore.setState({ conn: 'open' })
+  const { selected, tab } = useStore.getState()
+  if (selected) {
+    send({ type: 'focus', sessionId: selected })
+    if (tab === 'attach') send({ type: 'attach', sessionId: selected, on: true })
+  }
+}
+
+export function connect(): void {
+  const ws = openSocket()
+  if (!ws) {
+    useStore.setState({ conn: 'closed' })
+    retryLater()
+    return
+  }
   socket = ws
 
-  ws.addEventListener('open', () => {
-    retry = 500
-    useStore.setState({ conn: 'open' })
-    const { selected, tab } = useStore.getState()
-    if (selected) {
-      send({ type: 'focus', sessionId: selected })
-      if (tab === 'attach') send({ type: 'attach', sessionId: selected, on: true })
-    }
-  })
+  ws.addEventListener('open', onOpen)
 
   ws.addEventListener('message', (event) => {
     try {
@@ -440,8 +494,7 @@ export function connect(): void {
     outbox = null
     window.clearTimeout(stallTimer)
     useStore.setState({ conn: 'closed' })
-    window.setTimeout(connect, retry)
-    retry = Math.min(retry * 2, 10_000)
+    retryLater()
   })
 
   ws.addEventListener('error', () => ws.close())

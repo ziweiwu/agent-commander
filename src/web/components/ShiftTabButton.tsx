@@ -3,6 +3,7 @@ import type { Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { sendShiftTab } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { modeLabel } from '../lib/modes.ts'
 import styles from './ShiftTabButton.module.css'
 
 /**
@@ -15,27 +16,32 @@ import styles from './ShiftTabButton.module.css'
 type ShiftTabButtonSize = 'regular' | 'compact'
 
 /**
- * Send Shift+Tab to the agent — the chord that cycles its permission mode.
+ * Send Shift+Tab to the agent — the chord that cycles its permission mode —
+ * and show the mode the session last wrote down.
  *
- * **It reports no mode, and that is the fix rather than a shortcoming.** This
- * was a mode switch twice before: a `<select>` that asked the server to chase
- * a named mode, and then a cycle button that pressed once and waited to be
- * told where it landed. Both were reported as not working, and the second one
- * was not even wrong about the key — measured against a live session, three
- * presses walk it `auto` → `plan` exactly as they should.
+ * **The readout and the press are two different claims, and keeping them apart
+ * is the whole design.** This was a mode switch twice before: a `<select>` that
+ * asked the server to chase a named mode, and then a cycle button that pressed
+ * once and waited to be told where it landed. Both were reported as not
+ * working, and neither was wrong about the key — measured against a live
+ * session, three presses walk it `auto` → `plan` exactly as they should.
  *
  * What neither could do is *see* that. Claude Code writes its `permission-mode`
  * record when a turn ends, so a session sitting at its prompt — the one you are
  * usually switching — writes nothing in reply, and a session that has not taken
  * a turn yet has no transcript to write it to. So a press cost 2.5 seconds with
  * the control disabled, then said it could not confirm the switch, then left the
- * old mode's name sitting on the button. Three separate signals that nothing had
+ * old mode's name sitting on the button: three signals that nothing had
  * happened, about something that had.
  *
- * So the button now claims only what a key press can claim. It sends the chord
- * and says so. The agent's own terminal is what shows the mode, immediately and
- * without this app having to guess — which is where a user reads it anyway
- * (INV-11: never assert more than is known).
+ * So the mode shown here is never the answer to a press. It is
+ * `agent.permissionMode` — what the session itself last recorded — rendered
+ * whenever there is one and omitted when there is not, and the press does not
+ * touch it. **It therefore lags a switch, by design:** on an agent at its
+ * prompt the readout stays on the old mode until that session finishes a turn.
+ * Pressing still says only that the chord went out, and the toast still points
+ * at the agent's own terminal, which shows the new mode immediately and without
+ * this app having to guess (INV-11: never assert more than is known).
  *
  * Shared by the composer strip and the detail panel rather than written twice.
  * The select existed in both, was fixed in one, and stayed broken in the other
@@ -84,12 +90,23 @@ export function ShiftTabButton({
   }
 
   /*
-   * `⇧⇥` alone does not say what pressing it will do, and a sighted user
-   * cannot infer it from the glyph. The accessible name spells out both the
-   * chord and what it is for — the same reason the goal toggle carries its own
-   * aria-label rather than leaning on a pressed state.
+   * Absent until the session has recorded one — which is the ordinary state for
+   * an agent that has not taken a turn yet, not an error to paper over. Nothing
+   * is substituted for it: no "unknown", no assumed `default`, because either
+   * would be this app naming a mode it has not been told (INV-11).
    */
-  const label = t('shiftTabAction')
+  const current = agent.permissionMode ? modeLabel(agent.permissionMode, t) : undefined
+
+  /*
+   * `⇧⇥` alone does not say what pressing it will do, and a sighted user cannot
+   * infer it from the glyph. The accessible name spells out both the chord and
+   * what it is for — and carries the mode too when one is shown, because a
+   * label that omits part of its own visible text leaves a screen reader with
+   * less than the screen has.
+   */
+  const label = current
+    ? t('shiftTabActionWithMode', { mode: current })
+    : t('shiftTabAction')
 
   return (
     <button
@@ -105,6 +122,22 @@ export function ShiftTabButton({
         ⇧⇥
       </span>
       <span className={styles.name}>{t('shiftTabName')}</span>
+      {current && (
+        <>
+          {/* Decoration between two labels, and read as neither. */}
+          <span aria-hidden="true" className={styles.sep}>
+            ·
+          </span>
+          {/*
+            Hidden from the accessible name rather than duplicated into it: the
+            button's `aria-label` already ends with this mode, and leaving it
+            exposed would have a screen reader say it twice.
+          */}
+          <span aria-hidden="true" className={styles.current} data-testid="shift-tab-mode">
+            {current}
+          </span>
+        </>
+      )}
     </button>
   )
 }

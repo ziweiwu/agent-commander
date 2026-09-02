@@ -46,6 +46,7 @@ mod tmux_agents;
 mod tmux_source;
 mod transcript;
 mod tmux_client;
+mod token_file;
 mod types;
 
 use std::path::{Path, PathBuf};
@@ -72,6 +73,13 @@ async fn main() -> ExitCode {
         return if install_statusline() { ExitCode::SUCCESS } else { ExitCode::FAILURE };
     }
 
+    // The same shape, and for the same reason: revoking a token is maintenance,
+    // not a way to run. Printing it is the whole point of the command, so this
+    // is the one place the secret is written out in full on purpose.
+    if opts.rotate_token {
+        return rotate_token();
+    }
+
     // Clear staging directories left by runs that were killed rather than
     // asked to stop, matching `cli.ts:279`. Nothing waits on this: a failure
     // to tidy up is not a reason to refuse to start, and the files are 0600 in
@@ -85,6 +93,28 @@ async fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("agent-commander: {e:#}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Replace the stored token and say what it now is.
+///
+/// The new value goes to stdout because a token nobody can read is not a token
+/// anybody can use — this is the one command whose output *is* the secret. Its
+/// counterpart is `announce`, which masks for exactly the same reason: there
+/// the secret is a side effect of starting, and it lands in a log file.
+fn rotate_token() -> ExitCode {
+    let path = token_file::token_file();
+    match token_file::rotate(&path) {
+        Ok(token) => {
+            println!("{token}");
+            eprintln!("stored in {}", path.display());
+            eprintln!("every link carrying the old token is now refused.");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("agent-commander: {e}");
             ExitCode::FAILURE
         }
     }

@@ -53,6 +53,16 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
     >
       {t('notDelivered')}
     </span>
+  ) : message.queued ? (
+    /*
+     * A third state, not a variant of "sending". The agent was working when
+     * this was sent, so it is waiting its turn at the prompt — and Claude Code
+     * writes a message down only when it processes it. Saying "sending…" for
+     * the minutes a turn can take invites the user to send it again.
+     */
+    <span className={styles.state} data-testid="message-queued" title={t('queuedHint')}>
+      {t('queued')}
+    </span>
   ) : message.pending ? (
     <span className={styles.state}>{t('sending')}</span>
   ) : null

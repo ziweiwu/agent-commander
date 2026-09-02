@@ -2,8 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type { Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { setAgentGoal } from '../store/transport.ts'
+import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { useContextActions } from '../hooks/useContextActions.ts'
 import { Button } from './ui/Button.tsx'
+import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { ShiftTabButton } from './ShiftTabButton.tsx'
 import styles from './ChatControls.module.css'
 
@@ -39,8 +42,13 @@ export function ChatControls({ agent }: { agent: Agent }) {
    * synchronously, so the second finds it taken.
    */
   const sendingRef = useRef(false)
+  const ctx = useContextActions(agent)
+  const slashCommands = allowsSlashCommands(agent.agentKind)
   const busy = agent.status === 'busy'
-  const disabled = busy || !agent.paneId || pending !== null
+  // Clear and compact join the rule the goal already follows: nothing may start
+  // on top of something already in flight at this session.
+  const inFlight = pending !== null || ctx.pending !== null
+  const disabled = busy || !agent.paneId || inFlight
   const reason = busy ? t('controlBusy') : undefined
 
   const goal = agent.goal
@@ -187,8 +195,57 @@ export function ChatControls({ agent }: { agent: Agent }) {
               {t('goalAchieved')}
             </span>
           )}
+
+          {/*
+            * The two actions that act on the agent's memory rather than on its
+            * next turn. They exist in the detail panel's row as well, and are
+            * repeated here for the reason mode and goal are: that row is above
+            * the tabs, collapses behind `⋯` below 900px, and does not exist at
+            * all in full screen — which is exactly where a conversation gets
+            * long enough to want clearing.
+            *
+            * Both type a Claude Code slash command into the prompt, so INV-7
+            * hides them for a CLI that does not speak them and INV-8 refuses
+            * them while the agent is busy. The testids are the panel's copy's:
+            * scope by `chat-controls` to reach this one, as `control.spec.ts`
+            * already does for `shift-tab`.
+            */}
+          {slashCommands && (
+            <div className={styles.context}>
+              <Button
+                variant="compact"
+                data-testid="compact-agent"
+                disabled={disabled}
+                title={reason ?? t('compactContextTitle')}
+                /* "Compact" beside a Goal toggle does not say compact *what*.
+                   The visible label stays short for the strip; the accessible
+                   name spells out the object, the same trade the goal toggle
+                   makes above. */
+                aria-label={t('compactContextTitle')}
+                onClick={ctx.runCompact}
+              >
+                {ctx.pending === 'compact' ? t('compacting') : t('compactContext')}
+              </Button>
+              <Button
+                variant="compact"
+                className={styles.clear}
+                data-testid="clear-agent"
+                disabled={disabled}
+                title={reason ?? t('clearContextTitle')}
+                aria-label={t('clearContextTitle')}
+                onClick={ctx.askClear}
+              >
+                {ctx.pending === 'clear' ? t('clearing') : t('clearContext')}
+              </Button>
+            </div>
+          )}
         </div>
       )}
+      {/*
+        Outside the ternary: a dialog raised from the buttons above must not be
+        torn down if something re-renders this into the goal branch.
+      */}
+      <ConfirmDialog {...ctx.confirm} />
     </div>
   )
 }

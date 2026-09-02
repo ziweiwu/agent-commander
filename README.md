@@ -66,8 +66,8 @@ toolchain is needed only to work on it. Windows is not among them, because the
 Attach tab is tmux. See [Releasing](#releasing) for why all four ride in one
 package rather than one package each.
 
-A blocked agent opens straight onto the terminal that can answer it, and the
-whole thing works from a phone over Tailscale:
+A blocked agent can be answered without leaving the conversation, and the whole
+thing works from a phone over Tailscale:
 
 | Answering a blocked agent | On a phone |
 |---|---|
@@ -198,9 +198,16 @@ Open an agent and you get two tabs:
   summary). Messages you send appear immediately as *sending…* and settle once
   the agent's transcript confirms them; one the agent never echoes back is
   marked *not delivered* rather than spinning forever, and is never resent
-  for you. A typing indicator shows while it is working. `Enter` sends,
+  for you. A message sent to an agent that is **working** reads *queued* instead,
+  and does not start its countdown until the agent stops: Claude Code writes a
+  prompt down when it *processes* it, so a message waiting behind a long turn is
+  waiting, not late — counting it down through one used to mark every correctly
+  queued message as undelivered. A typing indicator shows while it is working. `Enter` sends,
   `Shift+Enter` adds a newline, and `Shift+Tab` cycles the permission mode —
-  the same chord the CLI uses, and it works mid-task. An agent that is working
+  the same chord the CLI uses, and it works mid-task. **Compact** and **Clear**
+  sit beside them, because the panel's own control row is above the tabs and is
+  not there at all in full screen — which is where a conversation gets long
+  enough to want clearing. An agent that is working
   can be stopped from here too, rather than only from the terminal. Above the box is a
   row of the replies you end up typing over and over — *continue*, *yes, go
   ahead*, *run the tests*, *what's blocking you?*, *summarise where you
@@ -211,8 +218,30 @@ Open an agent and you get two tabs:
 - **Attach** — the actual terminal, live. Full keyboard passthrough, so you can
   answer a permission dialog, hit Esc to interrupt, or arrow through a menu.
 
-A blocked agent opens straight onto **Attach** — the only tab that can answer
-its dialog — with a banner naming what it's waiting for.
+A blocked agent shows a banner naming what it's waiting for, and — where the
+question can be read — the question itself with a button per option, right above
+the conversation.
+
+**The options are read, never guessed.** Claude Code writes a tool call to its
+transcript *before* the dialog it raises is answered, so an unanswered
+`AskUserQuestion` is on disk in full: the question, every option's label and
+description, and whether it takes more than one answer. Those labels are what
+the buttons say. Clicking one sends that option's *number*, which selects it
+wherever the highlight happens to be sitting — arrow keys would have to assume
+the picker opened at the top, and being wrong about that answers a different
+question than the one you read.
+
+Where the transcript does not state the choices, the app says so instead of
+inventing them. A plan approval writes its plan but not the three choices the
+CLI composes; a permission request writes the tool and its command but not the
+numbered list. In both the app shows what it does know and offers ↑ ↓ Space
+Enter Esc, with **Open terminal** still there. This is INV-16, and it is the
+whole difference between a control you can trust with a live agent and one you
+cannot: a mislabelled button here answers somebody's question wrongly.
+
+One press closes the card, because a second digit would not repeat the answer —
+`AskUserQuestion` asks its questions one at a time, so it would answer the next
+one.
 
 ### On a phone
 
@@ -229,6 +258,14 @@ with a **Fit width** button when you want the whole pane at a glance, and a
 **Full screen** button beside it for when neither is enough. The quick
 keys (`Enter`, arrows, `Tab`, `Esc`, `Ctrl-C`) sit under it, since a phone
 keyboard has none of them.
+
+The opposite case is a desktop, where an 80-column capture used to sit small in
+a panel with half again as much room: the scale was capped at 1:1 everywhere but
+full screen. It now grows to fill the panel, bounded by height as well as width
+so enlarging can never push the last rows off the bottom, and the zoom button
+appears whenever the view is not 1:1 so a crisp capture is always one click
+away. None of this touches the real pane — it is a CSS transform on an image,
+and `cols` and `rows` never travel back to tmux (INV-1).
 
 ### Keyboard
 
@@ -359,6 +396,18 @@ those are enabled only while it is idle or waiting — greyed with a tooltip whi
 it is busy, so a keystroke never interleaves with a tool call in flight. On a
 phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
 screen.
+
+**Shift+Tab, Goal, Compact and Clear also sit in the composer strip**, beside
+the message box. That row is above the tabs and does not exist in full screen,
+which is precisely where a conversation gets long enough to want compacting —
+so the four that belong next to what you are typing are repeated there. Clear
+and Compact share one hook rather than one component, because what has to be
+identical between the two copies is a *sequence*: a guard so a double click
+cannot discard the session the first click just created, a refusal to claim
+anything when no new session appeared, and following the agent to its new id in
+the right order. One place to get that wrong is enough. (One gap, measured and
+accepted: a landscape phone hides the whole strip to keep 66px of conversation,
+so there they stay in the panel's row.)
 
 **Shift+Tab** sends that chord to the agent, which is how the CLI's own keyboard
 cycles the permission mode. The button says it sent the key and nothing more —
@@ -519,13 +568,43 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
 ```
 -p, --port <n>      port to listen on (default 4317)
     --host <addr>   bind address (default 127.0.0.1)
-    --token <s>     require this token; "auto" generates one
+    --token <s>     require this token; "auto" uses the stored one
+    --rotate-token  replace the stored token and exit
+    --print-url     print the full URL, token and all, then keep serving
+    --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)
     --browse-root <d>  root the folder picker is confined to (default: home)
     --mock          serve fixture agents, touching nothing real
     --install-statusline
                     add the quota bridge to ~/.claude/settings.json and exit
 -V, --version       print the version and exit
 ```
+
+`--token auto` keeps its token in `~/.claude/agent-commander/token`, mode 0600,
+next to the rate-limit cache. It used to mint a fresh one every start, which
+rotated at the worst possible moment: each restart broke the link saved on the
+phone, so the way to get a stable one was `--token <literal>` in an alias or a
+plist — where `ps` can read it, shell history keeps it, and nothing ever rotates
+it. Persisting it makes the bookmark durable and makes revocation deliberate:
+
+```
+agent-commander --rotate-token     # prints the new token; every old link now 401s
+```
+
+A literal `--token` is still an override for that run and is never written to
+the store.
+
+**The token only appears in a URL once.** Open the link and the server trades it
+for an `HttpOnly; SameSite=Strict` cookie and redirects to the same address
+without the query string, so it stops living in the address bar — and therefore
+in history, in `document.referrer`, and in the access log of whatever proxy is
+in front. The cookie also reaches the one place a header cannot: a WebSocket
+handshake carries no `Authorization`, which is the reason the query parameter
+existed in the first place. Only a browser navigation is exchanged, so
+`?token=` and `Authorization: Bearer` keep working unchanged for curl and
+scripts. The startup banner masks the token to four characters, because under
+the Mac app stdout is `~/Library/Logs/agent-commander/server.log` and printing
+it in full wrote the secret to disk on every start. `--print-url` asks for the
+whole link.
 
 The version is compiled into the binary, so it cannot disagree with the thing
 printing it, and the running server reports it at `/api/env` and on the Help
@@ -543,14 +622,20 @@ For access from your phone, put Tailscale in front of it rather than binding
 another address at all:
 
 ```
+npm run serve -- --token auto     # prints the URL to open
 tailscale serve --bg 4317
 ```
 
-Then open `https://<your-machine>.<tailnet>.ts.net/` on the phone. No token
-needed: the proxy forwards this machine's own Tailscale name, which counts as
-this machine and nothing else does — another host on the same tailnet is
-refused like any other stranger. Add `--token` anyway if you want the tailnet
-itself authenticated.
+Then open `https://<your-machine>.<tailnet>.ts.net/?token=…` on the phone.
+
+**The token is not optional here.** `tailscale serve` terminates TLS and proxies
+to the loopback port, forwarding the name the caller *dialled* — which is this
+machine's. Every peer on the tailnet therefore arrives wearing the same name,
+and nothing in the gate reads the peer address, so the name alone cannot tell
+your phone from anything else on the tailnet. Earlier versions of this file
+claimed it could; it could not, and a tokenless server behind `tailscale serve`
+was reachable by any tailnet peer. A tokenless server now answers to loopback
+and nothing else, so the phone needs the token to get in at all.
 
 If you would rather bind the tailnet address directly, name it — do **not** use
 `--host 0.0.0.0`, which also publishes the app on whatever Wi-Fi you are
@@ -562,6 +647,41 @@ npm run serve -- --host 100.x.y.z --token auto
 
 Never `tailscale funnel` this: that publishes to the public internet, and
 anyone who reached it could drive your agents.
+
+## What a credential is allowed to do
+
+One token used to mean everything: read every transcript, paste arbitrary text
+into any live pane, answer permission prompts, spawn agents, and walk the
+filesystem. `--grant` separates those.
+
+| Grant | What it covers |
+|---|---|
+| `read` | the fleet, transcripts, frames, `/api/env` |
+| `respond` | answering the question an agent is blocked on |
+| `drive` | pastes, keystrokes, `mode`, `model`, `compact`, `clear`, `close` |
+| `spawn` | starting new agents, and the folder picker |
+
+The default is all four, so a server nobody has configured behaves exactly as
+before. Every grant implies `read` — being able to answer a question you cannot
+see would be a worse thing to hand out than the whole token.
+
+The split worth knowing is `respond` against `drive`. Answering a blocked agent
+from a phone is what this app is for; typing arbitrary commands into it is not
+the same power, and until now there was no way to hand out one without the
+other:
+
+```
+agent-commander --token auto --grant respond
+```
+
+**Answers are bound to the question they were given for.** The card used to send
+a bare digit, which meant "whatever the pane is showing when tmux receives it" —
+so a stale tab, a duplicated frame, or the second question in an
+`AskUserQuestion` set could turn *yes, edit that file* into an answer to
+something else. Each prompt now carries an id derived from its own content, the
+browser echoes it back with the option index, and the server re-reads the
+transcript and refuses if the agent has moved on. The keystroke is composed on
+the server; the browser no longer sends one.
 
 ## Development
 

@@ -13,6 +13,17 @@ import styles from './Terminal.module.css'
 /** How far the capture may be enlarged in full screen. */
 const FULLSCREEN_MAX_SCALE = 2.5
 
+/**
+ * How far it may be enlarged inside the detail panel.
+ *
+ * Lower than full screen because the panel shares the window with the fleet
+ * list, but not 1: an 80-column capture pinned at 1:1 rendered ~700px wide in a
+ * panel with half again that much room, which reads as the terminal being
+ * broken rather than faithful. The height fit in `computeScale` is what keeps
+ * this from pushing rows off the bottom.
+ */
+const PANEL_MAX_SCALE = 2
+
 /** How many animation frames a zero-width container gets before it is opened anyway. */
 const MAX_SIZING_ATTEMPTS = 30
 
@@ -156,9 +167,7 @@ function openWhenSized(
       return
     }
     term.mount(wrap, scale)
-    // Full screen is the only place the capture may be enlarged; in the panel
-    // it sits beside other content and growing it would just crowd them.
-    term.setMaxScale(viewport.fullscreen ? FULLSCREEN_MAX_SCALE : 1)
+    term.setMaxScale(viewport.fullscreen ? FULLSCREEN_MAX_SCALE : PANEL_MAX_SCALE)
     // Always measure after mounting. The usual trigger is the first frame
     // changing geometry, but a frame that arrives before this deferred mount
     // finds no host to measure and is silently skipped — leaving the pane
@@ -338,7 +347,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         Ctrl-C
       </Button>
       <div className={styles.view}>
-        {term && (term.overflowing || term.zoom === 'fit') && (
+        {term && (term.overflowing || term.scaled || term.zoom === 'fit') && (
           <Button
             variant="compact"
             data-testid="zoom-toggle"

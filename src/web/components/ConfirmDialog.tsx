@@ -22,16 +22,13 @@ const CANCEL_TESTID = 'confirm-cancel'
  * this buys its interruption with `loss`, a specific statement of what will not
  * come back, and not with a type-the-name box nobody has evidence for.
  */
-export function ConfirmDialog({
-  open,
-  title,
-  body,
-  loss,
-  confirmLabel,
-  cancelLabel,
-  onConfirm,
-  onCancel,
-}: {
+/**
+ * Named rather than inline so a caller that *composes* the whole dialog can
+ * hand it over as one value. `useContextActions` does: the copy a clear asks
+ * with is part of the reasoning it centralises, not a decision each surface
+ * offering the button should re-make.
+ */
+export interface ConfirmDialogProps {
   open: boolean
   title: string
   body: string
@@ -43,7 +40,18 @@ export function ConfirmDialog({
   cancelLabel: string
   onConfirm: () => void
   onCancel: () => void
-}): JSX.Element | null {
+}
+
+export function ConfirmDialog({
+  open,
+  title,
+  body,
+  loss,
+  confirmLabel,
+  cancelLabel,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps): JSX.Element | null {
   const rootRef = useRef<HTMLDivElement>(null)
   const id = useId()
   const titleId = `${id}-title`

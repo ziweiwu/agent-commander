@@ -12,9 +12,21 @@ import { DelegationTree } from './DelegationTree.tsx'
 import styles from './AgentCard.module.css'
 
 /** Server-side reasons that have a translation. */
+/**
+ * Claude Code's own words for why a session is blocked, in the reader's.
+ *
+ * The set is closed — the CLI picks from a fixed table and falls back to
+ * `permission prompt` — but only two of them were ever mapped, so the other
+ * four reached a Chinese reader as raw English.
+ */
 export const REASON_KEY: Record<string, Key> = {
   'dialog open': 'waitingDialog',
   'starting up': 'waitingStarting',
+  'permission prompt': 'waitingPermission',
+  'input needed': 'waitingInput',
+  'sandbox request': 'waitingSandbox',
+  'goal proposal': 'waitingGoal',
+  'worker request': 'waitingWorker',
 }
 
 export const STATUS_KEY: Record<string, Key> = {

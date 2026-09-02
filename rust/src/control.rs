@@ -1459,6 +1459,21 @@ mod tests {
 
     /// INV-2: the key name becomes an argv entry, so anything off the list is
     /// refused before tmux is reached — and confirmation does not buy a way in.
+    /// INV-2: a digit is an *absolute* choice, which is the only reason it is
+    /// allowed at all. `0` names no option and a two-digit string is not a key.
+    #[test]
+    fn inv2_allows_single_digits_and_nothing_that_merely_looks_like_one() {
+        for key in ["1", "5", "9"] {
+            assert!(check_key(key, None).is_ok(), "{key}");
+        }
+        for hostile in ["0", "10", "1 ", " 1", "1\n", "99", "-1", "1;2"] {
+            assert!(
+                matches!(check_key(hostile, None), Err(KeyRefusal::NotAllowed(_))),
+                "{hostile}"
+            );
+        }
+    }
+
     #[test]
     fn inv2_refuses_a_key_that_is_not_on_the_allow_list() {
         for hostile in ["C-z", "; rm -rf /", "Enter Enter", "", "escape", "C-C"] {

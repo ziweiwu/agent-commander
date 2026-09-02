@@ -1,11 +1,10 @@
 import { useEffect, useRef } from 'react'
-import { Outlet, useParams, useLocation } from 'react-router-dom'
+import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import { countByGroup, type StatusFilter } from '../lib/filter.ts'
 import { useIsNarrow } from '../hooks/useMediaQuery.ts'
-import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { FleetList } from './FleetList.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
@@ -18,7 +17,7 @@ import styles from './App.module.css'
 /** Shell: topbar, layout, global keyboard. Routes render through `Outlet`. */
 export function App() {
   const t = useTranslate()
-  const navigate = useTokenNavigate()
+  const navigate = useNavigate()
   const location = useLocation()
   const narrow = useIsNarrow()
 
@@ -236,7 +235,7 @@ function moveCardFocus(delta: number): void {
 const EXPECT_MS = 8000
 
 export function FleetRoute() {
-  const navigate = useTokenNavigate()
+  const navigate = useNavigate()
   const narrow = useIsNarrow()
   const { sessionId } = useParams()
   const location = useLocation()
@@ -254,18 +253,25 @@ export function FleetRoute() {
     focusAgent(sessionId ?? null)
   }, [sessionId])
 
-  // A blocked agent is opened to answer its dialog, which only the terminal can
-  // do, so redirect to the terminal tab rather than making the user find it.
-  //
-  // An agent whose CLI keeps no readable transcript is redirected for a
-  // different reason: its Chat tab is hidden, so landing on it would leave the
-  // panel showing nothing with no visible way back to the terminal.
+  /*
+   * An agent whose CLI keeps no readable transcript is redirected to the
+   * terminal, because its Chat tab is hidden and landing on it would leave the
+   * panel showing nothing with no visible way back.
+   *
+   * A *blocked* agent used to be redirected here too, on the grounds that only
+   * the terminal could answer its dialog. That is no longer true: the Chat tab
+   * reads the question out of the transcript and offers its options (INV-16),
+   * so sending the user to a capture of somebody else's terminal now takes them
+   * away from the better surface rather than towards the only one. The blocked
+   * banner keeps its "Open terminal" button for the prompts that cannot be
+   * named, which is the case that redirect was really serving.
+   */
   useEffect(() => {
     if (!agent || wantTab !== 'chat' || !agent.paneId) return
-    if (agent.status === 'waiting' || !hasTranscripts(agent.agentKind)) {
+    if (!hasTranscripts(agent.agentKind)) {
       navigate(`/agent/${agent.sessionId}/term`, { replace: true })
     }
-  }, [agent?.sessionId, agent?.status, agent?.paneId, agent?.agentKind, wantTab, navigate, agent])
+  }, [agent?.sessionId, agent?.paneId, agent?.agentKind, wantTab, navigate, agent])
 
   useEffect(() => {
     if (!sessionId) return

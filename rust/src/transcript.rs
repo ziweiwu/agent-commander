@@ -18,7 +18,9 @@ use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::sources::{AgentPatch, TailApi, TailRead};
-use crate::types::{now_ms, Agent, GoalState, NoticeKind, TimelineEvent, TimelineKind};
+use crate::types::{
+    now_ms, Agent, GoalState, NoticeKind, PendingPrompt, PromptOption, TimelineEvent, TimelineKind,
+};
 
 /// On first read, only this much history is loaded.
 const BACKFILL_BYTES: u64 = 256 * 1024;
@@ -346,6 +348,82 @@ pub fn summarize_tool(name: &str, input: Option<&Value>) -> String {
     }
 }
 
+/// Build the prompt a still-unanswered tool call is asking, where it says one.
+///
+/// Only three shapes carry anything worth showing, and they carry different
+/// amounts. `AskUserQuestion` states the question and every option, so the
+/// interface may label buttons with them. `ExitPlanMode` states the plan but
+/// not the approval choices, which the CLI composes at the terminal. Anything
+/// else is a tool waiting on permission: its input says what it would do, and
+/// nothing on disk says what the numbered list will look like.
+///
+/// Whatever is not on disk stays absent here rather than being guessed at, and
+/// the interface offers keys where it has no labels (INV-16).
+pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
+    let mut prompt = PendingPrompt {
+        tool: name.to_string(),
+        question: None,
+        options: Vec::new(),
+        multi_select: None,
+        more_questions: None,
+        detail: None,
+        id: String::new(),
+    };
+    match name {
+        "AskUserQuestion" => fill_from_questions(&mut prompt, input),
+        "ExitPlanMode" => {
+            prompt.detail = text_field_of(input, "plan").map(str::to_string);
+        }
+        _ => {
+            // What it would do, in the words the tool itself used.
+            let summary = summarize_tool(name, input);
+            if !summary.is_empty() {
+                prompt.detail = Some(summary);
+            }
+        }
+    }
+    prompt
+}
+
+/// The first question of an `AskUserQuestion` set, as the card will show it.
+///
+/// The picker asks them one at a time, so the first is the one on screen.
+/// Saying how many follow is honest about what one answer finishes; pretending
+/// they are all answerable at once is not.
+fn fill_from_questions(prompt: &mut PendingPrompt, input: Option<&Value>) {
+    let questions = input.and_then(|v| v.get("questions")).and_then(Value::as_array);
+    let Some(questions) = questions else { return };
+    let Some(first) = questions.first() else { return };
+    prompt.question = text_field(first, "question").map(str::to_string);
+    prompt.multi_select =
+        first.get("multiSelect").and_then(Value::as_bool).filter(|on| *on).map(|_| true);
+    if questions.len() > 1 {
+        prompt.more_questions = Some(questions.len() - 1);
+    }
+    prompt.options = options_of(first);
+}
+
+/// Every option with a label. One without cannot be drawn, so it is not offered.
+fn options_of(question: &Value) -> Vec<PromptOption> {
+    let Some(options) = question.get("options").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    options
+        .iter()
+        .filter_map(|option| {
+            let label = text_field(option, "label")?;
+            Some(PromptOption {
+                label: label.to_string(),
+                description: text_field(option, "description").map(str::to_string),
+            })
+        })
+        .collect()
+}
+
+fn text_field_of<'a>(input: Option<&'a Value>, key: &str) -> Option<&'a str> {
+    input.and_then(|v| v.get(key)).and_then(Value::as_str).filter(|t| !t.is_empty())
+}
+
 /// Read a goal record, if this line is one.
 ///
 /// Returned rather than assigned so both the tailer and the one-shot reader
@@ -379,11 +457,27 @@ pub fn goal_from_record(rec: &Value) -> Option<GoalState> {
 pub struct ParseResult {
     pub events: Vec<TimelineEvent>,
     pub patch: AgentPatch,
+    /// Tool calls this batch opened, in order, with what each one is asking.
+    ///
+    /// A call is "open" from the moment it is written until its `tool_result`
+    /// arrives. During ordinary work something is nearly always open — a tool
+    /// that is merely *running* looks exactly like one waiting to be allowed —
+    /// so an open call is never on its own a claim that the agent is blocked.
+    /// The registry's `waiting` status is the other half, and the client shows
+    /// a prompt only when both agree (INV-16).
+    pub opened: Vec<(String, PendingPrompt)>,
+    /// `tool_use` ids answered by a `tool_result` in this batch.
+    pub answered: Vec<String>,
 }
 
 impl ParseResult {
     fn empty() -> Self {
-        ParseResult { events: Vec::new(), patch: AgentPatch::default() }
+        ParseResult {
+            events: Vec::new(),
+            patch: AgentPatch::default(),
+            opened: Vec::new(),
+            answered: Vec::new(),
+        }
     }
 }
 
@@ -542,7 +636,15 @@ impl Batch<'_> {
     }
 
     fn push_user_prompt(&mut self, content: Option<&Value>, context: EventContext) {
-        // Array content on a user record is tool_result plumbing; not shown.
+        // Array content on a user record is tool_result plumbing; not shown as
+        // a message, but it is exactly what closes an open call.
+        if let Some(blocks) = content.and_then(Value::as_array) {
+            for block in blocks {
+                if let Some(id) = text_field(block, "tool_use_id") {
+                    self.out.answered.push(id.to_string());
+                }
+            }
+        }
         let Some(text) = content.and_then(Value::as_str) else { return };
         let text = text.trim();
         if text.is_empty() {
@@ -598,6 +700,16 @@ impl Batch<'_> {
 
     fn push_tool_call(&mut self, block: &Value, context: EventContext, sets: &RecordSets) {
         let Some(name) = text_field(block, "name") else { return };
+        /*
+         * A sidechain's calls belong to a delegate's own conversation. The user
+         * is not the one being asked, and answering into this agent's prompt
+         * would go to the wrong session entirely.
+         */
+        if context.sidechain != Some(true) {
+            if let Some(id) = text_field(block, "id") {
+                self.out.opened.push((id.to_string(), pending_prompt(name, block.get("input"))));
+            }
+        }
         let delegated = sets.subagent_tools.contains(name);
         if delegated {
             self.subagents += 1;
@@ -758,6 +870,15 @@ pub struct TranscriptTail {
     /// must not be raised again by a transcript that has merely gone missing —
     /// that would blank a conversation the user is reading, once per poll.
     backfilled: bool,
+    /// Tool calls written but not yet answered, oldest first.
+    ///
+    /// Kept here rather than per batch because the read is incremental (INV-4):
+    /// the call and the result that closes it are usually in different reads,
+    /// often minutes apart — an unanswered question sat for eleven of them in
+    /// the sample this was built against.
+    open_calls: Vec<(String, PendingPrompt)>,
+    /// The prompt the last read reported, so a change can be noticed.
+    reported_prompt: Option<PendingPrompt>,
 }
 
 impl TranscriptTail {
@@ -774,6 +895,41 @@ impl TranscriptTail {
             total_tokens: 0,
             total_subagents: 0,
             backfilled: false,
+            open_calls: Vec::new(),
+            reported_prompt: None,
+        }
+    }
+
+    /// The call this agent is most likely blocked on, if any is still open.
+    ///
+    /// The newest, because a dialog raised while another was open is the one on
+    /// screen. This says only what the transcript said; whether the agent is
+    /// actually waiting is the registry's to decide, and the client requires
+    /// both before it offers to answer anything (INV-16).
+    pub fn pending_prompt(&self) -> Option<&PendingPrompt> {
+        self.open_calls.last().map(|(_, prompt)| prompt)
+    }
+
+    /// The prompt to report now, and whether it differs from last time.
+    fn report_prompt(&mut self) -> (Option<PendingPrompt>, bool) {
+        let now = self.pending_prompt().cloned();
+        let changed = now != self.reported_prompt;
+        self.reported_prompt = now.clone();
+        (now, changed)
+    }
+
+    /// Fold one batch's opened and answered calls into the running set.
+    fn track_calls(&mut self, result: &ParseResult) {
+        for id in &result.answered {
+            self.open_calls.retain(|(open, _)| open != id);
+        }
+        for (id, prompt) in &result.opened {
+            // A result can precede its call within one batch only if the file
+            // is out of order, but re-opening an answered call would strand it.
+            if result.answered.contains(id) {
+                continue;
+            }
+            self.open_calls.push((id.clone(), prompt.clone()));
         }
     }
 
@@ -820,7 +976,14 @@ impl TranscriptTail {
         // silence is exactly what a delegated run looks like from here.
         if size == self.offset {
             self.backfilled |= first;
-            return TailRead { events: Vec::new(), patch: self.delegation().await, first };
+            let (prompt, prompt_changed) = self.report_prompt();
+            return TailRead {
+                events: Vec::new(),
+                patch: self.delegation().await,
+                first,
+                prompt,
+                prompt_changed,
+            };
         }
 
         let start = self.offset;
@@ -843,18 +1006,31 @@ impl TranscriptTail {
         };
         self.apply_batch(&mut result).await;
         self.backfilled |= first;
-        TailRead { events: result.events, patch: result.patch, first }
+        let (prompt, prompt_changed) = self.report_prompt();
+        TailRead { events: result.events, patch: result.patch, first, prompt, prompt_changed }
     }
 
     /// Nothing to read yet, and the client has never been sent a backfill
     /// either, so the next successful read is still its first.
     fn nothing_yet(&self) -> TailRead {
-        TailRead { events: Vec::new(), patch: AgentPatch::default(), first: !self.backfilled }
+        TailRead {
+            events: Vec::new(),
+            patch: AgentPatch::default(),
+            first: !self.backfilled,
+            prompt: None,
+            prompt_changed: false,
+        }
     }
 
     /// Nothing was read, and this is not a replacement of what the client holds.
     fn nothing_read() -> TailRead {
-        TailRead { events: Vec::new(), patch: AgentPatch::default(), first: false }
+        TailRead {
+            events: Vec::new(),
+            patch: AgentPatch::default(),
+            first: false,
+            prompt: None,
+            prompt_changed: false,
+        }
     }
 
     /// Where the transcript is, resolved on first use and cached after that.
@@ -900,6 +1076,9 @@ impl TranscriptTail {
             self.offset = 0;
             self.partial.clear();
             self.decoder.reset();
+            // The file this tracked has been replaced, so every call it was
+            // holding open belongs to a transcript that no longer exists.
+            self.open_calls.clear();
             first = true;
         }
         first
@@ -941,6 +1120,7 @@ impl TranscriptTail {
     /// Fold one batch into the tailer's running totals, then overlay what a
     /// subagent of this session is doing.
     async fn apply_batch(&mut self, result: &mut ParseResult) {
+        self.track_calls(result);
         self.total_tokens += result.patch.tokens.unwrap_or(0);
         self.total_subagents += result.patch.subagents.unwrap_or(0);
         if self.total_tokens > 0 {
@@ -2033,5 +2213,187 @@ mod tests {
         assert_eq!(d.write(&bytes[3..]), "检b");
         // Bytes that can never be valid are replaced, not held forever.
         assert_eq!(d.write(&[0xff, b'x']), "\u{FFFD}x");
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+    use serde_json::json;
+
+    /* ---- INV-16: an answer names only what the transcript named ---- */
+
+    fn ask(questions: Value) -> Value {
+        json!({ "questions": questions })
+    }
+
+    /// The whole reason the chat window may draw labelled buttons at all: the
+    /// options are *read*, not inferred from the terminal.
+    #[test]
+    fn inv16_reads_the_options_an_ask_user_question_states() {
+        let prompt = pending_prompt(
+            "AskUserQuestion",
+            Some(&ask(json!([{
+                "question": "Which migration should run first?",
+                "multiSelect": false,
+                "options": [
+                    { "label": "Backfill the index", "description": "Slower, but safe." },
+                    { "label": "Swap the table" },
+                ],
+            }]))),
+        );
+        assert_eq!(prompt.question.as_deref(), Some("Which migration should run first?"));
+        assert_eq!(prompt.options.len(), 2);
+        assert_eq!(prompt.options[0].label, "Backfill the index");
+        assert_eq!(prompt.options[0].description.as_deref(), Some("Slower, but safe."));
+        // Absent rather than invented: the second option carries no description.
+        assert_eq!(prompt.options[1].description, None);
+        assert_eq!(prompt.multi_select, None);
+        assert_eq!(prompt.more_questions, None);
+    }
+
+    /// The picker asks one at a time, so one answer does not finish the call.
+    /// Saying how many remain is honest; implying it is over is not.
+    #[test]
+    fn inv16_counts_the_questions_still_behind_the_first() {
+        let prompt = pending_prompt(
+            "AskUserQuestion",
+            Some(&ask(json!([
+                { "question": "First?", "options": [{ "label": "a" }] },
+                { "question": "Second?", "options": [{ "label": "b" }] },
+                { "question": "Third?", "options": [{ "label": "c" }] },
+            ]))),
+        );
+        assert_eq!(prompt.question.as_deref(), Some("First?"));
+        assert_eq!(prompt.more_questions, Some(2));
+    }
+
+    /// A digit cannot finish a multi-select, so the flag has to travel: the
+    /// interface offers keys there instead of one-click answers.
+    #[test]
+    fn inv16_carries_multi_select_so_one_digit_is_not_offered_as_the_answer() {
+        let prompt = pending_prompt(
+            "AskUserQuestion",
+            Some(&ask(json!([{
+                "question": "Which of these?",
+                "multiSelect": true,
+                "options": [{ "label": "a" }, { "label": "b" }],
+            }]))),
+        );
+        assert_eq!(prompt.multi_select, Some(true));
+    }
+
+    /// Claude Code writes the plan but composes the approval choices at the
+    /// terminal, so this is the case where the app must show and not name.
+    #[test]
+    fn inv16_takes_the_plan_from_exit_plan_mode_and_invents_no_choices() {
+        let prompt =
+            pending_prompt("ExitPlanMode", Some(&json!({ "plan": "## Steps\n1. Do the thing" })));
+        assert!(prompt.options.is_empty(), "named choices nothing wrote down");
+        assert_eq!(prompt.detail.as_deref(), Some("## Steps\n1. Do the thing"));
+    }
+
+    /// A permission request writes the tool and its input, never the numbered
+    /// list the dialog will draw.
+    #[test]
+    fn inv16_describes_a_permission_request_without_naming_its_options() {
+        let prompt = pending_prompt(
+            "Bash",
+            Some(&json!({ "command": "rm -rf build", "description": "Clear the build tree" })),
+        );
+        assert!(prompt.options.is_empty(), "named choices nothing wrote down");
+        assert_eq!(prompt.detail.as_deref(), Some("Clear the build tree"));
+        assert_eq!(prompt.question, None);
+    }
+
+    /// A malformed or empty payload must degrade to "something is open" rather
+    /// than to a confident empty question (INV-5, INV-11).
+    #[test]
+    fn inv16_says_nothing_it_cannot_read() {
+        let prompt = pending_prompt("AskUserQuestion", Some(&json!({})));
+        assert_eq!(prompt.question, None);
+        assert!(prompt.options.is_empty());
+        assert_eq!(prompt.tool, "AskUserQuestion");
+    }
+
+    /* ---- open and closed calls ---- */
+
+    fn tail_with(lines: &[&str]) -> TranscriptTail {
+        let mut tail = TranscriptTail::new("s", std::env::temp_dir());
+        let mut n = 0;
+        let mut seq = move || {
+            n += 1;
+            format!("e{n}")
+        };
+        let result = parse_lines(lines, &mut seq);
+        tail.track_calls(&result);
+        tail
+    }
+
+    fn call(id: &str, name: &str, input: Value) -> String {
+        json!({
+            "type": "assistant",
+            "timestamp": "2026-08-14T00:57:52.725Z",
+            "message": { "content": [
+                { "type": "tool_use", "id": id, "name": name, "input": input },
+            ] },
+        })
+        .to_string()
+    }
+
+    fn answer_for(id: &str) -> String {
+        json!({
+            "type": "user",
+            "timestamp": "2026-08-14T00:58:52.725Z",
+            "message": { "content": [{ "type": "tool_result", "tool_use_id": id }] },
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn inv16_holds_a_question_open_until_its_result_arrives() {
+        let question = call("t1", "AskUserQuestion", json!({ "questions": [
+            { "question": "Go ahead?", "options": [{ "label": "Yes" }] },
+        ] }));
+        let tail = tail_with(&[&question]);
+        assert_eq!(tail.pending_prompt().and_then(|p| p.question.as_deref()), Some("Go ahead?"));
+
+        let answered = tail_with(&[&question, &answer_for("t1")]);
+        assert!(answered.pending_prompt().is_none(), "kept a question that was answered");
+    }
+
+    /// A dialog raised while another was open is the one on screen.
+    #[test]
+    fn inv16_reports_the_newest_open_call() {
+        let first = call("t1", "Bash", json!({ "description": "older" }));
+        let second = call("t2", "Bash", json!({ "description": "newer" }));
+        let tail = tail_with(&[&first, &second]);
+        assert_eq!(tail.pending_prompt().and_then(|p| p.detail.as_deref()), Some("newer"));
+    }
+
+    /// A subagent's question is asked of the subagent, and answering it into
+    /// this agent's prompt would type into the wrong session entirely.
+    #[test]
+    fn inv16_ignores_a_call_from_a_sidechain() {
+        let call = json!({ "type": "tool_use", "id": "t1", "name": "Bash", "input": { "description": "d" } });
+        let line = json!({
+            "type": "assistant",
+            "timestamp": "2026-08-14T00:57:52.725Z",
+            "isSidechain": true,
+            "message": { "content": [call] },
+        })
+        .to_string();
+        let tail = tail_with(&[&line]);
+        assert!(tail.pending_prompt().is_none(), "offered to answer a delegate's question");
+    }
+
+    /// Nothing open is the ordinary state, and it must read as nothing rather
+    /// than as the last question all over again.
+    #[test]
+    fn inv16_reports_nothing_when_every_call_has_been_answered() {
+        let a = call("t1", "Bash", json!({ "description": "one" }));
+        let b = call("t2", "Bash", json!({ "description": "two" }));
+        let tail = tail_with(&[&a, &b, &answer_for("t1"), &answer_for("t2")]);
+        assert!(tail.pending_prompt().is_none());
     }
 }

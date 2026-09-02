@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentControls } from '../../src/web/components/AgentControls.tsx'
-import { agent, renderApp, resetStore } from './helpers.tsx'
+import { agent, answer, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 
 const clearAgentContext = vi.hoisted(() =>
@@ -28,10 +28,6 @@ const navigate = vi.hoisted(() => vi.fn())
  * and is the least reliable dialog surface on a phone. So the tests click the
  * verb, which is also what pins that the guard is still there at all.
  */
-async function answer(user: ReturnType<typeof userEvent.setup>, verb: 'accept' | 'cancel') {
-  await user.click(await screen.findByTestId(`confirm-${verb}`))
-}
-
 vi.mock('../../src/web/store/transport.ts', () => ({
   clearAgentContext,
   compactAgentContext,
@@ -39,8 +35,9 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   sendShiftTab: vi.fn(),
   setAgentModel: vi.fn(),
 }))
-vi.mock('../../src/web/hooks/useTokenNavigate.ts', () => ({
-  useTokenNavigate: () => navigate,
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => navigate,
 }))
 
 const idle = () => agent({ sessionId: 'session-before', status: 'idle', paneId: '%1' })

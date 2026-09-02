@@ -6,6 +6,25 @@
 }
 
 /*
+ * The list carries its own scroll on a desktop, because the shell no longer
+ * has one to lend it — see the note in `App.module.css`. `min-height: 0` is
+ * the load-bearing half: a flex child defaults to `min-height: auto` and
+ * refuses to shrink below its content, so without it the column keeps its full
+ * 1870px and pushes the shell back to a document scroll with `overflow: hidden`
+ * on top, which clips the fleet instead of scrolling it.
+ *
+ * `scrollbar-gutter` reserves the track up front so the cards do not shift
+ * sideways the moment a filter takes the list from scrolling to not.
+ */
+@media (min-width: 901px) {
+  .column {
+    overflow-y: auto;
+    min-height: 0;
+    scrollbar-gutter: stable;
+  }
+}
+
+/*
  * New agent, and — when there is anything to prune — the prune button beside
  * it. They share a row on a wide list and stack on a narrow one, so the phone
  * never has two half-width buttons with a wrapped label in each.

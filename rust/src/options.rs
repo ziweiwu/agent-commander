@@ -39,6 +39,100 @@ pub fn is_permission_mode(mode: &str) -> bool {
     crate::types::is_spawn_mode(mode)
 }
 
+/* ------------------------------------------------------------------ grants */
+
+/// What a credential is allowed to do, as four separable powers.
+///
+/// One token used to grant all of them: read every transcript, type arbitrary
+/// text into any live pane, answer permission prompts, spawn agents, and
+/// enumerate the filesystem. Those have wildly different blast radii, and the
+/// link saved on a phone is the one most likely to be over-privileged for what
+/// it is actually used for.
+///
+/// Default is everything, so a server nobody has configured behaves exactly as
+/// before. `--grant read,respond` is the opt-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Grant {
+    /// The fleet, transcripts, frames, and what the server is.
+    Read,
+    /// Answer the question an agent is blocked on. Deliberately not `Drive`:
+    /// it is the one thing you open the app on a phone to do.
+    Respond,
+    /// Arbitrary input — pastes, keystrokes, mode and model changes, `/clear`.
+    Drive,
+    /// Start new agents, and walk the filesystem to pick where.
+    Spawn,
+}
+
+impl Grant {
+    /// One bit per grant, in declaration order; `Grants` is the set of them.
+    fn bit(self) -> u8 {
+        1 << (self as u8)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Grant::Read => "read",
+            Grant::Respond => "respond",
+            Grant::Drive => "drive",
+            Grant::Spawn => "spawn",
+        }
+    }
+
+    const EVERY: [Grant; 4] = [Grant::Read, Grant::Respond, Grant::Drive, Grant::Spawn];
+
+    fn from_name(name: &str) -> Option<Grant> {
+        Grant::EVERY.into_iter().find(|g| g.name() == name)
+    }
+}
+
+/// A set of `Grant`s.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Grants(u8);
+
+impl Grants {
+    pub const ALL: Grants = Grants(1 | 2 | 4 | 8);
+
+    pub fn allows(self, grant: Grant) -> bool {
+        self.0 & grant.bit() != 0
+    }
+
+    /// Parse `read,respond`. Empty or unknown names are refused rather than
+    /// ignored: a typo that silently granted nothing would look like the app
+    /// being broken, and one that silently granted everything would be worse.
+    pub fn parse(raw: &str) -> Result<Grants, String> {
+        let mut bits = 0u8;
+        for name in raw.split(',') {
+            let name = name.trim();
+            if name.is_empty() {
+                continue;
+            }
+            match Grant::from_name(name) {
+                Some(grant) => bits |= grant.bit(),
+                None => {
+                    let known: Vec<&str> = Grant::EVERY.iter().map(|g| g.name()).collect();
+                    return Err(format!("unknown grant: {name} (known: {})", known.join(", ")));
+                }
+            }
+        }
+        if bits == 0 {
+            return Err("--grant needs at least one of: read, respond, drive, spawn".to_string());
+        }
+        // `respond`, `drive` and `spawn` all imply reading: every one of them
+        // acts on an agent this app had to list first, and a server that let
+        // you answer a question you could not see would be a worse thing to
+        // hand someone than the whole token.
+        Ok(Grants(bits | Grant::Read.bit()))
+    }
+
+    /// The names, for a refusal that says what this credential actually has.
+    pub fn names(self) -> String {
+        let held: Vec<&str> =
+            Grant::EVERY.iter().filter(|g| self.allows(**g)).map(|g| g.name()).collect();
+        held.join(",")
+    }
+}
+
 /// The production port, and the only one that ever serves real agents.
 ///
 /// Nothing in development binds it: the npm dev scripts pass a port
@@ -64,6 +158,11 @@ pub struct Options {
     pub web_root: String,
     pub browse_root: Option<String>,
     pub install_statusline: bool,
+    pub rotate_token: bool,
+    /// What this server's credential is allowed to do.
+    pub grants: Grants,
+    /// Print the token in the startup banner instead of masking it.
+    pub print_url: bool,
 }
 
 impl Default for Options {
@@ -78,6 +177,9 @@ impl Default for Options {
             web_root: default_web_root(&exe_dir()).to_string_lossy().into_owned(),
             browse_root: None,
             install_statusline: false,
+            rotate_token: false,
+            grants: Grants::ALL,
+            print_url: false,
         }
     }
 }
@@ -231,7 +333,7 @@ fn parse_int_10(text: &str) -> Option<i64> {
 /// hands out. Long enough that guessing it is not a strategy.
 const TOKEN_BYTES: usize = 16;
 
-fn random_token() -> String {
+pub fn random_token() -> String {
     use rand::Rng;
     let mut bytes = [0u8; TOKEN_BYTES];
     rand::thread_rng().fill(&mut bytes);
@@ -241,21 +343,24 @@ fn random_token() -> String {
 /// Parse argv. Returns the help text rather than printing it, so a test can
 /// read it and `main` stays the only thing that writes to a terminal.
 pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
+    parse_args_with_token_file(argv, &crate::token_file::token_file())
+}
+
+/// `parse_args`, with the token file named rather than assumed.
+///
+/// The path is a parameter for one reason: `--token auto` reads and writes it,
+/// and a test that exercised the real one would mint a token into the running
+/// user's home directory and then reuse it on every later run. The seam is
+/// narrow on purpose — `parse_args` is still the only entry point anything but
+/// a test calls.
+pub fn parse_args_with_token_file(argv: &[String], token_path: &Path) -> Result<Parsed, String> {
     let mut opts = Options::default();
     let mut i = 0usize;
     while i < argv.len() {
         let arg = argv[i].as_str();
         let (flag, inline) = split_on_equals(arg);
 
-        // `--flag value` and `--flag=value` both, with the same error when the
-        // value is simply missing.
-        let take_value = |i: &mut usize| -> Result<String, String> {
-            if let Some(inline_value) = inline.clone() {
-                return Ok(inline_value);
-            }
-            *i += 1;
-            argv.get(*i).cloned().ok_or_else(|| format!("{flag} needs a value"))
-        };
+        let take_value = |i: &mut usize| flag_value(argv, i, flag, inline.clone());
 
         match flag {
             "--mock" => opts.mock = true,
@@ -269,6 +374,9 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
             "--token" => opts.token = Some(take_value(&mut i)?),
             "--web-root" => opts.web_root = resolved(&take_value(&mut i)?),
             "--install-statusline" => opts.install_statusline = true,
+            "--rotate-token" => opts.rotate_token = true,
+            "--grant" => opts.grants = Grants::parse(&take_value(&mut i)?)?,
+            "--print-url" => opts.print_url = true,
             "--dev" => opts.dev = true,
             "--help" | "-h" => return Ok(Parsed::Help(help_text())),
             "--version" | "-V" => return Ok(Parsed::Version(version_text())),
@@ -278,7 +386,22 @@ pub fn parse_args(argv: &[String]) -> Result<Parsed, String> {
         i += 1;
     }
 
-    finalise_options(opts)
+    finalise_options(opts, token_path)
+}
+
+/// The value for `flag`: `--flag value` and `--flag=value` both, with the same
+/// error when the value is simply missing.
+fn flag_value(
+    argv: &[String],
+    i: &mut usize,
+    flag: &str,
+    inline: Option<String>,
+) -> Result<String, String> {
+    if let Some(inline_value) = inline {
+        return Ok(inline_value);
+    }
+    *i += 1;
+    argv.get(*i).cloned().ok_or_else(|| format!("{flag} needs a value"))
 }
 
 /// Split `--flag=value` into its halves. A bare `--flag` has no inline value,
@@ -311,10 +434,14 @@ fn port_from(raw: &str) -> Result<u16, String> {
 
 /// The rules that are about the command line as a whole rather than any one
 /// flag, applied once every argument has been read.
-fn finalise_options(mut opts: Options) -> Result<Parsed, String> {
+fn finalise_options(mut opts: Options, token_path: &Path) -> Result<Parsed, String> {
     refuse_fixtures_on_the_production_port(&opts)?;
+    // `auto` means "the token this machine keeps", not "a token for this
+    // process". Reading it back is what lets a saved link outlive a restart;
+    // see `token_file`. A literal `--token` is left exactly as typed — it is an
+    // explicit override, and writing it to disk would be a surprise.
     if opts.token.as_deref() == Some("auto") {
-        opts.token = Some(random_token());
+        opts.token = Some(crate::token_file::read_or_create(token_path)?);
     }
     refuse_an_open_bind_without_a_token(&opts)?;
     Ok(Parsed::Options(opts))
@@ -368,7 +495,11 @@ pub fn help_text() -> String {
         format!("  -p, --port <n>     port to listen on (default {PROD_PORT})"),
         "      --host <addr>  bind address (default 127.0.0.1; requires --token if not loopback)"
             .to_string(),
-        "      --token <s>    require this token; \"auto\" generates one".to_string(),
+        "      --token <s>    require this token; \"auto\" uses the stored one".to_string(),
+        "      --rotate-token  replace the stored token and exit".to_string(),
+        "      --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)"
+            .to_string(),
+        "      --print-url    print the full URL, token and all, then keep serving".to_string(),
         "      --mock         serve fixture agents, touching nothing real".to_string(),
         "      --mock-transitions  like --mock, but statuses change on a timer".to_string(),
         "      --browse-root <d>  root the folder picker is confined to (default: home)"
@@ -405,8 +536,18 @@ mod tests {
         argv.iter().map(|arg| (*arg).to_string()).collect()
     }
 
+    /// Parse against a token store of its own.
+    ///
+    /// Never the real one: `--token auto` writes it, so a test that used
+    /// `token_file()` would mint a token into the developer's home directory
+    /// and every later run would silently adopt it.
     fn parse(argv: &[&str]) -> Result<Options, String> {
-        match parse_args(&args(argv))? {
+        let store = tempfile::tempdir().expect("tempdir");
+        parse_in(argv, &store.path().join("token"))
+    }
+
+    fn parse_in(argv: &[&str], token_path: &Path) -> Result<Options, String> {
+        match parse_args_with_token_file(&args(argv), token_path)? {
             Parsed::Options(o) => Ok(o),
             Parsed::Help(_) => panic!("expected options, got help"),
             Parsed::Version(_) => panic!("expected options, got a version"),
@@ -475,9 +616,33 @@ mod tests {
         let t = o.token.unwrap();
         assert_eq!(t.len(), TOKEN_HEX_CHARS);
         assert!(t.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()), "{t}");
-        // Two runs must not agree, or it is not a secret.
-        let again = parse(&["--host", "0.0.0.0", "--token", "auto"]).unwrap().token.unwrap();
-        assert_ne!(t, again);
+        // Two machines must not agree, or it is not a secret.
+        let elsewhere = parse(&["--host", "0.0.0.0", "--token", "auto"]).unwrap().token.unwrap();
+        assert_ne!(t, elsewhere);
+    }
+
+    #[test]
+    fn token_auto_returns_the_same_token_on_the_next_start() {
+        // The point of persisting it. `auto` used to mint a new secret every
+        // start, so every restart broke the link saved on the phone and the
+        // only stable option was a literal token in argv, which `ps` can read
+        // and which nothing ever rotates.
+        let store = tempfile::tempdir().expect("tempdir");
+        let path = store.path().join("token");
+        let first = parse_in(&["--token", "auto"], &path).unwrap().token.unwrap();
+        let second = parse_in(&["--token", "auto"], &path).unwrap().token.unwrap();
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_literal_token_is_never_written_to_the_store() {
+        // An explicit `--token` is an override for this run. Persisting it
+        // would silently make one invocation's argument the default for every
+        // later `--token auto`.
+        let store = tempfile::tempdir().expect("tempdir");
+        let path = store.path().join("token");
+        assert_eq!(parse_in(&["--token", "s3cret"], &path).unwrap().token.as_deref(), Some("s3cret"));
+        assert!(!path.exists(), "a literal token must not create the store");
     }
 
     #[test]

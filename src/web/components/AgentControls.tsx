@@ -1,20 +1,15 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { useHeldChoice } from '../hooks/useHeldChoice.ts'
 import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
-import {
-  clearAgentContext,
-  closeAgent,
-  compactAgentContext,
-  setAgentModel,
-} from '../store/transport.ts'
+import { closeAgent, setAgentModel } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
 import { ConfirmDialog } from './ConfirmDialog.tsx'
 import { ShiftTabButton } from './ShiftTabButton.tsx'
 import { displayName } from '../lib/naming.ts'
-import { useTokenNavigate } from '../hooks/useTokenNavigate.ts'
+import { useContextActions } from '../hooks/useContextActions.ts'
 import styles from './AgentControls.module.css'
 
 /** The server's list, not a copy of it — see `shared/types.ts`. */
@@ -37,19 +32,16 @@ export function aliasOfModel(model: string | undefined): string {
 export function AgentControls({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
-  const setExpectSession = useStore((s) => s.setExpectSession)
-  const navigate = useTokenNavigate()
   /*
-   * INV-2's "exactly once". `pending` is React state and does not land until
-   * React flushes, so two clicks in one batch would both read it as null. Clear
-   * in particular must never go twice: the second would discard the fresh
-   * session the first one just created.
+   * Clear and compact live in a hook because the composer strip offers them
+   * too, and the clear path — navigate, in this order, never twice — is a
+   * sequence rather than a widget. See `useContextActions`.
    */
-  const sendingRef = useRef(false)
-  const [pending, setPending] = useState<'model' | 'clear' | 'compact' | 'close' | null>(null)
-  // Which destructive action is waiting to be confirmed, if any. The buttons
-  // only ask; the runners below are what reach the agent (INV-2).
-  const [confirming, setConfirming] = useState<'clear' | 'close' | null>(null)
+  const ctx = useContextActions(agent)
+  const [pending, setPending] = useState<'model' | 'close' | null>(null)
+  // Close only. Clear's confirmation is the hook's, so both surfaces ask with
+  // the same words.
+  const [confirmingClose, setConfirmingClose] = useState(false)
   // Held until the agent reports it back — see `useHeldChoice`.
   const [modelValue, setPickedModel, clearPickedModel] = useHeldChoice(
     aliasOfModel(agent.model),
@@ -58,7 +50,12 @@ export function AgentControls({ agent }: { agent: Agent }) {
 
   const slashCommands = allowsSlashCommands(agent.agentKind)
   const busy = agent.status === 'busy'
-  const disabled = busy || !agent.paneId || pending !== null
+  /*
+   * Clear and compact moved out of this component's `pending` but not out of
+   * this rule: a model change must still not start on top of a clear.
+   */
+  const inFlight = pending !== null || ctx.pending !== null
+  const disabled = busy || !agent.paneId || inFlight
   const reason = busy ? t('controlBusy') : undefined
   /*
    * INV-8's exceptions. Mode sends a control key rather than typing at all;
@@ -69,7 +66,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
    * used. Goal and Close still wait for idle. Mode carries its own copy of this
    * rule inside `ShiftTabButton`, which is shared with the composer strip.
    */
-  const midRunDisabled = !agent.paneId || pending !== null
+  const midRunDisabled = !agent.paneId || inFlight
 
   const setModel = async (value: string): Promise<void> => {
     setPending('model')
@@ -93,71 +90,12 @@ export function AgentControls({ agent }: { agent: Agent }) {
 
   const onClose = async (): Promise<void> => {
     const name = displayName(agent)
-    setConfirming(null)
+    setConfirmingClose(false)
     setPending('close')
     const result = await closeAgent()
     setPending(null)
     if (!result.ok) showToast(t('controlFailed', { error: result.error }))
     else showToast(t(result.detail === 'forced' ? 'closedForced' : 'closedGracefully', { name }))
-  }
-
-  /*
-   * Clear replaces the session rather than editing it, so the id the user is
-   * looking at stops existing. Without following it, `focusAgent` points at
-   * nothing, the route bails to the fleet, and the agent reappears further down
-   * the page as a stranger — from the user's side, the panel closed itself.
-   */
-  const onClear = async (): Promise<void> => {
-    if (sendingRef.current) return
-    const name = displayName(agent)
-    setConfirming(null)
-    sendingRef.current = true
-    setPending('clear')
-    try {
-      const result = await clearAgentContext()
-      if (!result.ok) {
-        showToast(t('controlFailed', { error: result.error }))
-        return
-      }
-      if (result.detail === undefined || result.detail === 'unverified') {
-        // The paste went out and no new session appeared inside the window.
-        // Saying it worked would claim something nobody read (INV-11), and
-        // navigating on that claim would land on an id that may not exist.
-        showToast(t('clearUnverified', { name }))
-        return
-      }
-      showToast(t('cleared', { name }))
-      /*
-       * Say so before navigating. The registry has not scanned for this id yet
-       * — it appeared a moment ago — and the route's "the agent ended while it
-       * was open" rule would otherwise fire on arrival and bounce straight back
-       * to the fleet.
-       */
-      setExpectSession(result.detail)
-      navigate(`/agent/${encodeURIComponent(result.detail)}`, { replace: true })
-    } finally {
-      sendingRef.current = false
-      setPending(null)
-    }
-  }
-
-  /*
-   * No confirmation: compaction shortens the context rather than discarding it,
-   * and Claude Code does it unprompted when the window fills. What it does need
-   * is honesty about timing — it runs for minutes, so nothing here waits.
-   */
-  const onCompact = async (): Promise<void> => {
-    if (sendingRef.current) return
-    sendingRef.current = true
-    setPending('compact')
-    try {
-      const result = await compactAgentContext()
-      if (!result.ok) showToast(t('controlFailed', { error: result.error }))
-      else showToast(t('compactRequested', { name: displayName(agent) }))
-    } finally {
-      sendingRef.current = false
-      setPending(null)
-    }
   }
 
   return (
@@ -209,9 +147,9 @@ export function AgentControls({ agent }: { agent: Agent }) {
             data-testid="compact-agent"
             disabled={disabled}
             title={reason ?? t('compactContextTitle')}
-            onClick={() => void onCompact()}
+            onClick={ctx.runCompact}
           >
-            {pending === 'compact' ? t('compacting') : t('compactContext')}
+            {ctx.pending === 'compact' ? t('compacting') : t('compactContext')}
           </Button>
 
           <Button
@@ -220,9 +158,9 @@ export function AgentControls({ agent }: { agent: Agent }) {
             data-testid="clear-agent"
             disabled={disabled}
             title={reason ?? t('clearContextTitle')}
-            onClick={() => setConfirming('clear')}
+            onClick={ctx.askClear}
           >
-            {pending === 'clear' ? t('clearing') : t('clearContext')}
+            {ctx.pending === 'clear' ? t('clearing') : t('clearContext')}
           </Button>
         </>
       )}
@@ -233,7 +171,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
         data-testid="close-agent"
         disabled={disabled}
         title={reason}
-        onClick={() => setConfirming('close')}
+        onClick={() => setConfirmingClose(true)}
       >
         {pending === 'close' ? t('closing') : t('closeAgent')}
       </Button>
@@ -245,24 +183,15 @@ export function AgentControls({ agent }: { agent: Agent }) {
         and needs none: it ends a session, and the transcript it wrote stays on
         disk to be read afterwards.
       */}
+      <ConfirmDialog {...ctx.confirm} />
       <ConfirmDialog
-        open={confirming === 'clear'}
-        title={t('clearContext')}
-        body={t('clearContextTitle')}
-        loss={t('clearConfirm', { name: displayName(agent) })}
-        confirmLabel={t('clearContext')}
-        cancelLabel={t('clearKeep')}
-        onConfirm={() => void onClear()}
-        onCancel={() => setConfirming(null)}
-      />
-      <ConfirmDialog
-        open={confirming === 'close'}
+        open={confirmingClose}
         title={t('closeAgent')}
         body={t('closeConfirm', { name: displayName(agent) })}
         confirmLabel={t('closeAgent')}
         cancelLabel={t('closeKeep')}
         onConfirm={() => void onClose()}
-        onCancel={() => setConfirming(null)}
+        onCancel={() => setConfirmingClose(false)}
       />
     </div>
   )

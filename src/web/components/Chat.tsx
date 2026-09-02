@@ -9,6 +9,7 @@ import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
 import { interruptAndSend, sendConfirmedKey, sendMessage, sendShiftTab } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
+import { AnswerCard } from './AnswerCard.tsx'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button, Chip } from './ui/Button.tsx'
@@ -60,6 +61,7 @@ export function Chat({ agent }: { agent: Agent }) {
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
   const events = useStore((s) => s.events)
+  const prompt = useStore((s) => s.prompt)
   const showToast = useStore((s) => s.showToast)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -263,8 +265,21 @@ export function Chat({ agent }: { agent: Agent }) {
     if (!coarse) inputRef.current?.focus()
   }
 
+  /*
+   * Both halves, deliberately. The transcript holds an open tool call whenever
+   * one is merely *running*, and the registry knows the agent is stopped but
+   * not what it is stopped on — so either alone would offer to answer a
+   * question that is not being asked (INV-16).
+   */
+  const answering = agent.status === 'waiting' && prompt !== null
+
   return (
     <div className={styles.pane} data-testid="chat">
+      {answering && (
+        <div className={styles.answer}>
+          <AnswerCard agent={agent} prompt={prompt} />
+        </div>
+      )}
       <div className={styles.region}>
         <div
           ref={scrollRef}

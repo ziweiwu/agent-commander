@@ -180,18 +180,34 @@
 }
 
 /*
- * A landscape phone has ~380px of height. The quick-prompt row hides itself
- * there; this one does not, because full screen is where that phone reads a
- * conversation and the panel's own control row does not exist in it — hiding
- * this would leave no way to change mode or goal at all. It shrinks instead.
+ * The memory actions, ruled off from the turn switches.
+ *
+ * Not decoration: Clear is the only control in this strip with no undo, and it
+ * should not sit flush against a toggle that gets pressed casually. `flex: none`
+ * for the reason `.controls` has it — in a scroller a shrinkable child renders
+ * under its neighbours and takes their clicks.
  */
-@media (max-height: 420px) {
-  .controls {
+.context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  padding-left: 8px;
+  border-left: 1px solid var(--line);
+}
+
+/*
+ * Destructive on hover only, exactly as the panel's Close is. A permanently red
+ * button in a row this dense reads as an error state rather than as a verb.
+ */
+.clear:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+@media (max-width: 560px) {
+  .context {
     gap: 6px;
-  }
-  .select,
-  .toggle,
-  .input {
-    min-height: 34px;
+    padding-left: 6px;
   }
 }

@@ -238,4 +238,85 @@ test.describe('acting on a running agent', () => {
     await expect(page.getByTestId('goal-form')).toBeVisible()
     await expect(page.getByTestId('goal-input')).toHaveValue('/exit')
   })
+
+  /**
+   * The composer strip's copy of the memory actions.
+   *
+   * They exist in the detail panel's row too, so both are on screen at once on
+   * a desktop and every selector here has to say which it means — the same
+   * scoping `shift-tab` above already needs.
+   */
+  const strip = (page: Page) => page.getByTestId('chat-controls')
+
+  /*
+   * The whole reason these were duplicated. The panel's control row is above
+   * the tabs and is not rendered in full screen at all, which is exactly where
+   * a conversation gets long enough to want clearing.
+   */
+  test('INV-8 offers clear and compact beside the message box, in full screen too', async ({
+    page,
+  }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('fullscreen-toggle').first().click()
+    await expect(page.getByTestId('fullscreen-tab-chat')).toBeVisible()
+    // Not merely hidden here — it does not exist, which is what the strip is for.
+    await expect(page.getByTestId('agent-controls')).toHaveCount(0)
+    await expect(strip(page).getByTestId('clear-agent')).toBeEnabled()
+    await expect(strip(page).getByTestId('compact-agent')).toBeEnabled()
+  })
+
+  // Non-destructive on purpose: `AGENT.clearable` is reserved because clearing
+  // rotates the fixture's own id, and every project shares one mock server.
+  test('INV-8 asks before clearing from the strip, and a refusal sends nothing', async ({
+    page,
+  }) => {
+    await openAgent(page, AGENT.idle)
+    await strip(page).getByTestId('clear-agent').click()
+    await page.getByTestId('confirm-cancel').click()
+    await expect(page.getByTestId('confirm-dialog')).toHaveCount(0)
+    // Still the same session: nothing was cleared.
+    await expect(page).toHaveURL(new RegExp(AGENT.idle))
+  })
+
+  test('INV-8 compacts from the composer strip', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await strip(page).getByTestId('compact-agent').click()
+    await expect(page.getByTestId('toast')).toContainText(/requested/i, { timeout: 15_000 })
+  })
+
+  test('INV-8 offers neither from the strip to a busy agent', async ({ page }) => {
+    await openAgent(page, AGENT.busy)
+    await expect(strip(page).getByTestId('clear-agent')).toBeDisabled()
+    await expect(strip(page).getByTestId('compact-agent')).toBeDisabled()
+  })
+
+  /*
+   * INV-16. The mock fleet's blocked fixture is blocked on a real
+   * `AskUserQuestion` payload, so the labels on these buttons are the ones the
+   * transcript stated rather than anything read off the screen.
+   */
+  test('INV-16 answers a blocked agent from the conversation', async ({ page }) => {
+    /*
+     * Navigated rather than opened through `openAgent`, which waits for a first
+     * message: this fixture has never been prompted, and a question can be
+     * waiting on an agent whose conversation is still empty. That is a real
+     * shape, not a quirk of the mock — an agent asks for permission on its
+     * first tool call.
+     */
+    await page.goto(`/agent/${AGENT.waiting}`)
+    await expect(page.getByTestId('agent-detail')).toBeVisible()
+    const card = page.getByTestId('answer-card')
+    await expect(card).toBeVisible({ timeout: 15_000 })
+    await expect(card.getByTestId('answer-question')).toContainText(/migration/i)
+
+    const options = card.getByTestId('answer-option')
+    await expect(options).toHaveCount(2)
+    await expect(options.first()).toContainText(/Backfill the index/)
+
+    await options.first().click()
+    await expect(page.getByTestId('toast')).toBeVisible({ timeout: 15_000 })
+    // INV-2: the card closes itself on the first press, because a second digit
+    // would answer the question behind this one rather than repeat this answer.
+    await expect(options.first()).toBeDisabled()
+  })
 })

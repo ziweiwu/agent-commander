@@ -186,6 +186,49 @@ export type TimelineKind =
   | 'subagent'
   | 'notice'
 
+/** One choice in a prompt the agent is blocked on. */
+export interface PromptOption {
+  label: string
+  description?: string
+}
+
+/**
+ * A question the agent is waiting on, read out of its own transcript.
+ *
+ * Claude Code flushes a tool call before the dialog it raises is answered, so
+ * an `AskUserQuestion` still waiting for a reply is on disk in full — question,
+ * options, and whether it takes more than one. That is the only reason this app
+ * may name an option at all: it is *read*, never inferred from the screen.
+ *
+ * The other blocked shapes are deliberately thinner. `ExitPlanMode` writes its
+ * plan but not the three approval choices, which the CLI composes; a tool
+ * permission request writes the tool and its input but not the numbered list.
+ * There `options` is absent and the interface offers keys rather than labels it
+ * would have had to invent (INV-16).
+ */
+export interface PendingPrompt {
+  /** The tool that raised it — `AskUserQuestion`, `ExitPlanMode`, or another. */
+  tool: string
+  question?: string
+  /** Only ever what the transcript named. Absent means "not knowable here". */
+  options?: PromptOption[]
+  /** True when the picker takes several answers, so one digit cannot finish it. */
+  multiSelect?: boolean
+  /** How many questions this one call still asks after the first. */
+  moreQuestions?: number
+  /** Reference text: the plan under review, or the command being asked about. */
+  detail?: string
+  /**
+   * Identity of *this* question, echoed back on the answer.
+   *
+   * Derived by the server from the prompt's own content, so it survives a
+   * restart and needs nothing stored. An answer carrying a stale id is refused
+   * rather than typed into whatever the pane is showing by then — see
+   * `PendingPrompt::fingerprint` and INV-2.
+   */
+  id?: string
+}
+
 export interface TimelineEvent {
   id: string
   at: number
@@ -311,13 +354,26 @@ export type ClientMessage =
    * guard is a boundary rather than a UI convention (INV-6).
    */
   | { type: 'key'; sessionId: string; key: string; confirmed?: boolean }
+  /**
+   * Answer the prompt an agent is blocked on. `choice` indexes the options the
+   * transcript named; the server composes the keystroke, and refuses outright
+   * if `promptId` no longer matches the question on disk.
+   */
+  | { type: 'answer'; sessionId: string; promptId: string; choice: number }
 
 /* ---- server -> client ---- */
 
 export type ServerMessage =
   | { type: 'fleet'; agents: Agent[]; mock: boolean }
   | { type: 'limits'; limits: RateLimits | null }
-  | { type: 'timeline'; sessionId: string; events: TimelineEvent[]; reset: boolean }
+  | {
+      type: 'timeline'
+      sessionId: string
+      events: TimelineEvent[]
+      reset: boolean
+      /** What this agent is blocked on, when its transcript says (INV-16). */
+      prompt?: PendingPrompt
+    }
   | { type: 'frame'; frame: Frame }
   /**
    * A paste has finished being written to tmux, successfully or not. It is a
@@ -333,12 +389,21 @@ export type ServerMessage =
    */
   | { type: 'error'; sessionId?: string; message: string; kind?: 'pane-exited' }
 
-/** Control keys the server will forward. Anything else is rejected (INV-2). */
+/**
+ * Control keys the server will forward. Anything else is rejected (INV-2).
+ *
+ * The digits are how a numbered choice is answered. Claude Code's pickers are
+ * numbered, and a digit selects the option it labels wherever the cursor
+ * happens to be — which is why they are here rather than arrow keys: a relative
+ * move has to assume where the highlight started, and being wrong about that
+ * answers a different question than the one the user read.
+ */
 export const ALLOWED_KEYS = [
   'Enter', 'Escape', 'Tab', 'BSpace', 'Space',
   'Up', 'Down', 'Left', 'Right',
   'Home', 'End', 'PageUp', 'PageDown',
   'C-c', 'C-d', 'C-o', 'C-r', 'C-u',
+  '1', '2', '3', '4', '5', '6', '7', '8', '9',
 ] as const
 
 /** Keys that can destroy work, so the UI must confirm before sending (INV-6). */

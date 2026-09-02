@@ -23,6 +23,8 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   startAgent: vi.fn(),
   focusAgent: vi.fn(),
   setAttached: vi.fn(),
+  clearAgentContext: vi.fn(),
+  compactAgentContext: vi.fn(),
 }))
 
 beforeEach(() => {

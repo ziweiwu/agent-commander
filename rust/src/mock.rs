@@ -21,8 +21,8 @@ use crate::sources::{
     TailRead, Unsubscribe,
 };
 use crate::types::{
-    now_ms, Agent, AgentStatus, AgentTree, GoalState, RateLimits, SubagentNode, SubagentState,
-    TimelineEvent, TimelineKind, UsageWindow,
+    now_ms, Agent, AgentStatus, AgentTree, GoalState, PendingPrompt, PromptOption, RateLimits,
+    SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
 };
 
 /// Frozen clock. Every fixture timestamp is an offset from this, so two runs —
@@ -1030,7 +1030,42 @@ impl MockTail {
             events,
             patch: AgentPatch::default(),
             first: false,
+            prompt: self.blocked_on(),
+            prompt_changed: false,
         }
+    }
+
+    /*
+     * The blocked fixture is blocked on something specific.
+     *
+     * `npm run mock` exists so the awkward cases are on screen rather than only
+     * in a test, and "an agent is asking you a multiple-choice question" is now
+     * one of the app's own surfaces. The shape is a real `AskUserQuestion`
+     * payload: a question, labelled options, and a second question behind it,
+     * because answering one of several is what the card has to say honestly.
+     */
+    fn blocked_on(&self) -> Option<PendingPrompt> {
+        if self.session_id != "mock-waiting" {
+            return None;
+        }
+        Some(PendingPrompt {
+            tool: "AskUserQuestion".into(),
+            question: Some("Which migration should run first?".into()),
+            options: vec![
+                PromptOption {
+                    label: "Backfill the index (Recommended)".into(),
+                    description: Some("Slower, but nothing is read before it is written.".into()),
+                },
+                PromptOption {
+                    label: "Swap the table".into(),
+                    description: Some("Faster, with a window where reads miss.".into()),
+                },
+            ],
+            multi_select: None,
+            more_questions: Some(1),
+            detail: None,
+            id: String::new(),
+        })
     }
 
     /// The backfill every reader gets once: the fixture conversation, stamped
@@ -1055,6 +1090,8 @@ impl MockTail {
             events,
             patch: AgentPatch::default(),
             first: true,
+            prompt: self.blocked_on(),
+            prompt_changed: true,
         }
     }
 }

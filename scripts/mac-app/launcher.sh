@@ -41,6 +41,9 @@ LOGDIR="$HOME/Library/Logs/agent-commander"
 LOG="$LOGDIR/server.log"
 PIDFILE="$STATE/server.pid"
 PATHCACHE="$STATE/path"
+# Written by the server, not by this launcher: `--token auto` keeps its token
+# here so a saved link survives a restart. Read-only from here.
+TOKENFILE="$HOME/.claude/agent-commander/token"
 
 LOG_MAX_BYTES=1048576
 READY_TRIES=100
@@ -397,10 +400,23 @@ temporary directory behind. Its log is at ~/Library/Logs/agent-commander/server.
       exit 0
     fi
     ;;
-  3) alert "Agent Commander is already running with a token" \
-"A copy is listening on port $PORT and asking for a token, so this launcher cannot open it for you.
+  3) # Token-gated. The token is kept in a file now, so the common case — a
+     # copy the user started with --token auto — is one this launcher can open
+     # after all. Only a literal --token, which is deliberately never stored,
+     # still needs the address that copy printed.
+     STORED=""
+     if [ -r "$TOKENFILE" ]; then
+       STORED=$(/usr/bin/head -n 1 "$TOKENFILE" | /usr/bin/tr -d '[:space:]')
+     fi
+     if [ -n "$STORED" ]; then
+       /usr/bin/open "$URL?token=$STORED"
+       exit 0
+     fi
+     alert "Agent Commander is already running with a token" \
+"A copy is listening on port $PORT and asking for a token this launcher cannot find.
 
-Use the address that copy printed when it started — it ends in ?token=…"
+That copy was started with a literal --token, which is never written to
+$TOKENFILE. Use the address it printed when it started — it ends in ?token=…"
      exit 0 ;;
   2) alert "Port $PORT is already in use" \
 "Something that is not Agent Commander is listening on 127.0.0.1:$PORT.

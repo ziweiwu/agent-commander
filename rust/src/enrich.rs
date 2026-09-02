@@ -359,7 +359,7 @@ mod tests {
     #[async_trait]
     impl TailApi for FakeTail {
         async fn read(&mut self) -> anyhow::Result<TailRead> {
-            Ok(TailRead { events: Vec::new(), patch: self.0.clone(), first: false })
+            Ok(TailRead { events: Vec::new(), patch: self.0.clone(), first: false, ..Default::default() })
         }
     }
 
@@ -601,7 +601,12 @@ mod tests {
             if !self.work.is_zero() {
                 tokio::time::sleep(self.work).await;
             }
-            Ok(TailRead { events: Vec::new(), patch: activity(&format!("v{n}")), first: false })
+            Ok(TailRead {
+                events: Vec::new(),
+                patch: activity(&format!("v{n}")),
+                first: false,
+                ..Default::default()
+            })
         }
     }
 

@@ -36,6 +36,8 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   flushText: vi.fn(),
   setAttached: vi.fn(),
   setAgentGoal: vi.fn(),
+  clearAgentContext: vi.fn(),
+  compactAgentContext: vi.fn(),
 }))
 
 const working = (over: Partial<Agent> = {}): Agent =>

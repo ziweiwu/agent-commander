@@ -15,6 +15,8 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   startAgent: vi.fn(),
   focusAgent: vi.fn(),
   setAttached: vi.fn(),
+  clearAgentContext: vi.fn(),
+  compactAgentContext: vi.fn(),
 }))
 
 /** Any non-zero height: jsdom has no layout, so the value only has to be read back. */

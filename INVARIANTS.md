@@ -95,6 +95,31 @@ Pane ids are validated against `/^%\d+$/` before they reach argv, and control
 keys are checked against `ALLOWED_KEYS` server-side — the client's allowlist is
 a convenience, not the boundary.
 
+**An answer is bound to the question it was given for.** Answering used to be a
+`key` message carrying a bare digit, which means "whatever the pane is showing
+when tmux receives it". `AnswerCard` guarded against a double press with a ref,
+but that guard lived in one tab and was keyed on the prompt's *content*, so two
+identical consecutive questions looked like one — and nothing at all stopped a
+stale tab, a duplicated frame, or any other socket peer. `AskUserQuestion` asks
+its questions one at a time, so the second digit answers a question the user has
+not read.
+
+So `PendingPrompt` now carries an `id`: `fingerprint`, a hash over the session
+id and every field a reader reads before deciding — tool, question, detail,
+option labels, and `more_questions`, which is what makes question two of a set
+differ from question one. It is derived rather than issued, so it needs nothing
+stored and survives the server restarting under a browser that stayed open. The
+client echoes it on a new `answer` message with an option *index*; `on_answer`
+opens a tail of its own, re-reads the transcript, and refuses if the id no
+longer matches. The keystroke is composed on the server, so nothing the browser
+sends becomes an argv entry.
+
+Answering is also its own **grant** (`respond`), separable from `drive`. It is
+the highest-privilege verb in the app — it releases a command the agent already
+chose to run — and it is simultaneously the one thing you open this on a phone
+to do, which is why it must be grantable without also granting arbitrary
+keystrokes.
+
 The chat's optimistic echo is display-only. A pending message is drawn
 immediately so sending feels instant, but it is sent exactly once; `reconcile()`
 only ever *removes* the local copy once the transcript confirms it, and never
@@ -169,6 +194,16 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
 - `pane::tests` (the control-path group) — a write that fails after reaching tmux is
   never retried down the other path, a read that fails is, and the user's text
   never appears on a tmux command line
+- `types::tests` (`inv2_a_prompt_id_changes_with_every_field_a_reader_reads`,
+  `inv2_field_boundaries_cannot_be_shifted_to_forge_a_match`) — the id moves
+  with the question, the agent, and the position in a multi-question set
+- `routes::tests` (`inv2_an_answer_naming_the_current_prompt_reaches_the_agent`,
+  `inv2_an_answer_to_a_question_that_has_moved_on_is_refused`,
+  `inv2_an_option_the_transcript_never_named_is_refused`) — a correct id
+  answers, a stale one is refused with nothing reaching the pane, and an index
+  past what was offered is not a keystroke to invent
+- `test/ui/answer-card.test.tsx` — the card sends the option index and the
+  prompt id, and never a raw key
 - `test/chat.test.ts` — a repeated message stays visible until the transcript
   records *another* copy of it
 
@@ -197,27 +232,33 @@ machine*. Two headers, because they answer different questions:
   the host perfectly — both say `evil.example`, and only the fact that neither
   is a loopback name gives it away.
 
-"This machine" is two names, not one. Loopback is the obvious one. The other
-is this host's own Tailscale `DNSName`, when Tailscale is up: `tailscale serve`
-terminates TLS and proxies to the loopback port, forwarding the name the caller
-asked for, so a request that never left the tailnet arrives wearing a name that
-is not loopback. Refusing it made a tokenless server unreachable from the phone
-— the flow this project exists to serve — and `--token` was the only way back
-in.
+A tokenless server answers to loopback and to nothing else. Names beyond it —
+the address `--host` bound, and this host's own Tailscale `DNSName` — are
+gathered by `origin_names` only when a token is configured, and the reason is
+worth stating precisely, because it was got wrong once.
 
-Trusting it is narrower than the tailnet: it is one exact name, read from the
-Tailscale CLI at startup rather than from anything a caller sends, so a request
-matches only by being addressed to *this* host on a network the user
-administers. Another machine on the same tailnet does not match. Nothing the
-gate was written to stop gets through it either — a visited page carries its
-own `Origin`, which is neither loopback nor this name, and a rebound host is
-refused for exactly that reason.
+`tailscale serve` terminates TLS and proxies to the loopback port, forwarding
+the name the caller *dialled*. That name is this host's. So a request from the
+phone and a request from any other peer on the tailnet arrive identical: both
+say `box.tail1234.ts.net`, and nothing in the gate looks at the peer address.
+Accepting that name tokenless did not mean "this machine" — it meant the whole
+tailnet, and it was published in this file as if it meant the former.
 
-A configured token replaces that gate rather than adding to it: a token is
-proof of intent that neither a cross-origin page nor a rebound name can
-produce, since it lives in the URL of the real origin. It is what `--host`
-requires, where the app is bound to a network address directly rather than
-reached as itself through a proxy.
+The unit test that appeared to prove otherwise asserted that *another machine's*
+name is not a self-name. True, and irrelevant: a peer never announces its own
+name in `Host`, only the one it asked for.
+
+So the two gates ask two questions and neither substitutes for the other. The
+name says the request reached the server it was addressed to; the **token** says
+who sent it. `--host` already requires a token
+(`refuse_an_open_bind_without_a_token`); `tailscale serve` needs no `--host` at
+all, which is how the tokenless case arose, and is why the name is worthless
+without one.
+
+The origin gate is therefore never skipped, not even for a correct token. That
+mattered less while the token lived in a URL an attacking page could not read.
+It matters now: a credential the browser attaches by itself travels on a
+cross-origin request and proves nothing about intent.
 
 **What the gate protects is larger than it looks.** The socket carries every
 agent's conversation verbatim — prompts, tool calls, file paths, whatever was
@@ -240,21 +281,36 @@ than an attacker.
   `HEAD` under `/assets/` are exempt from the token — and from nothing else. It
   costs the gate nothing: those files are the compiled front end, published
   verbatim on npm, and no agent's directory, prompts or output passes through
-  them. A tokenless server has no token gate to bypass, so its same-origin
-  check still applies to them in full.
-- *The address bar.* The router replaces the whole location, query string
-  included, so `navigate('/agent/x')` drops the token from the URL. Nothing the
-  page remembers can repair that: the *document* request for `/agent/x` is
-  refused before a line of JavaScript runs, so the reload, the bookmark and the
-  link sent to a phone all dead-end. Every in-app navigation re-attaches it.
+  them. The same-origin check applies to them in full either way, because it
+  applies to everything.
+- *The address bar, which the token no longer touches.* It arrives once, as
+  `?token=…` on the URL the user opened; `cookie_exchange` trades it for an
+  `HttpOnly; SameSite=Strict` cookie and redirects to the same path without it.
+  The reload, the bookmark and the link sent to a phone are then served by the
+  cookie, so the router dropping the query string on `navigate('/agent/x')` is
+  correct rather than a bug to work around.
+
+  This replaced a client that remembered the token in `sessionStorage` and
+  re-attached it to every request and every navigation. That worked, and the
+  cost was that the secret lived in the address bar permanently — and therefore
+  in history, in `document.referrer`, and in the access log of whatever proxy
+  was in front. The cookie also reaches the one place a header cannot: a
+  `WebSocket` handshake carries no `Authorization`, which is why the query
+  parameter existed at all.
+
+  Only a browser navigation is exchanged (`Accept: text/html`), so `?token=` and
+  `Authorization: Bearer` still work unchanged for curl and for tests.
 
 - `routes::tests` (the origin group, incl. `inv3_a_rebound_host_is_refused_even_when_origin_matches_it`) — a cross-origin WebSocket and a cross-origin form POST
   are refused, a rebound `Host` is refused down a raw socket, every honest
-  spelling of loopback still serves, this host's own tailnet name serves while
-  another machine's does not, and the bundle is exempt from the token while the
-  document, the fleet and the socket are not
-- `test/ui/token.test.tsx` — the token survives into the requests the page makes
-  and into the URL the router leaves in the address bar
+  spelling of loopback still serves, a tokenless server answers to no name but
+  loopback (`inv3_a_tokenless_server_answers_to_no_name_but_loopback`) while a
+  token widens the set to the bound host and this host's own tailnet name
+  without ever replacing the gate (`a_token_does_not_replace_the_origin_gate`),
+  and the bundle is exempt from the token while the document, the fleet and the
+  socket are not
+- `test/ui/token.test.tsx` — the page puts no token on any request and none in
+  the address bar, even when it was loaded from a URL carrying one
 
 ## INV-4 — Bounded polling cost
 
@@ -561,6 +617,25 @@ the store: pressing one left the other reading the old mode two inches away
 until the enricher caught up, and an app that contradicts itself within one
 glance is worse than one that is briefly behind. Binding to nothing removed
 that whole class of problem along with the hold.
+
+**Four controls now sit in both places, and what is shared differs by control.**
+Mode, Goal, Clear and Compact all appear in the composer strip as well as in the
+detail panel's row, because that row is above the tabs, collapses behind `⋯`
+below 900px, and does not exist at all in full screen — the surface where a
+conversation gets long enough to want clearing. Shift+Tab is one shared
+*component*; Clear and Compact are one shared *hook*
+(`web/hooks/useContextActions.ts`), because their reasoning is a sequence rather
+than a widget: a `sendingRef` so a double click cannot discard the session the
+first click just created, a refusal to navigate on an `unverified` result, and
+`setExpectSession` **before** `navigate` so the route's "the agent ended while it
+was open" rule does not fire on an id the registry has not scanned yet. Two
+copies of that sequence would be two chances to get the order wrong, and only
+one of them would be under test.
+
+One gap is accepted rather than fixed: under `@media (max-height: 420px)` the
+whole strip is hidden, so a landscape phone in full screen still cannot reach
+them. Exempting them costs ~44px of the 66px left for the conversation, which
+`Chat.module.css` records as measured and rejected.
 
 **Model, which does still report, remains observable only late.** It is read
 back out of the transcript, which a busy session writes at the end of its turn,
@@ -924,7 +999,9 @@ it is what makes them stop checking — so `isGuess` ignores `stateInferred` on
 it entirely. `quiet` is not marked as a guess either: it is the honest answer,
 and marking it would imply a better one exists.
 
-- `test/delegate-effort.test.ts` — tool calls counted rather than turns; the
+- `subagents::inv13_counts_tool_calls_rather_than_turns` and the effort group
+  beside it (`subagents::inv13_measures_the_span_between_first_and_last_record`)
+  — tool calls counted rather than turns; the
   span read off the records and not off the file's mtime; nothing reported at
   all for a transcript that could not be parsed, distinct from a real zero; and
   a transcript that cannot have changed is not re-read
@@ -1017,3 +1094,68 @@ quiet.
 - `test/ui/fleet-delegates.test.tsx` — the question renders as a question, the
   "not a stall" note takes the same slot when a delegate is moving, and the
   question is withheld when no duration can be named
+
+## INV-16 — An answer names only what the transcript named
+
+The Chat tab offers to answer a question the agent is blocked on. Every option
+it labels is **read out of that agent's own transcript**, never inferred from
+the screen, and where the transcript does not state the choices the interface
+says so instead of composing a list.
+
+**Why this can be read at all.** Claude Code flushes a `tool_use` record before
+the dialog it raises is answered. Three independent proofs, all from real
+transcripts on this machine: an `AskUserQuestion` whose `tool_result` never
+arrives because the session was abandoned with the question on screen; a
+`PreToolUse` hook record written *after* the call and before the tool ran; and a
+call whose result landed 701 seconds later, which is a person reading. So an
+unanswered `AskUserQuestion` is on disk in full — `questions[].options[].label`,
+their descriptions, and `multiSelect`.
+
+**Why the three blocked shapes are treated differently.** They are knowable to
+different depths, and flattening that would mean inventing the difference:
+
+- `AskUserQuestion` states the question and every option. Buttons are labelled.
+- `ExitPlanMode` states the plan but not the three approval choices, which the
+  CLI composes at the terminal. The plan is shown; no choice is named.
+- A tool permission request states the tool and its input but never the numbered
+  list. What it would do is shown; no choice is named.
+
+`waitingFor` cannot stand in for any of this. It is a closed set — `dialog
+open`, `permission prompt`, `input needed`, `sandbox request`, `goal proposal`,
+`worker request` — and permission prompts, plan approvals and question pickers
+all collapse into one of them. It says that a dialog is open, never which.
+
+**A digit, because a digit is absolute.** An answer is delivered as the option's
+own number, which selects it wherever the highlight happens to sit. Arrow keys
+would have to assume the picker opens at the top, and being wrong about that
+does not fail loudly — it answers a different question than the one the user
+read. `1`–`9` are on `ALLOWED_KEYS` for this and nothing else; `0` names no
+option and a two-digit string is not a key.
+
+**Both halves must agree before anything is offered.** An open call means a tool
+is unfinished, which during ordinary work is nearly always true — a tool that is
+merely *running* looks exactly like one waiting to be allowed. The registry
+knows the session is stopped but not what stopped it. So the card appears only
+when the status is `waiting` **and** the transcript names an open call, and a
+delegate's question is excluded outright: it is asked of the delegate, and
+answering it into this agent's prompt would type into the wrong session.
+
+**One press, and the card closes.** This is INV-2's "exactly once" with a
+sharper edge than usual: a second digit is not a duplicate answer, because
+`AskUserQuestion` asks its questions one at a time — it would answer the *next*
+question, which the user has not read. The guard is a ref, cleared
+synchronously, for the reason the composer's is.
+
+- `transcript::prompt_tests` — the options an `AskUserQuestion` states are read
+  back exactly; `ExitPlanMode` yields its plan and no choices; a permission
+  request yields its subject and no choices; a malformed payload yields nothing
+  rather than an empty question; a call is held open until its `tool_result`
+  arrives; the newest open call wins; a sidechain's call is ignored
+- `control::inv2_allows_single_digits_and_nothing_that_merely_looks_like_one` —
+  `1`–`9` pass, `0`, `10`, `1 ` and `1;2` are refused
+- `test/ui/answer-card.test.tsx` — a labelled button per stated option, the
+  answer sent as its number, one answer from a double click, no invented labels
+  for a plan or a permission request, keys instead of digits for a multi-select,
+  and the card withheld unless status and transcript agree
+- `e2e/control.spec.ts` — INV-16 end to end against the mock fleet's blocked
+  fixture, which carries a real `AskUserQuestion` payload
