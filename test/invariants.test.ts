@@ -1,8 +1,7 @@
 /**
  * The invariant contract has to stay wired to the code it claims to describe.
  *
- * The invariants section of `SPEC.md` earns its place by being an *index*
- * rather than an essay:
+ * `INVARIANTS.md` earns its place by being an *index* rather than an essay:
  * every property is greppable from a test name, on both sides of the wire. That
  * promise is made in the file's own preamble and nothing was checking it, so it
  * rotted the way an unchecked claim always does. Measured when this test was
@@ -30,11 +29,11 @@ import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
-const CONTRACT = readFileSync('SPEC.md', 'utf8')
+const CONTRACT = readFileSync('INVARIANTS.md', 'utf8')
 
 /** The numbers the contract defines, in the order it defines them. */
 const declared = (): number[] =>
-  [...CONTRACT.matchAll(/^### INV-(\d+)\b/gm)].map((m) => Number(m[1]))
+  [...CONTRACT.matchAll(/^## INV-(\d+)\b/gm)].map((m) => Number(m[1]))
 
 function filesUnder(dir: string): string[] {
   if (!existsSync(dir)) return []

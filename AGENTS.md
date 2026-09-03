@@ -83,7 +83,7 @@ through a file instead of a command line, and why every control action is
 
 A change that makes either of those less true is the wrong change however
 convenient it looks. `ARCHITECTURE.md` §"The two constraints everything else
-follows from" carries the reasoning; `SPEC.md` §13 carries the contract.
+follows from" carries the reasoning; `INVARIANTS.md` carries the contract.
 
 ## Before you say it works
 
@@ -172,8 +172,8 @@ failure you would get for real.
 
 ## The invariant contract
 
-`SPEC.md` §"Invariants" numbers every property this app is built against,
-INV-1 through INV-16, and each is greppable from a test name:
+`INVARIANTS.md` numbers every property this app is built against, INV-1 through
+INV-16, and each is greppable from a test name:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml inv3   # the server's half
@@ -483,19 +483,23 @@ Point `harness:qa-bar-raiser` and `harness:ux-bar-raiser` at a `--mock` server o
 "nothing found" plainly rather than pad a list. `README.md` §"Review agents"
 lists what they have caught.
 
-## The two documents worth reading in full
+## The three documents worth reading in full
 
 - **`ARCHITECTURE.md`** — the module graph, the five planes, what is pushed
   versus polled, and §"Where it is fragile", which is ordered by how quietly
   each thing fails. Trim an entry when it is fixed; the record of trimmed ones
   is §"Fixed since this list was written". §"How it is checked" is the gate
   design.
+- **`INVARIANTS.md`** — INV-1 … INV-16, each with the tests that prove it.
+  `CLAUDE.md` imports it alongside this file, so it is in context for every
+  session here without being asked for.
 - **`SPEC.md`** — what the app is supposed to do, requirement by requirement,
-  and in §13 INV-1 … INV-16, each with the tests that prove it. Point the
-  review agents at §13 by name: they look for an `INVARIANTS.md` and will
-  otherwise report they had nothing to read against.
+  in more detail and more fluently than the invariants allow. The invariants
+  are the subset of it whose violation is a defect; where the two disagree the
+  invariant wins. It has no gate, so it is held down by citing a test for every
+  requirement it makes.
 
-`README.md` is for the person using the app. These two are for the person
+`README.md` is for the person using the app. These three are for the person
 changing it.
 
 `TODO.md` is queued work, written to be executed cold by whoever picks it up:

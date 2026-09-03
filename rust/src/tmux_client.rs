@@ -31,7 +31,7 @@
 //! `refresh-client -C`. **This file never sends that**, and neither does
 //! `pane`, which is the guarantee — by construction, not by configuration.
 //! `ignore-size` is kept below as defence in depth and is not load-bearing.
-//! SPEC.md INV-1 records the amendment; `verify-inv1` proves it against a live
+//! INVARIANTS.md records the amendment; `verify-inv1` proves it against a live
 //! server rather than by assertion.
 //!
 //! Nothing here is required. Every caller falls back to spawning a one-shot

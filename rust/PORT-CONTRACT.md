@@ -28,12 +28,12 @@ the acceptance test: **if the wire bytes differ, the port is wrong.**
 
 5. **Tests live in `#[cfg(test)] mod tests` beside the code**, as the parked port
    already does. Name the invariant in the test name where one applies:
-   `fn inv13_quiet_is_never_drawn_as_done()`. `SPEC.md` §13 in the repo root is
+   `fn inv13_quiet_is_never_drawn_as_done()`. `INVARIANTS.md` in the repo root is
    the authority — read the section for any invariant you touch.
 
 ## The invariants that constrain this code
 
-Read `SPEC.md` §13 for the full text. The ones that bite in the backend:
+Read `INVARIANTS.md` for the full text. The ones that bite in the backend:
 
 - **INV-1 — no tmux client this app creates may affect the size of a pane.** This
   is why panes are read with `capture-pane`, polled and diffed, and never with a
