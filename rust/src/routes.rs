@@ -2328,7 +2328,7 @@ fn live_fleet(pending: Arc<crate::pending::PendingStore>) -> Deps {
 /// being sent `refresh-client -C`, which nothing here ever sends.
 /// `ignore-size` is not the guarantee — it governs how a client affects other
 /// clients, and a regular client reflows the window with it, without it, and
-/// with `-r` alike. See INVARIANTS.md INV-1.
+/// with `-r` alike. See SPEC.md INV-1.
 async fn start_tmux_control() {
     if !crate::pane::available().await {
         eprintln!("warning: no tmux server reachable — agents will list but cannot be attached to.");

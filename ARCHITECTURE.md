@@ -2,8 +2,9 @@
 
 What the pieces are, which way data moves, and where the joins are weak.
 
-`INVARIANTS.md` holds the properties that must not break and the tests that
-prove them; `README.md` describes what the app does for the person using it.
+`SPEC.md` holds what the app must do and, in §13, the properties that must not
+break and the tests that prove them; `README.md` describes what the app does
+for the person using it.
 This file is for the person changing it. Where an invariant explains a design,
 this points at it rather than restating it.
 
@@ -505,7 +506,7 @@ empty without a token, so a tokenless server answers to loopback and nothing
 else.
 
 This used to accept the Tailscale name unconditionally, and the reasoning —
-recorded here and in `INVARIANTS.md` — was that the name meant "this machine".
+recorded here and in `SPEC.md` INV-3 — was that the name meant "this machine".
 It does not. `tailscale serve` forwards the name the caller *dialled*, which is
 ours, so every tailnet peer's request arrives wearing it, and nothing in the
 gate reads the peer address. The name meant "anyone on the tailnet". The unit
@@ -603,7 +604,7 @@ their absence would otherwise read as an oversight.
 - **`mapKey()` has a test** — `test/ui/key-map.test.tsx` — asserting it can never
   produce a name outside `ALLOWED_KEYS`, and can still produce every key it
   claims to.
-- **INV-10 is greppable** from a test name, as `INVARIANTS.md` promises of every
+- **INV-10 is greppable** from a test name, as `SPEC.md` §13 promises of every
   invariant.
 - **`qa-fuzz.mjs` imports `playwright`** rather than an absolute path into an
   unrelated project on one laptop.

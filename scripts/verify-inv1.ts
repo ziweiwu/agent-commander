@@ -9,6 +9,9 @@
  *   npx tsx scripts/verify-inv1.ts [--port 4317]
  */
 import { execFile } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
@@ -38,6 +41,27 @@ const portArg = process.argv.indexOf('--port')
 const PORT = portArg > -1 ? Number(process.argv[portArg + 1]) : 4317
 const BASE = `http://127.0.0.1:${PORT}`
 
+/**
+ * The token, when the server has one. `--token auto` is how the server is
+ * meant to run behind Tailscale, and it keeps the secret in this file; a check
+ * that could only talk to a tokenless server would be a check nobody runs
+ * against the server they actually use. `--token <value>` overrides it.
+ */
+function tokenQuery(): string {
+  const tokenArg = process.argv.indexOf('--token')
+  const fromArgv = tokenArg > -1 ? process.argv[tokenArg + 1] : undefined
+  const stored = (() => {
+    try {
+      return readFileSync(join(homedir(), '.claude', 'agent-commander', 'token'), 'utf8').trim()
+    } catch {
+      return ''
+    }
+  })()
+  const token = fromArgv ?? stored
+  return token ? `?token=${encodeURIComponent(token)}` : ''
+}
+const TOKEN_QUERY = tokenQuery()
+
 interface AgentRow {
   sessionId: string
   name: string
@@ -51,7 +75,7 @@ const fail: (message: string) => never = (message) => {
   process.exit(1)
 }
 
-const agents: AgentRow[] = await fetch(`${BASE}/api/agents`)
+const agents: AgentRow[] = await fetch(`${BASE}/api/agents${TOKEN_QUERY}`)
   .then((r) => r.json() as Promise<{ agents: AgentRow[] }>)
   .then((d) => d.agents)
   .catch(() => fail(`could not reach ${BASE} — start the server first`))
@@ -64,7 +88,7 @@ process.stdout.write(`attaching to ${target.name} (pane ${target.paneId})\n`)
 const before = await clientSnapshot()
 
 await new Promise<void>((resolve) => {
-  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`)
+  const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws${TOKEN_QUERY}`)
   let frames = 0
   ws.addEventListener('open', () => {
     ws.send(JSON.stringify({ type: 'focus', sessionId: target.sessionId }))

@@ -561,7 +561,7 @@ memory rather than a reading (INV-11).
 The Attach tab is built on frame capture rather than a pty. tmux here runs with
 `window-size latest`, so a browser client attaching at a different size would
 resize your real panes mid-work. Capturing frames means the browser is a pure
-observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
+observer that can never move your terminal. See INV-1 in [SPEC.md](SPEC.md).
 
 ## Options
 

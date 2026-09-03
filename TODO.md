@@ -7,7 +7,8 @@ doing *here* rather than in general, the exact call sites as they stood when it
 was written, and what "done" is checked against. Read `AGENTS.md` first; the
 gates named below are the ones it lists.
 
-**Where these came from.** A review of `INVARIANTS.md` asked whether 16 numbered
+**Where these came from.** A review of the invariants (then `INVARIANTS.md`,
+now `SPEC.md` §13) asked whether 16 numbered
 properties were better served by a formal specification language. The conclusion
 was that they are five different kinds of claim and no one language covers them
 — and that the four invariants with the most leverage (INV-11, 13, 14, 15, the
@@ -30,7 +31,7 @@ already the language of the half that needs it.
 Three candidates, smallest first. **INV-9 is done** — `browse::WithinRoot` is
 constructible only by `resolve_inside_root`, the parent computation lost its
 second containment check and the label lost its outside-the-root form, and
-INV-9 in `INVARIANTS.md` now describes the type. The two below remain.
+INV-9 in `SPEC.md` now describes the type. The two below remain.
 
 - **INV-6 — destructive keys need confirmation.** The `confirmed` flag on the
   `key` message is a `bool` checked at the boundary. A `Confirmed<Key>` that can
@@ -46,7 +47,7 @@ INV-9 in `INVARIANTS.md` now describes the type. The two below remain.
 
 **Done when:** `npm run lint` and `npm test` pass, and a runtime check is gone
 because it is now unrepresentable rather than merely unobserved. Update the
-invariant in `INVARIANTS.md` in the same commit.
+invariant in `SPEC.md` in the same commit.
 
 ### 2. Generate the wire contract instead of mirroring it — done
 
@@ -67,7 +68,7 @@ stale checkout. `src/shared/types.ts` re-exports it and adds `ModelAlias` and
 real `Panes` with a tmux in miniature whose single buffer table is reachable
 down both paths. 96 cases of up to 10 steps run in well under a second, so it
 rides in `npm test`; reverting the per-paste buffer name fails it on the
-historical two-pane overlap, shrunk to exactly that. `INVARIANTS.md` INV-2
+historical two-pane overlap, shrunk to exactly that. `SPEC.md` INV-2
 lists it.
 
 ### 4. Kani proofs for the pure predicates — attempted 2026-09-02, deferred

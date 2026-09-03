@@ -30,7 +30,7 @@
     "scripts/launch.mjs",
     "scripts/statusline-bridge.mjs",
     "README.md",
-    "INVARIANTS.md",
+    "SPEC.md",
     "LICENSE"
   ],
   "scripts": {
