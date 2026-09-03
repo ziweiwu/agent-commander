@@ -117,3 +117,26 @@
   color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * The fold for delegates that are not moving. A long session accumulates
+ * dozens of finished delegates, and a tree that lists them all buries the one
+ * or two still running under history; the count keeps them honest (INV-13)
+ * while the rows wait behind one press.
+ */
+.more {
+  margin: 4px 0 0;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--dim);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.more:hover {
+  color: var(--text);
+}

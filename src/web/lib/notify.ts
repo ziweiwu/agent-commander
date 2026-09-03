@@ -46,14 +46,39 @@ interface NotifyEnv {
   lang: Lang
 }
 
-export function notifyBlocked(agents: Agent[], env: NotifyEnv): void {
+/**
+ * Whether a block this page just watched happen is the moment to suggest
+ * turning notifications on.
+ *
+ * The same transition rule as the notification itself, applied to the
+ * suggestion: it is raised only for a witnessed block — never for the backlog
+ * a page load carries, which is what `fresh` already encodes — and only while
+ * the preference is off, only once per browser, and only where the browser
+ * could actually honour a yes. It is the one unsolicited prompt in the app,
+ * and it earns that by being about the app's own reason to exist.
+ */
+export interface NudgeEnv {
+  /** The notification preference, as stored. */
+  enabled: boolean
+  /** Whether this browser has already waved the suggestion away. */
+  dismissed: boolean
+  /** Whether this browser has a Notification API at all. */
+  supported: boolean
+}
+
+export function shouldNudge(fresh: Agent[], env: NudgeEnv): boolean {
+  return fresh.length > 0 && !env.enabled && !env.dismissed && env.supported
+}
+
+/** Notify for every watched transition, and say which agents those were. */
+export function notifyBlocked(agents: Agent[], env: NotifyEnv): Agent[] {
   const fresh = freshlyBlocked(agents)
-  if (fresh.length === 0 || !env.enabled) return
+  if (fresh.length === 0 || !env.enabled) return fresh
   // Feature-checked, not assumed: iOS Safari has no Notification constructor
   // at all outside an installed web app.
-  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return fresh
   // A visible tab already shows the waiting group at the top of the screen.
-  if (document.visibilityState === 'visible') return
+  if (document.visibilityState === 'visible') return fresh
 
   for (const agent of fresh) {
     try {
@@ -79,4 +104,5 @@ export function notifyBlocked(agents: Agent[], env: NotifyEnv): void {
       // a notification that does not appear, not an error worth surfacing.
     }
   }
+  return fresh
 }

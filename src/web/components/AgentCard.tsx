@@ -81,8 +81,34 @@ export interface AgentCardProps {
 }
 
 /**
+ * Whether a delegate line belongs on the face of the card or in its fold.
+ *
+ * The line answers "is anything under this agent still moving", which is the
+ * question a *working* card exists to answer — so on a busy card every claim
+ * is on the face. On an idle or waiting card the question is a different one,
+ * and "delegated nothing" on every idle card is a sentence read past forty
+ * times a day. So `none` folds there, while `some` and `unknown` stay: a
+ * count is worth a glance, and "cannot tell" is an admission INV-13 does not
+ * let the card bury (INV-11).
+ */
+function delegatesOnFace(agent: Agent, claim: DelegationClaim): boolean {
+  if (claim.kind === 'unread') return false
+  if (agent.status === 'busy') return true
+  return claim.kind !== 'none'
+}
+
+/**
  * One agent in the list. Memoised because the fleet re-renders on every server
  * broadcast, which is every couple of seconds with nine agents.
+ *
+ * **Three tiers, one card.** The face of the card carries what the group's
+ * question needs and nothing else: identity (name, status), the activity line,
+ * and one line of where it is. A working card adds what "is it still moving"
+ * needs — the trail, its delegates, the stall question — and a waiting card
+ * adds the one verb that answers it. Everything a reader can ask for but does
+ * not scan for — the token count and its caveat, the session's original name,
+ * the full path, the delegation tree — sits in a fold below the card, behind
+ * the one disclosure the card had already.
  */
 export const AgentCard = memo(function AgentCard({
   agent,
@@ -93,7 +119,7 @@ export const AgentCard = memo(function AgentCard({
   const t = useTranslate()
   const lang = useLang()
   const statusText = useStatusText()
-  const [showDelegates, setShowDelegates] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
   const claim = useMemo(() => claimOf(tree), [tree])
   const stalled = isStallCandidate(agent, claim)
   const rel = formatRelative(lang, relative(agent.lastActivityAt))
@@ -106,6 +132,7 @@ export const AgentCard = memo(function AgentCard({
   // conversation, rather than counting positions and hoping — which is what the
   // UX and mobile audits were doing until a Kiro fixture sorted into the slot.
   const transcripts = hasTranscripts(agent.agentKind)
+  const working = agent.status === 'busy'
   /*
    * INV-11. `lastActivityAt` means two different things depending on where it
    * came from: a transcript write, or a pane that produced output. The trail
@@ -113,10 +140,16 @@ export const AgentCard = memo(function AgentCard({
    * cannot support — a pane goes quiet when a TUI stops repainting, not only
    * when the agent stops. So an agent whose CLI writes no transcript gets no
    * trail rather than a weaker one wearing the same shape.
+   *
+   * And only a working card gets one at all: on an idle card the trail says
+   * nothing the timestamp beside it does not, and a shape that carries no new
+   * information is the definition of noise.
    */
-  const trail = transcripts ? trailOf(agent) : null
+  const trail = transcripts && working ? trailOf(agent) : null
   const worked = formatUptime(lang, uptimeParts(agent.startedAt, agent.lastActivityAt))
   const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
+  const onFace = delegatesOnFace(agent, claim)
+  const canAnswer = agent.status === 'waiting' && Boolean(agent.paneId)
 
   return (
     <div className={styles.wrap} data-testid="agent-entry" data-session-id={agent.sessionId}>
@@ -128,7 +161,7 @@ export const AgentCard = memo(function AgentCard({
         data-session-id={agent.sessionId}
         data-agent-kind={agent.agentKind}
         data-transcripts={transcripts}
-        data-attached={claim.kind === 'some' && tree !== undefined}
+        data-attached="true"
         aria-current={selected}
         onClick={() => onSelect(agent.sessionId)}
       >
@@ -136,6 +169,11 @@ export const AgentCard = memo(function AgentCard({
           <span className={styles.name} data-testid="agent-name" title={displayName(agent)}>
             {displayName(agent)}
           </span>
+          {kindLabel && (
+            <span className={styles.kind} data-testid="agent-kind">
+              {kindLabel}
+            </span>
+          )}
           <span
             className={styles.pill}
             data-testid="agent-status"
@@ -145,29 +183,6 @@ export const AgentCard = memo(function AgentCard({
           >
             {statusText(agent)}
           </span>
-        </div>
-
-        <div className={styles.meta} data-testid="agent-meta">
-          <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
-            {tildePath(agent.cwd)}
-          </span>
-          {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
-          {rel && <span>{rel}</span>}
-          {/* INV-11: labelled for what it is. This counts output tokens only,
-              from a transcript tail that is capped, so it is not the session's
-              spend and must not be presented as though it were. */}
-          {tok && <span title={t('tokensTitle')}>↓ {tok}</span>}
-          {isRenamed(agent) && (
-            <span className={styles.derived} title={agent.name}>
-              {agent.name}
-            </span>
-          )}
-          {kindLabel && (
-            <span className={styles.kind} data-testid="agent-kind">
-              {kindLabel}
-            </span>
-          )}
-          {!agent.paneId && <span className={styles.warn}>{t('notAttachable')}</span>}
         </div>
 
         {agent.activity ? (
@@ -183,6 +198,15 @@ export const AgentCard = memo(function AgentCard({
             {transcripts ? t('noPromptsYet') : t('noTranscript')}
           </div>
         )}
+
+        <div className={styles.meta} data-testid="agent-meta">
+          <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
+            {tildePath(agent.cwd)}
+          </span>
+          {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
+          {rel && <span>{rel}</span>}
+          {!agent.paneId && <span className={styles.warn}>{t('notAttachable')}</span>}
+        </div>
 
         {/* How long it was writing, then how long it has been silent — the same
             two numbers the card already prints, as a shape. Absent entirely for an
@@ -200,7 +224,7 @@ export const AgentCard = memo(function AgentCard({
           </div>
         )}
 
-        <DelegateLine agent={agent} claim={claim} />
+        {onFace && <DelegateLine agent={agent} claim={claim} />}
 
         {/*
           * INV-15. Only with a duration to name: this is a question about how long
@@ -212,29 +236,59 @@ export const AgentCard = memo(function AgentCard({
             {t('stallQuestion', { t: quietFor })}
           </p>
         )}
+
+        {/*
+          * The waiting group's one verb. Not a second button — the card is the
+          * button, and opening it lands on the answer card — but the affordance
+          * says what the tap does, which "waiting · dialog open" alone does not.
+          */}
+        {canAnswer && (
+          <span className={styles.cta} data-testid="agent-answer-cta" aria-hidden="true">
+            {t('cardAnswer')}
+          </span>
+        )}
       </button>
       {/*
         * Outside the card's own button, because a disclosure inside a button is
         * not a button — nested interactive elements are invalid, and a keyboard
         * lands on whichever one the browser decides to honour.
         */}
-      {claim.kind === 'some' && tree && (
-        <>
-          <button
-            type="button"
-            className={styles.disclosure}
-            data-testid="delegates-toggle"
-            aria-expanded={showDelegates}
-            onClick={() => setShowDelegates((open) => !open)}
-          >
-            {showDelegates ? t('delegatesHide') : t('delegatesShow')}
-          </button>
-          {showDelegates && (
-            <div className={styles.panel}>
-              <DelegationTree nodes={tree.children} />
+      <button
+        type="button"
+        className={styles.disclosure}
+        data-testid="details-toggle"
+        aria-expanded={showDetails}
+        onClick={() => setShowDetails((open) => !open)}
+      >
+        {showDetails ? t('detailsHide') : t('detailsShow')}
+      </button>
+      {showDetails && (
+        <div className={styles.panel} data-testid="agent-details">
+          <dl className={styles.facts}>
+            {/* INV-11: labelled for what it is, in words a phone can show. This
+                counts output tokens only, from a transcript tail that is capped,
+                so it is not the session's spend and must not read as though it
+                were. */}
+            {tok && (
+              <div className={styles.fact} data-testid="agent-tokens">
+                <dt>{t('tokensLabel')}</dt>
+                <dd>{t('tokensSeen', { n: tok })}</dd>
+              </div>
+            )}
+            {isRenamed(agent) && (
+              <div className={styles.fact}>
+                <dt>{t('sessionNameLabel')}</dt>
+                <dd className={styles.derived}>{agent.name}</dd>
+              </div>
+            )}
+            <div className={styles.fact}>
+              <dt>{t('pathLabel')}</dt>
+              <dd className={styles.path}>{agent.cwd}</dd>
             </div>
-          )}
-        </>
+          </dl>
+          {!onFace && <DelegateLine agent={agent} claim={claim} />}
+          {claim.kind === 'some' && tree && <DelegationTree nodes={tree.children} />}
+        </div>
       )}
     </div>
   )
@@ -250,7 +304,7 @@ export const AgentCard = memo(function AgentCard({
  * flashing "delegated nothing" on every card for the first three seconds after
  * a page load, which would be a false claim that happened to be brief.
  */
-function DelegateLine({ agent, claim }: { agent: Agent; claim: DelegationClaim }) {
+export function DelegateLine({ agent, claim }: { agent: Agent; claim: DelegationClaim }) {
   const t = useTranslate()
   if (claim.kind === 'unread') return null
 

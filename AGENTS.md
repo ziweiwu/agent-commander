@@ -93,10 +93,13 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1040 tests: 556 Rust (the server) + 484 vitest (the web app)
+npm test              # 1087 tests: 557 Rust (the server) + 530 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 309 end-to-end tests, five projects: desktop/tablet/phone on
-                      # Chromium, and phone/tablet again on WebKit
+npm run e2e           # 334 end-to-end tests, five projects: desktop/tablet/phone on
+                      # Chromium, and phone/tablet again on WebKit. Two mock
+                      # servers: the fixture fleet on 4599 and `--mock-empty`
+                      # on 4598, which `e2e/empty.spec.ts` alone points at.
+                      # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
 npm run verify:inv1   # attaching never resizes a real pane — server must be running
@@ -165,7 +168,9 @@ prompted, one Kiro session so the degraded card an agent with no transcript
 gets is on screen rather than only in a test, all three shapes an agent blocks
 on (a question with options, a plan awaiting approval, a tool awaiting
 permission — INV-16's three), and one whose pane has exited, so the Attach
-tab's dead-pane notice is a thing you can look at. The delegation trees behind them are
+tab's dead-pane notice is a thing you can look at. `--mock-empty` serves the
+same server with no agents in it, which is the only way to see the
+confirmed-empty screen rather than the loading one. The delegation trees behind them are
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
 in each of INV-13's three states, an orphan whose parent is not on disk, an
 agent that has delegated nothing, and a CLI that cannot say either way.
@@ -483,8 +488,8 @@ Build it by hand after changing anything it stages.
 
 Point `harness:qa-bar-raiser` and `harness:ux-bar-raiser` at a `--mock` server on
 4400 and never at 4317. Both review only — they never edit code — and both are told to say
-"nothing found" plainly rather than pad a list. `README.md` §"Review agents"
-lists what they have caught.
+"nothing found" plainly rather than pad a list. `docs/HANDBOOK.md` §"Review
+agents" lists what they have caught.
 
 ## The three documents worth reading in full
 
@@ -502,8 +507,10 @@ lists what they have caught.
   invariant wins. It has no gate, so it is held down by citing a test for every
   requirement it makes.
 
-`README.md` is for the person using the app. These three are for the person
-changing it.
+`README.md` is the one-page version for the person installing the app, and
+`docs/HANDBOOK.md` is the same at length. These three are for the person
+changing it, and `CONTRIBUTING.md` is the short route from a clone to a pull
+request.
 
 `TODO.md` is queued work, written to be executed cold by whoever picks it up:
 what the change is, the call sites as they stood, and what "done" is checked

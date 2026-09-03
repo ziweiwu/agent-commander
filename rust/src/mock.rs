@@ -747,12 +747,25 @@ impl MockSource {
     }
 
     pub fn new(transitions: bool) -> Self {
+        let mut source = Self::holding(fixtures());
+        source.transitions = transitions;
+        source
+    }
+
+    /// `--mock-empty`: the same server with nothing in it, which is the only
+    /// way to look at the confirmed-empty screen rather than the loading one.
+    pub fn empty() -> Self {
+        Self::holding(Vec::new())
+    }
+
+    /// A static source over these agents; `new` is what switches the timer on.
+    fn holding(agents: Vec<Agent>) -> Self {
         Self {
             inner: Arc::new(SourceInner {
-                agents: Mutex::new(fixtures()),
+                agents: Mutex::new(agents),
                 ..Default::default()
             }),
-            transitions,
+            transitions: false,
             timer: Mutex::new(None),
         }
     }
@@ -1238,9 +1251,22 @@ impl TailApi for MockTail {
 /// the parsed CLI options, and naming it here is the part that was missing.
 pub type Transitions = bool;
 
+/// What the fixture fleet holds, as the CLI asked for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fleet {
+    /// The fourteen awkward fixtures, static or moving.
+    Fixtures { transitions: Transitions },
+    /// No agents at all: `--mock-empty`.
+    Empty,
+}
+
 /// Everything `routes` needs, in mock form.
-pub fn mock_deps(transitions: Transitions) -> (Deps, Arc<MockSource>) {
-    let source = Arc::new(MockSource::new(transitions));
+pub fn mock_deps(fleet: Fleet) -> (Deps, Arc<MockSource>) {
+    let (source, transitions) = match fleet {
+        Fleet::Fixtures { transitions } => (MockSource::new(transitions), transitions),
+        Fleet::Empty => (MockSource::empty(), false),
+    };
+    let source = Arc::new(source);
     let deps = Deps {
         source: source.clone(),
         panes: Arc::new(MockPanes),

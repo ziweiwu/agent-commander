@@ -146,9 +146,21 @@
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
-  /* The detail owns the screen on a phone, so the shell must not scroll behind it. */
+  /*
+   * The detail owns the screen on a phone, so the shell must not scroll behind
+   * it. Sized from the visual viewport rather than `100dvh`: iOS Safari does
+   * not shrink `dvh` for its keyboard, so a `dvh` sheet kept its composer
+   * under the keys. `useVisualViewport` writes `--vvh`; `100dvh` is the value
+   * before it has, and on Android Chrome the two agree.
+   */
   .sheetMode {
-    height: 100dvh;
+    /* Both halves of the visible rectangle: Safari pans the visual viewport
+       down the layout viewport for its keyboard as well as shrinking it, so
+       the sheet's top follows `--vvt`. `position: relative` rather than a
+       transform, which would become the containing block for the toast. */
+    position: relative;
+    top: var(--vvt, 0px);
+    height: var(--vvh, 100dvh);
     overflow: hidden;
   }
   .sheetMode .layout {

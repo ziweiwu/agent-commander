@@ -64,6 +64,39 @@ beforeEach(() => {
   answerPrompt.mockClear()
 })
 
+describe('INV-16 the verified answer outranks the escape hatch', () => {
+  /*
+   * `Enter` commits whatever the real pane has highlighted, which is not
+   * necessarily the option the user just read. Drawn beside the labelled
+   * buttons at equal weight, it invited exactly that slip.
+   */
+  it('demotes the raw keys below a labelled answer, and says what they are for', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    const keys = screen.getByRole('group', { name: /answer keys/i })
+    expect(keys.dataset.secondary).toBe('true')
+    const note = screen.getByTestId('answer-keys-fallback')
+    expect(note.textContent).toMatch(/terminal keys/i)
+    // Demoted, not removed: the keys are still there for a picker whose
+    // rendering disagrees with the transcript.
+    expect(screen.getByTestId('answer-key-Enter')).toBeTruthy()
+    // The rule and the note come before the keys, so the reading order is
+    // "answer, then the fallback", which is the order of trust.
+    expect(note.compareDocumentPosition(keys) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('keeps the keys primary when the transcript named nothing', () => {
+    const permission: PendingPrompt = { tool: 'Bash', detail: 'rm -rf dist', id: 'p' }
+    renderApp(<AnswerCard agent={blocked()} prompt={permission} />)
+    expect(screen.getByRole('group', { name: /answer keys/i }).dataset.secondary).toBeUndefined()
+    expect(screen.queryByTestId('answer-keys-fallback')).toBeNull()
+  })
+
+  it('keeps the keys primary for a multi-select, which a digit cannot finish', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
+    expect(screen.getByRole('group', { name: /answer keys/i }).dataset.secondary).toBeUndefined()
+  })
+})
+
 describe('INV-16 the card names only what the transcript named', () => {
   it('labels a button with each option the transcript stated', () => {
     renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)

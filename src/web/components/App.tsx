@@ -4,15 +4,24 @@ import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import { countByGroup, type StatusFilter } from '../lib/filter.ts'
-import { useIsNarrow } from '../hooks/useMediaQuery.ts'
+import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
+import { useVisualViewport } from '../hooks/useVisualViewport.ts'
+import { useFleetTrees } from '../hooks/useFleetTrees.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { FleetList } from './FleetList.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
 import { NewAgentDialog } from './NewAgentDialog.tsx'
 import { SettingsMenu } from './SettingsMenu.tsx'
+import { NotifyButton, NotifyNudge } from './NotifyButton.tsx'
 import { Button, Chip } from './ui/Button.tsx'
 import { UsageChips } from './UsageChips.tsx'
 import styles from './App.module.css'
+
+/** Holds the delegation-graph poll while the fleet list is unmounted. */
+function TreePoll() {
+  useFleetTrees()
+  return null
+}
 
 /** Shell: topbar, layout, global keyboard. Routes render through `Outlet`. */
 export function App() {
@@ -20,6 +29,14 @@ export function App() {
   const navigate = useNavigate()
   const location = useLocation()
   const narrow = useIsNarrow()
+  const layout = useLayout()
+  // Stamped on the root so a stylesheet, a test or a person in DevTools can
+  // read which of the three layouts is on, rather than inferring it.
+  useEffect(() => {
+    document.documentElement.dataset.layout = layout
+  }, [layout])
+  // The height the sheet actually has once an on-screen keyboard is up.
+  useVisualViewport()
 
   const mock = useStore((s) => s.mock)
   const conn = useStore((s) => s.conn)
@@ -149,11 +166,14 @@ export function App() {
         >
           ?
         </Button>
+        <NotifyButton />
         <SettingsMenu />
         <div className={styles.conn} data-testid="connection-status" data-state={conn}>
           {t(conn === 'open' ? 'connLive' : conn === 'closed' ? 'connReconnecting' : 'connConnecting')}
         </div>
       </header>
+
+      <NotifyNudge />
 
       <Outlet context={{ searchRef, narrow }} />
 
@@ -320,6 +340,13 @@ export function FleetRoute() {
           onSelect={(id) => navigate(`/agent/${id}`)}
         />
       )}
+      {/*
+        * The list is the graph's holder (INV-4: one poll for the fleet), and
+        * on a phone the sheet unmounts it. The detail's status line still
+        * reads the delegates, so while the list is away this takes the poll
+        * over — one holder at a time, never two.
+        */}
+      {narrow && showDetail && <TreePoll />}
       {agent && (
         <AgentDetail
           agent={agent}

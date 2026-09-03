@@ -3,7 +3,8 @@
 What the pieces are, which way data moves, and where the joins are weak.
 
 `INVARIANTS.md` holds the properties that must not break and the tests that
-prove them; `README.md` describes what the app does for the person using it.
+prove them; `README.md` and `docs/HANDBOOK.md` describe what the app does for
+the person using it.
 This file is for the person changing it. Where an invariant explains a design,
 this points at it rather than restating it.
 
@@ -719,9 +720,9 @@ is a transitive dependency installed thousands of times and every megabyte
 multiplies. This one is a global CLI installed deliberately, so it ships all
 four binaries in a single package: ~4 MB packed instead of ~1 MB, in exchange
 for one package to own, one trusted-publisher configuration, and no window in
-which a half-published matrix resolves to an install with no server. README
-§"Releasing" carries the pipeline; AGENTS.md §"Shipping it to npm" carries what
-must not be changed by accident.
+which a half-published matrix resolves to an install with no server.
+`docs/HANDBOOK.md` §"Releasing" carries the pipeline; AGENTS.md §"Shipping it
+to npm" carries what must not be changed by accident.
 `rust/README.md` on that branch says the rest.
 
 Nothing on this line references it: not `package.json`, not the CI workflows,

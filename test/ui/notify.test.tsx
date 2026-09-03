@@ -8,7 +8,12 @@
  * later starts from "now" rather than dumping everything already blocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { freshlyBlocked, notifyBlocked, resetBlockedTracking } from '../../src/web/lib/notify.ts'
+import {
+  freshlyBlocked,
+  notifyBlocked,
+  resetBlockedTracking,
+  shouldNudge,
+} from '../../src/web/lib/notify.ts'
 import { agent } from './helpers.tsx'
 import type { Agent } from '../../src/shared/types.ts'
 
@@ -65,6 +70,40 @@ describe('INV-14 what counts as newly blocked', () => {
     freshlyBlocked([waiting('a')])
     freshlyBlocked([idle('a')])
     expect(freshlyBlocked([waiting('a')]).map((a) => a.sessionId)).toEqual(['a'])
+  })
+})
+
+/*
+ * The one unsolicited prompt in the app, held to the same rule as the
+ * notification it points at: a witnessed transition, never the backlog.
+ */
+describe('INV-14 the nudge to turn notifications on', () => {
+  const off = { enabled: false, dismissed: false, supported: true }
+
+  it('is silent on the first frame, however many agents are blocked', () => {
+    const fresh = notifyBlocked([waiting('a'), waiting('b')], { enabled: false, lang: 'en' })
+    expect(shouldNudge(fresh, off)).toBe(false)
+  })
+
+  it('asks once for a block this page watched happen while off', () => {
+    notifyBlocked([idle('a')], { enabled: false, lang: 'en' })
+    const fresh = notifyBlocked([waiting('a')], { enabled: false, lang: 'en' })
+    expect(shouldNudge(fresh, off)).toBe(true)
+    // And not again on the next frame: the block is standing, not news.
+    const again = notifyBlocked([waiting('a')], { enabled: false, lang: 'en' })
+    expect(shouldNudge(again, off)).toBe(false)
+  })
+
+  it('never asks once it has been waved away', () => {
+    expect(shouldNudge([waiting('a')], { ...off, dismissed: true })).toBe(false)
+  })
+
+  it('never asks when the preference is already on', () => {
+    expect(shouldNudge([waiting('a')], { ...off, enabled: true })).toBe(false)
+  })
+
+  it('never asks a browser that could not say yes', () => {
+    expect(shouldNudge([waiting('a')], { ...off, supported: false })).toBe(false)
   })
 })
 

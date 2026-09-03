@@ -121,22 +121,33 @@ export function ShiftTabButton({
       <span aria-hidden="true" className={styles.kbd}>
         ⇧⇥
       </span>
-      <span className={styles.name}>{t('shiftTabName')}</span>
-      {current && (
-        <>
-          {/* Decoration between two labels, and read as neither. */}
-          <span aria-hidden="true" className={styles.sep}>
-            ·
-          </span>
-          {/*
-            Hidden from the accessible name rather than duplicated into it: the
-            button's `aria-label` already ends with this mode, and leaving it
-            exposed would have a screen reader say it twice.
-          */}
-          <span aria-hidden="true" className={styles.current} data-testid="shift-tab-mode">
-            {current}
-          </span>
-        </>
+      {/* "Mode", not "Shift+Tab": the readout is what a reader scans for, and
+          a button named after its chord said nothing about what it showed. The
+          chord is the glyph beside it and the accessible name spells it out. */}
+      <span className={styles.name}>{t('modeLabel')}</span>
+      {/* Decoration between two labels, and read as neither. */}
+      <span aria-hidden="true" className={styles.sep}>
+        ·
+      </span>
+      {current ? (
+        /*
+          Hidden from the accessible name rather than duplicated into it: the
+          button's `aria-label` already ends with this mode, and leaving it
+          exposed would have a screen reader say it twice.
+        */
+        <span aria-hidden="true" className={styles.current} data-testid="shift-tab-mode">
+          {current}
+        </span>
+      ) : (
+        /*
+          Said rather than left blank. A bare "Mode ·" reads as a broken
+          readout; "not reported yet" is the actual state — the session has
+          not finished a turn since it started, so it has written no mode down
+          — and it names no mode this app was not told (INV-11).
+        */
+        <span aria-hidden="true" className={styles.unreported} data-testid="shift-tab-unreported">
+          {t('modeUnreported')}
+        </span>
       )}
     </button>
   )

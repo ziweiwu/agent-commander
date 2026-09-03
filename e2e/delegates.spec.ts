@@ -19,13 +19,35 @@ async function openDelegates(page: Page, sessionId: string): Promise<void> {
   await openFleet(page)
   const row = entry(page, sessionId)
   await expect(row.getByTestId('agent-delegates')).toBeVisible()
-  await row.getByTestId('delegates-toggle').click()
+  await row.getByTestId('details-toggle').click()
   await expect(row.getByTestId('delegation-tree')).toBeVisible()
 }
 
 test.describe('delegates on the card', () => {
+  /*
+   * At rest the tree leads with what is moving; the rest of a family waits
+   * behind a count, because a long session's tree is mostly history.
+   */
+  test('INV-13 leads with the moving delegates and folds the rest', async ({ page }) => {
+    await openDelegates(page, AGENT.movingFamily)
+    const row = entry(page, AGENT.movingFamily)
+    const drawn = row.locator('[data-testid="delegate"]')
+    const total = 4
+    await expect(drawn).not.toHaveCount(total)
+    // What is drawn at rest is the subtree that leads to something moving —
+    // its finished ancestors included, since a child is drawn under its parent.
+    await expect(
+      drawn.locator('[data-testid="delegate-state"][data-state="active"]').first(),
+    ).toBeVisible()
+    const fold = row.getByTestId('delegates-show-rest')
+    await expect(fold).toContainText(/more/)
+    await fold.click()
+    await expect(drawn).toHaveCount(total)
+  })
+
   test('INV-13 draws a delegate of a delegate', async ({ page }) => {
     await openDelegates(page, AGENT.movingFamily)
+    await entry(page, AGENT.movingFamily).getByTestId('delegates-show-rest').click()
 
     // The mock fleet's deepest chain: a research delegate and its own.
     await expect(entry(page, AGENT.movingFamily).getByTestId('delegate')).toHaveCount(4)
@@ -69,6 +91,8 @@ test.describe('delegates on the card', () => {
     // The one fixture with no effort at all lives under `busy`, beside two
     // that have it — so the difference is visible on one screen.
     await openDelegates(page, AGENT.busy)
+    // It is not moving, so at rest it waits behind the fold.
+    await entry(page, AGENT.busy).getByTestId('delegates-show-rest').click()
     const unreadable = entry(page, AGENT.busy)
       .getByTestId('delegate')
       .filter({ hasText: 'qa-triage' })
@@ -78,6 +102,8 @@ test.describe('delegates on the card', () => {
 
   test('INV-13 says when a delegate was raised out of a missing parent', async ({ page }) => {
     await openDelegates(page, AGENT.movingFamily)
+    // The orphan is quiet, so at rest it waits behind the fold with the rest.
+    await entry(page, AGENT.movingFamily).getByTestId('delegates-show-rest').click()
 
     await expect(entry(page, AGENT.movingFamily).getByTestId('delegate-orphan')).toBeVisible()
   })
@@ -93,7 +119,12 @@ test.describe('delegates on the card', () => {
     await expect(cannotTell).toHaveAttribute('data-claim', 'unknown')
     await expect(cannotTell).toContainText(/cannot tell/i)
 
-    const nothing = card(page, AGENT.idle).getByTestId('agent-delegates')
+    // On an idle card "delegated nothing" is in the fold rather than on the
+    // face: still a sentence, just not one read past forty times a day.
+    const idle = entry(page, AGENT.idle)
+    await expect(idle.getByTestId('agent-delegates')).toHaveCount(0)
+    await idle.getByTestId('details-toggle').click()
+    const nothing = idle.getByTestId('agent-delegates')
     await expect(nothing).toHaveAttribute('data-claim', 'none')
     await expect(nothing).not.toContainText(/cannot tell/i)
   })

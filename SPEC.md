@@ -6,7 +6,7 @@ else, so its boundaries matter more than most:
 
 | Document | Answers |
 |---|---|
-| `README.md` | How do I use it? |
+| `README.md`, `docs/HANDBOOK.md` | How do I use it? (one page, then at length) |
 | `ARCHITECTURE.md` | How is it built, and where does it break? |
 | `INVARIANTS.md` | What must never be false, and what proves it? |
 | **`SPEC.md`** | **What is it supposed to do?** |
@@ -188,20 +188,36 @@ the default for an unrecognised kind is deny.
 - **FR-FLEET-10** — No user-supplied string may set the document's width. A long
   search term echoed into an empty-state message MUST wrap or truncate.
   *Found by `qa-fuzz`; `scripts/audit-mobile.mjs` measures it.*
+- **FR-FLEET-11** — Before the first fleet frame has arrived, the list MUST show
+  a loading state that names no count and makes no claim, and MUST NOT show the
+  confirmed-empty copy. "No sessions found" is a reading the server has to have
+  given; over Tailscale on a phone the gap before it does is seconds long.
+  `--mock-empty` serves the confirmed-empty screen so it can be looked at.
+  **(INV-11)** *`test/ui/stale-fleet.test.tsx`, `e2e/loading.spec.ts`.*
 
 ### 3.2 The card
 
-- **FR-CARD-1** — A card MUST carry: name, status (with `waitingFor` where
-  present), full working directory, git branch, time since last activity, output
-  tokens, and a one-line summary of current activity.
+- **FR-CARD-1** — A card has three tiers. Its **face** MUST carry name, status
+  (with `waitingFor` where present), a one-line summary of current activity,
+  and one line of place: working directory, git branch, time since last
+  activity. A **working** card adds what "is it still moving" needs — the
+  activity trail, its delegate claims and the stall question — and a
+  **waiting** card that can be reached adds the verb that answers it. A
+  **fold** below the card, behind one disclosure, MUST carry the rest: the
+  output-token count with its caveat, the original session name where the
+  title leads, the full path, the delegation tree, and on a card that is not
+  working the "delegated nothing" claim. The face MUST NOT carry a fact the
+  group's question does not need. *`test/ui/card-diet.test.tsx`.*
 - **FR-CARD-2** — Where Claude Code named a session for itself (`nameSource:
   "derived"`), the card MUST lead with the agent's own conversation title, or
   failing that the first line of the last prompt, keeping the session name as
   secondary text. The app MUST NOT guess which names are derived — the session
   file says so. *`test/naming.test.ts`.*
 - **FR-CARD-3** — Token counts MUST be presented as what they are: output
-  tokens accumulated from a bounded backfill, not a session's spend.
-  **(INV-11)**
+  tokens accumulated from a bounded backfill, not a session's spend — and the
+  caveat MUST be visible text, not a hover title, because a phone has no hover
+  and a screen reader is not told about a `title`. **(INV-11)**
+  *`test/ui/card-diet.test.tsx`.*
 - **FR-CARD-4** — An agent that has never been prompted MUST say so ("No
   prompts yet") rather than showing zeros. *`test/ui/FleetList.test.tsx`.*
 - **FR-CARD-5** — A card MUST NOT present a figure from a dropped connection as
@@ -266,9 +282,15 @@ over the list with a back control; on a wide one, a second column.
   `Shift+Tab` in the box MUST send the chord to the agent (§5.1); the cost — that
   it no longer tabs focus backwards — is accepted, and `Tab` and `Escape` MUST
   still move focus. *`test/ui/escape-levels.test.tsx`.*
-- **FR-CHAT-7** — A row of quick replies MUST sit above the box. Picking one
-  sends it as it reads and MUST leave anything half-typed in the box alone.
-  *`test/ui/QuickPrompts.test.tsx`.*
+- **FR-CHAT-7** — The quick replies MUST be offered from one menu in the strip
+  above the box, closed at rest. As a row of chips they overflowed the strip at
+  every width the detail panel has — two of five out of sight at 1280px — and a
+  shortcut nobody can see is not one. Picking one sends it as it reads, closes
+  the menu, and MUST leave anything half-typed in the box alone. Opening it
+  MUST move focus into the list, and Escape MUST close the list and nothing
+  else (FR-UI-14): the list is portalled, so a guard that only saw keys from
+  inside it let Escape reach the app and close the whole agent panel.
+  *`test/ui/QuickPrompts.test.tsx`, `test/ui/burst-send.test.tsx`.*
 - **FR-CHAT-8** — Quick replies MUST follow the language the *conversation* is
   in, not the language the interface is set to. *`test/promptLang.test.ts`.*
 - **FR-CHAT-9** — While the agent is working, the conversation MUST show that it
@@ -336,10 +358,12 @@ epistemic rather than functional.
   nothing would otherwise recover it. *`test/ui/term-resize.test.tsx`.*
 - **FR-ATT-6** — A **Fit width** control MUST be offered whenever the view is
   not 1:1, in both directions, so a crisp capture is always one action away.
-- **FR-ATT-7** — A **Full screen** mode MUST be offered from the key bar under
-  the terminal, not only from the panel header: the view that needs the room is
-  the one the control belongs in. `Esc` leaves it.
-  *`test/ui/term-fullscreen.test.tsx`.*
+- **FR-ATT-7** — A **Full screen** mode MUST be offered once per layout: from
+  the panel header on a desktop and from the tab row on a narrow screen, where
+  it sits directly above the pane that needs the room. It was offered a third
+  time from the terminal's own key bar, two rows below the tab row's copy, and
+  a second answer to a question already answered is noise. `Esc` leaves it.
+  *`test/ui/inv17-parity.test.tsx`, `test/ui/one-place.test.tsx`.*
 - **FR-ATT-8** — Quick keys (`Enter`, `↑`, `↓`, `Tab`, `Esc`, `Ctrl-C`) MUST sit
   under the terminal, because a phone keyboard has none of them.
 - **FR-ATT-9** — `Ctrl-C`, `Ctrl-D` and `Escape` MUST require a confirmation
@@ -424,10 +448,16 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 ### 5.2 Where the controls live
 
-- **FR-CTL-12** — Shift+Tab, Goal, Compact and Clear MUST also be reachable from
-  the composer strip beside the message box. The panel's own control row sits
-  above the tabs and does not exist in full screen — which is exactly where a
-  conversation gets long enough to want compacting.
+- **FR-CTL-12** — Shift+Tab, Model, Goal, Compact and Clear MUST live in the
+  composer strip beside the message box, and nowhere else. The panel's control
+  row sits above the tabs, folds behind `⋯` on a phone and does not exist in
+  full screen — which is exactly where a conversation gets long enough to want
+  compacting, and where its model is read — so the strip is the one surface
+  every layout keeps; the row keeps Close, which ends the session rather than
+  steering it. They used to be in both, and at a desktop width both were
+  visible: two Clear buttons for one action. Every control on the agent screen
+  MUST be drawn once. *`test/ui/one-place.test.tsx`,
+  `test/ui/AgentControls.test.tsx`, `e2e/control.spec.ts`.*
 - **FR-CTL-13** — On a narrow screen the panel's control row MUST collapse behind
   a single control; it cost 111px of a 568px screen. On a landscape phone the
   composer strip MUST hide itself entirely — there are ~380px of height and the
@@ -620,7 +650,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-NOTIFY-5** — Notifications MUST be off by default, and enabling them MUST
   be the gesture that carries the browser's own permission prompt. Turning the
   preference on MUST start from "now" rather than replaying everything already
-  blocked. **(INV-14)**
+  blocked. The switch MUST be its own control in the header — a bell whose
+  shape carries its state — not a row inside the appearance menu, and Help
+  MUST say it exists. The app MAY make exactly one unsolicited suggestion to
+  turn it on: after this page watched an agent become blocked while the
+  preference was off, once per browser, never on load or for the backlog, and
+  never where the browser could not say yes. **(INV-14)**
+  *`test/ui/notify-button.test.tsx`, `test/ui/notify.test.tsx`.*
 - **FR-NOTIFY-6** — Permission MUST be re-read at fire time so revoking it in the
   browser wins immediately over anything stored, and a browser with no
   Notification API MUST get a disabled toggle that says so rather than one that
@@ -637,7 +673,46 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   (which crosses the breakpoint by being turned over), and a single-column phone
   sheet — and MUST survive a rotation mid-conversation without losing which agent
   is open, which tab it is on, what is half-typed, or the terminal's column count.
-  *`e2e/tablet.spec.ts`.*
+  The stylesheets MUST cut at exactly two widths, 900px and 560px, and the root
+  element carries `data-layout` naming which of the three is on. Eleven
+  breakpoints, each measured and each right, were more than a reader could
+  hold. *`e2e/tablet.spec.ts`, `test/responsive.test.ts`.*
+- **FR-UI-17** — A container that scrolls MUST say so at the edge it scrolls
+  past. Overlay scrollbars and phones hide the bar at rest, so the detail pane
+  on a landscape phone showed one answer option and no sign of the second. The
+  fade is measured, so it lifts when the end is in view.
+  *`test/ui/overflow-edge.test.ts`, `e2e/fades.spec.ts`.*
+- **FR-UI-20** — The agent view MUST carry a status line under its tabs with
+  the session's permission mode, its model, and its delegate claims — the same
+  facts the fleet card makes, on the screen where the work is read. The mode
+  is what the session last recorded or "not reported yet", never a guess
+  **(INV-11)**; the delegates are the sidecars' claims **(INV-13)**; a quiet
+  family is asked about **(INV-15)**. The mode button in the composer strip
+  MUST read "Mode · <mode>", not the name of its chord. The graph comes from
+  the store, filled by one holder at a time: the fleet list, or a stand-in
+  while a phone's sheet has the list unmounted **(INV-4)**.
+  *`test/ui/AgentDetail.test.tsx`, `test/ui/ChatControls.test.tsx`.*
+- **FR-UI-19** — An on-screen keyboard MUST NOT cover the composer, the answer
+  card, or the terminal's key bar, on iOS Safari or Android Chrome. Android
+  honours `interactive-widget=resizes-content` and shrinks the layout viewport;
+  Safari ignores it and shrinks only the visual viewport, so the sheet and the
+  full-screen overlay are sized from `window.visualViewport` (`--vvh`), and
+  the conversation stays pinned to its last message as its box shrinks. Text a
+  phone keyboard delivers without a keystroke — Android's input events, a
+  Chinese or Japanese composition, a paste — MUST reach the pane through
+  xterm's data stream, and a key the handler already took MUST NOT arrive
+  twice. The pane's textarea MUST refuse autocorrect, autocapitalisation and
+  completion, because each is a phone rewriting what reaches a live agent.
+  *`test/viewport.test.ts`, `test/ui/visual-viewport.test.tsx`,
+  `test/ui/term-ime.test.tsx`. Not provable in CI: no test runner drives a
+  real software keyboard, so a physical iPhone and Android phone are the last
+  gate.*
+- **FR-UI-18** — The confirmed-empty fleet MUST show both ways in — the command
+  that starts an agent, as copyable text, and the New agent button as a real
+  control — and point at the phone setup in Help. On a first run the New agent
+  dialog MUST open on the folder browser at home rather than a bare path field.
+  *`test/ui/FleetList.test.tsx`, `test/ui/NewAgentDialog.test.tsx`,
+  `e2e/empty.spec.ts`.*
 - **FR-UI-2** — Text inputs MUST be at least 16px so iOS does not zoom the page,
   tap targets MUST be at least 44px, and safe-area insets MUST keep content clear
   of a notch in both orientations. *`scripts/audit-mobile.mjs`.*
@@ -660,8 +735,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 ### 10.2 Theme and colour
 
-- **FR-UI-6** — Theme (System / Light / Dark) and colour scheme (five palettes)
-  MUST be separate axes, giving ten palettes: *Nordic, following the system* is a
+- **FR-UI-6** — Theme (System / Light / Dark) and colour scheme (eight palettes)
+  MUST be separate axes, giving sixteen palettes: *Nordic, following the system* is a
   thing a user can ask for.
 - **FR-UI-7** — "System" MUST write no theme attribute at all, so
   `prefers-color-scheme` keeps deciding while the app is open; an explicit choice

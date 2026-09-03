@@ -154,6 +154,10 @@ pub struct Options {
     pub token: Option<String>,
     pub mock: bool,
     pub mock_transitions: bool,
+    /// `--mock-empty`: the fixture server with no fixtures, so the genuine
+    /// zero-agent screen can be looked at. The ordinary mock fleet always has
+    /// fourteen, which is why that screen was never on screen before.
+    pub mock_empty: bool,
     pub dev: bool,
     pub web_root: String,
     pub browse_root: Option<String>,
@@ -173,6 +177,7 @@ impl Default for Options {
             token: None,
             mock: false,
             mock_transitions: false,
+            mock_empty: false,
             dev: false,
             web_root: default_web_root(&exe_dir()).to_string_lossy().into_owned(),
             browse_root: None,
@@ -369,6 +374,10 @@ pub fn parse_args_with_token_file(argv: &[String], token_path: &Path) -> Result<
                 opts.mock = true;
                 opts.mock_transitions = true;
             }
+            "--mock-empty" => {
+                opts.mock = true;
+                opts.mock_empty = true;
+            }
             "--port" | "-p" => opts.port = port_from(&take_value(&mut i)?)?,
             "--host" => opts.host = take_value(&mut i)?,
             "--token" => opts.token = Some(take_value(&mut i)?),
@@ -502,6 +511,7 @@ pub fn help_text() -> String {
         "      --print-url    print the full URL, token and all, then keep serving".to_string(),
         "      --mock         serve fixture agents, touching nothing real".to_string(),
         "      --mock-transitions  like --mock, but statuses change on a timer".to_string(),
+        "      --mock-empty   like --mock, with no agents at all".to_string(),
         "      --browse-root <d>  root the folder picker is confined to (default: home)"
             .to_string(),
         "      --install-statusline  add the quota bridge to ~/.claude/settings.json and exit"
@@ -592,6 +602,7 @@ mod tests {
             vec!["--mock"],
             vec!["--mock", "--port", "4317"],
             vec!["--mock-transitions"],
+            vec!["--mock-empty"],
         ] {
             let err = parse(&v).unwrap_err();
             assert!(err.contains("production port"), "{v:?}: {err}");
@@ -603,6 +614,13 @@ mod tests {
         assert_eq!(parse(&["--mock", "--port", "4400"]).unwrap().port, DEV_PORT);
         assert_eq!(parse(&[]).unwrap().port, PROD_PORT);
         assert!(!parse(&[]).unwrap().mock);
+    }
+
+    #[test]
+    fn an_empty_mock_is_still_a_mock() {
+        let o = parse(&["--mock-empty", "--port", "4400"]).unwrap();
+        assert!(o.mock && o.mock_empty);
+        assert!(!parse(&["--mock", "--port", "4400"]).unwrap().mock_empty);
     }
 
     #[test]

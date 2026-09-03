@@ -60,6 +60,9 @@ describe('INV-13 the card says only what the sidecars support', () => {
 
   it('says "delegated nothing" and "cannot tell" as different sentences', () => {
     const { unmount } = card({ sessionId: 'a' }, tree([]))
+    // On an idle card "delegated nothing" lives in the fold — it is the one
+    // claim not worth a glance forty times a day — but it is still a sentence.
+    fireEvent.click(screen.getByTestId('details-toggle'))
     const none = delegates()
     unmount()
 
@@ -91,7 +94,7 @@ describe('INV-13 the card says only what the sidecars support', () => {
 describe('INV-13 the expanded tree', () => {
   const open = (children: SubagentNode[]): void => {
     card({ sessionId: 'a' }, tree(children))
-    fireEvent.click(screen.getByTestId('delegates-toggle'))
+    fireEvent.click(screen.getByTestId('details-toggle'))
   }
 
   it('names a quiet delegate quiet rather than done', () => {
@@ -174,6 +177,49 @@ describe('INV-13 the expanded tree', () => {
   })
 })
 
+/*
+ * A long session's tree is mostly history. While anything is moving, only
+ * the moving subtrees are drawn and the rest wait behind a count; while
+ * nothing is moving the whole tree is shown, since there is no "current" to
+ * prefer and an empty tree standing in for a full one would be a lie.
+ */
+describe('INV-13 the tree leads with what is moving', () => {
+  const open = (children: SubagentNode[]): void => {
+    card({ sessionId: 'a', status: 'busy', delegating: true }, tree(children))
+    fireEvent.click(screen.getByTestId('details-toggle'))
+  }
+
+  it('folds the delegates that are not moving behind a count', () => {
+    open([
+      node({ agentId: 'x', state: 'active', stateInferred: true }),
+      node({ agentId: 'y', state: 'quiet' }),
+      node({ agentId: 'z', state: 'done' }),
+    ])
+    expect(screen.getAllByTestId('delegate')).toHaveLength(1)
+    const fold = screen.getByTestId('delegates-show-rest')
+    expect(fold.textContent).toMatch(/2 more/)
+    fireEvent.click(fold)
+    expect(screen.getAllByTestId('delegate')).toHaveLength(3)
+    expect(fold.getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('keeps a quiet parent whose child is still moving', () => {
+    open([
+      node({ agentId: 'p', state: 'quiet', children: [node({ agentId: 'c', state: 'active', depth: 2 })] }),
+      node({ agentId: 'q', state: 'quiet' }),
+    ])
+    const shown = screen.getAllByTestId('delegate').map((el) => el.getAttribute('data-state'))
+    expect(shown).toEqual(['quiet', 'active'])
+    expect(screen.getByTestId('delegates-show-rest').textContent).toMatch(/1 more/)
+  })
+
+  it('shows everything when nothing is moving, with no fold to open', () => {
+    open([node({ agentId: 'x', state: 'quiet' }), node({ agentId: 'y', state: 'done' })])
+    expect(screen.getAllByTestId('delegate')).toHaveLength(2)
+    expect(screen.queryByTestId('delegates-show-rest')).toBeNull()
+  })
+})
+
 describe('INV-15 a silent family is asked about, not pronounced on', () => {
   const quietFamily = tree([node({ agentId: 'x' }), node({ agentId: 'y' })])
 
@@ -208,12 +254,19 @@ describe('INV-15 a silent family is asked about, not pronounced on', () => {
 
 describe('INV-11 the trail is drawn only where it was measured', () => {
   it('draws the split, and names both lengths in words', () => {
-    card({ sessionId: 'a', lastActivityAt: Date.now() - 60_000 })
+    card({ sessionId: 'a', status: 'busy', lastActivityAt: Date.now() - 60_000 })
     expect(screen.getByTestId('agent-trail').getAttribute('aria-label')).toMatch(/silent/i)
   })
 
   it('draws nothing for an agent with no last write to measure from', () => {
-    card({ sessionId: 'a' })
+    card({ sessionId: 'a', status: 'busy' })
+    expect(screen.queryByTestId('agent-trail')).toBeNull()
+  })
+
+  // On an idle card the trail says nothing the timestamp does not, and a
+  // shape carrying no new information is noise on the card everybody reads.
+  it('draws nothing on a card that is not working', () => {
+    card({ sessionId: 'a', status: 'idle', lastActivityAt: Date.now() - 60_000 })
     expect(screen.queryByTestId('agent-trail')).toBeNull()
   })
 

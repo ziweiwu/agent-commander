@@ -1,7 +1,12 @@
 .overlay {
   position: fixed;
   inset: 0;
-  /* The overlay is the viewport; nothing inside it may widen the page. */
+  /* The overlay is the viewport; nothing inside it may widen the page. Its
+     height is the *visual* viewport's, so on iOS Safari the composer and the
+     terminal's key bar sit above the keyboard rather than under it. */
+  top: var(--vvt, 0px);
+  bottom: auto;
+  height: var(--vvh, 100dvh);
   overflow: hidden;
   z-index: 100;
   background: var(--bg);

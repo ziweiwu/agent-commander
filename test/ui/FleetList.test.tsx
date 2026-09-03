@@ -63,6 +63,21 @@ describe('FleetList', () => {
     expect(screen.getByTestId('empty-state').textContent).toContain('claude')
   })
 
+  /*
+   * The one screen where the app explains itself once: the command and the
+   * button are both there, as things rather than as mentions in prose, and a
+   * phone with nothing to show is pointed at the setup it is most likely
+   * missing.
+   */
+  it('offers both ways in, and the phone setup', async () => {
+    const user = userEvent.setup()
+    renderApp(<FleetList tiled selected={null} onSelect={() => {}} />)
+    expect(screen.getByTestId('empty-command').textContent).toBe('claude')
+    expect(screen.getByTestId('empty-help').getAttribute('href')).toBe('/help')
+    await user.click(screen.getByTestId('empty-new-agent'))
+    expect(useStore.getState().newAgentOpen).toBe(true)
+  })
+
   it('reports a session that has never been prompted', () => {
     useStore.setState({ agents: [agent({ sessionId: 'fresh', activity: undefined })] })
     renderApp(<FleetList tiled selected={null} onSelect={() => {}} />)

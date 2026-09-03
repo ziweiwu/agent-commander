@@ -1,0 +1,27 @@
+.bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.bell[data-state='on'] {
+  color: var(--accent);
+}
+.bell[data-state='off'] {
+  color: var(--dim);
+}
+
+/*
+ * The same amber wash as the mock banner: a fact about right now, not an
+ * alarm. It asks once and goes away, so it does not earn a stronger colour.
+ */
+.nudge {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px 12px;
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--waiting) 18%, transparent);
+  color: var(--text);
+  font-size: var(--text-sm);
+}

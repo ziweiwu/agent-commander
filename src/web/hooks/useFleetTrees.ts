@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FleetTree } from '../../shared/types.ts'
 import { fetchTree } from '../store/transport.ts'
+import { useStore } from '../store/store.ts'
 
 /**
  * How often to re-read the delegation graph while a view of it is open.
@@ -59,9 +60,18 @@ async function readTrees(
  * a blank view because it still looks like an answer.
  */
 export function useFleetTrees(): FleetTree['trees'] {
-  const [trees, setTrees] = useState<FleetTree['trees']>([])
+  /*
+   * Seeded from, and published to, the store. Two holders take turns with
+   * this hook — the fleet list, and the detail view on a phone where the list
+   * is unmounted while the sheet covers it — and the detail's status line
+   * reads the graph from the store rather than polling for itself. Seeding
+   * from the store is what keeps the graph on screen across the hand-over
+   * instead of blanking for one poll; the tag comes with it so the hand-over
+   * costs a 304 rather than the whole body.
+   */
+  const [trees, setTrees] = useState<FleetTree['trees']>(() => useStore.getState().trees)
 
-  const etag = useRef<string | null>(null)
+  const etag = useRef<string | null>(useStore.getState().treesEtag)
 
   useEffect(() => {
     let live = true
@@ -79,6 +89,7 @@ export function useFleetTrees(): FleetTree['trees'] {
       if (live && next) {
         etag.current = next.etag
         setTrees(next.trees)
+        useStore.getState().setTrees(next.trees, next.etag)
       }
     }
 

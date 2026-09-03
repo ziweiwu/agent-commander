@@ -128,11 +128,32 @@ describe('PaneTerm re-fits to its container', () => {
     document.body.innerHTML = ''
   })
 
-  it('watches the parent of the box it sizes, never that box', async () => {
-    const { wrap, root } = await mounted(500, 1000)
-    // Observing `wrap` would be a feedback loop: rescale writes its size.
-    expect(observer().targets).toEqual([root])
+  it('watches the parent of the box it sizes and the box that bounds it, never itself', async () => {
+    const { wrap, root, box } = await mounted(500, 1000)
+    // Observing `wrap` would be a feedback loop: rescale writes its size. The
+    // root reports width changes; the bounding box is where height changes
+    // arrive, since the root is sized by its content.
+    expect(observer().targets).toEqual([root, box])
     expect(observer().targets).not.toContain(wrap)
+  })
+
+  /*
+   * An on-screen keyboard: the box loses half its height and none of its
+   * width. The root's size does not move, so a rescale keyed to it never ran,
+   * and the pane's bottom rows sat under the keys.
+   */
+  it('re-fits when the box loses height with its width unchanged', async () => {
+    const { term, scaler, box } = await mounted(500, 1000)
+    term.setZoom('fit')
+    term.scheduleRescale()
+    runFrames()
+    expect(scaler.style.transform).toBe('scale(0.5)')
+
+    // 140px tall with a 40px key bar leaves 100px for a 400px capture.
+    sized(box, 500, 140)
+    observer().callback()
+    runFrames()
+    expect(scaler.style.transform).toBe('scale(0.25)')
   })
 
   it('rescales when the container changes, with no new frame', async () => {

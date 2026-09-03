@@ -3,8 +3,13 @@ import { tildePath, uptimeParts } from '../lib/format.ts'
 import { formatUptime } from '../lib/i18n.ts'
 import { useState } from 'react'
 import { useIsNarrow } from '../hooks/useMediaQuery.ts'
+import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
-import { REASON_KEY, STATUS_KEY, useStatusText } from './AgentCard.tsx'
+import { DelegateLine, REASON_KEY, STATUS_KEY, useStatusText } from './AgentCard.tsx'
+import { aliasOfModel } from './AgentControls.tsx'
+import { claimOf, isStallCandidate } from '../lib/delegation.ts'
+import { modeLabel } from '../lib/modes.ts'
+import { useMemo } from 'react'
 import { displayName, isRenamed } from '../lib/naming.ts'
 import { useStore } from '../store/store.ts'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
@@ -45,6 +50,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
   const [controlsOpen, setControlsOpen] = useState(false)
   const showControls = !narrow || controlsOpen
   const transcripts = hasTranscripts(agent.agentKind)
+  // On a landscape phone the second answer option sits below this pane's fold
+  // with nothing saying so; the fade is the something.
+  const [paneRef, paneEdge] = useOverflowEdge<HTMLDivElement>()
 
   // Full screen replaces the panel entirely rather than rendering both, so the
   // conversation is not mounted twice and scrolled in two places.
@@ -198,7 +206,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         )}
       </div>
 
-      <div className={styles.pane}>
+      <StatusLine agent={agent} />
+
+      <div className={styles.pane} ref={paneRef} data-overflow={paneEdge} data-testid="detail-pane">
         {agent.status === 'waiting' && (
           <BlockedBanner agent={agent} tab={tab} onOpenTerminal={() => onTab('attach')} />
         )}
@@ -209,6 +219,52 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         )}
       </div>
     </section>
+  )
+}
+
+/**
+ * What the session is doing, in one line under the tabs: its permission mode,
+ * its model, and its delegates — the same claims the fleet card makes, on the
+ * screen where they were missing. The card is glanced at; this is where the
+ * work is read, and "which mode is this in" and "is the delegate still going"
+ * are questions asked from here.
+ *
+ * Every figure is the session's own or an admission (INV-11): a mode is what
+ * the transcript last recorded, or "not reported yet"; the delegates are the
+ * sidecars' claims and nothing more (INV-13); a quiet family is asked about,
+ * never pronounced on (INV-15). The graph comes from the store, filled by
+ * whichever holder currently polls it.
+ */
+function StatusLine({ agent }: { agent: Agent }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const trees = useStore((s) => s.trees)
+  const tree = trees.find((candidate) => candidate.sessionId === agent.sessionId)
+  const claim = useMemo(() => claimOf(tree), [tree])
+  const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
+  const stalled = isStallCandidate(agent, claim) && quietFor !== ''
+  const mode = agent.permissionMode ? modeLabel(agent.permissionMode, t) : undefined
+  const model = aliasOfModel(agent.model)
+
+  return (
+    <div className={styles.statusLine} data-testid="detail-status-line">
+      <span className={styles.fact} data-testid="detail-mode" data-reported={mode !== undefined}>
+        <span className={styles.factLabel}>{t('modeLabel')}</span>
+        {mode ?? <em>{t('modeUnreported')}</em>}
+      </span>
+      {model && (
+        <span className={styles.fact} data-testid="detail-model">
+          <span className={styles.factLabel}>{t('modelLabel')}</span>
+          {model}
+        </span>
+      )}
+      <DelegateLine agent={agent} claim={claim} />
+      {stalled && (
+        <span className={styles.stall} data-testid="detail-stall" title={t('stallQuestionTitle')}>
+          {t('stallQuestion', { t: quietFor })}
+        </span>
+      )}
+    </div>
   )
 }
 

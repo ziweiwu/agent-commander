@@ -234,6 +234,45 @@
   padding-left: 7px;
 }
 
+/*
+ * The waiting group's verb, drawn as the thing the tap does. A span inside the
+ * card's button rather than a button of its own — nested buttons are invalid —
+ * so it is decoration for the sighted; the card's own name carries the status.
+ */
+.cta {
+  justify-self: start;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--waiting);
+  padding: 2px 10px;
+  border: 1px solid color-mix(in srgb, var(--waiting) 50%, transparent);
+  border-radius: var(--radius-pill);
+}
+
+/* The fold: facts a reader asks for rather than scans for. */
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 0 0 8px;
+  font-size: var(--text-sm);
+}
+.fact {
+  display: contents;
+}
+.fact dt {
+  color: var(--faint);
+}
+.fact dd {
+  margin: 0;
+  color: var(--dim);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.path {
+  font-family: ui-monospace, Menlo, monospace;
+}
+
 .disclosure {
   border: 1px solid var(--line-strong);
   border-top: none;

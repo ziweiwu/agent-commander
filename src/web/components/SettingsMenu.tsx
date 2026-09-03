@@ -23,6 +23,9 @@ const SCHEME_KEY = {
   solar: 'schemeSolar',
   ember: 'schemeEmber',
   mauve: 'schemeMauve',
+  one: 'schemeOne',
+  dracula: 'schemeDracula',
+  monokai: 'schemeMonokai',
 } as const
 
 /*
@@ -51,7 +54,13 @@ function Swatch({ scheme }: { scheme: Scheme }) {
 }
 
 /**
- * Alerts, theme, colours and language.
+ * Theme, colours and language: how the app looks.
+ *
+ * Notifications used to be in here too, behind an icon that reads everywhere
+ * else as a theme toggle, so the switch the headline feature depends on was
+ * the one nothing on screen pointed at. It is the bell beside this now
+ * (`NotifyButton`), and the icon is a gear, which is what a menu of
+ * appearance settings is.
  *
  * Theme and language close the menu on a choice, so the result is visible
  * immediately, which is what every other menu on the platform does. Colours
@@ -62,43 +71,10 @@ export function SettingsMenu() {
   const theme = useStore((s) => s.theme)
   const scheme = useStore((s) => s.scheme)
   const lang = useStore((s) => s.lang)
-  const notify = useStore((s) => s.notify)
   const setTheme = useStore((s) => s.setTheme)
   const setScheme = useStore((s) => s.setScheme)
   const setLang = useStore((s) => s.setLang)
-  const setNotify = useStore((s) => s.setNotify)
-  /*
-   * Why the row can be honest about failure. iOS Safari outside an installed
-   * web app has no Notification constructor at all, and a user who blocked the
-   * permission once will never see the browser prompt again — in both cases a
-   * toggle that flipped on and did nothing would be the app claiming an
-   * ability it does not have (INV-11). The hint under the row says which of
-   * the two happened.
-   */
-  const [notifyHint, setNotifyHint] = useState<'unsupported' | 'denied' | null>(
-    typeof Notification === 'undefined' ? 'unsupported' : null,
-  )
   const [open, setOpen] = useState(false)
-
-  const toggleNotify = async (): Promise<void> => {
-    if (notify) {
-      setNotify(false)
-      return
-    }
-    if (typeof Notification === 'undefined') {
-      setNotifyHint('unsupported')
-      return
-    }
-    // The permission prompt rides this click — the one moment a browser
-    // accepts the request as intentional rather than ambient.
-    const permission = await Notification.requestPermission()
-    if (permission === 'granted') {
-      setNotifyHint(null)
-      setNotify(true)
-    } else {
-      setNotifyHint('denied')
-    }
-  }
   const wrapRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
   /** Which edge the menu hangs from; see the effect below. */
@@ -157,7 +133,7 @@ export function SettingsMenu() {
         aria-label={t('settings')}
         onClick={() => setOpen((v) => !v)}
       >
-        {THEME_ICON[theme]}
+        ⚙
       </Button>
 
       {open && (
@@ -168,28 +144,6 @@ export function SettingsMenu() {
           ref={menuRef}
           role="menu"
         >
-          <div className={styles.group}>
-            <span className={styles.label}>{t('notifyLabel')}</span>
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              className={styles.item}
-              data-testid="notify-toggle"
-              aria-checked={notify}
-              aria-pressed={notify}
-              disabled={notifyHint === 'unsupported'}
-              onClick={() => void toggleNotify()}
-            >
-              <span className={styles.icon}>{notify ? '◉' : '○'}</span>
-              {t('notifyToggle')}
-            </button>
-            {notifyHint && (
-              <span className={styles.hint} data-testid="notify-hint" role="status">
-                {t(notifyHint === 'denied' ? 'notifyDenied' : 'notifyUnsupported')}
-              </span>
-            )}
-          </div>
-
           <div className={styles.group}>
             <span className={styles.label}>{t('theme')}</span>
             {THEMES.map((option) => (

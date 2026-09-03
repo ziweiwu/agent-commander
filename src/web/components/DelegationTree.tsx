@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import type { SubagentNode } from '../../shared/types.ts'
-import { isGuess } from '../lib/delegation.ts'
+import { isGuess, splitByMoving } from '../lib/delegation.ts'
 import { relative, uptimeParts } from '../lib/format.ts'
 import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
@@ -36,12 +37,38 @@ const STATE_TITLE_KEY: Record<SubagentNode['state'], Key> = {
  * would have to begin somewhere invented. See `trail.ts`.
  */
 export function DelegationTree({ nodes }: { nodes: readonly SubagentNode[] }) {
+  const t = useTranslate()
+  const [showRest, setShowRest] = useState(false)
+  /*
+   * Moving delegates first, the rest behind a count. A long session's tree is
+   * mostly history — dozens of finished delegates, all `quiet` — and the one
+   * or two still running were the rows a reader had to hunt for. The fold
+   * says how many it holds, so nothing is quietly dropped (INV-13).
+   */
+  const { shown, folded } = splitByMoving(nodes)
+  const visible = showRest ? nodes : shown
+
   return (
-    <ul className={styles.tree} data-testid="delegation-tree">
-      {nodes.map((node) => (
-        <Delegate key={node.agentId} node={node} />
-      ))}
-    </ul>
+    <div>
+      <ul className={styles.tree} data-testid="delegation-tree">
+        {visible.map((node) => (
+          <Delegate key={node.agentId} node={node} />
+        ))}
+      </ul>
+      {folded > 0 && (
+        <button
+          type="button"
+          className={styles.more}
+          data-testid="delegates-show-rest"
+          aria-expanded={showRest}
+          onClick={() => setShowRest((open) => !open)}
+        >
+          {showRest
+            ? t('delegatesHideRest', { n: folded })
+            : t('delegatesShowRest', { n: folded })}
+        </button>
+      )}
+    </div>
   )
 }
 

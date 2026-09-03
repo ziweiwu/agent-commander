@@ -43,6 +43,39 @@ describe('while the socket is open', () => {
   })
 })
 
+/*
+ * The first frame is the case the stale caption cannot cover: there is nothing
+ * to caption yet. Over Tailscale on a phone the gap before it lands is
+ * measured in seconds, and "No Claude Code sessions found" in that gap is a
+ * guess wearing the words of a reading.
+ */
+describe('INV-11 before the first frame', () => {
+  it('does not claim the fleet is empty while nothing has arrived', () => {
+    useStore.setState({ agents: [], conn: 'connecting', fleetAt: null })
+    shell()
+    expect(screen.queryByTestId('empty-state')).toBeNull()
+    const loading = screen.getByTestId('fleet-loading')
+    expect(loading.textContent).toMatch(/connecting/i)
+    expect(loading.getAttribute('role')).toBe('status')
+  })
+
+  it('still does not claim it while the socket is open but silent', () => {
+    // Between `onopen` and the first fleet frame `conn` is already 'open', so
+    // the gate has to be the frame, not the connection.
+    useStore.setState({ agents: [], conn: 'open', fleetAt: null })
+    shell()
+    expect(screen.queryByTestId('empty-state')).toBeNull()
+    expect(screen.getByTestId('fleet-loading')).toBeTruthy()
+  })
+
+  it('says empty only once the server has said zero', () => {
+    useStore.setState({ agents: [], conn: 'open', fleetAt: Date.now() })
+    shell()
+    expect(screen.queryByTestId('fleet-loading')).toBeNull()
+    expect(screen.getByTestId('empty-state').textContent).toMatch(/no claude code sessions/i)
+  })
+})
+
 describe('while the socket is down', () => {
   it('says the cards are a memory, and when it stopped knowing', () => {
     useStore.setState({
@@ -76,8 +109,10 @@ describe('while the socket is down', () => {
   it('says nothing when there are no cards to mistrust', () => {
     useStore.setState({ agents: [], conn: 'closed', fleetAt: null })
     shell()
-    // An empty fleet asserts nothing, so there is nothing to caveat.
+    // An empty fleet asserts nothing, so there is nothing to caveat — and
+    // nothing to call empty either, since no frame ever said so.
     expect(screen.queryByTestId('fleet-stale')).toBeNull()
+    expect(screen.queryByTestId('empty-state')).toBeNull()
   })
 
   it('still captions the fleet when it never heard a first time', () => {

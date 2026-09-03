@@ -99,6 +99,22 @@
   gap: 6px;
 }
 
+/*
+ * The keys when a labelled answer exists above them: below a rule, muted, and
+ * introduced by `.fallback`. Opacity rather than a smaller target — the
+ * buttons keep their 44px on a touch screen, they just stop competing.
+ */
+.fallback {
+  margin: 4px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+.secondary {
+  opacity: 0.75;
+}
+
 @media (max-width: 560px) {
   .card {
     padding: 10px;

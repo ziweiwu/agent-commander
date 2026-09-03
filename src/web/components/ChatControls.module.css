@@ -40,7 +40,11 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   padding: 3px 6px;
+  /* Both, because Safari ignores `min-height` on a `<select>` and honours
+     `height` — measured at 20px against Chromium's 30 without it, under the
+     24px floor on every browser iOS has. `e2e/responsive.spec.ts` caught it. */
   min-height: 30px;
+  height: 30px;
   cursor: pointer;
   max-width: 150px;
 }
@@ -148,6 +152,9 @@
     min-height: 44px;
     font-size: 16px;
   }
+  .select {
+    height: 44px;
+  }
 }
 
 /*
@@ -176,6 +183,9 @@
   .toggle,
   .input {
     min-height: 44px;
+  }
+  .select {
+    height: 44px;
   }
 }
 

@@ -149,7 +149,26 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </p>
       )}
 
-      <div className={styles.keys} role="group" aria-label={t('answerKeysLabel')}>
+      {/*
+        * Where the transcript named the options, the labelled buttons above
+        * are the verified answer and these keys are the escape hatch: `Enter`
+        * commits whatever the real pane has highlighted, which is not
+        * necessarily the option the user just read. Drawn at equal weight the
+        * two invited exactly that slip, so with labels present the keys drop
+        * below a rule, shrink, and say what they are for. Without labels they
+        * are the only way to answer and stay primary (INV-16).
+        */}
+      {answerable && (
+        <p className={styles.fallback} data-testid="answer-keys-fallback">
+          {t('answerKeysFallback')}
+        </p>
+      )}
+      <div
+        className={`${styles.keys} ${answerable ? styles.secondary : ''}`}
+        role="group"
+        aria-label={t('answerKeysLabel')}
+        data-secondary={answerable ? 'true' : undefined}
+      >
         {KEYS.map((key) => (
           <Button
             key={key}

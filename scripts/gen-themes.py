@@ -458,11 +458,16 @@ SCHEMES = [
         note=(
             "Teal-tinted dark, cream light, after Solarized — the scheme that "
             "made symmetric lightness between the two modes the point. Its hue "
-            "relationships are the most carefully chosen of any of these."
+            "relationships are the most carefully chosen of any of these. "
+            "Measured from the published palette: base03 #002b36 is hue 220, "
+            "base3 #fdf6e3 is 90, blue #268bd2 is 245, yellow #b58900 is 86, "
+            "red #dc322f is 27. Its green #859900 is an olive at 119, which sits "
+            "too close to the amber to tell `waiting` from `accent` at a glance, "
+            "so `accent` is a plainer green here — the one departure."
         ),
-        neutral_dark=205,
+        neutral_dark=220,
         neutral_light=90,
-        hues={"busy": 245, "waiting": 82, "accent": 145, "danger": 15},
+        hues={"busy": 245, "waiting": 86, "accent": 145, "danger": 27},
         chroma_surface_dark=0.028,
         chroma_surface_light=0.030,
     ),
@@ -506,6 +511,71 @@ SCHEMES = [
         chroma_surface_light=0.028,
         chroma_dark=0.11,
         chroma_light=0.14,
+    ),
+    Scheme(
+        key="one",
+        label="One",
+        note=(
+            "Cool blue-grey, after Atom's One Dark and One Light, measured from "
+            "the syntax themes' own `colors.less`: One Dark's background "
+            "hsl(220,13%,18%) is OKLCH hue 264, its blue hsl(207,82%,66%) 245, "
+            "green 133, yellow 82, red 17; One Light's blue is 263, green 143, "
+            "orange 76, red 28 — so each role takes the midpoint. The greys sit "
+            "a little off the measured hue and well above the measured chroma "
+            "(~0.016), because at One Dark's true grey the scheme was 0.015 "
+            "from Nordic, and two schemes that close are one scheme with two "
+            "names (FR-UI-8). The light half stays near One Light's near-white."
+        ),
+        neutral_dark=254,
+        neutral_light=210,
+        hues={"busy": 250, "waiting": 80, "accent": 138, "danger": 22},
+        chroma_surface_dark=0.060,
+        chroma_surface_light=0.020,
+        chroma_dark=0.11,
+        chroma_light=0.14,
+    ),
+    Scheme(
+        key="dracula",
+        label="Dracula",
+        note=(
+            "Purple-black with a violet accent, after Dracula, measured from the "
+            "published spec: background #282a36 is OKLCH hue 278, purple #bd93f9 "
+            "302, green #50fa7b 148, red #ff5555 24. The purple is the whole "
+            "identity, so it carries `busy`. Dracula's yellow #f1fa8c is 113, "
+            "which reads as the same colour as the green beside it, and its "
+            "orange #ffb86c is 67, which reads as the red; `waiting` takes the "
+            "hue between them. The surfaces carry more purple than #282a36 "
+            "itself: at its true chroma (~0.022) the scheme was 0.012 from "
+            "Mauve. The light half is Alucard's warm near-white."
+        ),
+        neutral_dark=278,
+        neutral_light=95,
+        hues={"busy": 302, "waiting": 95, "accent": 148, "danger": 24},
+        chroma_surface_dark=0.060,
+        chroma_surface_light=0.008,
+        chroma_dark=0.125,
+        chroma_light=0.15,
+    ),
+    Scheme(
+        key="monokai",
+        label="Monokai",
+        note=(
+            "Olive-black with lime and magenta, after Monokai, measured from "
+            "monokai.vim: background #272822 is OKLCH hue 115, purple #ae81ff "
+            "298, orange #fd971f 62, green #a6e22e 127, magenta #f92672 7. The "
+            "lime is `accent`, the magenta `danger`, the orange `waiting`; "
+            "`busy` takes the violet so the working colour is never confused "
+            "with the alert. Monokai never had a light half, so this one is a "
+            "warm, faintly green off-white derived to sit apart from Solar's "
+            "cream."
+        ),
+        neutral_dark=115,
+        neutral_light=120,
+        hues={"busy": 298, "waiting": 62, "accent": 127, "danger": 7},
+        chroma_surface_dark=0.012,
+        chroma_surface_light=0.020,
+        chroma_dark=0.12,
+        chroma_light=0.15,
     ),
 ]
 

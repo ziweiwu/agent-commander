@@ -147,10 +147,52 @@
   display: none;
 }
 
+/* One chip that opens the replies, and the list it opens above itself. */
 .quick {
+  position: relative;
   display: flex;
-  gap: 6px;
   flex: none;
+}
+/*
+ * Portalled to the body and pinned in viewport pixels by `Chat`: the strip is
+ * a horizontal scroller, which clips on both axes, so a list drawn inside it
+ * sat under the conversation and could not be reached.
+ */
+.quickList {
+  position: fixed;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow, 0 6px 24px rgb(0 0 0 / 0.18));
+}
+.quickItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.quickItem:hover,
+.quickItem:focus-visible {
+  background: var(--panel-2);
+}
+@media (pointer: coarse) {
+  .quickItem {
+    min-height: 44px;
+  }
 }
 
 /*
@@ -365,8 +407,10 @@
   line-height: 1;
 }
 
-/* Below this the label costs the message box more than it is worth. */
-@media (max-width: 460px) {
+/* On a phone the label costs the message box more than it is worth: measured
+   at 460px, where the paired Interrupt buttons squeezed the box to 32px.
+   Applied at the phone layout's one cut. */
+@media (max-width: 560px) {
   .stopGlyph {
     display: inline;
   }

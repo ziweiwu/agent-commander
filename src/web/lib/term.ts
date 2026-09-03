@@ -201,6 +201,24 @@ export class PaneTerm {
       }
       return false
     })
+
+    /*
+     * Text that never arrives as a keystroke.
+     *
+     * The handler above sees every keydown, but on Android Chrome a software
+     * keyboard delivers characters through input and composition events with
+     * a keydown whose key is `Unidentified` — so with only the handler, typing
+     * into the pane on a phone sent nothing at all. Chinese and Japanese input
+     * on every platform is the same shape: a composition, committed at the
+     * end. And a paste is a `paste` event, never a key. xterm folds all of
+     * these into its data stream, so the stream is the second door.
+     *
+     * The two doors cannot both deliver one character: a keydown the handler
+     * takes is `preventDefault`ed, so it never changes the textarea and never
+     * becomes data. That is also why iOS autocorrect cannot rewrite what was
+     * sent — the textarea it would correct is always empty.
+     */
+    this.term.onData((data) => onText(data))
   }
 
   onZoomChange(fn: () => void): void {
@@ -212,6 +230,22 @@ export class PaneTerm {
     this.#host = host
     this.#scaler = scaler
     this.term.open(scaler)
+    /*
+     * The hidden textarea a phone keyboard types into. xterm sets most of
+     * these itself; they are set here as well because each one, missing, is
+     * a phone silently rewriting what reaches a live agent: capitalising the
+     * first letter of a command, "correcting" a flag, offering a completion.
+     * `enterkeyhint` names the key the keyboard draws — a terminal wants a
+     * return, not a Send.
+     */
+    const textarea = this.term.textarea
+    if (textarea) {
+      textarea.setAttribute('autocapitalize', 'off')
+      textarea.setAttribute('autocorrect', 'off')
+      textarea.setAttribute('autocomplete', 'off')
+      textarea.setAttribute('spellcheck', 'false')
+      textarea.setAttribute('enterkeyhint', 'enter')
+    }
     this.#observeContainer(host)
   }
 
@@ -229,10 +263,23 @@ export class PaneTerm {
    * width and height, so observing the element it sizes is a feedback loop.
    */
   #observeContainer(host: HTMLElement): void {
-    const box = host.parentElement
-    if (!box || typeof ResizeObserver === 'undefined') return
+    const root = host.parentElement
+    if (!root || typeof ResizeObserver === 'undefined') return
     this.#observer = new ResizeObserver(() => this.scheduleRescale())
-    this.#observer.observe(box)
+    this.#observer.observe(root)
+    /*
+     * The bounded box as well — the detail's pane or the full-screen body —
+     * because that is where *height* changes arrive. The root is sized by its
+     * content, so it grows and shrinks with the capture and never with the
+     * screen: an on-screen keyboard that halved the box left the root the
+     * same size, no rescale ran, and the pane's bottom rows — the prompt —
+     * sat under the keys with nothing to bring them back. Observing the box
+     * is what makes the keyboard a resize like any other. It converges: a
+     * rescale writes the host's size, the box is sized by the layout rather
+     * than by the host, and an observer does not fire for a size that did
+     * not change.
+     */
+    if (root.parentElement) this.#observer.observe(root.parentElement)
   }
 
   focus(): void {

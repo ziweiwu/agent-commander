@@ -98,13 +98,14 @@
   min-width: 0;
 }
 
-/* Model and mode sit side by side on a desktop, stacked on a phone. */
+/* Model and mode sit side by side on a desktop, stacked on a phone. Measured
+   as needed below 480px; applied at the phone layout's one cut. */
 .row {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-@media (max-width: 480px) {
+@media (max-width: 560px) {
   .row {
     grid-template-columns: 1fr;
   }

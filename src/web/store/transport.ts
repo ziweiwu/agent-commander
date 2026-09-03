@@ -17,7 +17,8 @@ import type {
   ServerEnv,
   ServerMessage,
 } from '../../shared/types.ts'
-import { notifyBlocked } from '../lib/notify.ts'
+import { notifyBlocked, shouldNudge } from '../lib/notify.ts'
+import { loadNudgeDismissed } from '../lib/prefs.ts'
 import { useStore } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -375,7 +376,15 @@ function handle(msg: ServerMessage): void {
       // queued behind a live turn is waiting, not late.
       useStore.getState().syncDelivery()
       announceBlocked(msg.agents)
-      notifyBlocked(msg.agents, { enabled: state.notify, lang: state.lang })
+      const fresh = notifyBlocked(msg.agents, { enabled: state.notify, lang: state.lang })
+      // The one unsolicited prompt in the app, and only for a block this page
+      // watched happen while the preference was off (INV-14).
+      const nudge = shouldNudge(fresh, {
+        enabled: state.notify,
+        dismissed: loadNudgeDismissed(),
+        supported: typeof Notification !== 'undefined',
+      })
+      if (nudge) useStore.getState().setNotifyNudge(true)
       return
     }
     case 'limits': {

@@ -57,6 +57,10 @@ const ALLOWED: Record<string, Hidden> = {
   // Decoration and chrome that name nothing about the agent on screen.
   '.gutter': { reason: 'the message rail is decorative; grouping survives it' },
   '.sheetMode .title': { reason: "the sheet's own header names what is open" },
+  '.statusLine': {
+    reason:
+      'a readout, not a control: the mode is on the strip’s own button and the delegates are on the card; a landscape phone needs the height for the conversation',
+  },
 
   // The one control a layout takes away, and the step that reaches it.
   '.sheetMode .filters': {
@@ -180,5 +184,25 @@ describe('INV-17 the three layouts differ in labelling, not in capability', () =
       .filter(([, entry]) => entry.restoredBy !== undefined)
       .map(([selector]) => selector)
     expect(actions).toEqual(['.sheetMode .filters'])
+  })
+
+  /*
+   * Three layouts, two width cuts. There were eleven breakpoints between
+   * 900px and 380px, each measured and each right, and the accumulation was
+   * what nobody could hold in their head. The desktop/narrow cut at 900 and
+   * the phone cut at 560 are the layouts INV-17 names; a third number here is
+   * a fourth layout nobody declared.
+   */
+  it('draws its three layouts from two width cuts', () => {
+    const cuts = new Set<number>()
+    for (const { css } of stylesheets()) {
+      for (const block of mediaBlocks(css)) {
+        for (const m of block.condition.matchAll(/(?:min|max)-width:\s*(\d+)px/g)) {
+          cuts.add(Number(m[1]))
+        }
+      }
+    }
+    // 901 is the other side of the 900 cut, not a third one.
+    expect([...cuts].sort((a, b) => a - b)).toEqual([560, 900, 901])
   })
 })

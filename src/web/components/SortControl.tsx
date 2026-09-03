@@ -32,6 +32,7 @@ export function SortControl() {
       <select
         className={styles.select}
         data-testid="sort-select"
+        name="sort"
         value={sort}
         onChange={(e) => setSort(e.target.value as SortKey)}
       >

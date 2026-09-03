@@ -89,15 +89,22 @@ describe('burst send', () => {
     expect(sendMessage).toHaveBeenNthCalledWith(2, 'second')
   })
 
-  // A chip has no draft to clear, and a double tap is two separate tasks that
-  // no same-batch check would catch.
-  it('sends one message when a quick prompt is double-clicked', async () => {
+  /** A reply is behind the menu now, so picking one is open-then-pick. */
+  const pick = async (user: ReturnType<typeof userEvent.setup>, index: number): Promise<void> => {
+    await user.click(screen.getByTestId('quick-menu'))
+    await user.click(screen.getAllByTestId('quick-prompt')[index] as HTMLElement)
+  }
+
+  // A reply has no draft to clear, and a double tap is two separate tasks that
+  // no same-batch check would catch. The menu closing on the first pick takes
+  // most of the sting out of it; the one-second guard is what catches a
+  // reopen-and-pick done on reflex.
+  it('sends one message when a quick prompt is picked twice inside a second', async () => {
     const user = userEvent.setup()
     renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
-    const chip = screen.getAllByTestId('quick-prompt')[0] as HTMLElement
 
-    await user.click(chip)
-    await user.click(chip)
+    await pick(user, 0)
+    await pick(user, 0)
 
     expect(sendMessage).toHaveBeenCalledExactlyOnceWith('continue')
   })
@@ -107,22 +114,21 @@ describe('burst send', () => {
   it('does not swallow the same prompt sent to a different agent', async () => {
     const user = userEvent.setup()
     const { rerender } = renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
-    await user.click(screen.getAllByTestId('quick-prompt')[0] as HTMLElement)
+    await pick(user, 0)
 
     rerender(<Chat agent={agent({ sessionId: 'b' })} />)
-    await user.click(screen.getAllByTestId('quick-prompt')[0] as HTMLElement)
+    await pick(user, 0)
 
     expect(sendMessage).toHaveBeenCalledTimes(2)
   })
 
-  // Different chips are different intentions, not a mis-tap.
-  it('does not swallow a different prompt clicked straight after', async () => {
+  // Different replies are different intentions, not a mis-tap.
+  it('does not swallow a different prompt picked straight after', async () => {
     const user = userEvent.setup()
     renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
-    const chips = screen.getAllByTestId('quick-prompt')
 
-    await user.click(chips[0] as HTMLElement)
-    await user.click(chips[2] as HTMLElement)
+    await pick(user, 0)
+    await pick(user, 2)
 
     expect(sendMessage).toHaveBeenCalledTimes(2)
     expect(sendMessage).toHaveBeenNthCalledWith(2, 'run the tests')

@@ -66,8 +66,9 @@
   }
 }
 
-/* On a narrow column the arrow alone carries it; the word is the tooltip. */
-@media (max-width: 420px) {
+/* On a phone the arrow alone carries it; the word is the tooltip. Measured as
+   needed below 420px; applied at the phone layout's one cut. */
+@media (max-width: 560px) {
   .senseLabel {
     display: none;
   }

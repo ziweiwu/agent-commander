@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { grouped, unusedAgents, type StatusFilter } from '../lib/filter.ts'
 import { displayName } from '../lib/naming.ts'
@@ -162,8 +163,20 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         data-testid="fleet-list"
         data-stale={conn === 'open' ? undefined : 'true'}
       >
-        {agents.length === 0 ? (
-          <Empty title={t('emptyFleetTitle')} body={t('emptyFleetBody')} />
+        {/*
+          * INV-11, applied to the first frame. `agents` starts as `[]` before
+          * the socket has delivered anything, and over Tailscale on a phone
+          * that gap is measured in seconds. Rendering "No Claude Code sessions
+          * found" into it presents a guess as a reading — the same failure the
+          * stale caption above exists to prevent, at the one moment the caption
+          * has nothing to caption. `fleetAt` is set only by a fleet frame, so
+          * the confirmed-empty copy renders only once the server has actually
+          * said "zero".
+          */}
+        {fleetAt === null ? (
+          <Loading label={t('fleetLoading')} />
+        ) : agents.length === 0 ? (
+          <FirstRun onNewAgent={() => setNewAgentOpen(true)} />
         ) : groups.length === 0 ? (
           <Empty
             title={t('emptyFilterTitle')}
@@ -200,6 +213,62 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
           ))
         )}
       </div>
+    </div>
+  )
+}
+
+/** How many card outlines the skeleton draws: enough to read as a list. */
+const SKELETON_CARDS = 3
+
+/**
+ * The fleet before the first frame: outlines, not claims.
+ *
+ * Three muted card shapes and the same "connecting" the header chip shows,
+ * announced as a status so a screen reader hears it once. It carries no
+ * count, no names and no group headings, because none of those are known yet.
+ */
+function Loading({ label }: { label: string }) {
+  return (
+    <div className={styles.loading} data-testid="fleet-loading" role="status">
+      <p className={styles.loadingLabel}>{label}</p>
+      {Array.from({ length: SKELETON_CARDS }, (_, i) => (
+        <div key={i} className={styles.skeleton} aria-hidden="true" />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * The one screen where the app has to explain itself once.
+ *
+ * There is no onboarding, and that is right for a tool opened forty times a
+ * day. But a confirmed-empty fleet is either the first launch or a machine
+ * with nothing running, and both want the same two things said plainly: the
+ * command that starts an agent, and the button that starts one from here. A
+ * phone with nothing to show is also the moment somebody is most likely to be
+ * setting the app up, so the Tailscale page in Help is one tap away.
+ */
+function FirstRun({ onNewAgent }: { onNewAgent: () => void }) {
+  const t = useTranslate()
+  return (
+    <div className={styles.empty} data-testid="empty-state">
+      <p className={styles.emptyTitle}>{t('emptyFleetTitle')}</p>
+      <p className={styles.emptyBody}>{t('emptyFleetBody')}</p>
+      <div className={styles.waysIn}>
+        <code className={styles.command} data-testid="empty-command">
+          claude
+        </code>
+        <span className={styles.or}>{t('emptyFleetOr')}</span>
+        <Button data-testid="empty-new-agent" onClick={onNewAgent}>
+          + {t('newAgent')}
+        </Button>
+      </div>
+      <p className={styles.emptyHelp}>
+        {t('emptyFleetHelp')}{' '}
+        <Link to="/help" data-testid="empty-help">
+          {t('emptyFleetHelpLink')}
+        </Link>
+      </p>
     </div>
   )
 }

@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Agent } from '../../shared/types.ts'
+import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
-import { setAgentGoal } from '../store/transport.ts'
+import { setAgentGoal, setAgentModel } from '../store/transport.ts'
+import { useHeldChoice } from '../hooks/useHeldChoice.ts'
+import { aliasOfModel } from './AgentControls.tsx'
 import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useContextActions } from '../hooks/useContextActions.ts'
@@ -31,8 +33,13 @@ import styles from './ChatControls.module.css'
 export function ChatControls({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
-  const [pending, setPending] = useState<'goal' | null>(null)
+  const [pending, setPending] = useState<'goal' | 'model' | null>(null)
   const [editing, setEditing] = useState(false)
+  // Held until the agent reports it back — see `useHeldChoice`.
+  const [modelValue, setPickedModel, clearPickedModel] = useHeldChoice(
+    aliasOfModel(agent.model),
+    agent.sessionId,
+  )
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
   /*
@@ -65,7 +72,36 @@ export function ChatControls({ agent }: { agent: Agent }) {
     if (editing) inputRef.current?.focus()
   }, [editing])
 
-  const run = async (kind: 'goal', action: () => Promise<void>): Promise<void> => {
+  /*
+   * INV-8's exception: model types, but through the same `paste` the message
+   * box already uses on working agents by design — refusing it forbade
+   * through one door what the app permits through the other. So it stays
+   * available mid-run, which is when you reach for it: you notice the wrong
+   * model *while* it is being used. It waits only for a pane, and for nothing
+   * else to be in flight at this session.
+   */
+  const midRunDisabled = !agent.paneId || inFlight
+
+  const onSetModel = (value: string): void =>
+    void run('model', async () => {
+      setPickedModel(value)
+      const result = await setAgentModel(value)
+      if (!result.ok) {
+        // It did not land, so stop showing it as though it had.
+        clearPickedModel()
+        showToast(t('controlFailed', { error: result.error }))
+        return
+      }
+      /*
+       * Sent, but not yet observable. The switch is invisible to this app
+       * until the session writes it into its transcript, which for a busy
+       * agent is when the turn ends — so the toast says so rather than letting
+       * a silent, unchanged-looking select imply nothing occurred.
+       */
+      if (result.detail === 'queued') showToast(t('modelQueued', { model: value }))
+    })
+
+  const run = async (kind: 'goal' | 'model', action: () => Promise<void>): Promise<void> => {
     if (sendingRef.current) return
     sendingRef.current = true
     setPending(kind)
@@ -156,7 +192,38 @@ export function ChatControls({ agent }: { agent: Agent }) {
         </div>
       ) : (
         <div className={styles.goal}>
-          <ShiftTabButton agent={agent} />
+          {/* Shift+Tab is Claude Code's mode chord; into another CLI it is a
+              stray keystroke. The detail row used to carry this gate; now that
+              the strip is the chord's only home, the gate lives here (INV-7). */}
+          {slashCommands && <ShiftTabButton agent={agent} />}
+
+          {/*
+            * The model, beside the mode: both are about the next turn, and
+            * both are wanted while typing it. This used to be the one control
+            * left in the detail row, which folds behind `⋯` on a phone and
+            * does not exist in full screen — so on the two surfaces where a
+            * conversation is actually read, the model was not on screen.
+            */}
+          {slashCommands && (
+            <label className={styles.field}>
+              <span className={styles.label}>{t('modelLabel')}</span>
+              <select
+                className={styles.select}
+                data-testid="model-select"
+                aria-label={t('modelLabel')}
+                disabled={midRunDisabled}
+                value={modelValue}
+                onChange={(e) => onSetModel(e.target.value)}
+              >
+                {!agent.model && <option value="">—</option>}
+                {MODEL_ALIASES.map((model) => (
+                  <option key={model} value={model}>
+                    {model === 'default' ? t('modelDefault') : model}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           <button
             type="button"

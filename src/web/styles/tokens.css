@@ -41,15 +41,24 @@
   --swatch-nordic-bg: #091828;
   --swatch-nordic-panel-2: #1b2c3c;
   --swatch-nordic-accent: #74af78;
-  --swatch-solar-bg: #051b1d;
-  --swatch-solar-panel-2: #182e31;
-  --swatch-solar-accent: #6eb170;
+  --swatch-solar-bg: #071a20;
+  --swatch-solar-panel-2: #1a2d34;
+  --swatch-solar-accent: #6db070;
   --swatch-ember-bg: #201406;
   --swatch-ember-panel-2: #342718;
   --swatch-ember-accent: #67af7b;
   --swatch-mauve-bg: #181426;
   --swatch-mauve-panel-2: #2b273a;
   --swatch-mauve-accent: #64b07a;
+  --swatch-one-bg: #021731;
+  --swatch-one-panel-2: #132b47;
+  --swatch-one-accent: #7bae6a;
+  --swatch-dracula-bg: #121332;
+  --swatch-dracula-panel-2: #232647;
+  --swatch-dracula-accent: #60b06d;
+  --swatch-monokai-bg: #171812;
+  --swatch-monokai-panel-2: #2a2b24;
+  --swatch-monokai-accent: #8aac56;
 
   /* Type scale. Six steps; anything between them was drift. */
   --text-xs: 11px;
@@ -104,6 +113,15 @@
   --swatch-mauve-bg: #f1eefe;
   --swatch-mauve-panel-2: #e7e3f8;
   --swatch-mauve-accent: #036833;
+  --swatch-one-bg: #e2f4f8;
+  --swatch-one-panel-2: #d8eaee;
+  --swatch-one-accent: #286803;
+  --swatch-dracula-bg: #f2f0ea;
+  --swatch-dracula-panel-2: #e8e6e0;
+  --swatch-dracula-accent: #036927;
+  --swatch-monokai-bg: #eef2e4;
+  --swatch-monokai-panel-2: #e4e8da;
+  --swatch-monokai-accent: #466301;
   color-scheme: light;
 }
 
@@ -139,6 +157,15 @@
     --swatch-mauve-bg: #f1eefe;
     --swatch-mauve-panel-2: #e7e3f8;
     --swatch-mauve-accent: #036833;
+    --swatch-one-bg: #e2f4f8;
+    --swatch-one-panel-2: #d8eaee;
+    --swatch-one-accent: #286803;
+    --swatch-dracula-bg: #f2f0ea;
+    --swatch-dracula-panel-2: #e8e6e0;
+    --swatch-dracula-accent: #036927;
+    --swatch-monokai-bg: #eef2e4;
+    --swatch-monokai-panel-2: #e4e8da;
+    --swatch-monokai-accent: #466301;
     color-scheme: light;
   }
 }
@@ -166,15 +193,24 @@
   --swatch-nordic-bg: #091828;
   --swatch-nordic-panel-2: #1b2c3c;
   --swatch-nordic-accent: #74af78;
-  --swatch-solar-bg: #051b1d;
-  --swatch-solar-panel-2: #182e31;
-  --swatch-solar-accent: #6eb170;
+  --swatch-solar-bg: #071a20;
+  --swatch-solar-panel-2: #1a2d34;
+  --swatch-solar-accent: #6db070;
   --swatch-ember-bg: #201406;
   --swatch-ember-panel-2: #342718;
   --swatch-ember-accent: #67af7b;
   --swatch-mauve-bg: #181426;
   --swatch-mauve-panel-2: #2b273a;
   --swatch-mauve-accent: #64b07a;
+  --swatch-one-bg: #021731;
+  --swatch-one-panel-2: #132b47;
+  --swatch-one-accent: #7bae6a;
+  --swatch-dracula-bg: #121332;
+  --swatch-dracula-panel-2: #232647;
+  --swatch-dracula-accent: #60b06d;
+  --swatch-monokai-bg: #171812;
+  --swatch-monokai-panel-2: #2a2b24;
+  --swatch-monokai-accent: #8aac56;
   color-scheme: dark;
 }
 
@@ -263,21 +299,25 @@
 /* ---- Solar ---- */
 /* Teal-tinted dark, cream light, after Solarized — the scheme that made symmetric
   lightness between the two modes the point. Its hue relationships are the most
-  carefully chosen of any of these. */
+  carefully chosen of any of these. Measured from the published palette: base03 #002b36
+  is hue 220, base3 #fdf6e3 is 90, blue #268bd2 is 245, yellow #b58900 is 86, red
+  #dc322f is 27. Its green #859900 is an olive at 119, which sits too close to the amber
+  to tell `waiting` from `accent` at a glance, so `accent` is a plainer green here — the
+  one departure. */
 :root[data-scheme='solar'] {
-  --bg: #051b1d;
-  --panel: #0f2427;
-  --panel-2: #182e31;
-  --line: #143c40;
-  --line-strong: #698183;
-  --text: #cde7ea;
-  --dim: #90b7bb;
-  --faint: #759b9f;
-  --busy: #5ea7e3;
-  --waiting: #c69b45;
-  --idle: #759b9f;
-  --accent: #6eb170;
-  --danger: #e4878e;
+  --bg: #071a20;
+  --panel: #10242a;
+  --panel-2: #1a2d34;
+  --line: #173b45;
+  --line-strong: #6a8087;
+  --text: #cee6ee;
+  --dim: #91b5c1;
+  --faint: #779aa5;
+  --busy: #5da7e2;
+  --waiting: #c19c43;
+  --idle: #779aa5;
+  --accent: #6db070;
+  --danger: #e4887e;
   --focus: #4c96d0;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   color-scheme: dark;
@@ -293,10 +333,10 @@
   --dim: #594f33;
   --faint: #6e6447;
   --busy: #015e96;
-  --waiting: #755405;
+  --waiting: #725603;
   --idle: #6e6447;
   --accent: #04691a;
-  --danger: #a03244;
+  --danger: #a1342f;
   --focus: #046ba9;
   --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
   color-scheme: light;
@@ -313,10 +353,10 @@
     --dim: #594f33;
     --faint: #6e6447;
     --busy: #015e96;
-    --waiting: #755405;
+    --waiting: #725603;
     --idle: #6e6447;
     --accent: #04691a;
-    --danger: #a03244;
+    --danger: #a1342f;
     --focus: #046ba9;
     --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
     color-scheme: light;
@@ -324,19 +364,19 @@
 }
 
 :root[data-scheme='solar'][data-theme='dark'] {
-  --bg: #051b1d;
-  --panel: #0f2427;
-  --panel-2: #182e31;
-  --line: #143c40;
-  --line-strong: #698183;
-  --text: #cde7ea;
-  --dim: #90b7bb;
-  --faint: #759b9f;
-  --busy: #5ea7e3;
-  --waiting: #c69b45;
-  --idle: #759b9f;
-  --accent: #6eb170;
-  --danger: #e4878e;
+  --bg: #071a20;
+  --panel: #10242a;
+  --panel-2: #1a2d34;
+  --line: #173b45;
+  --line-strong: #6a8087;
+  --text: #cee6ee;
+  --dim: #91b5c1;
+  --faint: #779aa5;
+  --busy: #5da7e2;
+  --waiting: #c19c43;
+  --idle: #779aa5;
+  --accent: #6db070;
+  --danger: #e4887e;
   --focus: #4c96d0;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   color-scheme: dark;
@@ -501,6 +541,263 @@
   --accent: #64b07a;
   --danger: #df879b;
   --focus: #6f8ed3;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---- One ---- */
+/* Cool blue-grey, after Atom's One Dark and One Light, measured from the syntax themes'
+  own `colors.less`: One Dark's background hsl(220,13%,18%) is OKLCH hue 264, its blue
+  hsl(207,82%,66%) 245, green 133, yellow 82, red 17; One Light's blue is 263, green
+  143, orange 76, red 28 — so each role takes the midpoint. The greys sit a little off
+  the measured hue and well above the measured chroma (~0.016), because at One Dark's
+  true grey the scheme was 0.015 from Nordic, and two schemes that close are one scheme
+  with two names (FR-UI-8). The light half stays near One Light's near-white. */
+:root[data-scheme='one'] {
+  --bg: #021731;
+  --panel: #09213c;
+  --panel-2: #132b47;
+  --line: #25374c;
+  --line-strong: #637e9f;
+  --text: #cee4ff;
+  --dim: #87b2e7;
+  --faint: #6d97ca;
+  --busy: #69a5e2;
+  --waiting: #c69a4b;
+  --idle: #6d97ca;
+  --accent: #7bae6a;
+  --danger: #e18885;
+  --focus: #5793cf;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='one'][data-theme='light'] {
+  --bg: #e2f4f8;
+  --panel: #f6fdff;
+  --panel-2: #d8eaee;
+  --line: #badfe6;
+  --line-strong: #6e7e81;
+  --text: #213032;
+  --dim: #3c5458;
+  --faint: #51696e;
+  --busy: #015ca0;
+  --waiting: #785400;
+  --idle: #51696e;
+  --accent: #286803;
+  --danger: #9f3639;
+  --focus: #0c69b3;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='one']:not([data-theme]) {
+    --bg: #e2f4f8;
+    --panel: #f6fdff;
+    --panel-2: #d8eaee;
+    --line: #badfe6;
+    --line-strong: #6e7e81;
+    --text: #213032;
+    --dim: #3c5458;
+    --faint: #51696e;
+    --busy: #015ca0;
+    --waiting: #785400;
+    --idle: #51696e;
+    --accent: #286803;
+    --danger: #9f3639;
+    --focus: #0c69b3;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='one'][data-theme='dark'] {
+  --bg: #021731;
+  --panel: #09213c;
+  --panel-2: #132b47;
+  --line: #25374c;
+  --line-strong: #637e9f;
+  --text: #cee4ff;
+  --dim: #87b2e7;
+  --faint: #6d97ca;
+  --busy: #69a5e2;
+  --waiting: #c69a4b;
+  --idle: #6d97ca;
+  --accent: #7bae6a;
+  --danger: #e18885;
+  --focus: #5793cf;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---- Dracula ---- */
+/* Purple-black with a violet accent, after Dracula, measured from the published spec:
+  background #282a36 is OKLCH hue 278, purple #bd93f9 302, green #50fa7b 148, red
+  #ff5555 24. The purple is the whole identity, so it carries `busy`. Dracula's yellow
+  #f1fa8c is 113, which reads as the same colour as the green beside it, and its orange
+  #ffb86c is 67, which reads as the red; `waiting` takes the hue between them. The
+  surfaces carry more purple than #282a36 itself: at its true chroma (~0.022) the scheme
+  was 0.012 from Mauve. The light half is Alucard's warm near-white. */
+:root[data-scheme='dracula'] {
+  --bg: #121332;
+  --panel: #1a1c3c;
+  --panel-2: #232647;
+  --line: #30334c;
+  --line-strong: #72789f;
+  --text: #dadffe;
+  --dim: #a1aae8;
+  --faint: #878fcb;
+  --busy: #b18fe4;
+  --waiting: #b79e34;
+  --idle: #878fcb;
+  --accent: #60b06d;
+  --danger: #e8837d;
+  --focus: #a07ed1;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='dracula'][data-theme='light'] {
+  --bg: #f2f0ea;
+  --panel: #fdfcf6;
+  --panel-2: #e8e6e0;
+  --line: #dbd8cc;
+  --line-strong: #7c7a75;
+  --text: #2e2d29;
+  --dim: #514f48;
+  --faint: #66645d;
+  --busy: #6f44a4;
+  --waiting: #6b5900;
+  --idle: #66645d;
+  --accent: #036927;
+  --danger: #a33133;
+  --focus: #7c51b2;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='dracula']:not([data-theme]) {
+    --bg: #f2f0ea;
+    --panel: #fdfcf6;
+    --panel-2: #e8e6e0;
+    --line: #dbd8cc;
+    --line-strong: #7c7a75;
+    --text: #2e2d29;
+    --dim: #514f48;
+    --faint: #66645d;
+    --busy: #6f44a4;
+    --waiting: #6b5900;
+    --idle: #66645d;
+    --accent: #036927;
+    --danger: #a33133;
+    --focus: #7c51b2;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='dracula'][data-theme='dark'] {
+  --bg: #121332;
+  --panel: #1a1c3c;
+  --panel-2: #232647;
+  --line: #30334c;
+  --line-strong: #72789f;
+  --text: #dadffe;
+  --dim: #a1aae8;
+  --faint: #878fcb;
+  --busy: #b18fe4;
+  --waiting: #b79e34;
+  --idle: #878fcb;
+  --accent: #60b06d;
+  --danger: #e8837d;
+  --focus: #a07ed1;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+/* ---- Monokai ---- */
+/* Olive-black with lime and magenta, after Monokai, measured from monokai.vim:
+  background #272822 is OKLCH hue 115, purple #ae81ff 298, orange #fd971f 62, green
+  #a6e22e 127, magenta #f92672 7. The lime is `accent`, the magenta `danger`, the orange
+  `waiting`; `busy` takes the violet so the working colour is never confused with the
+  alert. Monokai never had a light half, so this one is a warm, faintly green off-white
+  derived to sit apart from Solar's cream. */
+:root[data-scheme='monokai'] {
+  --bg: #171812;
+  --panel: #20211b;
+  --panel-2: #2a2b24;
+  --line: #353729;
+  --line-strong: #7c7d75;
+  --text: #e1e3da;
+  --dim: #aeb1a4;
+  --faint: #94968a;
+  --busy: #ae94e6;
+  --waiting: #d9914e;
+  --idle: #94968a;
+  --accent: #8aac56;
+  --danger: #e58599;
+  --focus: #9c82d3;
+  --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+
+:root[data-scheme='monokai'][data-theme='light'] {
+  --bg: #eef2e4;
+  --panel: #fafeef;
+  --panel-2: #e4e8da;
+  --line: #d4dcbf;
+  --line-strong: #797c6f;
+  --text: #2b2e23;
+  --dim: #4c513f;
+  --faint: #616754;
+  --busy: #6b46a7;
+  --waiting: #864b02;
+  --idle: #616754;
+  --accent: #466301;
+  --danger: #a13051;
+  --focus: #7753b5;
+  --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: light) {
+  :root[data-scheme='monokai']:not([data-theme]) {
+    --bg: #eef2e4;
+    --panel: #fafeef;
+    --panel-2: #e4e8da;
+    --line: #d4dcbf;
+    --line-strong: #797c6f;
+    --text: #2b2e23;
+    --dim: #4c513f;
+    --faint: #616754;
+    --busy: #6b46a7;
+    --waiting: #864b02;
+    --idle: #616754;
+    --accent: #466301;
+    --danger: #a13051;
+    --focus: #7753b5;
+    --shadow: 0 10px 30px rgb(16 24 40 / 0.12);
+    color-scheme: light;
+  }
+}
+
+:root[data-scheme='monokai'][data-theme='dark'] {
+  --bg: #171812;
+  --panel: #20211b;
+  --panel-2: #2a2b24;
+  --line: #353729;
+  --line-strong: #7c7d75;
+  --text: #e1e3da;
+  --dim: #aeb1a4;
+  --faint: #94968a;
+  --busy: #ae94e6;
+  --waiting: #d9914e;
+  --idle: #94968a;
+  --accent: #8aac56;
+  --danger: #e58599;
+  --focus: #9c82d3;
   --shadow: 0 10px 30px rgb(0 0 0 / 0.45);
   color-scheme: dark;
 }

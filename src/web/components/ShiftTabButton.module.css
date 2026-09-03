@@ -68,6 +68,13 @@
   max-width: 12ch;
 }
 
+/* The honest blank: quieter than a mode, so it does not read as one. */
+.unreported {
+  color: var(--faint);
+  font-style: italic;
+  white-space: nowrap;
+}
+
 .compact {
   min-height: 36px;
   padding: 5px 10px;

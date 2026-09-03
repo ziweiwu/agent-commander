@@ -112,7 +112,10 @@ async function appAt(
   }))
   const { App, FleetRoute } = await import('../../src/web/components/App.tsx')
   const { useStore } = await import('../../src/web/store/store.ts')
-  useStore.setState(state)
+  // A fresh module, so `resetStore` above did not reach it: the frame has to
+  // be marked as arrived here, or the fleet is outlines rather than cards
+  // (INV-11's first-frame rule).
+  useStore.setState({ fleetAt: Date.now(), ...state })
   render(
     <MemoryRouter initialEntries={[url]}>
       <Routes>

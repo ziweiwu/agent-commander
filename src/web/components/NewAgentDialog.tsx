@@ -92,20 +92,29 @@ export function NewAgentDialog() {
   // as the element to restore focus to, not the input we are about to focus.
   useModalChrome(rootRef, open)
 
+  // Directories already in use are the likeliest places to want another agent.
+  const suggestions = [...new Set([...readList(RECENT_KEY), ...agents.map((a) => a.cwd)])].slice(0, 8)
+  /*
+   * A first run has nothing to suggest: no recent folders, no agents whose
+   * folders could be reused, no saved default. The form was then a bare text
+   * field asking for a path, which is the worst possible first question. So
+   * it opens on the folder browser instead, at home. The field stays empty:
+   * picking a folder fills it, and typing a path still works.
+   */
+  const firstRun = suggestions.length === 0 && loadDefaultDir() === ''
+
   useEffect(() => {
     if (!open) return
     if (!env) void loadEnv()
     setError('')
-    setBrowsing(false)
+    setBrowsing(firstRun)
     setDir((current) => current || loadDefaultDir())
     dirRef.current?.focus()
-  }, [open, env])
+  }, [open, env, firstRun])
 
   if (!open) return null
 
   const noTmux = env?.tmux === false
-  // Directories already in use are the likeliest places to want another agent.
-  const suggestions = [...new Set([...readList(RECENT_KEY), ...agents.map((a) => a.cwd)])].slice(0, 8)
 
   const close = () => {
     setBusy(false)

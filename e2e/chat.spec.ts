@@ -49,8 +49,12 @@ test.describe('sending a message', () => {
     await expect(said(page, text)).toHaveCount(1)
   })
 
-  test('a double-tapped quick prompt sends one message', async ({ page }) => {
+  test('a quick reply picked twice inside a second sends one message', async ({ page }) => {
     await openAgent(page, AGENT.idle)
+    // The replies are behind one menu, which closes on a pick — so the reflex
+    // this guards against is reopen-and-pick, not a second tap in place.
+    const menu = page.getByTestId('quick-menu')
+    await menu.click()
     const chip = page.getByTestId('quick-prompt').first()
     // The chip's visible text carries a ➤ that the message does not; the
     // prompt itself is the rest of it.
@@ -70,7 +74,8 @@ test.describe('sending a message', () => {
     // is a one-second window on the chip itself.
     await chip.click()
     await page.waitForTimeout(100)
-    await chip.click()
+    await menu.click()
+    await page.getByTestId('quick-prompt').first().click()
 
     await page.waitForTimeout(3_000)
     expect((await said(page, label).count()) - before).toBe(1)
@@ -99,7 +104,14 @@ test.describe('sending a message', () => {
     // The pane has to be a scroller in its own right rather than growing the
     // page: on a phone that is the difference between a readable conversation
     // and one the composer has pushed off the bottom.
-    const overflowing = await scroll.evaluate((el) => el.scrollHeight > el.clientHeight)
+    // Past the pin slack, not merely past the box: within ~60px of the end the
+    // app still counts the reader as at the end, so a conversation that
+    // overflows by ten pixels has nothing to jump back to.
+    const PIN_SLACK = 60
+    const overflowing = await scroll.evaluate(
+      (el, slack) => el.scrollHeight - el.clientHeight > slack,
+      PIN_SLACK,
+    )
     if (overflowing) {
       await scroll.evaluate((el) => el.scrollTo({ top: 0 }))
       await expect(page.getByTestId('jump-to-latest')).toBeVisible()

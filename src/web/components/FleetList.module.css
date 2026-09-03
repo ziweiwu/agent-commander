@@ -45,7 +45,8 @@
   justify-content: center;
 }
 
-@media (max-width: 520px) {
+/* Measured as needed below 520px; applied at the phone layout's one cut. */
+@media (max-width: 560px) {
   .actions {
     flex-direction: column;
   }
@@ -98,6 +99,41 @@
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 520px), 1fr));
 }
 
+/*
+ * INV-11 before the first frame: outlines where the cards will be, and the
+ * word "connecting" — never the confirmed-empty copy, which is a claim the
+ * server has not yet made. Muted the same way the stale list is, for the same
+ * reason: it is not a reading.
+ */
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.loadingLabel {
+  margin: 0 2px 4px;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+.skeleton {
+  height: 84px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel-2);
+  opacity: 0.55;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
 .empty {
   color: var(--dim);
   overflow-wrap: anywhere;
@@ -116,6 +152,33 @@
   margin: 0;
   overflow-wrap: anywhere;
   font-size: var(--text-base);
+}
+/* The two ways in, side by side: the command and the button. */
+.waysIn {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 14px;
+  margin-top: 16px;
+}
+.command {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-md);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  user-select: all;
+}
+.or {
+  font-size: var(--text-sm);
+  color: var(--faint);
+}
+.emptyHelp {
+  margin: 18px 0 0;
+  font-size: var(--text-sm);
 }
 
 

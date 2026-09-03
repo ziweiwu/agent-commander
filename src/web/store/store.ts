@@ -8,6 +8,7 @@
  */
 import { create } from 'zustand'
 import type {
+  FleetTree,
   Agent,
   Frame,
   NewAgentResponse,
@@ -54,6 +55,13 @@ export interface AppState {
   /* server-driven */
   agents: Agent[]
   /**
+   * The delegation graph, as last read by whichever holder polls it — the
+   * fleet list, or the detail view on a phone while the list is unmounted.
+   * The tag travels with it so a hand-over costs a 304, not a body.
+   */
+  trees: FleetTree['trees']
+  treesEtag: string | null
+  /**
    * When `agents` last arrived from the server.
    *
    * INV-11: while the socket is down the cards still hold the last values, and
@@ -75,6 +83,11 @@ export interface AppState {
 
   fleet: FleetState
   notify: boolean
+  /**
+   * The one-time suggestion to turn notifications on, raised only after this
+   * page watched an agent become blocked while they were off (INV-14).
+   */
+  notifyNudge: boolean
   theme: Theme
   scheme: Scheme
   lang: Lang
@@ -111,6 +124,8 @@ export interface AppState {
 
   /* actions */
   setNotify: (notify: boolean) => void
+  setNotifyNudge: (nudge: boolean) => void
+  setTrees: (trees: FleetTree['trees'], etag: string | null) => void
   setTheme: (theme: Theme) => void
   setScheme: (scheme: Scheme) => void
   setLang: (lang: Lang) => void
@@ -204,6 +219,8 @@ let toastTimer: number | undefined
 
 export const useStore = create<AppState>()((set, get) => ({
   agents: [],
+  trees: [],
+  treesEtag: null,
   fleetAt: null,
   limits: null,
   env: null,
@@ -225,6 +242,7 @@ export const useStore = create<AppState>()((set, get) => ({
   // to on a reload with no visible cause.
   fleet: { query: '', filter: loadFilter(), sort: loadSort(), dir: loadDir() },
   notify: loadNotify() === 'on',
+  notifyNudge: false,
   theme: loadTheme(),
   scheme: loadScheme(),
   lang: loadLang(),
@@ -240,9 +258,12 @@ export const useStore = create<AppState>()((set, get) => ({
   exited: [],
   expectSession: null,
 
+  setNotifyNudge: (notifyNudge) => set({ notifyNudge }),
+  setTrees: (trees, treesEtag) => set({ trees, treesEtag }),
   setNotify: (notify) => {
     saveNotify(notify ? 'on' : 'off')
-    set({ notify })
+    // Turning it on answers the nudge, wherever the answer came from.
+    set({ notify, notifyNudge: notify ? false : get().notifyNudge })
   },
 
   setTheme: (theme) => {

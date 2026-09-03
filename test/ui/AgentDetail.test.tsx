@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import { AgentDetail } from '../../src/web/components/AgentDetail.tsx'
+import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -18,6 +19,64 @@ vi.mock('../../src/web/store/transport.ts', () => ({
 const noop = () => {}
 
 beforeEach(resetStore)
+
+/*
+ * The status line under the tabs: the session's mode, model and delegates on
+ * the screen where the work is read, not only on the card that is glanced at.
+ */
+describe('the status line', () => {
+  const open = (over: Parameters<typeof agent>[0]) =>
+    renderApp(
+      <AgentDetail agent={agent(over)} tab="chat" sheet={false} onTab={noop} onClose={noop} />,
+    )
+
+  it('names the mode the session recorded, and the model', () => {
+    open({ sessionId: 'a', permissionMode: 'plan', model: 'claude-opus-5' })
+    expect(screen.getByTestId('detail-mode').textContent).toMatch(/plan/i)
+    expect(screen.getByTestId('detail-mode').dataset.reported).toBe('true')
+    expect(screen.getByTestId('detail-model').textContent).toContain('opus')
+  })
+
+  // INV-11: a session that has not finished a turn has written no mode down,
+  // and that is said rather than filled with "default".
+  it('says the mode is not reported yet rather than guessing one', () => {
+    open({ sessionId: 'a', permissionMode: undefined, model: undefined })
+    expect(screen.getByTestId('detail-mode').textContent).toMatch(/not reported/i)
+    expect(screen.getByTestId('detail-mode').dataset.reported).toBe('false')
+    expect(screen.queryByTestId('detail-model')).toBeNull()
+  })
+
+  it('reads the delegates from the graph the fleet polled', () => {
+    useStore.setState({
+      trees: [
+        {
+          sessionId: 'a',
+          children: [
+            {
+              agentId: 'x',
+              agentType: 'Explore',
+              description: 'look',
+              depth: 1,
+              lastWriteAt: Date.now() - 5_000,
+              bytes: 1,
+              state: 'quiet',
+              children: [],
+            },
+          ],
+        },
+      ],
+    })
+    open({ sessionId: 'a', status: 'busy', delegating: true })
+    const line = screen.getByTestId('detail-status-line')
+    expect(line.querySelector('[data-testid="agent-delegates"]')?.getAttribute('data-claim')).toBe('some')
+    expect(line.textContent).toContain('1 quiet')
+  })
+
+  it('claims nothing about delegates while the graph has not arrived', () => {
+    open({ sessionId: 'a', status: 'busy' })
+    expect(screen.queryByTestId('agent-delegates')).toBeNull()
+  })
+})
 
 describe('AgentDetail', () => {
   it('names the agent and its status', () => {

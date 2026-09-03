@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { dayMark } from '../lib/format.ts'
 import { formatDay, translate } from '../lib/i18n.ts'
@@ -36,6 +37,10 @@ const OFFLINE_HINT_ID = 'composer-offline-hint'
 const KEY_HINT_ID = 'composer-key-hint'
 /** Named so the disclosure beside Send can say what it opens. */
 const STRIP_ID = 'composer-strip'
+/** How close to the viewport's edge a floating list may come. */
+const VIEWPORT_EDGE_PX = 8
+/** The gap between the Replies chip and the list that opens above it. */
+const REPLIES_GAP_PX = 6
 
 /**
  * The replies that get typed over and over: unblock it, approve it, make it
@@ -75,6 +80,75 @@ export function Chat({ agent }: { agent: Agent }) {
   const short = useIsShort()
   const [stripOpen, setStripOpen] = useState(false)
   const showStrip = !short || stripOpen
+  /*
+   * The quick replies are one menu rather than a row of five chips. As a row
+   * they overflowed the strip at every width the detail panel actually has —
+   * measured at 1280px: 1145px of chips in a 776px strip, two of five out of
+   * sight — and a shortcut nobody can see is not a shortcut. One press more
+   * for a frequent action is the trade; the chips' own guard against a
+   * double tap survives inside the menu.
+   */
+  const [repliesOpen, setRepliesOpen] = useState(false)
+  const repliesRef = useRef<HTMLDivElement>(null)
+  const repliesListRef = useRef<HTMLDivElement>(null)
+  /*
+   * Where the list goes, in viewport pixels. The strip is a horizontal
+   * scroller, and a scroller clips on both axes, so a list positioned inside
+   * it was drawn under the conversation and could not be reached. It is
+   * portalled to the body instead and pinned above the chip that opened it.
+   */
+  const [repliesAt, setRepliesAt] = useState<{ left: number; bottom: number } | null>(null)
+  const toggleReplies = (): void => {
+    if (repliesOpen) {
+      setRepliesOpen(false)
+      return
+    }
+    const rect = repliesRef.current?.getBoundingClientRect()
+    if (rect) {
+      setRepliesAt({ left: rect.left, bottom: window.innerHeight - rect.top + REPLIES_GAP_PX })
+    }
+    setRepliesOpen(true)
+  }
+  /*
+   * Keep the list on screen. It is pinned to the chip's left edge, and the
+   * chip sits at the right end of the strip, so at a desktop width the list
+   * ran 106px past the viewport and clipped its last two replies. Measured
+   * once it has rendered, and shifted left by whatever does not fit.
+   */
+  useLayoutEffect(() => {
+    if (!repliesOpen) return
+    const list = repliesListRef.current
+    if (!list) return
+    const { left, width } = list.getBoundingClientRect()
+    const overshoot = left + width - (window.innerWidth - VIEWPORT_EDGE_PX)
+    if (overshoot > 0) {
+      setRepliesAt((at) => (at ? { ...at, left: Math.max(VIEWPORT_EDGE_PX, at.left - overshoot) } : at))
+    }
+    /*
+     * Focus moves into the list, as a menu's does. Without this a click left
+     * focus on the chip, and the list's own Escape handler — which stops the
+     * key reaching the app's "close the panel" handler — never saw the key,
+     * because the list is portalled and the chip is not inside it. Escape
+     * then closed the whole agent panel, menu and all.
+     */
+    list.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+  }, [repliesOpen])
+
+  /** Close the list and hand focus back to the chip that opened it. */
+  const closeReplies = (): void => {
+    setRepliesOpen(false)
+    repliesRef.current?.querySelector<HTMLElement>('[data-testid="quick-menu"]')?.focus()
+  }
+  useEffect(() => {
+    if (!repliesOpen) return
+    const away = (press: MouseEvent): void => {
+      const target = press.target as Node
+      if (repliesRef.current?.contains(target) || repliesListRef.current?.contains(target)) return
+      setRepliesOpen(false)
+    }
+    document.addEventListener('mousedown', away)
+    return () => document.removeEventListener('mousedown', away)
+  }, [repliesOpen])
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
   const events = useStore((s) => s.events)
@@ -223,6 +297,22 @@ export function Chat({ agent }: { agent: Agent }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages.length, busy, pinned])
+
+  /*
+   * Stay pinned when the box itself changes height, not only when a message
+   * lands. An on-screen keyboard takes half the screen from this scroller,
+   * and without this the last message — the one being replied to — went
+   * under the composer on every keyboard open.
+   */
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(() => {
+      if (pinned) el.scrollTop = el.scrollHeight
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [pinned])
 
   /*
    * Opening an agent should let you reply without another click — but not on a
@@ -406,34 +496,83 @@ export function Chat({ agent }: { agent: Agent }) {
           <ChatControls agent={agent} />
 
 
-          <div className={styles.quick} role="group" aria-label={t('quickPromptsLabel')}>
-            {QUICK_PROMPTS.map((key) => {
-              const text = translate(promptLang, key)
-              return (
-                <Chip
-                  key={key}
-                  className={styles.quickChip}
-                  data-testid="quick-prompt"
-                  // Spelt out because the chip reads as something that fills the
-                  // box in; it sends.
-                  title={t('quickPromptSend', { text })}
-                  aria-label={t('quickPromptSend', { text })}
-                  disabled={!online}
-                  aria-describedby={online ? undefined : OFFLINE_HINT_ID}
-                  onClick={() => sendQuick(text)}
-                >
-                  {/* The chip shape is used elsewhere in the app to mean "fill
-                      a field in, safe to reconsider". This one commits, and on
-                      touch there is no hover to reveal the title that says so,
-                      so the glyph carries it. Hidden from the a11y tree — the
-                      accessible name already spells it out. */}
-                  <span aria-hidden="true" className={styles.quickGlyph}>
-                    ➤
-                  </span>
-                  {text}
-                </Chip>
-              )
-            })}
+          <div
+            className={styles.quick}
+            ref={repliesRef}
+            onKeyDown={(e) => {
+              // The chip's own Escape, for the moment between the click and
+              // focus landing in the list: the list is the innermost thing
+              // Escape can dismiss, and it must not take the panel with it.
+              if (e.key === 'Escape' && repliesOpen) {
+                e.stopPropagation()
+                closeReplies()
+              }
+            }}
+          >
+            <Chip
+              className={styles.quickChip}
+              data-testid="quick-menu"
+              aria-haspopup="menu"
+              aria-expanded={repliesOpen}
+              aria-controls="quick-replies"
+              title={t('quickPromptsLabel')}
+              disabled={!online}
+              aria-describedby={online ? undefined : OFFLINE_HINT_ID}
+              onClick={toggleReplies}
+            >
+              {t('quickMenu')}
+              <span aria-hidden="true" className={styles.quickGlyph}>
+                ▾
+              </span>
+            </Chip>
+            {repliesOpen &&
+              createPortal(
+              <div
+                id="quick-replies"
+                ref={repliesListRef}
+                className={styles.quickList}
+                style={repliesAt ?? undefined}
+                role="menu"
+                aria-label={t('quickPromptsLabel')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    // The menu is the innermost thing Escape can dismiss; it
+                    // must not close the whole agent panel with it.
+                    e.stopPropagation()
+                    closeReplies()
+                  }
+                }}
+              >
+                {QUICK_PROMPTS.map((key) => {
+                  const text = translate(promptLang, key)
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      role="menuitem"
+                      className={styles.quickItem}
+                      data-testid="quick-prompt"
+                      // Spelt out because an item reads as something that
+                      // fills the box in; it sends.
+                      title={t('quickPromptSend', { text })}
+                      aria-label={t('quickPromptSend', { text })}
+                      onClick={() => {
+                        setRepliesOpen(false)
+                        sendQuick(text)
+                      }}
+                    >
+                      {/* The glyph says "this commits". Hidden from the a11y
+                          tree — the accessible name already spells it out. */}
+                      <span aria-hidden="true" className={styles.quickGlyph}>
+                        ➤
+                      </span>
+                      {text}
+                    </button>
+                  )
+                })}
+              </div>,
+              document.body,
+            )}
           </div>
         </div>
       )}
@@ -448,6 +587,11 @@ export function Chat({ agent }: { agent: Agent }) {
             rows={1}
             value={draft}
             disabled={!attachable}
+            // The key a phone keyboard draws in the corner: Enter sends here,
+            // so the key says so. Shift+Enter for a newline needs a hardware
+            // keyboard; on a phone the composer grows by pasting or by the
+            // agent, not by paragraphs.
+            enterKeyHint="send"
             /*
              * Still typeable with the socket down. Drafting is not sending, and
              * a disabled box would throw away the half-written reply this whole

@@ -125,6 +125,26 @@ const MOCK_SERVER: PlaywrightTestConfig['webServer'] = {
   stderr: 'pipe',
 }
 
+/**
+ * The same server with nothing in it, on the next port down.
+ *
+ * The confirmed-empty fleet — the first-launch screen — cannot be reached on
+ * the fixture server, which always has fourteen agents, and cannot be faked
+ * by intercepting the socket, which produces the *loading* screen instead
+ * (INV-11 separates the two on purpose). So `empty.spec.ts` points at this
+ * one, and only at this one.
+ */
+const EMPTY_PORT = Number(process.env.E2E_EMPTY_PORT ?? 4598)
+export const EMPTY_URL = `http://127.0.0.1:${EMPTY_PORT}/`
+const EMPTY_SERVER: PlaywrightTestConfig['webServer'] = {
+  command: `rust/target/release/agent-commander --mock-empty --port ${EMPTY_PORT}`,
+  url: EMPTY_URL,
+  reuseExistingServer: !process.env.CI,
+  timeout: 120_000,
+  stdout: 'ignore',
+  stderr: 'pipe',
+}
+
 export default defineConfig({
   testDir: './e2e',
   // The specs share one server, and several of them send messages into the
@@ -147,5 +167,6 @@ export default defineConfig({
 
   projects: PROJECTS,
 
-  webServer: MOCK_SERVER,
+  // The fixture server builds first; the empty one reuses its binary.
+  webServer: [MOCK_SERVER, EMPTY_SERVER],
 })

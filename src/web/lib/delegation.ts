@@ -100,3 +100,35 @@ export function isStallCandidate(agent: Agent, claim: DelegationClaim): boolean 
 export function claimFor(sessionId: string, trees: readonly AgentTree[]): DelegationClaim {
   return claimOf(trees.find((tree) => tree.sessionId === sessionId))
 }
+
+/** Whether this delegate, or anything under it, is still moving. */
+export function hasMoving(node: SubagentNode): boolean {
+  return node.state === 'active' || node.children.some(hasMoving)
+}
+
+/** Every node in a forest, counted deep. */
+function countDeep(nodes: readonly SubagentNode[]): number {
+  return nodes.reduce((n, node) => n + 1 + countDeep(node.children), 0)
+}
+
+/**
+ * The delegates worth drawing at rest, and how many wait behind a fold.
+ *
+ * A long session accumulates dozens of finished delegates, and a tree that
+ * lists every one buries the two still running under history. So while
+ * anything is moving, the tree shows the moving subtrees and folds the rest
+ * behind a count. While nothing is moving there is no "current" to prefer,
+ * and the whole tree is shown — hiding everything would be an empty tree
+ * standing in for a full one. The count is what keeps the fold honest
+ * (INV-13): the quiet delegates are still there, still quiet, and still
+ * never called done.
+ */
+export function splitByMoving(nodes: readonly SubagentNode[]): {
+  shown: readonly SubagentNode[]
+  folded: number
+} {
+  const moving = nodes.filter(hasMoving)
+  if (moving.length === 0) return { shown: nodes, folded: 0 }
+  const rest = nodes.filter((node) => !hasMoving(node))
+  return { shown: moving, folded: countDeep(rest) }
+}

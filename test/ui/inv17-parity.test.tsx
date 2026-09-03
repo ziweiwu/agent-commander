@@ -62,7 +62,7 @@ const ACTIONS = [
   'send-mode-queue',
   'send-mode-interrupt',
   'goal-toggle',
-  'quick-prompt',
+  'quick-menu',
   'shift-tab',
 ] as const
 

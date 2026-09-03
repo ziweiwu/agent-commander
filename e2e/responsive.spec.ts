@@ -44,7 +44,7 @@ const ACTIONS = [
   'send-mode-queue',
   'send-mode-interrupt',
   'goal-toggle',
-  'quick-prompt',
+  'quick-menu',
   'shift-tab',
 ]
 
@@ -89,8 +89,8 @@ test.describe('INV-17 every shape is the whole app', () => {
 
     const missing: string[] = []
     for (const id of ACTIONS) {
-      // `first()`: the quick replies are a row of chips sharing one id, and
-      // `clear-agent` is offered by both the settings row and the strip.
+      // `first()`: `fullscreen-toggle` is rendered once per layout, in the
+      // header on a desktop and in the tab row on a phone.
       const control = page.getByTestId(id).first()
       if (!(await control.isVisible().catch(() => false))) missing.push(id)
     }
@@ -113,7 +113,7 @@ test.describe('INV-17 every shape is the whole app', () => {
     await expect(page.getByTestId('composer-strip')).toBeHidden()
     await toggle.click()
     await expect(page.getByTestId('composer-strip')).toBeVisible()
-    for (const id of ['send-mode-queue', 'send-mode-interrupt', 'goal-toggle', 'quick-prompt']) {
+    for (const id of ['send-mode-queue', 'send-mode-interrupt', 'goal-toggle', 'quick-menu']) {
       await expect(page.getByTestId(id).first()).toBeVisible()
     }
     expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(1)

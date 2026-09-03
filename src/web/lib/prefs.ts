@@ -24,7 +24,16 @@ export type Theme = (typeof THEMES)[number]
  * the default and is written as the bare `:root`, so it sets no attribute at
  * all — which is also what makes a document with no attributes complete.
  */
-export const SCHEMES = ['graphite', 'nordic', 'solar', 'ember', 'mauve'] as const
+export const SCHEMES = [
+  'graphite',
+  'nordic',
+  'solar',
+  'ember',
+  'mauve',
+  'one',
+  'dracula',
+  'monokai',
+] as const
 export type Scheme = (typeof SCHEMES)[number]
 
 export const DEFAULT_SCHEME: Scheme = 'graphite'
@@ -125,6 +134,22 @@ export function loadNotify(): NotifyChoice {
 
 export function saveNotify(choice: NotifyChoice): void {
   write(NOTIFY_KEY, choice)
+}
+
+/*
+ * Whether the one-time nudge — "an agent just needed you, get notified next
+ * time?" — has been waved away. Per browser, like the preference it points
+ * at, and never asked again once it has: a nudge that keeps coming back is a
+ * nag, and this app makes exactly one unsolicited suggestion.
+ */
+const NUDGE_KEY = 'agent-commander.notify-nudge'
+
+export function loadNudgeDismissed(): boolean {
+  return read(NUDGE_KEY) === 'dismissed'
+}
+
+export function saveNudgeDismissed(): void {
+  write(NUDGE_KEY, 'dismissed')
 }
 
 function isSort(value: unknown): value is SortKey {

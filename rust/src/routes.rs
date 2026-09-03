@@ -920,6 +920,9 @@ async fn serve_static(app: &App, pathname: &str) -> Response {
     text(StatusCode::NOT_FOUND, "not found — run `npm run build:web` first")
 }
 
+/// What the document is served with: always revalidate, never pin a build.
+const DOCUMENT_CACHE: &str = "no-cache";
+
 /// Whether the document being served should say it is a mock fleet.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MockStamp {
@@ -945,21 +948,35 @@ async fn send_file(file: &Path, stamp: MockStamp) -> Option<Response> {
         return Some(
             (
                 StatusCode::OK,
-                [(header::CONTENT_TYPE, HeaderValue::from_static("text/html"))],
+                [
+                    (header::CONTENT_TYPE, HeaderValue::from_static("text/html")),
+                    (header::CACHE_CONTROL, HeaderValue::from_static(DOCUMENT_CACHE)),
+                ],
                 html,
             )
                 .into_response(),
         );
     }
 
-    Some(
-        (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, HeaderValue::from_static(mime_for(file)))],
-            bytes,
-        )
-            .into_response(),
+    let mime = mime_for(file);
+    let mut res = (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, HeaderValue::from_static(mime))],
+        bytes,
     )
+        .into_response();
+    /*
+     * The document must be revalidated on every load. Its bundle is content-
+     * hashed, so a stale `index.html` is the one thing that can pin a phone to
+     * an old build after a deploy — a reload fetched the same names, and the
+     * fix that was already live never arrived. The hashed assets themselves
+     * are safe to keep.
+     */
+    if mime.starts_with("text/html") {
+        res.headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static(DOCUMENT_CACHE));
+    }
+    Some(res)
 }
 
 /* -------------------------------------------------------------------------
@@ -2507,7 +2524,12 @@ fn fleet_for(
     if !opts.mock {
         return (live_fleet(pending), None);
     }
-    let (deps, source) = crate::mock::mock_deps(opts.mock_transitions);
+    let fleet = if opts.mock_empty {
+        crate::mock::Fleet::Empty
+    } else {
+        crate::mock::Fleet::Fixtures { transitions: opts.mock_transitions }
+    };
+    let (deps, source) = crate::mock::mock_deps(fleet);
     (deps, Some(source))
 }
 

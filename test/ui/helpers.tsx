@@ -15,6 +15,10 @@ export function resetStore(): void {
   document.documentElement.removeAttribute('data-scheme')
   useStore.setState({
     agents: [],
+    // A known state is one the server has spoken to: a frame has arrived, so
+    // an empty `agents` here is a confirmed-empty fleet. The first-frame tests
+    // set this back to null themselves (INV-11).
+    fleetAt: Date.now(),
     limits: null,
     env: null,
     mock: false,
@@ -27,6 +31,10 @@ export function resetStore(): void {
     theme: 'system',
     scheme: 'graphite',
     lang: 'en',
+    notify: false,
+    notifyNudge: false,
+    trees: [],
+    treesEtag: null,
     events: [],
     messages: [],
     pending: [],

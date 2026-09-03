@@ -160,7 +160,7 @@ test.describe('acting on a running agent', () => {
   test('INV-8 follows the agent to the session it is now running @once', async ({ page }) => {
     await openAgent(page, AGENT.clearable)
 
-    await (await controls(page)).getByTestId('clear-agent').click()
+    await strip(page).getByTestId('clear-agent').click()
     await page.getByTestId('confirm-accept').click()
 
     // A different id, and still on an agent rather than back at the fleet.
@@ -169,37 +169,20 @@ test.describe('acting on a running agent', () => {
     await expect(page.getByTestId('agent-detail')).toBeVisible()
   })
 
-  // There is no undo, so it asks — and a refused dialog must send nothing.
-  test('INV-8 sends no /clear when the confirmation is refused', async ({ page }) => {
-    await openAgent(page, AGENT.idle)
-
-    await (await controls(page)).getByTestId('clear-agent').click()
-    await page.getByTestId('confirm-cancel').click()
-
-    // The dialog is gone and nothing happened: same agent, same session.
-    await expect(page.getByTestId('confirm-dialog')).toHaveCount(0)
-    await expect(page).toHaveURL(new RegExp(AGENT.idle))
-  })
-
   /*
-   * Compaction runs for minutes, so nothing waits for it. The only honest thing
-   * to say when the button returns is that it was asked for (INV-11).
+   * The row keeps model and close only. Mode, goal, clear and compact were
+   * here too, and at a desktop width both copies were on screen: two Clear
+   * buttons for one action. The strip is the surface every layout keeps, so it
+   * is the one home (FR-CTL-12).
    */
-  test('INV-8 reports a compaction as requested rather than done', async ({ page }) => {
+  test('FR-CTL-12 the control row does not repeat what the strip owns', async ({ page }) => {
     await openAgent(page, AGENT.idle)
-
-    await (await controls(page)).getByTestId('compact-agent').click()
-
-    await expect(page.getByTestId('toast')).toContainText(/requested/i)
-  })
-
-  // Both type into the prompt, so both wait for idle exactly as Close does.
-  test('INV-8 offers neither clear nor compact to a busy agent', async ({ page }) => {
-    await openAgent(page, AGENT.busy)
     const row = await controls(page)
-
-    await expect(row.getByTestId('clear-agent')).toBeDisabled()
-    await expect(row.getByTestId('compact-agent')).toBeDisabled()
+    await expect(row.getByTestId('close-agent')).toBeVisible()
+    for (const id of ['shift-tab', 'model-select', 'goal-toggle', 'clear-agent', 'compact-agent']) {
+      await expect(row.getByTestId(id)).toHaveCount(0)
+      await expect(page.getByTestId(id)).toHaveCount(1)
+    }
   })
 
   test('INV-8 sets a goal and clears it again', async ({ page }) => {
@@ -240,18 +223,16 @@ test.describe('acting on a running agent', () => {
   })
 
   /**
-   * The composer strip's copy of the memory actions.
-   *
-   * They exist in the detail panel's row too, so both are on screen at once on
-   * a desktop and every selector here has to say which it means — the same
-   * scoping `shift-tab` above already needs.
+   * The composer strip, the one home of the memory actions. Still scoped by
+   * its test id, so a copy quietly returning to the row would not satisfy a
+   * selector that means this one.
    */
   const strip = (page: Page) => page.getByTestId('chat-controls')
 
   /*
-   * The whole reason these were duplicated. The panel's control row is above
-   * the tabs and is not rendered in full screen at all, which is exactly where
-   * a conversation gets long enough to want clearing.
+   * The reason the strip is the home. The panel's control row is above the
+   * tabs and is not rendered in full screen at all, which is exactly where a
+   * conversation gets long enough to want clearing.
    */
   test('INV-8 offers clear and compact beside the message box, in full screen too', async ({
     page,

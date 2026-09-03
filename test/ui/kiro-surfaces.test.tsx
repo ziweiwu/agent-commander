@@ -100,47 +100,41 @@ describe('the detail panel agrees with full screen', () => {
 })
 
 describe('controls that would type a Claude command are not offered', () => {
-  it('hides mode and model, and keeps close', () => {
+  it('keeps close, which needs no slash command', () => {
     resetStore()
     render(
       <MemoryRouter>
         <AgentControls agent={kiro({ status: 'idle' })} />
       </MemoryRouter>,
     )
-    expect(screen.queryByTestId('shift-tab')).toBeNull()
-    expect(screen.queryByTestId('model-select')).toBeNull()
-    // /clear and /compact are Claude Code commands too, so for another CLI
-    // they are not a disabled feature but a wrong one (INV-7).
-    expect(screen.queryByTestId('clear-agent')).toBeNull()
-    expect(screen.queryByTestId('compact-agent')).toBeNull()
     expect(screen.queryByTestId('close-agent')).not.toBeNull()
   })
 
-  it('offers all three for Claude', () => {
+  it('offers the model for Claude, in the composer strip', () => {
     resetStore()
     render(
       <MemoryRouter>
-        <AgentControls agent={agent({ sessionId: 'claude-1', status: 'idle', paneId: '%1' })} />
+        <ChatControls agent={agent({ sessionId: 'claude-1', status: 'idle', paneId: '%1' })} />
       </MemoryRouter>,
     )
-    expect(screen.queryByTestId('shift-tab')).not.toBeNull()
     expect(screen.queryByTestId('model-select')).not.toBeNull()
-    expect(screen.queryByTestId('clear-agent')).not.toBeNull()
-    expect(screen.queryByTestId('compact-agent')).not.toBeNull()
   })
 
   /*
-   * The composer strip carries its own copy of these, so it needs its own copy
-   * of the rule. Gating one surface and not its sibling is the exact shape of
-   * bug this file was written for.
+   * The composer strip is where mode, model, clear and compact live, so it
+   * carries the rule for them: /model, /clear and /compact are Claude Code
+   * commands, and for another CLI they are not a disabled feature but a wrong
+   * one (INV-7).
    */
-  it('hides them in the composer strip too', () => {
+  it('hides mode, model, clear and compact in the composer strip', () => {
     resetStore()
     render(
       <MemoryRouter>
         <ChatControls agent={kiro({ status: 'idle' })} />
       </MemoryRouter>,
     )
+    expect(screen.queryByTestId('shift-tab')).toBeNull()
+    expect(screen.queryByTestId('model-select')).toBeNull()
     expect(screen.queryByTestId('clear-agent')).toBeNull()
     expect(screen.queryByTestId('compact-agent')).toBeNull()
   })

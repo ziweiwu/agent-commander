@@ -112,15 +112,16 @@
  * The word next to the ⤢ in the tab row.
  *
  * It fits beside "Chat", "Attach" and the ⋯ disclosure on a 390px phone and
- * does not on a 360px one, where the row would push the layout sideways. Below
- * that it is hidden the accessible way rather than removed, so the button keeps
- * its name for a screen reader and only loses the word on screen — and the
- * terminal's own key bar carries a fully labelled Full screen button anyway.
+ * does not on a 360px one, where the row would push the layout sideways. On
+ * the phone layout it is hidden the accessible way rather than removed, so
+ * the button keeps its name for a screen reader and only loses the word on
+ * screen; the ⤢ glyph and its tooltip remain. Measured at 380px; applied at
+ * the phone layout's one cut.
  */
 .actionLabel {
   white-space: nowrap;
 }
-@media (max-width: 380px) {
+@media (max-width: 560px) {
   .actionLabel {
     position: absolute;
     width: 1px;
@@ -147,6 +148,53 @@
 .tab:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/*
+ * One line of the session's own facts under the tabs. Wraps rather than
+ * scrolls: nothing here is a control, so a second line costs a reader nothing
+ * and a sideways scroller would hide the delegates behind the mode.
+ */
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--line);
+  font-size: var(--text-sm);
+  color: var(--dim);
+  min-width: 0;
+}
+.fact {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+.fact em {
+  color: var(--faint);
+}
+.factLabel {
+  font-size: var(--text-xs);
+  color: var(--faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* The same question the card asks, in the same voice (INV-15). */
+.stall {
+  color: var(--waiting);
+}
+/*
+ * A landscape phone has ~380px of height and the conversation needs them:
+ * measured, this line took the conversation from 31% of the screen to 23%.
+ * Nothing on it is a control — the mode is on the strip's own button and the
+ * delegates are on the card — so it is the first thing to give way there.
+ */
+@media (max-height: 520px) and (pointer: coarse) {
+  .statusLine {
+    display: none;
+  }
 }
 
 .pane {
@@ -209,7 +257,9 @@
   display: inline-flex;
 }
 
-@media (max-width: 400px) {
+/* The ‹ chevron is still the way back. Measured as needed below 400px; applied
+   at the phone layout's one cut. */
+@media (max-width: 560px) {
   .sheet .backLabel {
     display: none;
   }

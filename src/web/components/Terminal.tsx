@@ -316,7 +316,6 @@ export interface TerminalProps {
 export function Terminal({ agent, onExit }: TerminalProps) {
   const t = useTranslate()
   const fullscreen = useStore((s) => s.fullscreen)
-  const setFullscreen = useStore((s) => s.setFullscreen)
   const exited = usePaneExited(agent)
   const { wrapRef, scaleRef, term, guarded } = usePaneTerm({ agent, onExit, fullscreen, exited })
 
@@ -382,28 +381,13 @@ export function Terminal({ agent, onExit }: TerminalProps) {
           </Button>
         )}
         {/*
-         * Full screen, offered where the cramped view is rather than only from
-         * the panel header. On a phone the terminal is the one view that cannot
-         * be made to fit, so the control that fixes it should not be a bare ⤢
-         * two rows above it. Hidden once full screen is on: the overlay carries
-         * its own way out, and a button that does nothing reads as broken.
-         *
-         * Hidden for a dead pane too, and for a sharper reason: full screen
-         * rebuilds the terminal in a different subtree, and no further frames
-         * are coming to repaint it. The button would trade the last thing the
-         * agent drew — the one part of this surface that says *why* it died —
-         * for a bigger empty box.
+         * No full-screen button here. There was one, on the reasoning that the
+         * cramped view is where the control belongs — and that made three ⤢
+         * buttons on one screen, with this one two rows below the tab row's.
+         * The tab row's is the one that survives on a phone, and the header's
+         * on a desktop; a third was a second answer to a question the reader
+         * had already been given (FR-ATT-7).
          */}
-        {!fullscreen && !exited && (
-          <Button
-            variant="compact"
-            data-testid="term-fullscreen"
-            title={t('expand')}
-            onClick={() => setFullscreen(true)}
-          >
-            ⤢ {t('expand')}
-          </Button>
-        )}
       </div>
       {!exited && <span className={styles.hint}>{t('termHint')}</span>}
     </div>

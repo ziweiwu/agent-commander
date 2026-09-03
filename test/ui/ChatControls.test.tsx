@@ -109,7 +109,10 @@ describe('shift+tab', () => {
     renderApp(<ChatControls agent={unreported} />)
 
     expect(screen.queryByTestId('shift-tab-mode')).toBeNull()
-    expect(screen.getByTestId('shift-tab').textContent).not.toMatch(/mode|unknown/i)
+    // Said as an absence, not filled with a guess: no "default", no "unknown"
+    // dressed as a mode. The button still says what it is a readout of.
+    expect(screen.getByTestId('shift-tab-unreported').textContent).toMatch(/not reported/i)
+    expect(screen.getByTestId('shift-tab').textContent).not.toMatch(/unknown|default/i)
   })
 
   /*

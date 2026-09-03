@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { DirListing } from '../../shared/types.ts'
 import { browseDirs } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './FolderBrowser.module.css'
 
@@ -18,6 +19,8 @@ export interface FolderBrowserProps {
  */
 export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
   const t = useTranslate()
+  // A long listing is capped at 40dvh and scrolls; the fade says so.
+  const [listRef, listEdge] = useOverflowEdge<HTMLDivElement>()
   const [listing, setListing] = useState<DirListing | null>(null)
   const [hidden, setHidden] = useState(false)
   const [error, setError] = useState('')
@@ -79,7 +82,7 @@ export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
       {error ? (
         <p className={styles.error}>{error}</p>
       ) : (
-        <div className={styles.list}>
+        <div className={styles.list} ref={listRef} data-overflow={listEdge}>
           {listing?.entries.length === 0 && <p className={styles.empty}>{t('browseEmpty')}</p>}
           {listing?.entries.map((entry) => (
             <button

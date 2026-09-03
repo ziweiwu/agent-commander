@@ -638,27 +638,33 @@ applied to the one control that never had a way to check itself: the key either
 reached the pane or the call failed loudly at tmux, and there is no third
 outcome for an observation to discover.
 
-**Two of these controls are on screen at once** — the composer strip and the
-detail panel's control row — which is why the button is one shared component
+**This control was on screen twice** — in the composer strip and in the detail
+panel's control row — which is why the button became one shared component
 rather than two. When it still displayed a mode, that display had to be held in
 the store: pressing one left the other reading the old mode two inches away
 until the enricher caught up, and an app that contradicts itself within one
 glance is worse than one that is briefly behind. Binding to nothing removed
 that whole class of problem along with the hold.
 
-**Four controls now sit in both places, and what is shared differs by control.**
-Mode, Goal, Clear and Compact all appear in the composer strip as well as in the
-detail panel's row, because that row is above the tabs, collapses behind `⋯`
-below 900px, and does not exist at all in full screen — the surface where a
-conversation gets long enough to want clearing. Shift+Tab is one shared
-*component*; Clear and Compact are one shared *hook*
-(`web/hooks/useContextActions.ts`), because their reasoning is a sequence rather
-than a widget: a `sendingRef` so a double click cannot discard the session the
-first click just created, a refusal to navigate on an `unverified` result, and
-`setExpectSession` **before** `navigate` so the route's "the agent ended while it
-was open" rule does not fire on an id the registry has not scanned yet. Two
-copies of that sequence would be two chances to get the order wrong, and only
-one of them would be under test.
+**Mode, Model, Goal, Clear and Compact now live in the composer strip and
+nowhere else.** They were in the detail panel's row as well, on the reasoning
+that the row is above the tabs, collapses behind `⋯` below 900px, and does not
+exist at all in full screen — the surface where a conversation gets long
+enough to want clearing. That reasoning was right about which surface survives
+and wrong about the conclusion: it argues for the strip being the one home,
+not for two homes, and at a plain desktop width both were visible — two Clear
+buttons for one action, on the app's central screen. Model followed the
+others a step later, for the same reason in reverse: left alone in the row, it
+was the one control about the next turn that a phone and a full screen could
+not see. The row keeps Close, which ends the session rather than steering it. Clear and Compact
+are still one *hook* (`web/hooks/useContextActions.ts`) with one caller,
+because their reasoning is a sequence rather than a widget: a `sendingRef` so
+a double click cannot discard the session the first click just created, a
+refusal to navigate on an `unverified` result, and `setExpectSession`
+**before** `navigate` so the route's "the agent ended while it was open" rule
+does not fire on an id the registry has not scanned yet.
+`test/ui/one-place.test.tsx` enumerates every control on the agent screen and
+fails on one drawn twice.
 
 One gap is accepted rather than fixed: under `@media (max-height: 420px)` the
 whole strip is hidden, so a landscape phone in full screen still cannot reach
@@ -867,6 +873,23 @@ rather than only by greying a button.
 - `test/ui/chat-offline.test.tsx` — the draft survives, nothing is sent, nothing
   is replayed on reconnect, and the explanation is reachable by keyboard
 
+**The first frame is not an empty fleet.** `agents` starts as `[]` before the
+socket has delivered anything, and the list rendered "No Claude Code sessions
+found" into that gap — the stale caption above guards every frame but the
+first, and the first is the one a phone over Tailscale spends seconds on. The
+gate is the frame, not the connection: between `onopen` and the first fleet
+message the socket is already open and still nothing is known. So the
+confirmed-empty copy renders only once a fleet frame has said zero, and until
+then the list is outlines and the word "connecting", with no count and no
+heading. `--mock-empty` exists so the confirmed-empty screen is a thing that
+can be looked at; the ordinary mock fleet always has fourteen agents.
+
+- `test/ui/stale-fleet.test.tsx` (the first-frame group) — nothing claims
+  emptiness while no frame has arrived, whether the socket is connecting or
+  already open; the empty copy appears only after a frame that said zero
+- `e2e/loading.spec.ts` — the same against the real bundle with the socket
+  intercepted so the frame never comes
+
 **A card's activity trail is measured or it is absent.** The two lengths a card
 draws — writing, then silent — come from `startedAt` and `lastActivityAt`, and
 the second field means two different things depending on where it came from: a
@@ -883,7 +906,10 @@ start time, so the tree draws a mark with nothing leading up to it.
   write; a write reported outside the session's life clamped rather than
   overflowing the row
 - `test/ui/fleet-delegates.test.tsx` — no trail for an agent whose CLI writes no
-  transcript, even when it reports a last activity
+  transcript, even when it reports a last activity, and none on a card that is
+  not working, where it would say nothing the timestamp does not
+- `test/ui/card-diet.test.tsx` — the token count's caveat is visible text in
+  the card's fold rather than a hover title, which a phone cannot show
 
 **A dead pane was a five-second toast.** With no pty to report an exit (INV-1),
 the only signal was a notice that expired while the terminal went on showing its
@@ -1059,6 +1085,28 @@ and marking it would imply a better one exists.
 - `e2e/delegates.spec.ts` — the same clauses against the real server and mock
   sidecars, plus depth-3 nesting and no sideways scroll at any width
 
+**One of the four claims is allowed off the face, and only on a card that is
+not working.** The line answers "is anything under this agent still moving",
+which is the question a *busy* card exists to answer, so there every claim is
+on the face. On an idle or waiting card the question is a different one, and
+"delegated nothing" on every idle card is a sentence read past forty times a
+day — so `none` moves into the card's fold there, still a sentence and still
+distinct from `unread`, which draws nothing anywhere. `some` and `unknown`
+stay on the face whatever the status: a count is worth a glance, and "cannot
+tell" is an admission this app does not get to bury (INV-11).
+
+- `test/ui/card-diet.test.tsx` — `none` on the face of a working card and in
+  the fold of an idle one; `test/ui/fleet-delegates.test.tsx` opens the fold
+  to read it
+
+**The same line is drawn under the agent's own tabs.** The card is glanced at;
+the detail is where the work is read, and "is the delegate still going" is a
+question asked from there. It is the one `DelegateLine`, fed from the graph in
+the store rather than a second poll: the fleet list holds the poll, and on a
+phone, where the sheet unmounts the list, a stand-in holds it instead — one
+holder at a time (INV-4). `test/ui/AgentDetail.test.tsx` reads the claims off
+the line and asserts nothing is claimed before the graph has arrived.
+
 ## INV-14 — A notification is a transition, not a state
 
 The tab title and the aria-live region describe standing state and may say
@@ -1084,15 +1132,34 @@ waiting:
 - **A visible tab never notifies.** The waiting group at the top of the screen
   is already the notification.
 
-Off by default. Enabling it is a click in settings, which is also the moment
-the browser's own permission prompt rides — the one gesture a browser accepts
-as intent rather than ambience.
+Off by default. Enabling it is a press on the bell in the header, which is also
+the moment the browser's own permission prompt rides — the one gesture a
+browser accepts as intent rather than ambience. The bell is its own control
+because the switch used to be a row inside the appearance menu, behind an icon
+that reads everywhere else as a theme toggle, and nothing on screen or in Help
+said it existed: the mechanism behind the app's headline promise was the one
+thing a reader had to find by curiosity.
+
+**The nudge is held to the same rule.** The app makes exactly one unsolicited
+suggestion — "an agent just needed you, get notified next time?" — and it is
+raised only for a block this page *watched* happen while the preference was
+off. Never on the first frame, however many agents are blocked in it; never
+again while the same block stands; never once waved away, which is remembered
+per browser; and never in a browser that could not honour a yes. A suggestion
+that fired on load would be the notification's own backlog failure wearing a
+banner.
 
 - `test/ui/notify.test.tsx` — the first frame is backlog; a watched transition
   notifies; a standing block does not repeat; unblocked-then-blocked is news
   again; tracking continues while disabled so enabling later dumps nothing; a
   visible tab stays silent; a revoked permission wins over the stored
-  preference
+  preference; and the nudge is silent on the first frame, asks once for a
+  watched block, and never once dismissed, already on, or unsupported
+- `test/ui/notify-button.test.tsx` — the bell is off by default and names what
+  a press does; the press carries the permission prompt; a refusal leaves it
+  off with the reason; a browser without the API gets a disabled bell that
+  says so; the settings menu no longer holds it; the banner turns it on or
+  remembers a refusal
 
 ## INV-15 — A silent family is a question, never a verdict
 
@@ -1196,7 +1263,8 @@ synchronously, for the reason the composer's is.
 - `test/ui/answer-card.test.tsx` — a labelled button per stated option, the
   answer sent as its number, one answer from a double click, no invented labels
   for a plan or a permission request, keys instead of digits for a multi-select,
-  and the card withheld unless status and transcript agree
+  the raw keys demoted below a labelled answer and primary where nothing was
+  labelled, and the card withheld unless status and transcript agree
 - `e2e/control.spec.ts` — INV-16 end to end against the mock fleet's blocked
   fixture, which carries a real `AskUserQuestion` payload
 - `mock::inv16_the_plan_and_permission_fixtures_name_no_option` and
@@ -1213,6 +1281,16 @@ composer is most of the screen. **Every action available in one shape is
 available in all three** — in the same place, or behind a disclosure that is
 itself on screen and labelled. What a smaller screen takes away is labelling,
 hints and decoration. It never takes away a capability.
+
+**Three layouts means two width cuts, and the stylesheets are held to that.**
+There were eleven width breakpoints between 900px and 380px, each hiding or
+shrinking one thing and each with a measured comment justifying it. The
+measurements were right; the accumulation was what a reader could not hold,
+and a breakpoint nobody can hold in their head is a fourth layout nobody
+declared. The desktop/narrow cut is 900px and the phone cut is 560px; the
+sub-560 decisions kept their measurements in their comments and moved to the
+phone cut, and the root element carries `data-layout` naming which of the
+three is on. `test/responsive.test.ts` fails on a third number.
 
 **Why this needs to be an invariant and not a habit.** The three layouts are
 one component tree under a few media queries, so losing a feature on a phone

@@ -29,6 +29,29 @@ describe('NewAgentDialog', () => {
     expect(screen.queryByTestId('new-agent-dialog')).toBeNull()
   })
 
+  /*
+   * A first run has nothing to suggest — no recent folders, no agents to
+   * borrow a folder from — and the form was then a bare text field asking for
+   * a path. It opens on the folder browser instead, at home.
+   */
+  it('opens the folder browser at home on a first run', () => {
+    useStore.setState({ newAgentOpen: true, env, agents: [] })
+    renderApp(<NewAgentDialog />)
+    expect(screen.getByTestId('new-agent-browse').getAttribute('aria-expanded')).toBe('true')
+    // The field is left for a typed path; the browser fills it on a pick.
+    expect((screen.getByTestId('new-agent-dir') as HTMLInputElement).value).toBe('')
+  })
+
+  it('keeps the field for a fleet with folders to suggest', () => {
+    useStore.setState({
+      newAgentOpen: true,
+      env,
+      agents: [agent({ sessionId: 'a', cwd: '/Users/me/Projects/thing' })],
+    })
+    renderApp(<NewAgentDialog />)
+    expect(screen.getByTestId('new-agent-browse').getAttribute('aria-expanded')).toBe('false')
+  })
+
   it('starts an agent in the directory given', async () => {
     const user = userEvent.setup()
     startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/Users/me/x' })

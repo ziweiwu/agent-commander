@@ -61,6 +61,26 @@ body.no-scroll {
   }
 }
 
+/*
+ * A container that scrolls says so at the edge it scrolls past. Overlay
+ * scrollbars and phones hide the bar at rest, so without this a clipped box
+ * reads as the end of the content. `useOverflowEdge` sets the attribute from a
+ * measurement, so the fade lifts the moment the end is in view rather than
+ * sitting there permanently suggesting more.
+ */
+[data-overflow='bottom'] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent 100%);
+}
+[data-overflow='right'] {
+  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+}
+[data-overflow='bottom right'] {
+  mask-image:
+    linear-gradient(to bottom, #000 calc(100% - 28px), transparent 100%),
+    linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
+  mask-composite: intersect;
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     animation-duration: 0.01ms !important;

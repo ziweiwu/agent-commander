@@ -91,6 +91,7 @@ export function Help({ onClose }: { onClose: () => void }) {
           <li>{t('helpBasicsGroups')}</li>
           <li>{t('helpBasicsChat')}</li>
           <li>{t('helpBasicsAttach')}</li>
+          <li>{t('helpBasicsNotify')}</li>
         </ul>
       </section>
 
