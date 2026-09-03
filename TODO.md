@@ -70,32 +70,33 @@ rides in `npm test`; reverting the per-paste buffer name fails it on the
 historical two-pane overlap, shrunk to exactly that. `INVARIANTS.md` INV-2
 lists it.
 
-### 4. Kani proofs for the pure predicates
+### 4. Kani proofs for the pure predicates — attempted 2026-09-02, deferred
 
-`cargo-kani` is a bounded model checker for Rust. `#[kani::proof]` lives beside
-the function and verifies the actual implementation over all inputs up to a
-bound — no separate artifact, so nothing to drift.
+Tried, measured, and taken back out. `cargo-kani` 0.67 (`cargo install
+--locked kani-verifier && cargo kani setup`, ~10 minutes) was pointed at five
+`#[kani::proof]` harnesses: `is_inside` reflexive and the `/a`-vs-`/ab`
+sibling case, `is_loopback_name` against an independently written byte
+automaton for the regex it replaced, `is_self_name(h, &[])` equal to
+`is_loopback_name(h)`, and `is_allowed_name` matching whole. Symbolic
+`&str`s built from `kani::any::<u8>()` over a small alphabet, `str::from_utf8`,
+`--default-unwind 18`.
 
-Four functions are the right shape: small, total, no I/O.
+**Cost, on an M-series Mac:** at 15-byte hostnames and 4-byte paths, five
+harnesses in parallel (`-j`) had not finished *one* after 3h 30m. A single
+harness alone, `is_allowed_name` at a 6-byte bound with `--default-unwind 9`,
+generated 225,393 verification conditions (138,224 after simplification) and
+was still in the SAT solver at 15 minutes. The expense is not the predicates,
+it is the std code under them — `Path::components`, `str::split`, UTF-8
+validation — each unrolled symbolically per byte. A run that takes hours is
+not a habit, and it is nothing a Stop hook could hold.
 
-- `browse::is_inside` (`rust/src/browse.rs:65`) — the INV-9 containment check,
-  including the `/abc` is-not-inside-`/a` segment case
-- `routes::is_loopback_name` (`rust/src/routes.rs:367`)
-- `routes::is_allowed_name` (`rust/src/routes.rs:447`)
-- `routes::is_self_name` (`rust/src/routes.rs:472`)
-
-**Honest caveat:** symbolic strings get expensive quickly, so bound path and
-hostname length (32 characters is plenty to exercise every branch). This buys a
-*bounded* proof, not a total one — still far stronger than examples, and it is
-the INV-3 and INV-9 code, where being wrong is a security bug rather than a
-cosmetic one.
-
-**Keep it out of the Stop-hook gates.** Kani needs its own toolchain and is far
-slower than the ~46s those three cost; a hook slow enough to resent is one that
-gets deleted (`AGENTS.md` makes this argument about `build` and `e2e`). CI or a
-deliberate local run owns it.
-
----
+**If it is picked up again**, two things would change the arithmetic: prove
+byte-level re-implementations that the real functions are then tested equal
+to on examples (cheap, but it is no longer a proof of the shipped code), or
+model the inputs as component lists rather than strings so `Path` never runs
+symbolically. Neither is obviously worth it against `browse::inv9_*` and
+`routes::tests`, which already pin every branch by example. The harness text
+is in this session's history if wanted; nothing of it is in the tree.
 
 ## Tier 3 — the surface that is hardest to read
 
@@ -115,6 +116,28 @@ multipliers. Tests: `test/term-scale.test.ts` (the budget),
 font-based enlarge), `e2e/attach.spec.ts` "re-fits the capture when the window
 changes shape". `npm run verify:inv1` is the check that `cols`/`rows` still
 never travel back to tmux; run it against a real pane before a release.
+
+## Tier 4 — fixtures the QA pass could not reach
+
+### 6. Two blocked shapes and a dead pane, in the mock fleet
+
+**Filed from the 0.9.0 QA pass, 2026-09-02.** `rust/src/mock.rs` has one
+blocked fixture, `mock-waiting`, and it is an `AskUserQuestion` with labelled
+options. INV-16 describes two more shapes — `ExitPlanMode` (a plan, no options)
+and a tool permission request (tool and input, no options) — and the
+`AnswerCard` states for them (`answerNoOptions`, the key-only picker) exist as
+UI that no fixture can put on screen. Likewise no fixture ever reports
+`pane-exited`, so `usePaneExited`, the notice-and-caption layout and
+`useRefitAfterExit` in `Terminal.tsx` are covered by unit tests only.
+
+Add three fixtures: one blocked on `ExitPlanMode`, one on a `Bash` permission
+request, and one whose pane has exited (the server sends `{type:'error',
+kind:'pane-exited'}` for it on attach). Give each an entry in
+`e2e/helpers.ts`'s `AGENT` map and a golden response if it changes
+`rust/tests/golden/agents.json`.
+
+**Done when:** `npm run mock` shows all three, the QA agents can drive them,
+and an e2e test each exercises the no-options card and the dead-pane notice.
 
 ## Not doing
 
