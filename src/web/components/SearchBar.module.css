@@ -17,6 +17,17 @@
 .searchbar input::placeholder {
   color: var(--faint);
 }
+/*
+ * iOS Safari zooms the whole page when a focused input's text is under 16px,
+ * and nothing in the viewport meta suppresses that (nor should it — pinch zoom
+ * is an accessibility feature). Sixteen on touch devices only: the desktop
+ * filter box stays in step with the rest of the toolbar.
+ */
+@media (pointer: coarse) {
+  .searchbar input {
+    font-size: 16px;
+  }
+}
 .slashHint {
   position: absolute;
   right: 10px;

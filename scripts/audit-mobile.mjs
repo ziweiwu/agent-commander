@@ -5,6 +5,16 @@ const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
 const findings = []
 const add = (sev, area, msg) => findings.push({ sev, area, msg })
 
+/*
+ * The smallest text the attach view will draw before it pans instead — the
+ * same number as `MIN_EFFECTIVE_FONT` in `src/web/lib/term.ts`. Text at the
+ * floor that happens to fit exactly is the design working, not a finding; the
+ * old threshold of 10 flagged it as unreadable half a pixel above the floor.
+ */
+const MIN_EFFECTIVE_FONT = 9.5
+/** xterm's font when nothing has enlarged it — `BASE_FONT` in `term.ts`. */
+const BASE_FONT = 13
+
 const PROFILES = [
   { name: 'iphone14promax', device: devices['iPhone 14 Pro Max'] },
   { name: 'iphone-se', device: devices['iPhone SE'] },
@@ -116,6 +126,11 @@ for (const { name, device } of PROFILES) {
       // pane at full size inside a smaller box — clipped, with nothing to pan.
       const measured = Boolean(t) && t !== 'none'
       const m = measured ? parseFloat(t.split('(')[1]) : 1
+      // Enlarging raises xterm's own font rather than the transform, so the
+      // rendered size is the font it is drawing at times whatever transform is
+      // left, not 13 times the transform.
+      const xterm = scaler.querySelector('.xterm')
+      const fontPx = xterm ? parseFloat(getComputedStyle(xterm).fontSize) || BASE_FONT : BASE_FONT
       const cols = screen.offsetWidth
       return {
         measured,
@@ -140,7 +155,7 @@ for (const { name, device } of PROFILES) {
         scale: Math.round(m * 100) / 100,
         naturalW: screen.offsetWidth,
         shownW: Math.round(wrap.clientWidth),
-        effectiveFontPx: Math.round(13 * m * 10) / 10,
+        effectiveFontPx: Math.round(fontPx * m * 10) / 10,
         cols,
       }
     })
@@ -160,7 +175,7 @@ for (const { name, device } of PROFILES) {
       if (term.effectiveFontPx < 8) {
         add('high', 'terminal', `${name}: terminal renders at ${term.effectiveFontPx}px effective text (scale ${term.scale}) — illegible on a phone`)
       }
-      if (term.effectiveFontPx < 10 && !term.pannable) {
+      if (term.effectiveFontPx < MIN_EFFECTIVE_FONT && !term.pannable) {
         add('med', 'terminal', `${name}: terminal is shrunk to fit with no way to scroll it at a readable size (overflow-x: ${overflowX})`)
       }
     }
