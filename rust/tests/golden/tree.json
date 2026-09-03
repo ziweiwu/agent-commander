@@ -1,195 +1,207 @@
 {
-    "trees": [
+  "trees": [
+    {
+      "sessionId": "mock-waiting",
+      "children": []
+    },
+    {
+      "sessionId": "mock-busy",
+      "children": [
         {
-            "sessionId": "mock-waiting",
-            "children": []
+          "agentId": "a58ddcc3c4b6b8989",
+          "agentType": "ux-bar-raiser",
+          "description": "UX audit of the terminal system monitor",
+          "depth": 1,
+          "lastWriteAt": 1788437811887,
+          "bytes": 412000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "done",
+          "stoppedByUser": true,
+          "children": []
         },
         {
-            "sessionId": "mock-busy",
-            "children": [
-                {
-                    "agentId": "a58ddcc3c4b6b8989",
-                    "agentType": "ux-bar-raiser",
-                    "description": "UX audit of the terminal system monitor",
-                    "depth": 1,
-                    "lastWriteAt": 1788185722491,
-                    "bytes": 412000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "done",
-                    "stoppedByUser": true,
-                    "children": []
-                },
-                {
-                    "agentId": "ac4c01953dfb1440f",
-                    "agentType": "qa-bar-raiser",
-                    "description": "Adversarial QA sweep across every terminal size",
-                    "depth": 1,
-                    "lastWriteAt": 1788186798491,
-                    "bytes": 188000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "active",
-                    "stateInferred": true,
-                    "children": [
-                        {
-                            "agentId": "ad49ce3a43efeaa2b",
-                            "agentType": "general-purpose",
-                            "description": "Check contrast at 20 columns in both themes",
-                            "depth": 2,
-                            "parentAgentId": "ac4c01953dfb1440f",
-                            "lastWriteAt": 1788186793491,
-                            "bytes": 71000,
-                            "calls": 12,
-                            "workedMs": 240000,
-                            "state": "active",
-                            "stateInferred": true,
-                            "children": []
-                        }
-                    ]
-                },
-                {
-                    "agentId": "a6c07bfd53044168f",
-                    "agentType": "qa-triage",
-                    "description": "Independent second pass over the QA report, verifying every claimed finding against the source before it is believed",
-                    "depth": 1,
-                    "lastWriteAt": 1788185962491,
-                    "bytes": 52000,
-                    "state": "quiet",
-                    "children": []
-                }
-            ]
+          "agentId": "ac4c01953dfb1440f",
+          "agentType": "qa-bar-raiser",
+          "description": "Adversarial QA sweep across every terminal size",
+          "depth": 1,
+          "lastWriteAt": 1788438887887,
+          "bytes": 188000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "active",
+          "stateInferred": true,
+          "children": [
+            {
+              "agentId": "ad49ce3a43efeaa2b",
+              "agentType": "general-purpose",
+              "description": "Check contrast at 20 columns in both themes",
+              "depth": 2,
+              "parentAgentId": "ac4c01953dfb1440f",
+              "lastWriteAt": 1788438882887,
+              "bytes": 71000,
+              "calls": 12,
+              "workedMs": 240000,
+              "state": "active",
+              "stateInferred": true,
+              "children": []
+            }
+          ]
         },
         {
-            "sessionId": "mock-busy-2",
-            "children": [
-                {
-                    "agentId": "a9b1181eab51efaf0",
-                    "agentType": "find-music",
-                    "description": "Kissa listening list for Tokyo and Yokohama",
-                    "depth": 1,
-                    "lastWriteAt": 1788186800491,
-                    "bytes": 301000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "active",
-                    "stateInferred": true,
-                    "children": [
-                        {
-                            "agentId": "a69275682c401ef83",
-                            "agentType": "general-purpose",
-                            "description": "Research Benelux, Italy and Spain bars",
-                            "depth": 2,
-                            "parentAgentId": "a9b1181eab51efaf0",
-                            "lastWriteAt": 1788186142491,
-                            "bytes": 244000,
-                            "calls": 12,
-                            "workedMs": 240000,
-                            "state": "done",
-                            "children": [
-                                {
-                                    "agentId": "ab481603df0bb2d1d",
-                                    "agentType": "general-purpose",
-                                    "description": "Cross-check opening hours against the venues",
-                                    "depth": 3,
-                                    "parentAgentId": "a69275682c401ef83",
-                                    "lastWriteAt": 1788186022491,
-                                    "bytes": 96000,
-                                    "calls": 12,
-                                    "workedMs": 240000,
-                                    "state": "done",
-                                    "children": []
-                                }
-                            ]
-                        }
-                    ]
-                },
-                {
-                    "agentId": "ab21ff3003f5f193c",
-                    "agentType": "Explore",
-                    "description": "Sweep the vault for existing kissa notes",
-                    "depth": 2,
-                    "parentAgentId": "a-parent-that-is-gone",
-                    "lastWriteAt": 1788185482491,
-                    "bytes": 31000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "quiet",
-                    "reparented": true,
-                    "children": []
-                }
-            ]
-        },
-        {
-            "sessionId": "mock-quiet-family",
-            "children": [
-                {
-                    "agentId": "a3f81c0b7d2e45a19",
-                    "agentType": "general-purpose",
-                    "description": "Rewrite migration 0042 against the new schema",
-                    "depth": 1,
-                    "lastWriteAt": 1788185842491,
-                    "bytes": 87000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "quiet",
-                    "children": []
-                },
-                {
-                    "agentId": "a7d20e91fc8b3a604",
-                    "agentType": "Explore",
-                    "description": "Find every caller of the old billing columns",
-                    "depth": 1,
-                    "lastWriteAt": 1788185662491,
-                    "bytes": 24000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "quiet",
-                    "children": []
-                }
-            ]
-        },
-        {
-            "sessionId": "mock-long-name",
-            "children": [
-                {
-                    "agentId": "af0e1cdf1ec262236",
-                    "agentType": "code-reviewer",
-                    "description": "Review the diff for correctness",
-                    "depth": 1,
-                    "lastWriteAt": 1788186794491,
-                    "bytes": 118000,
-                    "calls": 12,
-                    "workedMs": 240000,
-                    "state": "quiet",
-                    "children": []
-                }
-            ]
-        },
-        {
-            "sessionId": "mock-idle-kb",
-            "children": []
-        },
-        {
-            "sessionId": "mock-idle-ce",
-            "children": []
-        },
-        {
-            "sessionId": "mock-idle-db",
-            "children": []
-        },
-        {
-            "sessionId": "mock-fresh",
-            "children": []
-        },
-        {
-            "sessionId": "mock-no-tmux",
-            "children": []
-        },
-        {
-            "sessionId": "tmux:kiro-1787832510",
-            "children": [],
-            "unknown": true
+          "agentId": "a6c07bfd53044168f",
+          "agentType": "qa-triage",
+          "description": "Independent second pass over the QA report, verifying every claimed finding against the source before it is believed",
+          "depth": 1,
+          "lastWriteAt": 1788438051887,
+          "bytes": 52000,
+          "state": "quiet",
+          "children": []
         }
-    ]
+      ]
+    },
+    {
+      "sessionId": "mock-busy-2",
+      "children": [
+        {
+          "agentId": "a9b1181eab51efaf0",
+          "agentType": "find-music",
+          "description": "Kissa listening list for Tokyo and Yokohama",
+          "depth": 1,
+          "lastWriteAt": 1788438889887,
+          "bytes": 301000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "active",
+          "stateInferred": true,
+          "children": [
+            {
+              "agentId": "a69275682c401ef83",
+              "agentType": "general-purpose",
+              "description": "Research Benelux, Italy and Spain bars",
+              "depth": 2,
+              "parentAgentId": "a9b1181eab51efaf0",
+              "lastWriteAt": 1788438231887,
+              "bytes": 244000,
+              "calls": 12,
+              "workedMs": 240000,
+              "state": "done",
+              "children": [
+                {
+                  "agentId": "ab481603df0bb2d1d",
+                  "agentType": "general-purpose",
+                  "description": "Cross-check opening hours against the venues",
+                  "depth": 3,
+                  "parentAgentId": "a69275682c401ef83",
+                  "lastWriteAt": 1788438111887,
+                  "bytes": 96000,
+                  "calls": 12,
+                  "workedMs": 240000,
+                  "state": "done",
+                  "children": []
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "agentId": "ab21ff3003f5f193c",
+          "agentType": "Explore",
+          "description": "Sweep the vault for existing kissa notes",
+          "depth": 2,
+          "parentAgentId": "a-parent-that-is-gone",
+          "lastWriteAt": 1788437571887,
+          "bytes": 31000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "quiet",
+          "reparented": true,
+          "children": []
+        }
+      ]
+    },
+    {
+      "sessionId": "mock-quiet-family",
+      "children": [
+        {
+          "agentId": "a3f81c0b7d2e45a19",
+          "agentType": "general-purpose",
+          "description": "Rewrite migration 0042 against the new schema",
+          "depth": 1,
+          "lastWriteAt": 1788437931887,
+          "bytes": 87000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "quiet",
+          "children": []
+        },
+        {
+          "agentId": "a7d20e91fc8b3a604",
+          "agentType": "Explore",
+          "description": "Find every caller of the old billing columns",
+          "depth": 1,
+          "lastWriteAt": 1788437751887,
+          "bytes": 24000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "quiet",
+          "children": []
+        }
+      ]
+    },
+    {
+      "sessionId": "mock-long-name",
+      "children": [
+        {
+          "agentId": "af0e1cdf1ec262236",
+          "agentType": "code-reviewer",
+          "description": "Review the diff for correctness",
+          "depth": 1,
+          "lastWriteAt": 1788438883887,
+          "bytes": 118000,
+          "calls": 12,
+          "workedMs": 240000,
+          "state": "quiet",
+          "children": []
+        }
+      ]
+    },
+    {
+      "sessionId": "mock-idle-kb",
+      "children": []
+    },
+    {
+      "sessionId": "mock-idle-ce",
+      "children": []
+    },
+    {
+      "sessionId": "mock-idle-db",
+      "children": []
+    },
+    {
+      "sessionId": "mock-fresh",
+      "children": []
+    },
+    {
+      "sessionId": "mock-no-tmux",
+      "children": []
+    },
+    {
+      "sessionId": "tmux:kiro-1787832510",
+      "children": [],
+      "unknown": true
+    },
+    {
+      "sessionId": "mock-plan",
+      "children": []
+    },
+    {
+      "sessionId": "mock-permission",
+      "children": []
+    },
+    {
+      "sessionId": "mock-gone",
+      "children": []
+    }
+  ]
 }

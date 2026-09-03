@@ -595,6 +595,13 @@ their absence would otherwise read as an oversight.
   spawned its own `tmux` and read any error as "the window closed", including
   the `EAGAIN` that `pane.rs` retries four times. It now goes through `pane.rs`
   and drops an entry only on a positive answer. `test/pending.test.ts`.
+- **A pane that has exited now says so.** `routes.rs` sent the dead-pane error
+  as prose alone, with no `kind`, and `transport.ts` branches on the kind — so
+  the browser never marked the session exited, and the notice, the caption and
+  the disabled key bar were reachable from unit tests and from nowhere else.
+  The mock fleet's `mock-gone` fixture, added to put that surface on screen, is
+  what found it. `routes::a_dead_pane_ends_the_terminal_and_not_the_conversation`
+  asserts the kind; `e2e/blocked-shapes.spec.ts` drives it.
 - **The five `as never` casts** on the control path are gone: `control.rs` takes
   `Agent | undefined` and `assertControllable` asserts `Controllable`, which
   carries the pane id in the type.

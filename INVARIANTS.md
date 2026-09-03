@@ -1195,3 +1195,7 @@ synchronously, for the reason the composer's is.
   and the card withheld unless status and transcript agree
 - `e2e/control.spec.ts` — INV-16 end to end against the mock fleet's blocked
   fixture, which carries a real `AskUserQuestion` payload
+- `mock::inv16_the_plan_and_permission_fixtures_name_no_option` and
+  `e2e/blocked-shapes.spec.ts` — the two thinner shapes, a plan and a tool
+  permission, show what was written and name no option; the same spec drives
+  the fixture whose pane has exited onto the dead-pane notice

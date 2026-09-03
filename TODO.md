@@ -117,25 +117,22 @@ never travel back to tmux; run it against a real pane before a release.
 
 ## Tier 4 — fixtures the QA pass could not reach
 
-### 6. Two blocked shapes and a dead pane, in the mock fleet
+### 6. Two blocked shapes and a dead pane, in the mock fleet — done
 
-**Filed from the 0.9.0 QA pass, 2026-09-02.** `rust/src/mock.rs` has one
-blocked fixture, `mock-waiting`, and it is an `AskUserQuestion` with labelled
-options. INV-16 describes two more shapes — `ExitPlanMode` (a plan, no options)
-and a tool permission request (tool and input, no options) — and the
-`AnswerCard` states for them (`answerNoOptions`, the key-only picker) exist as
-UI that no fixture can put on screen. Likewise no fixture ever reports
-`pane-exited`, so `usePaneExited`, the notice-and-caption layout and
-`useRefitAfterExit` in `Terminal.tsx` are covered by unit tests only.
+`mock-plan` (`ExitPlanMode`), `mock-permission` (a `Bash` permission request)
+and `mock-gone` (pane `%84`, which `MockPanes::meta` alone reports dead) are in
+`rust/src/mock.rs`, in `e2e/helpers.ts`'s `AGENT` map, and driven by
+`e2e/blocked-shapes.spec.ts`. The goldens were regenerated with
+`GOLDEN_WRITE=1 cargo test recorded`, which is now how a fixture change is
+recorded: the Node server they were captured from is gone, so a golden pins
+the wire shape against unintended change and is rewritten, and reviewed, on
+purpose.
 
-Add three fixtures: one blocked on `ExitPlanMode`, one on a `Bash` permission
-request, and one whose pane has exited (the server sends `{type:'error',
-kind:'pane-exited'}` for it on attach). Give each an entry in
-`e2e/helpers.ts`'s `AGENT` map and a golden response if it changes
-`rust/tests/golden/agents.json`.
-
-**Done when:** `npm run mock` shows all three, the QA agents can drive them,
-and an e2e test each exercises the no-options card and the dead-pane notice.
+The dead-pane fixture earned its place on arrival: the server had been sending
+the pane-exited error with no `kind`, so the browser never marked a session
+exited and the notice, the caption and the disabled key bar were unreachable
+outside unit tests. `routes::a_dead_pane_ends_the_terminal_and_not_the_conversation`
+now asserts the kind.
 
 ## Not doing
 

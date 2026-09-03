@@ -19,6 +19,12 @@ export const AGENT = {
   busy: 'mock-busy',
   /** Not running in tmux: attach is impossible and must say why (INV-5). */
   noTmux: 'mock-no-tmux',
+  /** Blocked on `ExitPlanMode`: a plan to read, no options to name (INV-16). */
+  plan: 'mock-plan',
+  /** Blocked on a tool permission: the command to read, no options to name. */
+  permission: 'mock-permission',
+  /** Its pane has exited: the Attach tab must say so rather than keep drawing. */
+  gone: 'mock-gone',
   /**
    * Reserved for `/clear`, and reserved because clearing is destructive to the
    * fixture itself: it rotates the session id, exactly as a real one does, so

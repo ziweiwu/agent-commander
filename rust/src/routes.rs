@@ -44,7 +44,7 @@ use crate::pane_hub::HubEvent;
 use crate::pending::SpawnedSession;
 use crate::sources::{Deps, PaneApi, PaneSample, Submit, TailApi, Unsubscribe};
 use crate::types::{
-    Agent, AgentTree, ClientMessage, ControlResponse, DirListing, FleetTree, Geom,
+    Agent, AgentTree, ClientMessage, ControlResponse, DirListing, ErrorKind, FleetTree, Geom,
     GoalState, NewAgentRequest, NewAgentResponse, ServerEnv, ServerMessage,
 };
 
@@ -1879,7 +1879,15 @@ fn draw_sample(
     let meta = sample.meta;
     let lines = &sample.lines;
     if meta.dead {
-        viewer.error(session_id, DEAD_PANE);
+        // `kind` is what the browser branches on: it marks the session exited,
+        // swaps the capture for the dead-pane notice and disables the keys. The
+        // message alone was sent for a while, and the notice was unreachable —
+        // the mock fleet's `mock-gone` fixture is what found that.
+        viewer.send(ServerMessage::Error {
+            session_id: Some(session_id.to_string()),
+            message: DEAD_PANE.to_string(),
+            kind: Some(ErrorKind::PaneExited),
+        });
         end_terminal(st);
         return;
     }
@@ -4151,6 +4159,9 @@ mod tests {
             .await;
         let err = next_msg(&mut client, |m| is_type(m, "error")).await.unwrap();
         assert_eq!(err["message"], serde_json::json!(DEAD_PANE));
+        // The structured kind is the half the browser acts on; the prose is
+        // only how to say it.
+        assert_eq!(err["kind"], serde_json::json!("pane-exited"));
         // The transcript is on disk and is still the record of what this agent
         // did, so the chat must keep arriving.
         assert!(

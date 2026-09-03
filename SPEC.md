@@ -766,7 +766,9 @@ requirements in this document look like refusals to be helpful.
 
 - **NFR-OPS-6** — The fixture fleet MUST stay deliberately awkward: agents
   sharing a home directory with auto-generated names, a name too long for its
-  card, sessions never prompted, a session of a kind with no transcript, and
+  card, sessions never prompted, a session of a kind with no transcript, every shape
+  an agent blocks on (a question with options, a plan, a tool permission), a
+  pane that has exited, and
   delegation trees covering a depth-3 chain, a stopped delegate, one node in each
   of the three delegate states, an orphan whose parent is missing, an agent that
   delegated nothing, and a CLI that cannot say either way.

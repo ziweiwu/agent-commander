@@ -159,10 +159,13 @@ Never point a fuzzer, an audit or a review agent at 4317. It drives real
 agents, and anything that types into whatever it finds will type into someone's
 session. `qa-sweep.sh` refuses that port outright and `--mock` on it is rejected.
 
-`npm run mock` serves a deliberately awkward fixture fleet — ten agents, five
-sharing a home directory, one name too long for its card, two never prompted,
-and one Kiro session so the degraded card an agent with no transcript gets is
-on screen rather than only in a test. The delegation trees behind them are
+`npm run mock` serves a deliberately awkward fixture fleet — fourteen agents,
+five sharing a home directory, one name too long for its card, five never
+prompted, one Kiro session so the degraded card an agent with no transcript
+gets is on screen rather than only in a test, all three shapes an agent blocks
+on (a question with options, a plan awaiting approval, a tool awaiting
+permission — INV-16's three), and one whose pane has exited, so the Attach
+tab's dead-pane notice is a thing you can look at. The delegation trees behind them are
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
 in each of INV-13's three states, an orphan whose parent is not on disk, an
 agent that has delegated nothing, and a CLI that cannot say either way.

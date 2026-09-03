@@ -74,6 +74,12 @@ const IDLE_DB_PID: i64 = 53848;
 const FRESH_PID: i64 = 2330;
 const HEADLESS_PID: i64 = 6556;
 const KIRO_PID: i64 = 84638;
+const PLAN_PID: i64 = 61402;
+const PERMISSION_PID: i64 = 61577;
+const GONE_PID: i64 = 9034;
+/// The one fixture pane tmux reports as dead: the agent's process has exited
+/// and the pane is showing its last frame (`mock-gone`).
+const DEAD_PANE: &str = "%84";
 
 /// How many delegates the busy fixture reports. Three, so the count is plural
 /// and does not collide with the two the delegating fixture carries.
@@ -99,7 +105,85 @@ fn fixtures() -> Vec<Agent> {
         never_prompted(),
         headless_outside_tmux(),
         kiro_seen_only_from_tmux(),
+        blocked_on_a_plan(),
+        blocked_on_a_permission(),
+        whose_pane_has_exited(),
     ]
+}
+
+/// Blocked on `ExitPlanMode`: the plan is on disk, the three approval choices
+/// are not, so the card shows the plan and offers keys rather than labels it
+/// would have had to invent (INV-16).
+fn blocked_on_a_plan() -> Agent {
+    Agent {
+        session_id: "mock-plan".into(),
+        pid: PLAN_PID,
+        name: "plan-the-migration".into(),
+        cwd: "/Users/demo/Projects/kb-vault".into(),
+        folder: "kb-vault".into(),
+        status: AgentStatus::Waiting,
+        waiting_for: Some("dialog open".into()),
+        kind: "interactive".into(),
+        started_at: START - 1_500_000,
+        version: Some("2.1.232".into()),
+        pane_id: Some("%82".into()),
+        tmux_session: Some("claude-mock-plan".into()),
+        activity: Some("ExitPlanMode".into()),
+        last_activity_at: Some(START - 90_000),
+        tokens: Some(12_400),
+        permission_mode: Some("plan".into()),
+        agent_kind: CLAUDE_KIND.into(),
+        ..Default::default()
+    }
+}
+
+/// Blocked on a tool permission: the transcript names the tool and what it
+/// would do, and nothing else — no numbered list to read the options from.
+fn blocked_on_a_permission() -> Agent {
+    Agent {
+        session_id: "mock-permission".into(),
+        pid: PERMISSION_PID,
+        name: "rebuild-dist".into(),
+        cwd: "/Users/demo/Projects/lego-deals".into(),
+        folder: "lego-deals".into(),
+        status: AgentStatus::Waiting,
+        waiting_for: Some("dialog open".into()),
+        kind: "interactive".into(),
+        started_at: START - 700_000,
+        version: Some("2.1.232".into()),
+        pane_id: Some("%83".into()),
+        tmux_session: Some("claude-mock-perm".into()),
+        activity: Some("Bash: rm -rf dist && npm run build".into()),
+        last_activity_at: Some(START - 30_000),
+        tokens: Some(3_910),
+        agent_kind: CLAUDE_KIND.into(),
+        ..Default::default()
+    }
+}
+
+/// An agent whose pane has ended. INV-1 forbids the pty that would report an
+/// exit, so the frame path finds out from `display-message` the way it would
+/// for real: `meta` reports the pane dead, and the Attach tab has to say so
+/// rather than keep drawing the last frame as if it were live.
+fn whose_pane_has_exited() -> Agent {
+    Agent {
+        session_id: "mock-gone".into(),
+        pid: GONE_PID,
+        name: "prune-old-branches".into(),
+        cwd: "/Users/demo/Projects/lego-deals".into(),
+        folder: "lego-deals".into(),
+        status: AgentStatus::Idle,
+        kind: "interactive".into(),
+        started_at: START - 5_400_000,
+        version: Some("2.1.232".into()),
+        pane_id: Some(DEAD_PANE.into()),
+        tmux_session: Some("claude-mock-gone".into()),
+        activity: Some("exited".into()),
+        last_activity_at: Some(START - 1_800_000),
+        tokens: Some(21_006),
+        agent_kind: CLAUDE_KIND.into(),
+        ..Default::default()
+    }
 }
 
 /// Waiting on a person: a dialog is open and nothing moves until it is
@@ -904,7 +988,7 @@ pub struct MockPanes;
 
 #[async_trait]
 impl PaneApi for MockPanes {
-    async fn meta(&self, _pane_id: &str) -> anyhow::Result<PaneMeta> {
+    async fn meta(&self, pane_id: &str) -> anyhow::Result<PaneMeta> {
         Ok(PaneMeta {
             cols: PANE_COLS,
             rows: PANE_ROWS,
@@ -912,9 +996,10 @@ impl PaneApi for MockPanes {
             cursor_y: CURSOR_ROW,
             // A live agent is a full-screen TUI, so the fixture pane reports the
             // alternate screen and a live process — the same combination the
-            // frame path sees against a real agent (`mock.ts:360`).
+            // frame path sees against a real agent (`mock.ts:360`). One pane
+            // reports the other thing tmux can say: its process has exited.
             alternate: true,
-            dead: false,
+            dead: pane_id == DEAD_PANE,
         })
     }
 
@@ -1046,10 +1131,47 @@ impl MockTail {
      * because answering one of several is what the card has to say honestly.
      */
     fn blocked_on(&self) -> Option<PendingPrompt> {
-        if self.session_id != "mock-waiting" {
-            return None;
+        match self.session_id.as_str() {
+            "mock-waiting" => Some(Self::question_with_options()),
+            "mock-plan" => Some(Self::plan_awaiting_approval()),
+            "mock-permission" => Some(Self::tool_awaiting_permission()),
+            _ => None,
         }
-        Some(PendingPrompt {
+    }
+
+    /// The other two blocked shapes INV-16 names, thinner on purpose: the
+    /// transcript states what is being asked, not what the numbered choices
+    /// are, so `options` stays empty and the card offers keys.
+    fn plan_awaiting_approval() -> PendingPrompt {
+        PendingPrompt {
+            tool: "ExitPlanMode".into(),
+            question: None,
+            options: Vec::new(),
+            multi_select: None,
+            more_questions: None,
+            detail: Some(
+                "## Plan\n1. Backfill the index behind a feature flag\n2. Swap the table once the \
+                 backfill has caught up\n3. Drop the old table after a week of reads"
+                    .into(),
+            ),
+            id: String::new(),
+        }
+    }
+
+    fn tool_awaiting_permission() -> PendingPrompt {
+        PendingPrompt {
+            tool: "Bash".into(),
+            question: None,
+            options: Vec::new(),
+            multi_select: None,
+            more_questions: None,
+            detail: Some("rm -rf dist && npm run build".into()),
+            id: String::new(),
+        }
+    }
+
+    fn question_with_options() -> PendingPrompt {
+        PendingPrompt {
             tool: "AskUserQuestion".into(),
             question: Some("Which migration should run first?".into()),
             options: vec![
@@ -1066,7 +1188,7 @@ impl MockTail {
             more_questions: Some(1),
             detail: None,
             id: String::new(),
-        })
+        }
     }
 
     /// The backfill every reader gets once: the fixture conversation, stamped
@@ -1216,9 +1338,13 @@ mod tests {
 
     #[test]
     fn inv13_the_fixture_trees_match_what_is_recorded() {
-        let want = without_write_times(serde_json::from_str(NODE_MOCK_TREE).unwrap());
         let trees: Vec<_> = fixtures().iter().map(|a| mock_tree(a, now_ms())).collect();
-        let got = without_write_times(serde_json::json!({ "trees": trees }));
+        let raw = serde_json::json!({ "trees": trees });
+        if rewrite_golden("tree.json", &raw) {
+            return;
+        }
+        let want = without_write_times(serde_json::from_str(NODE_MOCK_TREE).unwrap());
+        let got = without_write_times(raw);
         assert_eq!(got, want);
     }
 
@@ -1239,13 +1365,54 @@ mod tests {
         assert!(tree.children.is_empty());
     }
 
+    /// `GOLDEN_WRITE=1 cargo test recorded` rewrites the two recorded responses
+    /// from the fixtures as they are now. They were captured from the Node
+    /// server once; that server is gone, so since then a golden is what pins
+    /// the wire shape against *unintended* change — a fixture added on purpose
+    /// is regenerated, and the diff is reviewed like any other.
+    fn rewrite_golden(name: &str, value: &serde_json::Value) -> bool {
+        if std::env::var_os("GOLDEN_WRITE").is_none() {
+            return false;
+        }
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden").join(name);
+        let mut text = serde_json::to_string_pretty(value).unwrap();
+        text.push('\n');
+        std::fs::write(path, text).unwrap();
+        true
+    }
+
     #[test]
     fn fixtures_serialise_to_the_recorded_wire_shape() {
         // The capture is the whole `/api/agents` body; the fleet is under
         // `agents`, exactly as the route serves it.
-        let want: serde_json::Value = serde_json::from_str(NODE_MOCK_AGENTS).unwrap();
         let got = serde_json::json!({ "agents": fixtures(), "mock": true });
+        if rewrite_golden("agents.json", &got) {
+            return;
+        }
+        let want: serde_json::Value = serde_json::from_str(NODE_MOCK_AGENTS).unwrap();
         assert_eq!(got, want);
+    }
+
+    /// The two thinner blocked shapes INV-16 names: something to read, no
+    /// option to name. A card that invented "Yes / No" here would be claiming
+    /// to know what the CLI's picker shows.
+    #[test]
+    fn inv16_the_plan_and_permission_fixtures_name_no_option() {
+        for id in ["mock-plan", "mock-permission"] {
+            let prompt = MockTail::new(id.into()).blocked_on().expect(id);
+            assert!(prompt.options.is_empty(), "{id} invented options");
+            assert!(prompt.detail.as_deref().is_some_and(|d| !d.is_empty()), "{id} has nothing to read");
+        }
+        assert_eq!(MockTail::new("mock-plan".into()).blocked_on().unwrap().tool, "ExitPlanMode");
+        assert!(MockTail::new("mock-gone".into()).blocked_on().is_none());
+    }
+
+    #[tokio::test]
+    async fn the_exited_fixture_is_the_only_dead_pane() {
+        assert!(MockPanes.meta(DEAD_PANE).await.unwrap().dead);
+        for live in ["%76", "%77", "%82", "%83"] {
+            assert!(!MockPanes.meta(live).await.unwrap().dead, "{live}");
+        }
     }
 
     fn by_id(id: &str) -> Agent {
@@ -1273,6 +1440,10 @@ mod tests {
                 "mock-no-tmux",
                 // Discovered from tmux, not from a session file it wrote.
                 "tmux:kiro-1787832510",
+                // The two thinner blocked shapes, and a pane that has ended.
+                "mock-plan",
+                "mock-permission",
+                "mock-gone",
             ]
         );
     }
@@ -1298,6 +1469,9 @@ mod tests {
                 (FRESH_PID, Some("%0")),
                 (HEADLESS_PID, None),
                 (KIRO_PID, Some("%302")),
+                (PLAN_PID, Some("%82")),
+                (PERMISSION_PID, Some("%83")),
+                (GONE_PID, Some(DEAD_PANE)),
             ]
         );
     }
@@ -1437,6 +1611,9 @@ mod tests {
                 // A CLI that keeps no transcript has no token count to give,
                 // and absent is the honest answer rather than zero (INV-11).
                 None,
+                Some(12_400),
+                Some(3_910),
+                Some(21_006),
             ]
         );
     }
