@@ -5,6 +5,7 @@
 //! goes through these, which is what lets `--mock` be a real substitution
 //! rather than a pile of conditionals.
 
+use crate::control::SendableKey;
 use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -159,7 +160,11 @@ pub trait PaneApi: Send + Sync + 'static {
         Ok(PaneSample { meta, lines })
     }
     async fn paste(&self, pane_id: &str, text: &str, submit: Submit) -> anyhow::Result<()>;
-    async fn key(&self, pane_id: &str, key_name: &str) -> anyhow::Result<()>;
+    /// Send one control key. Only a [`SendableKey`] gets here, which is where
+    /// INV-2's allow-list and INV-6's confirmation rule are enforced (in
+    /// `control::check_key`) — so there is no key a caller can pass that was
+    /// not checked, rather than a check each caller remembers to make.
+    async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()>;
 }
 
 #[derive(Debug, Clone, Default)]

@@ -161,7 +161,7 @@ pub trait ControlDeps: Send + Sync {
         text: &str,
         submit: Submit,
     ) -> anyhow::Result<()>;
-    async fn key(&self, pane_id: &str, key: &str) -> anyhow::Result<()>;
+    async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()>;
     /// Reads the goal the session reports now; used to verify one was set.
     async fn read_goal(&self) -> Option<GoalState>;
     /// Reads the session id this process is running *now*.
@@ -196,7 +196,7 @@ impl ControlDeps for LiveDeps {
     ) -> anyhow::Result<()> {
         self.panes.paste(pane_id, text, submit).await
     }
-    async fn key(&self, pane_id: &str, key: &str) -> anyhow::Result<()> {
+    async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()> {
         self.panes.key(pane_id, key).await
     }
     async fn read_goal(&self) -> Option<GoalState> {
@@ -306,7 +306,7 @@ pub async fn send_shift_tab(agent: Option<&Agent>, deps: &dyn ControlDeps) -> Ac
     let pane = reachable_target(agent)?;
     // BTab is tmux's name for back-tab, which is what a terminal emits for
     // Shift+Tab.
-    deps.key(pane, "BTab").await.map_err(ControlFailure::Failed)?;
+    deps.key(pane, &SendableKey::server_composed("BTab")).await.map_err(ControlFailure::Failed)?;
     Ok(())
 }
 
@@ -629,14 +629,48 @@ pub enum KeyRefusal {
 /// the flag, sends `false`, or sends some other truthy value gets the same
 /// refusal, because `Option<bool>` cannot be coerced the way a JavaScript
 /// truthiness test could.
-pub fn check_key(key: &str, confirmed: Option<bool>) -> Result<(), KeyRefusal> {
+pub fn check_key(key: &str, confirmed: Option<bool>) -> Result<SendableKey, KeyRefusal> {
     if !is_allowed_key(key) {
         return Err(KeyRefusal::NotAllowed(key.to_string()));
     }
     if is_destructive_key(key) && confirmed != Some(true) {
         return Err(KeyRefusal::NeedsConfirmation(key.to_string()));
     }
-    Ok(())
+    Ok(SendableKey(key.to_string()))
+}
+
+/// A key that may reach a live agent.
+///
+/// This is INV-6 (and INV-2's allow-list) as a type rather than as a check
+/// every call site remembers to make. [`PaneApi::key`] takes one, and there
+/// are exactly two ways to get one: [`check_key`], which is where a key the
+/// *client* named is held to the allow-list and to the confirmation rule; and
+/// [`SendableKey::server_composed`], for a key the *server* decided to send —
+/// the mode chord, the digit that answers a prompt. The second takes a
+/// `&'static str`, which nothing that arrived on the wire can be, so a client's
+/// key cannot be smuggled through it. Before this type, `on_key` checked and
+/// then passed a bare `&str` on; a second caller that forgot the check would
+/// have compiled.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendableKey(String);
+
+impl SendableKey {
+    /// A key the server chose to send, spelled as a literal in the server.
+    ///
+    /// Not held to the allow-list: `BTab` is not on it, because a client may
+    /// not send it, and this is how the server sends it anyway. It is still
+    /// held to INV-6 — the server never composes an interrupt on anyone's
+    /// behalf, and a literal that tried to would fail every test that reaches
+    /// this line.
+    pub(crate) fn server_composed(name: &'static str) -> SendableKey {
+        debug_assert!(!is_destructive_key(name), "the server never composes {name}");
+        SendableKey(name.to_string())
+    }
+
+    /// The tmux key name, for the one place it becomes an argument.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 /* ------------------------------------------------ INV-12: input budget */
@@ -866,8 +900,8 @@ mod tests {
             *self.typed.lock().unwrap() = true;
             Ok(())
         }
-        async fn key(&self, pane_id: &str, key: &str) -> anyhow::Result<()> {
-            self.keys.lock().unwrap().push((pane_id.into(), key.into()));
+        async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()> {
+            self.keys.lock().unwrap().push((pane_id.into(), key.as_str().into()));
             *self.pressed.lock().unwrap() = true;
             Ok(())
         }
@@ -1343,7 +1377,7 @@ mod tests {
         ) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn key(&self, _pane_id: &str, _key: &str) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -1384,7 +1418,7 @@ mod tests {
         ) -> anyhow::Result<()> {
             anyhow::bail!("spawn tmux EAGAIN")
         }
-        async fn key(&self, _pane_id: &str, _key: &str) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
             anyhow::bail!("spawn tmux EAGAIN")
         }
         async fn read_goal(&self) -> Option<GoalState> {

@@ -499,6 +499,7 @@ mod tests {
     //! that.
 
     use super::*;
+    use crate::control::SendableKey;
     use crate::sources::{PaneMeta, Submit};
     use async_trait::async_trait;
     use std::sync::atomic::AtomicUsize;
@@ -649,7 +650,7 @@ mod tests {
         ) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn key(&self, _pane_id: &str, _key_name: &str) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
             Ok(())
         }
     }
@@ -1182,7 +1183,7 @@ mod tests {
         ) -> anyhow::Result<()> {
             Ok(())
         }
-        async fn key(&self, _pane_id: &str, _key_name: &str) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
             Ok(())
         }
     }

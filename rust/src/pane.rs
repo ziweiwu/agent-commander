@@ -34,6 +34,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use tokio::sync::oneshot;
 
+use crate::control::SendableKey;
 use crate::sources::{PaneApi, PaneMeta, PaneSample, Submit};
 use crate::tmux_client::{tmux_control, TmuxControl};
 
@@ -1057,8 +1058,8 @@ impl PaneApi for Panes {
         Ok(Panes::paste(self, pane_id, text, submit).await?)
     }
 
-    async fn key(&self, pane_id: &str, key_name: &str) -> anyhow::Result<()> {
-        Ok(Panes::key(self, pane_id, key_name).await?)
+    async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()> {
+        Ok(Panes::key(self, pane_id, key.as_str()).await?)
     }
 }
 

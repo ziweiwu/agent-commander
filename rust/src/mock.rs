@@ -9,6 +9,7 @@
 //! for byte, because the two backends are compared field by field when both are
 //! run with `--mock` — any "improvement" here reads as a divergence there.
 
+use crate::control::SendableKey;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
@@ -969,7 +970,7 @@ impl PaneApi for MockPanes {
         Ok(())
     }
 
-    async fn key(&self, _pane_id: &str, _key_name: &str) -> anyhow::Result<()> {
+    async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
         Ok(())
     }
 }

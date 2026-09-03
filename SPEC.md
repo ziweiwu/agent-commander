@@ -1285,10 +1285,23 @@ the UI does. What it buys is that sending one is deliberate rather than
 incidental, and that the rule lives where every other rule about reaching a live
 agent lives.
 
+**The rule is a type, not a check each caller remembers.** `PaneApi::key` takes
+a `control::SendableKey`, and there are two ways to make one. `check_key` is
+where a key the *client* named is held to the allow-list and to the
+confirmation rule; it returns the type only when both pass. `server_composed`
+is for a key the *server* decided to send — the mode chord, the digit that
+answers a prompt — and takes a `&'static str`, which nothing that arrived on
+the wire can be, so a client's key cannot be smuggled through it. Before this,
+`on_key` checked and then passed a bare `&str` on, and a second caller that
+forgot the check would have compiled.
+
 - `control::inv6_every_destructive_key_needs_confirmation` — each destructive key is refused and not
   forwarded without confirmation, is forwarded with it, and every other allowed
   key still needs none; a client that omits the flag, sends `false`, or sends a
   truthy non-`true` value gets the same refusal
+- `sources::PaneApi::key` — the signature is the rest of the proof: no
+  implementation can be handed a key that did not come from `check_key` or
+  from a literal in the server
 
 ### INV-7 — One command shape
 

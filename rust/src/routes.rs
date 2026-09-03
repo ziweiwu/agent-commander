@@ -78,7 +78,7 @@ pub const DEAD_PANE: &str = "pane has exited";
 /// *applied*: a guard that is never called is worse than no guard, because the
 /// tests still pass. Every inbound `key` goes through `check_key`, every
 /// `paste` through `MAX_PASTE` and the budget, and both through `afford`.
-use crate::control::{check_key, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUCH_INPUT};
+use crate::control::{check_key, SendableKey, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUCH_INPUT};
 
 /// The most a JSON request body may be.
 const MAX_BODY: usize = 8 * 1024;
@@ -1581,13 +1581,17 @@ struct Answer {
 
 const CANNOT_READ_TRANSCRIPT: &str = "cannot read this agent's transcript";
 
+/// The keys that answer a numbered picker, by option index. Nine, because the
+/// picker numbers from 1 and `0` selects nothing.
+const DIGIT_KEYS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
 /// The pane to answer into and the digit that answers — or why nothing may be
 /// sent, in the words the client shows.
 async fn answer_keystroke(
     agent: &Agent,
     answer: &Answer,
     app: &App,
-) -> Result<(String, String), &'static str> {
+) -> Result<(String, SendableKey), &'static str> {
     // A tail of its own, read fresh. The viewer's tail has its own byte offset
     // and its own schedule; what matters here is what is on disk at the instant
     // the answer arrived, not what was true when the card was drawn.
@@ -1603,7 +1607,9 @@ async fn answer_keystroke(
         return Err("no such option");
     }
     let pane_id = agent.pane_id.clone().ok_or("agent is no longer available")?;
-    Ok((pane_id, (answer.choice + 1).to_string()))
+    // The digit is a literal the server owns, never a string off the wire.
+    let digit = DIGIT_KEYS.get(answer.choice).ok_or("no such option")?;
+    Ok((pane_id, SendableKey::server_composed(digit)))
 }
 
 fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
@@ -1732,10 +1738,13 @@ async fn on_key(request: KeyRequest, viewer: &Arc<Viewer>, app: &Arc<App>) {
      * posture, which says the client's allow-list is a convenience and
      * not the boundary.
      */
-    if let Err(refusal) = check_key(&key, confirmed) {
-        viewer.error(&session_id, refusal.to_string());
-        return;
-    }
+    let key = match check_key(&key, confirmed) {
+        Ok(key) => key,
+        Err(refusal) => {
+            viewer.error(&session_id, refusal.to_string());
+            return;
+        }
+    };
     if let Err(err) = app.deps.panes.key(&pane_id, &key).await {
         viewer.error(&session_id, reason(&err));
     }
@@ -2258,7 +2267,7 @@ mod mock_control {
         /// swallowed by the CLI without writing anything this app can read.
         /// A mock that answered with a mode would be modelling a reply the
         /// live path does not make.
-        async fn key(&self, _pane_id: &str, _key: &str) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
             Ok(())
         }
 
@@ -2712,7 +2721,7 @@ mod tests {
             self.writes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-        async fn key(&self, _pane_id: &str, _key: &str) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
             self.writes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }

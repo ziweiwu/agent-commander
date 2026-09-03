@@ -31,14 +31,12 @@ already the language of the half that needs it.
 Three candidates, smallest first. **INV-9 is done** — `browse::WithinRoot` is
 constructible only by `resolve_inside_root`, the parent computation lost its
 second containment check and the label lost its outside-the-root form, and
-INV-9 in `SPEC.md` now describes the type. The two below remain.
+INV-9 in `SPEC.md` now describes the type. **INV-6 is done** —
+`control::SendableKey` is what `PaneApi::key` takes, `check_key` is the only
+constructor for a client's key and `server_composed` (a `&'static str`, which
+wire data cannot be) the only one for the server's own chords and digits. One
+remains.
 
-- **INV-6 — destructive keys need confirmation.** The `confirmed` flag on the
-  `key` message is a `bool` checked at the boundary. A `Confirmed<Key>` that can
-  only be built by the checking function moves the rule from "every call site
-  remembers" to "no call site can forget". Note INV-6's own history: this was a
-  browser-only obligation once, and the file calls that the one claim in it that
-  was not true — a type would have made that state unwritable.
 - **INV-2 — a write picks its path before a byte is sent and never changes its
   mind.** That sentence describes a typestate machine. The control-client path
   and the spawned-tmux path are currently a runtime choice that a later `?` could
