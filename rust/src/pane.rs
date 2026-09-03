@@ -282,6 +282,48 @@ fn paste_args(buffer: &str, pane_id: &str, submit: Submit) -> Vec<String> {
 
 /* ------------------------------------------------------------- the two paths */
 
+/// The way one write reaches tmux, decided before a byte is sent (INV-2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    /// Down the control client. A paste travels as a staged file, because the
+    /// client's stdin is the command channel.
+    Control,
+    /// A one-shot `tmux`, with the text on stdin.
+    Spawned,
+}
+
+/// A write with its route settled: both spellings are built, and only the one
+/// the route names will be used. [`Panes::send`] consumes it, so a write is
+/// sent once or not at all — there is no value left afterwards to send again.
+///
+/// The two spellings are built rather than derived from each other because
+/// they have different quoting rules, and deriving one from the other is
+/// exactly the kind of cleverness that would put a `'` somewhere surprising.
+struct Prepared {
+    route: Route,
+    /// The spawn form: one argv, commands joined by `;`.
+    args: Vec<String>,
+    /// The control form: one string per command.
+    commands: Vec<String>,
+    /// The file a control-mode paste was staged through, deleted after the send.
+    staged: Option<PathBuf>,
+    /// The tmux buffer a paste loads, for tidying up if the send fails.
+    buffer: Option<String>,
+}
+
+/// A write that reached tmux and was reported as failed.
+///
+/// Its outcome is unknown — the text may well have landed — so it is never
+/// retried, and this type is how that is enforced: it carries the route it
+/// took, for tidying up down the same one, and the error, and nothing that
+/// could send. Before it, "retry down the other path" was one `if` and one
+/// `?` away from being written.
+struct Failed {
+    route: Route,
+    buffer: Option<String>,
+    error: PaneError,
+}
+
 /// Reaching tmux by spawning a fresh client. The fallback path, and the only
 /// one that can write to stdin.
 #[async_trait]
@@ -787,26 +829,102 @@ impl Panes {
         self.run(args, None).await
     }
 
-    /// Run a write, through the control client when it is up — and only once.
-    ///
-    /// The difference from [`Panes::exec_read`] is the entire point of this
-    /// function. A write that fails *after* it reached tmux has an unknown
-    /// outcome: a sequence of `load-buffer ; paste-buffer ; send-keys` that
-    /// reports an error at the last step has already put the text into the
-    /// pane, and a client that timed out may well have delivered everything.
-    /// Retrying that down the spawn path would type the user's text into a live
-    /// agent a second time — which is exactly what INV-2 forbids: re-sending is
-    /// the user's decision, not the app's.
-    ///
-    /// So the path is chosen *before* anything is sent, and a failure after
-    /// that is reported rather than retried. The one retry that remains is
-    /// inside [`Panes::run`], for `EAGAIN`, and it is safe for the same reason
-    /// it is needed: the process never started, so nothing was written.
-    async fn exec_write(&self, args: &[String], commands: &[String]) -> Result<String, PaneError> {
-        if self.control.ready() {
-            return self.control.run(commands).await;
+    /// A key, ready to send down whichever route is up.
+    fn prepare_key(&self, pane_id: &str, key_name: &str) -> Prepared {
+        Prepared {
+            route: self.route(),
+            args: key_args(pane_id, key_name),
+            commands: vec![key_cmd(pane_id, key_name)],
+            staged: None,
+            buffer: None,
         }
-        self.run(args, None).await
+    }
+
+    /// A paste, ready to send: staged first and completely, so the route is
+    /// settled before a single byte reaches tmux.
+    ///
+    /// Anything that goes wrong staging — no temp dir, a full disk, a temp root
+    /// with a quote in its name — has written nothing, so taking the spawn
+    /// route instead carries none of the double-delivery risk [`Panes::send`]
+    /// exists to avoid. That is the one place a route is decided twice, and it
+    /// is before anything has been sent.
+    async fn prepare_paste(&self, pane_id: &str, text: &str, submit: Submit) -> Prepared {
+        let buffer = buffer_name();
+        let staged = match self.route() {
+            Route::Control => stage(&buffer, text).await,
+            Route::Spawned => None,
+        };
+        match staged {
+            Some(file) => Prepared {
+                route: Route::Control,
+                args: Vec::new(),
+                commands: paste_cmds(&buffer, &file.to_string_lossy(), pane_id, submit),
+                staged: Some(file),
+                buffer: Some(buffer),
+            },
+            None => Prepared {
+                route: Route::Spawned,
+                args: paste_args(&buffer, pane_id, submit),
+                commands: Vec::new(),
+                staged: None,
+                buffer: Some(buffer),
+            },
+        }
+    }
+
+    fn route(&self) -> Route {
+        if self.control.ready() {
+            Route::Control
+        } else {
+            Route::Spawned
+        }
+    }
+
+    /// Send a prepared write — once.
+    ///
+    /// This consumes the [`Prepared`], and that is the entire point. A write
+    /// that fails *after* it reached tmux has an unknown outcome: a sequence of
+    /// `load-buffer ; paste-buffer ; send-keys` that reports an error at the
+    /// last step has already put the text into the pane, and a client that
+    /// timed out may well have delivered everything. Retrying that down the
+    /// other route would type the user's text into a live agent a second time —
+    /// which is exactly what INV-2 forbids: re-sending is the user's decision,
+    /// not the app's. What the caller is left holding is a [`Failed`], which
+    /// can tidy up and hand back the error, and cannot send. The one retry that
+    /// remains is inside [`Panes::run`], for `EAGAIN`, and it is safe for the
+    /// same reason it is needed: the process never started, so nothing was
+    /// written.
+    async fn send(&self, prepared: Prepared, stdin: Option<&str>) -> Result<(), Failed> {
+        let Prepared { route, args, commands, staged, buffer } = prepared;
+        let result = match route {
+            Route::Control => self.control.run(&commands).await,
+            Route::Spawned => self.run(&args, stdin).await,
+        };
+        if let Some(file) = staged {
+            let _ = tokio::fs::remove_file(&file).await;
+        }
+        result.map(|_| ()).map_err(|error| Failed { route, buffer, error })
+    }
+
+    /// Delete the buffer a failed paste may have left behind, down the route
+    /// the paste took, and hand back the failure unchanged.
+    ///
+    /// These names are per-paste, so a buffer left by a sequence that stopped
+    /// part-way would sit in the tmux server for as long as it runs. Deleting a
+    /// buffer cannot deliver anything to an agent, so unlike the paste itself
+    /// this is safe to issue blindly.
+    async fn tidy_after(&self, failed: Failed) -> PaneError {
+        let Failed { route, buffer, error } = failed;
+        let Some(buffer) = buffer else { return error };
+        match route {
+            Route::Control => {
+                let _ = self.control.run(&[format!("delete-buffer -b {buffer}")]).await;
+            }
+            Route::Spawned => {
+                let _ = self.run(&strs(&["delete-buffer", "-b", &buffer]), None).await;
+            }
+        }
+        error
     }
 
     /// Read the pane's geometry and cursor without touching it.
@@ -859,67 +977,15 @@ impl Panes {
         ticket.wait().await;
 
         if text.is_empty() {
-            self.exec_write(&key_args(pane_id, "Enter"), &[key_cmd(pane_id, "Enter")])
-                .await?;
-            return Ok(());
+            let enter = self.prepare_key(pane_id, "Enter");
+            return self.send(enter, None).await.map_err(|failed| failed.error);
         }
 
-        let buffer = buffer_name();
-
-        // Staging happens first and completely, so the choice between the two
-        // paths is made before a single byte reaches tmux. Anything that goes
-        // wrong here — no temp dir, a full disk, a temp root with a quote in
-        // its name — has written nothing, so taking the spawn path instead
-        // carries none of the double-delivery risk `exec_write` exists to
-        // avoid.
-        let file = if self.control.ready() { stage(&buffer, text).await } else { None };
-
-        if let Some(file) = file {
-            let cmds = paste_cmds(&buffer, &file.to_string_lossy(), pane_id, submit);
-            let result = self.control.run(&cmds).await;
-            let _ = tokio::fs::remove_file(&file).await;
-            return match result {
-                Ok(_) => Ok(()),
-                Err(err) => self.after_failed_control_paste(&buffer, err).await,
-            };
+        let prepared = self.prepare_paste(pane_id, text, submit).await;
+        match self.send(prepared, Some(text)).await {
+            Ok(()) => Ok(()),
+            Err(failed) => Err(self.tidy_after(failed).await),
         }
-
-        match self.run(&paste_args(&buffer, pane_id, submit), Some(text)).await {
-            Ok(_) => Ok(()),
-            Err(err) => self.after_failed_spawned_paste(&buffer, err).await,
-        }
-    }
-
-    /// Tidy up after a control-mode paste that stopped part-way, and report the
-    /// failure unchanged.
-    ///
-    /// The buffer may have been loaded before the sequence stopped, and these
-    /// names are per-paste, so it would sit in the tmux server for as long as it
-    /// runs. Deleting a buffer cannot deliver anything to an agent, so unlike
-    /// the paste itself this is safe to issue blindly.
-    ///
-    /// The paste is issued, its outcome unknown, and therefore not retried. See
-    /// [`Panes::exec_write`].
-    async fn after_failed_control_paste(
-        &self,
-        buffer: &str,
-        err: PaneError,
-    ) -> Result<(), PaneError> {
-        let _ = self.control.run(&[format!("delete-buffer -b {buffer}")]).await;
-        Err(err)
-    }
-
-    /// The same tidy-up for the spawn path. A sequence that failed part-way can
-    /// leave its buffer behind, and these are per-call, so rather than being
-    /// overwritten by the next one they would accumulate for the life of the
-    /// tmux server.
-    async fn after_failed_spawned_paste(
-        &self,
-        buffer: &str,
-        err: PaneError,
-    ) -> Result<(), PaneError> {
-        let _ = self.run(&strs(&["delete-buffer", "-b", buffer]), None).await;
-        Err(err)
     }
 
     /// Send a single control key. The caller must have validated it against
@@ -929,9 +995,8 @@ impl Panes {
         // Same queue as paste: an Enter must not overtake the text it submits.
         let mut ticket = Ticket::take(pane_id);
         ticket.wait().await;
-        self.exec_write(&key_args(pane_id, key_name), &[key_cmd(pane_id, key_name)])
-            .await?;
-        Ok(())
+        let prepared = self.prepare_key(pane_id, key_name);
+        self.send(prepared, None).await.map_err(|failed| failed.error)
     }
 
     /// The pane ids in a session, oldest first.

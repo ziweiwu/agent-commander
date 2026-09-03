@@ -194,7 +194,11 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
   socket that discards rather than replays
 - `pane::tests` (the control-path group) — a write that fails after reaching tmux is
   never retried down the other path, a read that fails is, and the user's text
-  never appears on a tmux command line
+  never appears on a tmux command line. The path is a value as well as a rule:
+  `pane::Prepared` carries the route chosen before a byte is sent and
+  `Panes::send` consumes it, leaving a `pane::Failed` that can tidy up down
+  the route it took and hand back the error, and cannot send. "Retry down the
+  other path" is therefore not something the code after a failure can write
 - `pane_props::inv2_every_interleaving_delivers_each_text_once_to_its_pane_in_order`
   — the same four clauses as a stateful property rather than a list of
   examples: generated sequences of pastes and keys, two at a time, down either

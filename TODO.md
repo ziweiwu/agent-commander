@@ -27,24 +27,17 @@ Turn runtime-checked properties into ones the compiler enforces. This is the
 only technique here that costs nothing at runtime and cannot drift, and Rust is
 already the language of the half that needs it.
 
-Three candidates, smallest first. **INV-9 is done** — `browse::WithinRoot` is
+All three candidates are done. **INV-9** — `browse::WithinRoot` is
 constructible only by `resolve_inside_root`, the parent computation lost its
-second containment check and the label lost its outside-the-root form, and
-INV-9 in `INVARIANTS.md` now describes the type. **INV-6 is done** —
-`control::SendableKey` is what `PaneApi::key` takes, `check_key` is the only
-constructor for a client's key and `server_composed` (a `&'static str`, which
-wire data cannot be) the only one for the server's own chords and digits. One
-remains.
-
-- **INV-2 — a write picks its path before a byte is sent and never changes its
-  mind.** That sentence describes a typestate machine. The control-client path
-  and the spawned-tmux path are currently a runtime choice that a later `?` could
-  in principle re-take; encoded as types, retrying down the other path stops
-  compiling.
-
-**Done when:** `npm run lint` and `npm test` pass, and a runtime check is gone
-because it is now unrepresentable rather than merely unobserved. Update the
-invariant in `INVARIANTS.md` in the same commit.
+second containment check and the label lost its outside-the-root form.
+**INV-6** — `control::SendableKey` is what `PaneApi::key` takes; `check_key`
+is the only constructor for a client's key and `server_composed` (a `&'static
+str`, which wire data cannot be) the only one for the server's own chords and
+digits. **INV-2** — `pane::Prepared` is the route chosen before a byte is
+sent, `Panes::send` consumes it, and what is left after a failure is a
+`pane::Failed` that can tidy up and cannot send; `exec_write` and the two
+`after_failed_*` functions are gone. Each invariant's section in
+`INVARIANTS.md` describes its type.
 
 ### 2. Generate the wire contract instead of mirroring it — done
 
