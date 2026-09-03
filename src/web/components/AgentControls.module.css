@@ -29,7 +29,19 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   padding: 5px 8px;
+  /*
+   * Both, because WebKit ignores one of them.
+   *
+   * Safari applies its own metrics to a `<select>` and does not honour
+   * `min-height` on one: measured at 90x20 against Chromium's 34, which is
+   * under WCAG 2.2 AA's 24px target floor on every Safari there is — and every
+   * browser on iOS is Safari. It does honour `height`, so both are set to the
+   * same number. `box-sizing: border-box` is global, so this is the same box
+   * Chromium was already drawing rather than a taller one.
+   * `e2e/responsive.spec.ts` is what caught it (INV-17).
+   */
   min-height: 34px;
+  height: 34px;
   cursor: pointer;
   max-width: 170px;
 }
@@ -50,6 +62,7 @@
 @media (pointer: coarse) {
   .select {
     min-height: 44px;
+    height: 44px;
     font-size: 16px;
   }
 }

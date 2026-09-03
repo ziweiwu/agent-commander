@@ -38,10 +38,25 @@ for (const scheme of ['light', 'dark']) {
   )
   if (clipped) add('med', 'truncation', `${clipped} clipped element(s) with no title`)
 
+  /*
+   * That the filter narrows and that what survives matches — not a count.
+   *
+   * This asserted exactly one result, which was true of the fixture fleet on
+   * the day it was written and became a false alarm the moment two fixtures
+   * were added in the same folder. A count is a test of the fixtures; "fewer
+   * than before, and every card shown is a match" is a test of the filter.
+   */
+  const allCards = await page.$$eval(T('agent-card'), (els) => els.length)
   await page.fill(T('search'), 'lego')
   await page.waitForTimeout(150)
-  const filtered = await page.$$eval(T('agent-name'), (els) => els.map((e) => e.textContent))
-  if (filtered.length !== 1) add('high', 'search', `filtering by "lego" gave ${filtered.length}`)
+  const matches = await page.$$eval(T('agent-card'), (els) =>
+    els.map((e) => `${e.textContent}`.toLowerCase()),
+  )
+  if (matches.length === 0 || matches.length >= allCards) {
+    add('high', 'search', `filtering by "lego" left ${matches.length} of ${allCards}`)
+  }
+  const strays = matches.filter((text) => !text.includes('lego')).length
+  if (strays) add('high', 'search', `${strays} card(s) shown that do not match "lego"`)
   await page.fill(T('search'), '')
   await page.waitForTimeout(150)
 
@@ -71,8 +86,21 @@ for (const scheme of ['light', 'dark']) {
   const answerable = (await page.$(T('answer-card'))) !== null
   const escapeHatch = (await page.$(T('unblock-button'))) !== null
   if (!answerable && !escapeHatch) add('high', 'taskC', 'no way to resolve the block')
-  if (answerable && (await page.$$(T('answer-option'))).length === 0) {
-    add('med', 'taskC', 'answer card offers no way to answer')
+  /*
+   * A card with no option buttons is not a broken card.
+   *
+   * Only `AskUserQuestion` writes its choices down. `ExitPlanMode` and a tool
+   * permission request write what is being asked and nothing about the
+   * numbered list, so INV-16 has the card say so and offer the keys instead —
+   * and the fleet now carries a fixture of each, so whichever sorts first is
+   * whichever this opens. What has to be true either way is that the card
+   * offers *something*: labelled options, or the stated absence plus the keys.
+   */
+  if (answerable) {
+    const options = (await page.$$(T('answer-option'))).length
+    const keysInstead =
+      (await page.$(T('answer-no-options'))) !== null && (await page.$$('[data-testid^="answer-key-"]')).length > 0
+    if (options === 0 && !keysInstead) add('med', 'taskC', 'answer card offers no way to answer')
   }
   if (!page.url().includes('/agent/')) add('high', 'routing', `opening an agent did not change the URL (${page.url()})`)
   await page.screenshot({ path: `${OUT}/02-blocked-${scheme}.png`, fullPage: true })

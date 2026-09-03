@@ -127,6 +127,30 @@ exited and the notice, the caption and the disabled key bar were unreachable
 outside unit tests. `routes::a_dead_pane_ends_the_terminal_and_not_the_conversation`
 now asserts the kind.
 
+## Tier 5 — what INV-17 left open
+
+### 7. The parity list is written twice, by hand
+
+**Filed with INV-17, 2026-09-03.** `test/ui/inv17-parity.test.tsx` and
+`e2e/responsive.spec.ts` each carry the same list of action test ids, and the
+comment in the e2e one argues that having to notice a divergence is a feature.
+That is true and it is also how the list rots: an action added to the app and
+to neither list is invisible to both.
+
+The honest fix is to derive it. A single `src/shared/surfaces.ts` exporting the
+ids, imported by both tests, would make "add an action, add it to the list" one
+edit instead of two — and a lint rule or a test that walks the components for
+`data-testid` on an interactive element could then compare the app against the
+list rather than the lists against each other.
+
+**Watch for:** the reason it is two lists today is that a *discovered* list
+cannot catch a control that stopped rendering everywhere — it would agree with
+itself. So the derived list has to come from the source, not from a rendered
+tree, or the invariant loses the case it was written for.
+
+**Done when:** one list, both tests read it, and deleting a control from the
+app fails a test rather than shrinking a list.
+
 ## Not doing
 
 **TLA+ for the invariant set.** Evaluated and rejected. Of the 16, one (INV-2)

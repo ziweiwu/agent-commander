@@ -5,7 +5,7 @@ import { formatDay, translate } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
-import { useIsCoarse } from '../hooks/useMediaQuery.ts'
+import { useIsCoarse, useIsShort } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
 import { interruptAndSend, sendConfirmedKey, sendMessage, sendShiftTab } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
@@ -34,6 +34,8 @@ const OFFLINE_HINT_ID = 'composer-offline-hint'
  * screen-reader user has to hear that before their next Shift+Tab sends it.
  */
 const KEY_HINT_ID = 'composer-key-hint'
+/** Named so the disclosure beside Send can say what it opens. */
+const STRIP_ID = 'composer-strip'
 
 /**
  * The replies that get typed over and over: unblock it, approve it, make it
@@ -64,6 +66,15 @@ export function Chat({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const lang = useLang()
   const coarse = useIsCoarse()
+  /*
+   * A landscape phone cannot spare the strip's 48px by default, and may not
+   * lose what is in it either — the goal, the send-mode choice and the quick
+   * replies are nowhere else in the app (INV-17). So there it opens on
+   * request, and everywhere else it is simply there.
+   */
+  const short = useIsShort()
+  const [stripOpen, setStripOpen] = useState(false)
+  const showStrip = !short || stripOpen
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
   const events = useStore((s) => s.events)
@@ -365,8 +376,8 @@ export function Chat({ agent }: { agent: Agent }) {
         * push the conversation itself under the audit's floor of 30% of the
         * viewport. Sharing the strip costs nothing at any width.
         */}
-      {attachable && (
-        <div className={styles.strip} data-testid="composer-strip">
+      {attachable && showStrip && (
+        <div className={styles.strip} id={STRIP_ID} data-testid="composer-strip">
 
           {/*
             What Send does to an agent that is already working, and the stop
@@ -495,6 +506,26 @@ export function Chat({ agent }: { agent: Agent }) {
             typed matters most. Wrapping them instead cost the conversation more
             height than the audit's floor allows, so the redundant one goes.
           */}
+          {/*
+            The strip's way back on a screen too short to hold it open.
+            Beside Send because that is where the choice it carries is made —
+            "what does Send do to an agent that is already working" — and
+            because the composer row is the one row this layout always has.
+          */}
+          {attachable && short && (
+            <Button
+              type="button"
+              variant="compact"
+              data-testid="strip-toggle"
+              aria-expanded={stripOpen}
+              aria-controls={STRIP_ID}
+              title={t('moreOptions')}
+              aria-label={t('moreOptions')}
+              onClick={() => setStripOpen((open) => !open)}
+            >
+              ⋯
+            </Button>
+          )}
           {busy && !interrupting && (
             <Button
               type="button"

@@ -93,9 +93,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1032 tests: 556 Rust (the server) + 476 vitest (the web app)
+npm test              # 1040 tests: 556 Rust (the server) + 484 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 279 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 309 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
@@ -176,7 +176,7 @@ failure you would get for real.
 ## The invariant contract
 
 `INVARIANTS.md` numbers every property this app is built against, INV-1 through
-INV-16, and each is greppable from a test name:
+INV-17, and each is greppable from a test name:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml inv3   # the server's half
@@ -493,7 +493,7 @@ lists what they have caught.
   each thing fails. Trim an entry when it is fixed; the record of trimmed ones
   is §"Fixed since this list was written". §"How it is checked" is the gate
   design.
-- **`INVARIANTS.md`** — INV-1 … INV-16, each with the tests that prove it.
+- **`INVARIANTS.md`** — INV-1 … INV-17, each with the tests that prove it.
   `CLAUDE.md` imports it alongside this file, so it is in context for every
   session here without being asked for.
 - **`SPEC.md`** — what the app is supposed to do, requirement by requirement,

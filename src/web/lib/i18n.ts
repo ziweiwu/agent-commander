@@ -189,6 +189,7 @@ const EN = {
     'first, discarding whatever it had in flight. It stays on for this agent ' +
     'until you switch it back. Continue?',
   sendModeLabel: 'What Send does while the agent is working',
+  moreOptions: 'Send options, goal and common replies',
   sendModeQueue: 'Queue',
   sendModeInterrupt: 'Interrupt',
   sendModeQueueTitle: 'Let the agent finish; your message waits at its prompt.',
@@ -533,6 +534,7 @@ const ZH: Record<Key, string> = {
     '中断模式：在该助手工作时发送消息，会先打断它并丢弃正在进行的工作。' +
     '此设置对该助手持续生效，直到你切换回来。是否继续？',
   sendModeLabel: '助手工作时，发送键的行为',
+  moreOptions: '发送选项、目标与常用回复',
   sendModeQueue: '排队',
   sendModeInterrupt: '中断',
   sendModeQueueTitle: '让助手做完，你的消息在提示符处等待。',

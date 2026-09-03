@@ -177,14 +177,16 @@
  * A landscape phone has ~380px of height, of which the banner, header, tabs and
  * composer already take 305. Holding a row of shortcuts above the composer
  * there costs 48px of the 66px left for the conversation itself — the shortcut
- * is worth less than the thing it is covering. It comes back the moment there
- * is room.
+ * is worth less than the thing it is covering.
+ *
+ * This used to be `display: none` on the strip, and that was a capability
+ * taken away rather than moved: the goal, the send-mode choice and the quick
+ * replies live nowhere else, so a landscape phone was a shape of this app that
+ * could not set a goal at all — by keyboard either, since a hidden element
+ * leaves the tab order (INV-17). `Chat` now collapses the strip behind a `⋯`
+ * beside Send at this height, which costs the conversation nothing until it is
+ * asked for. The height reasoning above is why the default is closed.
  */
-@media (max-height: 420px) {
-  .strip {
-    display: none;
-  }
-}
 
 .composerRow {
   display: flex;

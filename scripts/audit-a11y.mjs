@@ -34,9 +34,21 @@ async function visitStates(page) {
   return states
 }
 
+/*
+ * The three shapes INV-17 names, not two.
+ *
+ * This ran desktop and phone for its first five releases, which left the
+ * tablet — the only device that crosses the 900px breakpoint in normal use, by
+ * being turned over — judged by nothing. Landscape is in the list for the same
+ * reason: it is the shape with the least height, where a row of controls is
+ * likeliest to be dropped rather than moved.
+ */
 for (const [profile, options] of [
   ['desktop', { viewport: { width: 1440, height: 900 } }],
+  ['tablet', { ...devices['iPad Pro 11'] }],
+  ['tablet-landscape', { ...devices['iPad Pro 11 landscape'] }],
   ['phone', { ...devices['iPhone 14 Pro Max'] }],
+  ['phone-landscape', { ...devices['iPhone 14 Pro Max landscape'] }],
 ]) {
   for (const scheme of ['light', 'dark']) {
     const context = await browser.newContext({ ...options, colorScheme: scheme })

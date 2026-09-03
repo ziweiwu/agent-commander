@@ -24,3 +24,13 @@ export const useIsNarrow = (): boolean => useMediaQuery('(max-width: 900px)')
 
 /** Touch input: used to avoid popping the on-screen keyboard unasked. */
 export const useIsCoarse = (): boolean => useMediaQuery('(pointer: coarse)')
+
+/**
+ * Too short to spend height on a row of settings — a landscape phone.
+ *
+ * The composer strip collapses behind a disclosure here rather than being
+ * dropped: INV-17 says a shape may re-arrange what it shows and may not take a
+ * capability away, and the goal, the send-mode choice and the quick replies
+ * live nowhere else.
+ */
+export const useIsShort = (): boolean => useMediaQuery('(max-height: 420px)')

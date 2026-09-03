@@ -122,8 +122,20 @@
 }
 /* iOS zooms the page when a focused field renders under 16px. This lives here
    as well as in the global layer because a module selector outranks it. */
+/* WebKit ignores `min-height` on a `<select>`, so the two that use `.input`
+   need a height as well. Scoped to selects: a text input is fine with the
+   minimum, and a fixed height on one is a way to clip it later. See the note in
+   `AgentControls.module.css` (INV-17). */
+select.input {
+  height: 42px;
+}
+
 @media (pointer: coarse) {
   .input {
     font-size: 16px;
+  }
+  select.input {
+    height: 44px;
+    min-height: 44px;
   }
 }

@@ -14,7 +14,7 @@ else, so its boundaries matter more than most:
 | `TODO.md` | What is queued, and what was rejected? |
 
 **The relationship to `INVARIANTS.md` is containment, not overlap.** INV-1 …
-INV-16 are the subset of this document's requirements that are (a) properties
+INV-17 are the subset of this document's requirements that are (a) properties
 whose violation is a defect rather than a preference, and (b) individually
 numbered and greppable from a test name. Where a requirement here restates an
 invariant it cites it, and **the invariant is authoritative** — if the two ever
@@ -647,6 +647,16 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Home Screen and open it full-screen.
 - **FR-UI-5** — Wide content MUST scroll inside its own container. The document
   body MUST NEVER scroll horizontally, at any viewport, for any input.
+  *`e2e/responsive.spec.ts`.* **(INV-17)**
+- **FR-UI-6** — Every action MUST be available in all three layouts. A layout
+  with less room MAY fold one behind a disclosure, which MUST itself be on
+  screen and named; it MUST NOT drop one. What a smaller screen gives up is
+  labelling, hints and decoration.
+  *`test/responsive.test.ts`, `test/ui/inv17-parity.test.tsx`,
+  `e2e/responsive.spec.ts`.* **(INV-17)**
+- **FR-UI-7** — Every control on screen MUST be hittable and named in every
+  layout, not only in the widest: 24x24 at WCAG 2.2 AA, 44x44 where the pointer
+  is coarse. *`e2e/responsive.spec.ts`, `scripts/audit-a11y.mjs`.* **(INV-17)**
 
 ### 10.2 Theme and colour
 
@@ -799,6 +809,7 @@ unverified.
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
+| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7 |
 
 ---
 

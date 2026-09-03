@@ -21,7 +21,10 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   padding: 7px 10px;
+  /* Both: WebKit ignores `min-height` on a `<select>`. See the note in
+     `AgentControls.module.css` (INV-17). */
   min-height: 40px;
+  height: 40px;
   cursor: pointer;
 }
 
@@ -56,6 +59,10 @@
 @media (pointer: coarse) {
   .dir {
     min-height: 44px;
+  }
+  .select {
+    min-height: 44px;
+    height: 44px;
   }
 }
 

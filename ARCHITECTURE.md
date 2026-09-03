@@ -627,7 +627,7 @@ Five gates, each answering a question the others cannot.
 |---|---|---|
 | `npm test` | the server's modules (`cargo test`), and the browser's in jsdom (vitest) | CI, Node 20 and 22 |
 | `npm run e2e` | the joins: a real browser against a real `--mock` server | CI, Chromium |
-| `npm run audit` | contrast across all ten palettes, WCAG 2.2 AA, task flows, device layouts | local |
+| `npm run audit` | contrast across all ten palettes, WCAG 2.2 AA at five device profiles, task flows, device layouts | local |
 | `npm run qa` | randomised exploration, deterministic per seed | local |
 | `npm run verify:inv1` | INV-1 against a live tmux server | local |
 

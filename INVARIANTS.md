@@ -1203,3 +1203,58 @@ synchronously, for the reason the composer's is.
   `e2e/blocked-shapes.spec.ts` — the two thinner shapes, a plan and a tool
   permission, show what was written and name no option; the same spec drives
   the fixture whose pane has exited onto the dead-pane notice
+
+## INV-17 — Every shape is the whole app
+
+This app has three layouts, and they are the same app. A desktop shows the
+fleet list beside the open agent; below 900px the agent becomes a sheet that
+covers the list; and a phone held sideways has so little height that the
+composer is most of the screen. **Every action available in one shape is
+available in all three** — in the same place, or behind a disclosure that is
+itself on screen and labelled. What a smaller screen takes away is labelling,
+hints and decoration. It never takes away a capability.
+
+**Why this needs to be an invariant and not a habit.** The three layouts are
+one component tree under a few media queries, so losing a feature on a phone
+costs one line and nothing notices. A control inside a `narrow &&` branch is
+absent; a class with `display: none` in a width query is absent *and* out of
+the tab order and the accessibility tree, so it cannot be reached by keyboard
+either. Every desktop test goes on passing, and the e2e suite only fails if
+some test happens to click the thing that vanished. This is the shape of defect
+that ships.
+
+It had already happened. The composer strip — the send-mode choice, the goal,
+and the quick replies — was `display: none` below 420px of height, on the
+stated and correct grounds that it cost 48px of the 66px a landscape phone had
+left for the conversation. But those three live nowhere else in the app, so a
+landscape phone was a shape of agent-commander that could not set a goal at
+all. The strip now collapses behind a `⋯` beside Send at that height, which
+costs the conversation nothing until it is asked for and takes nothing away.
+
+**The disclosures are part of the contract, not an implementation detail.**
+Below 900px the agent's settings row folds behind `⋯` in the tab strip, and the
+fleet's filters are hidden while the sheet covers the list they filter. Both
+are allowed *because* something reaches them: the `⋯` is on screen and named,
+and leaving the sheet brings the filters back. An action with nothing to reach
+it is not folded away, it is missing.
+
+**And every shape meets the same accessibility floor.** A control that is on
+screen can be hit (24x24 at AA, 44x44 where the pointer is coarse) and has a
+name to announce, in every layout — not only in the one the audit happened to
+open. Text inputs stay at 16px or larger on touch, because iOS zooms the page
+when a smaller one takes focus.
+
+- `test/responsive.test.ts` — enumerates every selector a viewport query hides
+  and fails on one the list does not account for, so hiding a label is a line
+  of documentation and hiding a control means writing down what reaches it
+- `test/ui/inv17-parity.test.tsx` — the same action list rendered at all three
+  shapes, opening each shape's disclosures first; reverting the strip fix fails
+  it naming the four features it costs
+- `e2e/responsive.spec.ts` — the same list in a real browser, five times over:
+  desktop, tablet and phone on Chromium and phone and tablet again on WebKit,
+  plus a landscape phone driven by resizing. Also asserts no layout scrolls
+  sideways, including the empty state with a 300-character query in it, and
+  that every visible control is hittable and named
+- `npm run audit:a11y` — WCAG 2.2 AA at five profiles (desktop, tablet both
+  ways, phone both ways) in both themes, which is where contrast and naming
+  are judged; `npm run audit:mobile` carries the 16px input rule
