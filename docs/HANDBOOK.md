@@ -742,7 +742,11 @@ published is not the thing the tag names, and npm versions are immutable once
 they land.
 
 ```
-npm version patch          # or minor / major
+npm version patch --no-git-tag-version   # or minor / major
+# then set the same version in rust/Cargo.toml and rebuild so Cargo.lock
+# follows — `test/version.test.ts` fails the release job when the two
+# manifests disagree, which is how v0.11.0 died on the runner
+git commit -am "0.11.1" && git tag v0.11.1
 git push --follow-tags
 ```
 
