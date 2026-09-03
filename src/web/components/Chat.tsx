@@ -28,6 +28,12 @@ const QUICK_REPEAT_MS = 1000
  * keyboard.
  */
 const OFFLINE_HINT_ID = 'composer-offline-hint'
+/**
+ * The key hints under the composer, named so the textarea can point at them:
+ * Shift+Tab in the box is the mode chord rather than a step backward, and a
+ * screen-reader user has to hear that before their next Shift+Tab sends it.
+ */
+const KEY_HINT_ID = 'composer-key-hint'
 
 /**
  * The replies that get typed over and over: unblock it, approve it, make it
@@ -62,10 +68,18 @@ export function Chat({ agent }: { agent: Agent }) {
   const conn = useStore((s) => s.conn)
   const events = useStore((s) => s.events)
   const prompt = useStore((s) => s.prompt)
+  /*
+   * Both halves, deliberately. The transcript holds an open tool call whenever
+   * one is merely *running*, and the registry knows the agent is stopped but
+   * not what it is stopped on — so either alone would offer to answer a
+   * question that is not being asked (INV-16).
+   */
+  const answering = agent.status === 'waiting' && prompt !== null
   const showToast = useStore((s) => s.showToast)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const answerRef = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
   const [draft, setDraft] = useState('')
   /** The synchronous truth about the draft; `draft` is only for rendering. */
@@ -199,11 +213,33 @@ export function Chat({ agent }: { agent: Agent }) {
     }
   }, [messages.length, busy, pinned])
 
-  // Opening an agent should let you reply without another click — but not on a
-  // phone, where focusing pops the keyboard over the conversation.
+  /*
+   * Opening an agent should let you reply without another click — but not on a
+   * phone, where focusing pops the keyboard over the conversation.
+   *
+   * A blocked agent is the exception in the other direction. Its answer
+   * buttons are what you opened it for, and they sit *before* the composer in
+   * the page, where Shift+Tab is the mode chord rather than a step backward —
+   * so from the composer the only route to them was forward through every
+   * control in the app. They take the focus instead. A question that arrives
+   * later takes it too, but only from somewhere idle: the page body, an empty
+   * composer, or the previous question's buttons. Mid-sentence, it stays put.
+   */
   useEffect(() => {
-    if (!coarse) inputRef.current?.focus()
-  }, [agent.sessionId, coarse])
+    if (coarse) return
+    const option = answering ? answerRef.current?.querySelector<HTMLElement>('button') : null
+    if (!option) {
+      inputRef.current?.focus()
+      return
+    }
+    const active = document.activeElement
+    const idle =
+      !active ||
+      active === document.body ||
+      (active === inputRef.current && draftRef.current === '') ||
+      answerRef.current?.contains(active) === true
+    if (idle) option.focus()
+  }, [agent.sessionId, coarse, answering, prompt?.id])
 
   // The mis-tap guard is per agent. Sending the same prompt to one agent and
   // then to the next is two deliberate instructions, however fast the switch.
@@ -265,18 +301,10 @@ export function Chat({ agent }: { agent: Agent }) {
     if (!coarse) inputRef.current?.focus()
   }
 
-  /*
-   * Both halves, deliberately. The transcript holds an open tool call whenever
-   * one is merely *running*, and the registry knows the agent is stopped but
-   * not what it is stopped on — so either alone would offer to answer a
-   * question that is not being asked (INV-16).
-   */
-  const answering = agent.status === 'waiting' && prompt !== null
-
   return (
     <div className={styles.pane} data-testid="chat">
       {answering && (
-        <div className={styles.answer}>
+        <div className={styles.answer} ref={answerRef}>
           <AnswerCard agent={agent} prompt={prompt} />
         </div>
       )}
@@ -415,7 +443,7 @@ export function Chat({ agent }: { agent: Agent }) {
              * change exists to keep; what is refused is the send, not the
              * writing. The description says why the send is refused.
              */
-            aria-describedby={online ? undefined : OFFLINE_HINT_ID}
+            aria-describedby={online ? KEY_HINT_ID : OFFLINE_HINT_ID}
             placeholder={
               attachable ? t('messagePlaceholder', { name: shortName(agent) }) : t('messageDisabled')
             }
@@ -502,7 +530,7 @@ export function Chat({ agent }: { agent: Agent }) {
           </Button>
         </div>
         {online ? (
-          <div className={styles.hint} data-testid="composer-hint">
+          <div className={styles.hint} id={KEY_HINT_ID} data-testid="composer-hint">
             <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')} ·{' '}
             <kbd>Shift+Tab</kbd> {t('hintShiftTab')}
           </div>

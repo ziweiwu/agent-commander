@@ -13,7 +13,7 @@
  * to prevent.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Chat } from '../../src/web/components/Chat.tsx'
 import { AnswerCard } from '../../src/web/components/AnswerCard.tsx'
@@ -182,5 +182,43 @@ describe('INV-16 the card appears only when both halves agree', () => {
   it('offers nothing when the transcript cannot say what is being asked', () => {
     show('waiting', null)
     expect(screen.queryByTestId('answer-card')).toBeNull()
+  })
+})
+
+/*
+ * The answer buttons are what a keyboard user opened a blocked agent for, and
+ * they sit before the composer — where Shift+Tab is the mode chord, not a step
+ * back. Landing in the composer left them reachable only by tabbing forward
+ * through every control in the app.
+ */
+describe('focus on a blocked agent', () => {
+  const open = (status: 'waiting' | 'busy', prompt: PendingPrompt | null) => {
+    useStore.setState({ prompt })
+    renderApp(<Chat agent={agent({ sessionId: 'a', status, paneId: '%1' })} />)
+  }
+
+  it('lands on the first answer option, not the composer', () => {
+    open('waiting', QUESTION)
+    expect(document.activeElement).toBe(screen.getAllByTestId('answer-option')[0])
+  })
+
+  it('lands in the composer when there is nothing to answer', () => {
+    open('busy', null)
+    expect(document.activeElement).toBe(screen.getByRole('textbox'))
+  })
+
+  it('does not take focus from a sentence in progress when a question arrives', async () => {
+    const user = userEvent.setup()
+    open('waiting', null)
+    await user.type(screen.getByRole('textbox'), 'half a thought')
+    act(() => useStore.setState({ prompt: QUESTION }))
+    expect(document.activeElement).toBe(screen.getByRole('textbox'))
+  })
+
+  it('tells assistive tech that Shift+Tab in the composer is the mode chord', () => {
+    open('busy', null)
+    const box = screen.getByRole('textbox')
+    const hint = document.getElementById(box.getAttribute('aria-describedby') ?? '')
+    expect(hint?.textContent).toContain('Shift+Tab')
   })
 })
