@@ -93,9 +93,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1026 tests: 554 Rust (the server) + 472 vitest (the web app)
+npm test              # 1032 tests: 556 Rust (the server) + 476 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 264 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 279 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run qa            # randomised exploration, deterministic per seed
