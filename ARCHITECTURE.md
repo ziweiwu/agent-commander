@@ -416,7 +416,7 @@ choices persist in `localStorage`, as the fleet filter now does too. Folding the
 list would mean ten menu entries and no way to say "this one, but follow the
 system".
 
-Five schemes in two modes is ten palettes, each owing a measured ratio on ~26
+Eight schemes in two modes is sixteen palettes, each owing a measured ratio on ~26
 foreground/background pairs — `--dim` against three different surfaces,
 `--line-strong` at 3:1 against the same three because it is the only thing
 drawing a control's edge, `--text` against the mock banner's tinted wash. That
@@ -628,7 +628,7 @@ Five gates, each answering a question the others cannot.
 |---|---|---|
 | `npm test` | the server's modules (`cargo test`), and the browser's in jsdom (vitest) | CI, Node 20 and 22 |
 | `npm run e2e` | the joins: a real browser against a real `--mock` server | CI, Chromium |
-| `npm run audit` | contrast across all ten palettes, WCAG 2.2 AA at five device profiles, task flows, device layouts | local |
+| `npm run audit` | contrast across all sixteen palettes, WCAG 2.2 AA at five device profiles, task flows, device layouts | local |
 | `npm run qa` | randomised exploration, deterministic per seed | local |
 | `npm run verify:inv1` | INV-1 against a live tmux server | local |
 
@@ -650,7 +650,7 @@ all of which live outside the layout on purpose.
 The palettes are checked twice, by two of those gates. `npm test`
 regenerates `tokens.css` from `scripts/gen-themes.py` and fails if the file on
 disk differs, which is what keeps the generator's reasoning attached to the
-values actually shipped; `npm run audit` measures every pair of all ten palettes
+values actually shipped; `npm run audit` measures every pair of all sixteen palettes
 and is what decides whether a scheme is legible.
 
 The last three stay local, and stay a habit rather than a gate. The audits judge

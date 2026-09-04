@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { SettingsMenu } from '../../src/web/components/SettingsMenu.tsx'
 import { FleetList } from '../../src/web/components/FleetList.tsx'
@@ -185,5 +185,67 @@ describe('language switching', () => {
     expect(screen.getByTestId('group-title').textContent).toBe('需要你处理')
     expect(screen.getByTestId('new-agent-button').textContent).toContain('新建代理')
     expect(document.documentElement.lang).toBe('zh-CN')
+  })
+})
+
+/*
+ * The one layer in the app that closed on a mouse alone. A keyboard user had
+ * no way to dismiss it, and tabbing past its last item left it open over the
+ * page while focus sat on a control underneath it.
+ */
+describe('dismissing the menu without a mouse', () => {
+  it('closes on Escape and hands focus back to the gear', async () => {
+    const user = userEvent.setup()
+    renderApp(<SettingsMenu />)
+    await user.click(screen.getByTestId('settings-button'))
+    expect(screen.getByTestId('settings-menu')).toBeDefined()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('settings-menu')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId('settings-button'))
+  })
+
+  it('closes when focus leaves it', async () => {
+    const user = userEvent.setup()
+    renderApp(
+      <>
+        <SettingsMenu />
+        <button type="button" data-testid="elsewhere">elsewhere</button>
+      </>,
+    )
+    await user.click(screen.getByTestId('settings-button'))
+    // jsdom's focus() carries no relatedTarget, so the event is dispatched
+    // as a browser would: focus leaving the menu for a control outside it.
+    fireEvent.focusOut(screen.getByTestId('settings-menu'), {
+      relatedTarget: screen.getByTestId('elsewhere'),
+    })
+    expect(screen.queryByTestId('settings-menu')).toBeNull()
+  })
+
+  // The way most people close this menu, and the one path that left focus
+  // on <body> — the next Tab then started the document over.
+  it('returns focus to the gear when a theme is chosen, not to <body>', async () => {
+    const user = userEvent.setup()
+    renderApp(<SettingsMenu />)
+    await user.click(screen.getByTestId('settings-button'))
+    await user.click(screen.getByTestId('theme-dark'))
+    expect(screen.queryByTestId('settings-menu')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId('settings-button'))
+  })
+
+  it('returns focus to the gear when a language is chosen', async () => {
+    const user = userEvent.setup()
+    renderApp(<SettingsMenu />)
+    await user.click(screen.getByTestId('settings-button'))
+    await user.click(screen.getByTestId('lang-zh-CN'))
+    expect(document.activeElement).toBe(screen.getByTestId('settings-button'))
+  })
+
+  it('stays open while focus moves between its own items', async () => {
+    const user = userEvent.setup()
+    renderApp(<SettingsMenu />)
+    await user.click(screen.getByTestId('settings-button'))
+    await user.tab()
+    await user.tab()
+    expect(screen.getByTestId('settings-menu')).toBeDefined()
   })
 })

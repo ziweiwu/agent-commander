@@ -77,6 +77,18 @@ export function SettingsMenu() {
   const [open, setOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * Every way the menu closes on purpose goes through here. Closing by
+   * removing the item that had focus drops focus onto <body>, so the next Tab
+   * starts the document over; the gear is where it came from, so the gear is
+   * where it goes back. Picking a theme or a language is the way most people
+   * close this menu, and it was the one path that did not do this.
+   */
+  const closeAndRefocus = (): void => {
+    setOpen(false)
+    wrapRef.current?.querySelector<HTMLElement>('[data-testid="settings-button"]')?.focus()
+  }
   /** Which edge the menu hangs from; see the effect below. */
   const [side, setSide] = useState<'right' | 'left'>('right')
 
@@ -123,7 +135,28 @@ export function SettingsMenu() {
   }, [open])
 
   return (
-    <div className={styles.wrap} ref={wrapRef}>
+    <div
+      className={styles.wrap}
+      ref={wrapRef}
+      /*
+       * The one layer in the app that closed on a mouse alone. Escape closes
+       * it and hands focus back to the gear, as every other layer here does;
+       * and focus leaving the menu — Tab past its last item — closes it too,
+       * because a menu left open over the page while focus is on a control
+       * underneath it hides that control from the person using it.
+       */
+      onKeyDown={(press) => {
+        if (press.key !== 'Escape' || !open) return
+        press.stopPropagation()
+        closeAndRefocus()
+      }}
+      onBlur={(leave) => {
+        if (!open) return
+        const next = leave.relatedTarget
+        if (next instanceof Node && wrapRef.current?.contains(next)) return
+        setOpen(false)
+      }}
+    >
       <Button
         variant="icon"
         data-testid="settings-button"
@@ -157,7 +190,7 @@ export function SettingsMenu() {
                 aria-pressed={theme === option}
                 onClick={() => {
                   setTheme(option)
-                  setOpen(false)
+                  closeAndRefocus()
                 }}
               >
                 <span className={styles.icon}>{THEME_ICON[option]}</span>
@@ -204,7 +237,7 @@ export function SettingsMenu() {
                 aria-pressed={lang === option}
                 onClick={() => {
                   setLang(option)
-                  setOpen(false)
+                  closeAndRefocus()
                 }}
               >
                 <span className={styles.icon}>{option === 'zh-CN' ? '中' : 'A'}</span>

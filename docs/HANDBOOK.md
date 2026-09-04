@@ -896,9 +896,9 @@ the terminal's column count, which INV-1 says may never follow the window.
 
 ### Colour schemes
 
-Five palettes ship: **Graphite** (the default — neutral slate, no temperature),
+Eight palettes ship: **Graphite** (the default — neutral slate, no temperature),
 **Nordic** (arctic blues), **Solar** (teal-tinted dark, cream light), **Ember**
-(warm browns and ambers) and **Mauve** (soft violet). Pick one in the settings
+(warm browns and ambers) and **Mauve** (soft violet), then **One** (Atom's blue-grey), **Dracula** (purple-black) and **Monokai** (olive-black with lime), each measured from the theme it is named after. Pick one in the settings
 menu under *Colours*, where every row carries a swatch in that scheme's page,
 raised-surface and accent colours: a name tells you nothing about what a palette
 does to a screen you are going to sit in front of all day. That menu stays open when you pick one,
@@ -907,7 +907,7 @@ three, and closing on the first makes comparing them four clicks apiece.
 
 Light and dark stays a separate axis. The scheme picks the palette family;
 System / Light / Dark picks which end of it, and "System" still writes no
-attribute at all. So there are ten palettes, and *Nordic, following the system*
+attribute at all. So there are sixteen palettes, and *Nordic, following the system*
 is a thing you can ask for — which is why the two were not folded into one menu
 of ten entries. Both settings persist in `localStorage`.
 
@@ -929,7 +929,7 @@ re-runs the generator and compares byte for byte, so a hand-edit fails the suite
 rather than surviving until the next `--write` quietly reverts it. The same test
 checks that the menu's list and the stylesheet agree in both directions — a
 scheme in the CSS the menu never offers is unreachable, one in the menu with no
-CSS behind it is a click that does nothing — and that all ten palettes define
+CSS behind it is a click that does nothing — and that all sixteen palettes define
 the whole token set.
 
 Three properties are enforced, not just the first. Contrast is the one WCAG
@@ -958,7 +958,7 @@ research and says which rule each constant came from.
 ### Audit gates
 
 ```
-python3 scripts/audit-contrast.py        # WCAG 1.4.3 / 1.4.11 across all ten palettes
+python3 scripts/audit-contrast.py        # WCAG 1.4.3 / 1.4.11 across all sixteen palettes
 PORT=4400 node scripts/audit-a11y.mjs    # WCAG 2.2 AA, desktop + phone, light + dark
 PORT=4400 node scripts/audit-ux.mjs      # task flows, keyboard, responsive, features
 PORT=4400 node scripts/audit-mobile.mjs  # real device profiles, portrait + landscape
@@ -970,8 +970,7 @@ localhost. The two that take screenshots write them to `SHOTS`, defaulting to
 
 Each exits non-zero on a finding, so they gate a change. `audit-contrast.py`
 parses `src/web/styles/tokens.css` and measures every pair the interface uses,
-independently for each of the ten palettes — it currently reports `10
-palette(s) audited, 0 failing pair(s)`. It is what caught `--faint` sitting at
+independently for each of the sixteen palettes — it currently reports `16 palette(s) audited, 0 failing pair(s)`. It is what caught `--faint` sitting at
 3.80:1 against a panel, and control borders at 1.25:1 while being the only thing
 defining a card's edge. It finds the palettes by parsing the stylesheet rather
 than from a list of scheme names, so a scheme added to the generator and

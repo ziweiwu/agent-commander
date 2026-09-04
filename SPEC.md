@@ -750,6 +750,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   surviving until the next regeneration. *`test/scheme.test.ts`.*
 - **FR-UI-10** — The scheme menu MUST stay open while a palette is picked, unlike
   the theme and language rows: choosing a palette means trying two or three.
+  It MUST still close like every other layer: on Escape, handing focus back to
+  the gear, and when focus leaves it, since a menu left open over the page
+  while focus sits on a control underneath hides that control from the person
+  using it. It closed on a mouse alone for its first five releases.
+  *`test/ui/SettingsMenu.test.tsx`.*
 
 ### 10.3 Language
 
