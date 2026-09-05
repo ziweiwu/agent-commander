@@ -98,12 +98,34 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
 /**
  * Inline markdown rendered as React elements, never as HTML, so transcript
  * content cannot inject markup into the page.
+ *
+ * A link is the one span that reaches outside the page, so it is held to
+ * INV-18: the `href` is whatever `parseInline` vetted and nothing else; it
+ * opens in a new tab, because navigating this one away drops the socket and
+ * every focus with it; `noopener` so the page it opens cannot reach back into
+ * this one; and `noreferrer` so the dashboard's own address — a tailnet name,
+ * when it is being used from a phone — is not handed to whatever the agent
+ * linked to.
  */
 function RichText({ text }: { text: string }) {
   return (
     <div className={styles.text} data-testid="message-text">
       {parseInline(text).map((span, i) =>
-        span.kind === 'code' ? (
+        span.kind === 'link' ? (
+          <a
+            key={i}
+            href={span.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="message-link"
+            // Inline in a sentence, so the touch-target sweeps (e2e and the
+            // audit scripts) apply WCAG 2.5.8's inline exemption to it and to
+            // nothing else. One attribute, read by every sweep.
+            data-inline="true"
+          >
+            {span.text}
+          </a>
+        ) : span.kind === 'code' ? (
           <code key={i}>{span.text}</code>
         ) : span.kind === 'bold' ? (
           <strong key={i}>{span.text}</strong>

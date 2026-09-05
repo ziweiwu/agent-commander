@@ -7,6 +7,7 @@
  * Contrast is measured separately against the design tokens.
  */
 import { chromium, devices } from 'playwright'
+import { TARGET_SIZE_CONTROLS } from './lib/targets.mjs'
 
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
 const T = (id) => `[data-testid="${id}"]`
@@ -16,6 +17,9 @@ const add = (wcag, sev, detail) => findings.push({ wcag, sev, detail })
 const browser = await chromium.launch()
 
 /** Walk the app into each of its main states so the audit sees all of it. */
+/** Long enough for a freshly opened surface to have laid itself out. */
+const SETTLE_MS = 600
+
 async function visitStates(page) {
   const states = []
   await page.waitForSelector(T('agent-card'))
@@ -30,6 +34,13 @@ async function visitStates(page) {
   await page.waitForSelector('.xterm-screen', { timeout: 6000 }).catch(() => {})
   await page.waitForTimeout(600)
   states.push('terminal')
+
+  // Earlier output is a surface of its own — a scroll box with a capture in
+  // it — and one nothing else here opens, so it would be judged by nobody.
+  await page.click(T('history-toggle'))
+  await page.waitForSelector(T('term-history'), { timeout: 6000 }).catch(() => {})
+  await page.waitForTimeout(SETTLE_MS)
+  states.push('terminal-history')
 
   return states
 }
@@ -83,7 +94,7 @@ for (const [profile, options] of [
     }
 
     // 2.5.8 — target size. AA is 24x24; anything under is a failure.
-    const tiny = await page.$$eval('button, a[href], [role="tab"], input[type="checkbox"]', (els) =>
+    const tiny = await page.$$eval(TARGET_SIZE_CONTROLS, (els) =>
       els
         .filter((e) => e.offsetParent !== null)
         .map((e) => {

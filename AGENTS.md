@@ -93,9 +93,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1087 tests: 557 Rust (the server) + 530 vitest (the web app)
+npm test              # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 334 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 369 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -181,7 +181,7 @@ failure you would get for real.
 ## The invariant contract
 
 `INVARIANTS.md` numbers every property this app is built against, INV-1 through
-INV-17, and each is greppable from a test name:
+INV-18, and each is greppable from a test name:
 
 ```sh
 cargo test --manifest-path rust/Cargo.toml inv3   # the server's half
@@ -238,7 +238,11 @@ commit.
   raising an error.
 - **`Registry.enrich()` is a blind shallow merge** with two callers writing
   different field sets, and `undefined` overwrites. That is load-bearing for
-  goal-clear and a trap for any new patch producer.
+  goal-clear and a trap for any new patch producer. A new `AgentPatch` field
+  has to be named in four places or it silently does nothing: `apply` and
+  `is_empty` in `sources.rs`, the `overwrite_named_fields!` list in
+  `tmux_source.rs`, and `card_fields` plus `differs` in `enrich.rs`. `running`
+  was the last one added and touched all four.
 - **`tokens` is output tokens only**, accumulated per tail from a 256 KiB
   backfill — not the session's spend, despite being presented as cost and used
   as a sort key.
@@ -290,6 +294,21 @@ commit.
   INV-4 tail-count flake that used to sit beside it went away with the port:
   `enrich.rs`'s cadence re-arms after the work instead of on a wall clock, so a
   slow pass no longer drops a tick.
+- **`theme.spec.ts` on the two WebKit projects flakes under a full-suite run.**
+  Two of its tests (`picking a scheme repaints the document` and `the scheme
+  and the theme both survive a reload`) failed with `page.goto: Test timeout
+  of 30000ms exceeded` on `tablet-safari`/`phone-safari` in two consecutive
+  full runs, and passed 28 of 28 when the spec was run alone on those
+  projects. It is the WebKit navigation stalling under load, not the app: a
+  red full run naming only those is worth a rerun of that spec before it is
+  believed.
+- **`fades.spec.ts` flaked once under a full run.** "the detail pane fades at
+  the bottom only while content is past it" failed on `phone` in one full run
+  and passed in the two full runs either side of it, plus 3 of 3 on its own.
+  It scrolls a pane to its end and waits for the fade to lift, so anything that
+  changes the pane's height after the scroll puts it back off the bottom. One
+  occurrence, recorded here so the next person reruns it rather than chasing
+  it; worth root-causing if it ever fails twice on different runs.
 - **The e2e `/clear` follow test flakes on slow CI runners.** `control.spec.ts`
   "INV-8 follows the agent to the session it is now running" failed both
   attempts on one GitHub runner and passed on rerun with nothing changed. One
@@ -498,7 +517,7 @@ agents" lists what they have caught.
   each thing fails. Trim an entry when it is fixed; the record of trimmed ones
   is §"Fixed since this list was written". §"How it is checked" is the gate
   design.
-- **`INVARIANTS.md`** — INV-1 … INV-17, each with the tests that prove it.
+- **`INVARIANTS.md`** — INV-1 … INV-18, each with the tests that prove it.
   `CLAUDE.md` imports it alongside this file, so it is in context for every
   session here without being asked for.
 - **`SPEC.md`** — what the app is supposed to do, requirement by requirement,

@@ -18,11 +18,18 @@ a laptop or from a phone.
 - **Answer a blocked agent from the Chat tab.** The options are read from the
   agent's own transcript, so every button is a choice the agent actually named.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
-  never resizes it: it is a capture, not a second terminal.
+  never resizes it: it is a capture, not a second terminal. **Earlier output**
+  reads back through its scrollback a page at a time, including for a pane
+  whose process has exited.
+- **What a busy agent is running**, read from the process table: the tool
+  process under it and how long it has been going. It is the only account of
+  the work an agent that keeps no transcript can give.
 - **Steer a running session**: message it, switch model or permission mode,
   set a goal, compact or clear its context, or close it.
 - **Notifications** when an agent starts waiting on you, off by default.
-- **Works on a phone** over Tailscale, keyboard and all.
+- **Works on a phone** over Tailscale. The on-screen keyboard takes the keys
+  and nothing else: the message box, the last message and any error stay above
+  it.
 - **Eight colour schemes**, light and dark, every one audited for contrast, in
   English and 简体中文.
 

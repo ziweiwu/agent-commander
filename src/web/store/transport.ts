@@ -25,8 +25,19 @@ let socket: WebSocket | null = null
 let retry = 500
 let announced = new Set<string>()
 
-export function send(msg: ClientMessage): void {
-  if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg))
+/**
+ * Write one frame, and say whether it was written.
+ *
+ * `true` only when the socket was open and took the bytes. Nothing is queued
+ * for later — replaying input into a live agent is INV-2's one prohibition —
+ * so a caller that tells the user something was sent must read this first.
+ * The store's `conn` is not enough: it is set by the `close` listener, and a
+ * socket that is CLOSING has stopped writing before that listener runs.
+ */
+export function send(msg: ClientMessage): boolean {
+  if (socket?.readyState !== WebSocket.OPEN) return false
+  socket.send(JSON.stringify(msg))
+  return true
 }
 
 /** Tell the server which agent this tab is looking at. */
@@ -35,21 +46,75 @@ export function focusAgent(sessionId: string | null): void {
   if (state.selected === sessionId) return
   // Whatever is half-typed belongs to the agent being left.
   flushText()
-  if (state.selected && state.tab === 'attach') {
+  if (state.selected && state.attached) {
     send({ type: 'attach', sessionId: state.selected, on: false })
   }
   useStore.setState({ selected: sessionId })
+  // Drops `attached` with the rest of the conversation: the server forgets
+  // the attachment on a focus change, and so must this side.
   state.resetConversation()
   send({ type: 'focus', sessionId })
 }
 
+/**
+ * Start or stop the server reading the selected agent's pane.
+ *
+ * "Attached" is a fact about frames — somebody on this page is drawing them —
+ * and not about which tab is showing. It used to be the same thing: the Attach
+ * tab was the only surface that drew a pane, so this set `tab` as a side
+ * effect and every reader of `tab === 'attach'` meant "frames are wanted". The
+ * Chat tab now draws a slice of the pane too, so the two are separate and the
+ * route sets the tab itself.
+ *
+ * Attaching is always sent, even when already attached: the server answers a
+ * fresh attach with a full repaint rather than a delta, which is how a
+ * terminal built after the frames started gets rows it never drew. Detaching
+ * when nothing is attached sends nothing — so a watcher's teardown can call
+ * this without first asking whether it is still the one attached (INV-4).
+ */
 export function setAttached(on: boolean): void {
-  const { selected } = useStore.getState()
+  const { selected, attached } = useStore.getState()
   if (!selected) return
+  if (!on && !attached) return
   flushText()
-  useStore.setState({ tab: on ? 'attach' : 'chat' })
-  if (!on) useStore.setState({ frame: null })
+  useStore.setState(on ? { attached: true } : { attached: false, frame: null })
   send({ type: 'attach', sessionId: selected, on })
+}
+
+/**
+ * How many lines above the screen one press asks for. The server holds it to
+ * its own maximum whatever is sent, so this is a request, not a promise.
+ */
+export const HISTORY_PAGE = 200
+
+/**
+ * How far above the screen this will read, mirroring the server's own cap.
+ *
+ * A convenience rather than the boundary — the server clamps regardless — but
+ * one the browser has to know, because the two clamps together make a floor:
+ * once this many lines are held, every further request comes back for a window
+ * that is already on screen and cannot be joined on, so the button did nothing
+ * at all, silently, on any pane deeper than this (a real one here holds 11,973
+ * lines). Reaching the floor is now a thing the view says (INV-11).
+ */
+export const HISTORY_DEPTH = 2_000 + HISTORY_PAGE
+
+/**
+ * Ask for the next page of lines above the attached pane's screen.
+ *
+ * Never polled: one press is one read (INV-4), the next page is asked for
+ * only once this one has answered, and nothing is re-asked on reconnect. The
+ * page after the held lines is what is asked for, so pressing again reads
+ * further up rather than the same window twice.
+ */
+export function requestHistory(): boolean {
+  const { selected, history, historyPending } = useStore.getState()
+  if (!selected || historyPending) return false
+  const before = history?.sessionId === selected ? history.lines.length : 0
+  if (before >= HISTORY_DEPTH) return false
+  if (!send({ type: 'history', sessionId: selected, before, lines: HISTORY_PAGE })) return false
+  useStore.setState({ historyPending: true })
+  return true
 }
 
 /**
@@ -177,9 +242,9 @@ export function interruptAndSend(text: string): void {
  * name rather than by whatever is selected, so a card in a list cannot answer
  * for a different agent.
  */
-export function answerPrompt(sessionId: string, promptId: string, choice: number): void {
-  if (promptId === '') return
-  send({ type: 'answer', sessionId, promptId, choice })
+export function answerPrompt(sessionId: string, promptId: string, choice: number): boolean {
+  if (promptId === '') return false
+  return send({ type: 'answer', sessionId, promptId, choice })
 }
 
 export function sendKey(key: string): void {
@@ -405,9 +470,19 @@ function handle(msg: ServerMessage): void {
       return
     }
     case 'frame': {
-      if (msg.frame.sessionId === state.selected && state.tab === 'attach') {
+      // Keyed on the attachment, not the tab: the Chat tab's peek is a watcher
+      // too, and a frame it asked for must not be dropped for being on the
+      // wrong tab.
+      if (msg.frame.sessionId === state.selected && state.attached) {
         useStore.setState({ frame: msg.frame })
       }
+      return
+    }
+    case 'history': {
+      // Keyed on the selection like a frame: a reply for an agent this tab
+      // has left is a memory of somewhere else.
+      if (msg.sessionId !== state.selected) return
+      state.addHistory({ sessionId: msg.sessionId, before: msg.before, lines: msg.lines, total: msg.total })
       return
     }
     case 'paste-ack': {
@@ -422,6 +497,16 @@ function handle(msg: ServerMessage): void {
        * only announced.
        */
       if (msg.kind === 'pane-exited' && msg.sessionId) state.markExited(msg.sessionId)
+      // Nothing was typed, so the card may offer the same question again.
+      if (msg.kind === 'answer-refused' && msg.sessionId) state.markAnswerRefused(msg.sessionId)
+      // A history read that failed has answered, in its way: the next press
+      // may ask again rather than wait on a reply that is not coming. Keyed on
+      // the kind, not on the session: any other error naming this agent — a
+      // dead pane, a run of failed frame reads — would otherwise release the
+      // latch and make `addHistory` drop the reply that was still on its way.
+      if (msg.kind === 'history-failed' && msg.sessionId === state.selected) {
+        useStore.setState({ historyPending: false })
+      }
       state.showToast(msg.message)
   }
 }
@@ -467,10 +552,10 @@ function openSocket(): WebSocket | null {
 function onOpen(): void {
   retry = 500
   useStore.setState({ conn: 'open' })
-  const { selected, tab } = useStore.getState()
+  const { selected, attached } = useStore.getState()
   if (selected) {
     send({ type: 'focus', sessionId: selected })
-    if (tab === 'attach') send({ type: 'attach', sessionId: selected, on: true })
+    if (attached) send({ type: 'attach', sessionId: selected, on: true })
   }
 }
 
@@ -502,7 +587,11 @@ export function connect(): void {
     inFlight = null
     outbox = null
     window.clearTimeout(stallTimer)
-    useStore.setState({ conn: 'closed' })
+    // The same for the history read: its reply is never coming either, and a
+    // gate left shut disables "Earlier output" for the life of the page while
+    // saying nothing (INV-11). The lines already held are kept — they are what
+    // the pane said, and that has not stopped being true.
+    useStore.setState({ conn: 'closed', historyPending: false })
     retryLater()
   })
 

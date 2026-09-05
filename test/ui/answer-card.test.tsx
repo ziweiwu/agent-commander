@@ -7,10 +7,11 @@
  *
  * What makes it safe to answer here is that nothing is guessed. The options are
  * read out of the agent's own transcript, which Claude Code flushes *before*
- * the dialog is answered, and where the transcript does not state them this
- * says so instead of inventing a list (INV-16). A mislabelled button here
- * answers a live agent's question wrongly, which is exactly what INV-11 exists
- * to prevent.
+ * the dialog is answered. Where the transcript does not state them — a plan
+ * approval, a tool permission — the card offers the choices Claude Code draws
+ * for that dialog, flagged as drawn and shown above a live capture of the pane
+ * that can contradict them (INV-16). A mislabelled button here answers a live
+ * agent's question wrongly, which is exactly what INV-11 exists to prevent.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, screen } from '@testing-library/react'
@@ -21,9 +22,20 @@ import { agent, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import type { PendingPrompt } from '../../src/shared/types.ts'
 
+// The live capture is xterm behind a lazy import; here it only has to be
+// present or absent. `test/ui/pane-peek.test.tsx` proves what it does.
+vi.mock('../../src/web/components/LazyTerminal.tsx', () => ({
+  LazyPanePeek: () => <div data-testid="pane-peek" />,
+  LazyTerminal: () => null,
+}))
+
 const sendKey = vi.hoisted(() => vi.fn())
 const sendConfirmedKey = vi.hoisted(() => vi.fn())
-const answerPrompt = vi.hoisted(() => vi.fn())
+// Answers `true` like a socket that took the frame; the CLOSING-gap test below
+// routes one call through the real transport instead.
+const answerPrompt = vi.hoisted(() =>
+  vi.fn((_session: string, _prompt: string, _choice: number): boolean => true),
+)
 
 vi.mock('../../src/web/store/transport.ts', () => ({
   sendKey,
@@ -57,11 +69,33 @@ const QUESTION: PendingPrompt = {
 
 const blocked = () => agent({ sessionId: 'a', status: 'waiting', paneId: '%1' })
 
+/* What the server sends for the two dialogs whose choices the transcript never
+   states: Claude Code's own numbering, flagged as drawn (INV-16). */
+const DRAWN = [
+  { label: 'Yes', description: 'Allow this once' },
+  { label: "Yes, and don't ask again", description: 'As the terminal says' },
+  { label: 'No, and tell Claude what to do differently', description: 'Refuse' },
+]
+const PLAN: PendingPrompt = {
+  tool: 'ExitPlanMode',
+  detail: '## Steps\n1. Do the thing',
+  options: DRAWN,
+  optionsDrawn: true,
+  id: 'plan-fingerprint',
+}
+const PERMISSION: PendingPrompt = {
+  tool: 'Bash',
+  detail: 'Clear the build tree',
+  options: DRAWN,
+  optionsDrawn: true,
+  id: 'permission-fingerprint',
+}
+
 beforeEach(() => {
   resetStore()
   sendKey.mockClear()
   sendConfirmedKey.mockClear()
-  answerPrompt.mockClear()
+  answerPrompt.mockReset().mockImplementation(() => true)
 })
 
 describe('INV-16 the verified answer outranks the escape hatch', () => {
@@ -136,25 +170,178 @@ describe('INV-16 the card names only what the transcript named', () => {
     expect(answerPrompt).toHaveBeenCalledTimes(1)
   })
 
-  it('names no option for a plan, because the CLI composes those choices', () => {
-    renderApp(
-      <AnswerCard
-        agent={blocked()}
-        prompt={{ tool: 'ExitPlanMode', detail: '## Steps\n1. Do the thing' }}
-      />,
-    )
-    expect(screen.queryByTestId('answer-option')).toBeNull()
-    expect(screen.getByTestId('answer-no-options')).toBeTruthy()
+  /*
+   * The CLI composes a plan's approval choices at the terminal, so the labels
+   * offered are the drawn ones — and the card says so, in words and with a
+   * dashed edge, next to the live pane they can be checked against.
+   */
+  it('labels a plan with the drawn choices, says they are drawn, and shows the pane', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={PLAN} />)
+    const options = screen.getAllByTestId('answer-option')
+    expect(options.map((o) => o.textContent)).toEqual([
+      expect.stringContaining('Yes'),
+      expect.stringContaining("don't ask again"),
+      expect.stringContaining('No, and tell Claude'),
+    ])
+    expect(screen.getByTestId('answer-drawn').textContent).toMatch(/how Claude Code draws/)
+    expect(screen.getByTestId('answer-options').getAttribute('data-drawn')).toBe('true')
+    expect(options[0]?.getAttribute('aria-describedby')).toBe('answer-drawn-note')
+    expect(screen.getByTestId('answer-peek')).toBeTruthy()
+    expect(screen.getByTestId('pane-peek')).toBeTruthy()
     // What *is* known is still shown: the plan being approved.
     expect(screen.getByTestId('answer-detail').textContent).toContain('Do the thing')
   })
 
-  it('names no option for a permission request, but says what it is about', () => {
-    renderApp(
-      <AnswerCard agent={blocked()} prompt={{ tool: 'Bash', detail: 'Clear the build tree' }} />,
-    )
-    expect(screen.queryByTestId('answer-option')).toBeNull()
+  it('labels a permission request the same way, and still says what it is about', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    expect(screen.getAllByTestId('answer-option')).toHaveLength(3)
+    expect(screen.getByTestId('answer-drawn')).toBeTruthy()
     expect(screen.getByTestId('answer-detail').textContent).toContain('Clear the build tree')
+  })
+
+  it('answers a drawn choice with its index, bound to the prompt, like a stated one', async () => {
+    const user = userEvent.setup()
+    renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    await user.click(screen.getAllByTestId('answer-option')[2] as HTMLElement)
+    expect(answerPrompt).toHaveBeenCalledWith('a', 'permission-fingerprint', 2)
+  })
+
+  /* A question the transcript stated in full needs no second opinion: no
+     caveat, no dashed edge, no pane. */
+  it('does not caveat or show the pane for options the transcript stated', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    expect(screen.queryByTestId('answer-drawn')).toBeNull()
+    expect(screen.getByTestId('answer-options').getAttribute('data-drawn')).toBeNull()
+    expect(screen.queryByTestId('answer-peek')).toBeNull()
+  })
+
+  it('shows the pane wherever only keys are offered, so the highlight can be seen', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
+    expect(screen.getByTestId('answer-peek')).toBeTruthy()
+  })
+
+  it('shows no pane for an agent with no pane', () => {
+    renderApp(
+      <AnswerCard
+        agent={agent({ sessionId: 'a', status: 'waiting', paneId: undefined })}
+        prompt={PERMISSION}
+      />,
+    )
+    expect(screen.queryByTestId('answer-peek')).toBeNull()
+  })
+
+  /*
+   * With the socket down nothing is sent, and the card used to disable itself
+   * and announce "Answer sent" anyway — then stay dead through the reconnect.
+   * INV-11: it must not claim an answer it did not send.
+   */
+  it('refuses to answer while the socket is down, and claims nothing', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ conn: 'connecting' })
+    renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    const first = screen.getAllByTestId('answer-option')[0] as HTMLButtonElement
+    expect(first.disabled).toBe(true)
+    expect((screen.getByTestId('answer-key-Enter') as HTMLButtonElement).disabled).toBe(true)
+    await user.click(first)
+    expect(answerPrompt).not.toHaveBeenCalled()
+    expect(useStore.getState().toast).toBeNull()
+    // Back online, the same question is answerable: nothing was spent.
+    act(() => useStore.setState({ conn: 'open' }))
+    expect((screen.getAllByTestId('answer-option')[0] as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  /*
+   * The gap `conn` cannot see. A socket that has begun closing drops the frame
+   * before its `close` listener sets `conn`, so the button is enabled, the
+   * click writes nothing, and the card used to latch, say "Answer sent" and
+   * stay dead for this question through the reconnect. `send()` now reports
+   * whether the frame was written, and the card believes that rather than the
+   * store (INV-11). The call goes through the real transport, against a socket
+   * stubbed CLOSING, so both halves of the contract are on trial.
+   */
+  it('claims nothing and spends nothing when the socket is closing under an open conn', async () => {
+    const user = userEvent.setup()
+    const real = await vi.importActual<typeof import('../../src/web/store/transport.ts')>(
+      '../../src/web/store/transport.ts',
+    )
+    const written: string[] = []
+    class ClosingSocket {
+      static readonly OPEN = 1
+      readyState = 1
+      readonly listeners = new Map<string, Array<(e: unknown) => void>>()
+      send(raw: string): void {
+        written.push(raw)
+      }
+      addEventListener(type: string, fn: (e: unknown) => void): void {
+        this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
+      }
+      fire(type: string): void {
+        for (const fn of this.listeners.get(type) ?? []) fn({})
+      }
+      close(): void {}
+    }
+    const sockets: ClosingSocket[] = []
+    const originalSocket = globalThis.WebSocket
+    vi.stubGlobal(
+      'WebSocket',
+      // A `vi.fn(() => …)` cannot be `new`-ed; a class can.
+      class extends ClosingSocket {
+        constructor() {
+          super()
+          sockets.push(this)
+        }
+      },
+    )
+    try {
+      real.connect()
+      const socket = sockets[0] as ClosingSocket
+      socket.fire('open')
+      expect(useStore.getState().conn).toBe('open')
+      // CLOSING: the browser has stopped writing and `close` has not fired yet.
+      socket.readyState = 2
+      answerPrompt.mockImplementationOnce(real.answerPrompt)
+
+      renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+      const first = screen.getAllByTestId('answer-option')[0] as HTMLButtonElement
+      expect(first.disabled).toBe(false)
+      await user.click(first)
+
+      expect(written).toEqual([])
+      expect(answerPrompt).toHaveReturnedWith(false)
+      expect(useStore.getState().toast).not.toMatch(/Answer sent/)
+      expect(useStore.getState().toast).toMatch(/not sent/i)
+      // Nothing was spent: the same question is still answerable, and the next
+      // press goes through.
+      expect(first.disabled).toBe(false)
+      await user.click(first)
+      expect(answerPrompt).toHaveBeenCalledTimes(2)
+      expect(first.disabled).toBe(true)
+      expect(useStore.getState().toast).toMatch(/Answer sent/)
+    } finally {
+      // Only this stub: the setup's own globals (matchMedia) must stay.
+      vi.stubGlobal('WebSocket', originalSocket)
+    }
+  })
+
+  /*
+   * Every dialog whose choices the transcript does not state now arrives with
+   * drawn options, so the only way to reach this branch is an `AskUserQuestion`
+   * whose options could not be parsed. The copy has to describe that, not a
+   * terminal that draws choices nobody wrote down.
+   */
+  it('says the choices could not be read when a question arrives with none', () => {
+    renderApp(
+      <AnswerCard
+        agent={blocked()}
+        prompt={{ tool: 'AskUserQuestion', question: 'Which?', options: [], id: 'q' }}
+      />,
+    )
+    const note = screen.getByTestId('answer-no-options')
+    expect(note.textContent).toMatch(/could not be read from the transcript/)
+    expect(note.textContent).not.toMatch(/drawn by the terminal/)
+    expect(screen.queryByTestId('answer-drawn')).toBeNull()
+    expect(screen.queryByTestId('answer-option')).toBeNull()
+    expect(screen.getByTestId('answer-question').textContent).toBe('Which?')
   })
 
   /* One digit cannot finish a multi-select, so offering one would be a button
@@ -253,5 +440,27 @@ describe('focus on a blocked agent', () => {
     const box = screen.getByRole('textbox')
     const hint = document.getElementById(box.getAttribute('aria-describedby') ?? '')
     expect(hint?.textContent).toContain('Shift+Tab')
+  })
+})
+
+describe('a refused answer releases the card (INV-11)', () => {
+  it('re-enables the options when the server refuses this agent’s answer, and not another’s', async () => {
+    const user = userEvent.setup()
+    answerPrompt.mockReturnValue(true)
+    renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    const first = () => screen.getAllByTestId('answer-option')[0] as HTMLButtonElement
+    await user.click(first())
+    expect(first().disabled).toBe(true)
+
+    // Somebody else's refusal is not this card's business.
+    act(() => useStore.getState().markAnswerRefused('someone-else'))
+    expect(first().disabled).toBe(true)
+
+    // Ours: the pane was not drawing that row, nothing was typed, and the
+    // question is still the one on screen.
+    act(() => useStore.getState().markAnswerRefused('a'))
+    expect(first().disabled).toBe(false)
+    await user.click(first())
+    expect(answerPrompt).toHaveBeenCalledTimes(2)
   })
 })

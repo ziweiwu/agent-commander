@@ -50,7 +50,18 @@ tmuxSession?: string, attachBlockedReason?: string, activity?: string, lastActiv
 /**
  * Handed work to a subagent and doing nothing itself until it returns.
  */
-delegating?: boolean, aiTitle?: string, lastPrompt?: string, derivedName?: boolean, permissionMode?: string, model?: string, goal?: GoalState, };
+delegating?: boolean, aiTitle?: string, lastPrompt?: string, derivedName?: boolean, permissionMode?: string, model?: string, goal?: GoalState, 
+/**
+ * The tool process a busy agent is inside, read from the process table.
+ *
+ * INV-11: a measurement, not a claim — the process exists or it does not
+ * — and captioned as read from the process table wherever it is drawn.
+ * Absent for an agent that is not busy, or whose process has no child
+ * worth naming. Never a formatted duration: `since` is a timestamp so the
+ * payload is byte-stable for the life of the process (INV-4) and the
+ * browser does the arithmetic.
+ */
+running?: RunningProcess, };
 
 export type AgentStatus = "busy" | "idle" | "waiting" | "unknown";
 
@@ -69,7 +80,7 @@ unknown?: boolean, };
 
 export type ChangedRow = { row: number, text: string, };
 
-export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, };
+export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, };
 
 /**
  * `{ ok: true, detail? } | { ok: false, error }`
@@ -83,7 +94,7 @@ export type DirListing = { path: string, parent: string | null, root: string, en
 /**
  * Structured error conditions a client may branch on.
  */
-export type ErrorKind = "pane-exited";
+export type ErrorKind = "pane-exited" | "history-failed" | "answer-refused";
 
 /**
  * The whole fleet's delegation graph, as served by `GET /api/tree`.
@@ -137,11 +148,12 @@ export type NoticeKind = "compacted" | "compactedAuto";
  * app may name an option at all: it is *read*, never inferred from the screen
  * (INV-16).
  *
- * The other two blocked shapes are deliberately thinner. `ExitPlanMode` writes
- * its plan but not the three approval choices, which the CLI composes; a tool
- * permission request writes the tool and its input but not the numbered list.
- * For those `options` stays empty and the interface offers keys rather than
- * labels it would have had to invent.
+ * The other two blocked shapes are thinner. `ExitPlanMode` writes its plan but
+ * not the approval choices, which the CLI composes; a tool permission request
+ * writes the tool and its input but not the numbered list. For those `options`
+ * carries the choices Claude Code draws, with `options_drawn` set so the
+ * interface can say they are a claim about the CLI — and the server reads the
+ * pane before typing an answer to one, refusing if that row is not there.
  */
 export type PendingPrompt = { 
 /**
@@ -153,13 +165,22 @@ tool: string,
  */
 question?: string, 
 /**
- * Only ever what the transcript named. Absent means "not knowable here".
+ * What the transcript named, or — with `options_drawn` — what Claude Code
+ * draws for this dialog. Absent means "not knowable here".
  */
 options?: Array<PromptOption>, 
 /**
  * True when the picker takes several answers, so one digit cannot finish it.
  */
 multiSelect?: boolean, 
+/**
+ * True when `options` are what Claude Code *draws* for this dialog rather
+ * than what the transcript wrote. A plan approval and a permission prompt
+ * number their choices at the terminal and record none of them, so these
+ * labels are a claim about the CLI, marked as one and shown beside a live
+ * capture of the pane that can contradict them (INV-16).
+ */
+optionsDrawn?: boolean, 
 /**
  * How many questions this one call asks, when it asks more than one.
  */
@@ -193,6 +214,19 @@ export type RateLimits = { fiveHour?: UsageWindow, sevenDay?: UsageWindow,
 at: number, };
 
 /**
+ * One process under a busy agent — see `procs.rs` for how it is chosen.
+ */
+export type RunningProcess = { pid: number, 
+/**
+ * Program and first argument, e.g. `cargo test`, trimmed for a card.
+ */
+command: string, 
+/**
+ * Epoch milliseconds when the process started.
+ */
+since: number, };
+
+/**
  * Facts about the host machine, used by the help page.
  */
 export type ServerEnv = { tailscale: TailscaleEnv | null, 
@@ -217,7 +251,7 @@ export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boole
  * goes out for every agent many times a minute, and this is only ever
  * wanted for the one being read.
  */
-prompt?: PendingPrompt, } | { "type": "frame", frame: Frame, } | { "type": "paste-ack", sessionId: string, seq: number, } | { "type": "error", sessionId?: string, message: string, 
+prompt?: PendingPrompt, } | { "type": "frame", frame: Frame, } | { "type": "history", sessionId: string, before: number, lines: Array<string>, total: number, } | { "type": "paste-ack", sessionId: string, seq: number, } | { "type": "error", sessionId?: string, message: string, 
 /**
  * `kind` names the condition; `message` is only how to say it. The
  * pane-exit case is the one state a viewer must react to

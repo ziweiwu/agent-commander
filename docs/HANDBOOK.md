@@ -164,6 +164,11 @@ missing, and the card says so rather than leaving a blank:
 - **No conversation.** Kiro keeps no transcript this app can read, so there is
   no Chat tab — hidden rather than empty, because an empty one reads as a bug.
 - **No token counts, no delegation.** Both come from a transcript.
+- **What it is running, it can say.** A busy Kiro card names the tool process
+  under its pane — `running npm test · 4m` — read from the process table
+  rather than reported by the agent, and captioned as such. It is the one
+  activity signal a CLI with no transcript has. A busy Claude card carries the
+  same fact in its fold, where the transcript's own line already has the face.
 - **Status is inferred, and never `waiting`.** It reads `idle · quiet`, meaning
   only that the pane has stopped producing output. An agent blocked on a
   permission prompt and one that has simply finished look identical from
@@ -198,7 +203,10 @@ Open an agent and you get two tabs:
 - **Chat** — the session as a conversation. Your prompts and the agent's replies
   are attributed and grouped like a chat app, with the tool calls each reply
   produced folded underneath it (long runs collapse behind a `6 actions`
-  summary). Messages you send appear immediately as *sending…* and settle once
+  summary). A URL the agent writes — bare, or as a markdown link — is a link
+  that opens in a new tab; only `http` and `https` ever become one, and
+  anything else stays the text it arrived as (INV-18). Messages you send
+  appear immediately as *sending…* and settle once
   the agent's transcript confirms them; one the agent never echoes back is
   marked *not delivered* rather than spinning forever, and is never resent
   for you. A message sent to an agent that is **working** reads *queued* instead,
@@ -234,13 +242,29 @@ wherever the highlight happens to be sitting — arrow keys would have to assume
 the picker opened at the top, and being wrong about that answers a different
 question than the one you read.
 
-Where the transcript does not state the choices, the app says so instead of
-inventing them. A plan approval writes its plan but not the three choices the
-CLI composes; a permission request writes the tool and its command but not the
-numbered list. In both the app shows what it does know and offers ↑ ↓ Space
-Enter Esc, with **Open terminal** still there. This is INV-16, and it is the
-whole difference between a control you can trust with a live agent and one you
-cannot: a mislabelled button here answers somebody's question wrongly.
+Where the transcript does not state the choices, the app offers the ones
+Claude Code draws — and tells you that is what they are. A plan approval writes
+its plan but not the choices the CLI composes; a permission request writes the
+tool and its command but not the numbered list. For both, the card shows what
+it does know, then three buttons labelled the way Claude Code numbers that
+dialog (*Yes · Yes, and don't ask again · No, and tell Claude what to do
+differently*; for a plan, *Yes · Yes, manually approve edits · No, keep
+planning*), captioned as drawn and edged with dashes, because they are a claim
+about the CLI rather than something the agent wrote down. Under them sits the
+agent's terminal, live — the same capture the Attach tab shows — so the label
+you are about to press can be checked against the row the terminal actually
+numbers, and ↑ ↓ Space Enter Esc can be aimed at a highlight you can see. And
+before the number is sent, the server reads the pane itself and checks that
+the row under that number really starts with the label you pressed — Claude
+Code draws the permission dialog with two rows as often as three, and the plan
+dialog with two to five — refusing, in words, when it does not; the keys and
+the capture are how you answer that one. This is INV-16, and it is the whole difference
+between a control you can trust with a live agent and one you cannot: a
+mislabelled button here answers somebody's question wrongly, and the capture
+is what makes a wrong label visible instead of silent.
+
+The card also refuses while the connection is down, and says so, rather than
+disabling itself and announcing an answer it never sent.
 
 One press closes the card, because a second digit would not repeat the answer —
 `AskUserQuestion` asks its questions one at a time, so it would answer the next
@@ -255,12 +279,27 @@ the screen with the message box pinned to the bottom, above the home indicator.
 Inputs are 16px so iOS does not zoom the page when you tap them, tap targets are
 44px, and safe-area insets keep content clear of the notch in both orientations.
 
+When the keyboard comes up, the sheet lays itself out in what is left of the
+screen rather than under the keys: the message box stays visible, the last
+message stays visible above it, and the same is true of the new-agent dialog
+and of any error the app needs to show you while you type. On iOS that takes
+measuring the visual viewport, because the keyboard there does not change any
+height CSS can read.
+
 The terminal is the hard case: a 150-column pane shrunk to a 390px screen would
 render at about 4.6px. Instead it never scales below ~9.5px and pans sideways,
 with a **Fit width** button when you want the whole pane at a glance, and a
 **Full screen** button beside it for when neither is enough. The quick
 keys (`Enter`, arrows, `Tab`, `Esc`, `Ctrl-C`) sit under it, since a phone
 keyboard has none of them.
+
+**Earlier output**, beside Fit width, answers "what did it print before this":
+one press reads the 200 lines above the pane's visible screen out of tmux's
+scrollback and draws them above the live capture, on a surface of their own
+that scrolls; **Earlier** reads the next 200 up, until the pane has no more.
+It is a read on request rather than a poll, and it works for a pane whose
+process has exited, since that is usually when you want to know what it said
+last.
 
 The opposite case is a desktop, where an 80-column capture used to sit small in
 a panel with half again as much room: the scale was capped at 1:1 everywhere but
@@ -720,8 +759,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1087 tests: 557 Rust (the server) + 530 vitest (the web app)
-npm run e2e        # 334 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
+npm run e2e        # 369 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

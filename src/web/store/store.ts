@@ -51,6 +51,38 @@ import {
 export type Tab = 'chat' | 'attach'
 export type Conn = 'connecting' | 'open' | 'closed'
 
+export interface HistoryView {
+  sessionId: string
+  /** Oldest first, ending just above the visible screen. */
+  lines: string[]
+  /** How many lines of history the pane holds. */
+  total: number
+}
+
+/** One answer to a `history` request, as the wire carries it. */
+export interface HistoryPage {
+  sessionId: string
+  /** How many lines above the screen this page ends: the lines held so far. */
+  before: number
+  lines: string[]
+  total: number
+}
+
+/**
+ * Prepend a page to what is held, or start over with a first page.
+ *
+ * A page is accepted only where it joins on: the first page when nothing is
+ * held, or the one that ends where the held lines begin. Anything else is a
+ * reply to a request this view has moved on from, and is dropped rather than
+ * spliced in at the wrong depth.
+ */
+export function withPage(held: HistoryView | null, page: HistoryPage): HistoryView | null {
+  if (page.before === 0) return { sessionId: page.sessionId, lines: page.lines, total: page.total }
+  const joins = held !== null && held.sessionId === page.sessionId && held.lines.length === page.before
+  if (!joins || held === null) return held
+  return { sessionId: held.sessionId, lines: [...page.lines, ...held.lines], total: page.total }
+}
+
 export interface AppState {
   /* server-driven */
   agents: Agent[]
@@ -77,7 +109,17 @@ export interface AppState {
 
   /* selection — the router owns the URL, this mirrors it for the transport */
   selected: string | null
+  /** Which tab of the agent's detail is showing. Says nothing about frames. */
   tab: Tab
+  /**
+   * Whether the server has been asked to read the selected agent's pane.
+   *
+   * Separate from `tab` because two surfaces draw frames now: the Attach tab's
+   * terminal, and the Chat tab's peek at the bottom of the pane. Each attaches
+   * while it is mounted and detaches when it goes, so this is "somebody is
+   * watching" (INV-4) rather than "the Attach tab is open".
+   */
+  attached: boolean
   fullscreen: boolean
   newAgentOpen: boolean
 
@@ -105,9 +147,26 @@ export interface AppState {
   prompt: PendingPrompt | null
 
   frame: Frame | null
+  /**
+   * Lines above the attached pane's visible screen, fetched on request and
+   * never polled (INV-4). Oldest first, ending just above the top of the
+   * live capture; `total` is how deep the pane's history is, which is how the
+   * view knows when there is no more. Belongs to the conversation on screen
+   * and is dropped with it.
+   */
+  history: HistoryView | null
+  /** A history request is out and unanswered; the next waits for it. */
+  historyPending: boolean
   toast: string | null
   /** Sessions whose pane the server told us has exited. */
   exited: string[]
+  /**
+   * The last `answer` the server refused to type, and for which agent. A
+   * counter rather than a flag so two refusals in a row are two events. The
+   * card releases its one-press latch on it: nothing reached the agent, so
+   * the question is still the one on screen (INV-11).
+   */
+  answerRefused: { sessionId: string; seq: number } | null
   /**
    * A session this app knows exists but has not seen in a fleet broadcast yet.
    *
@@ -137,6 +196,10 @@ export interface AppState {
   setNewAgentOpen: (open: boolean) => void
   showToast: (message: string) => void
   markExited: (sessionId: string) => void
+  markAnswerRefused: (sessionId: string) => void
+  /** A page of history arrived: prepend it, if it is the page that was asked for. */
+  addHistory: (page: HistoryPage) => void
+  clearHistory: () => void
   /** Expect a session the fleet has not broadcast yet; null once it arrives. */
   setExpectSession: (sessionId: string | null) => void
   addPending: (text: string) => void
@@ -232,6 +295,7 @@ export const useStore = create<AppState>()((set, get) => ({
 
   selected: null,
   tab: 'chat',
+  attached: false,
   fullscreen: false,
   newAgentOpen: false,
 
@@ -254,8 +318,11 @@ export const useStore = create<AppState>()((set, get) => ({
   prompt: null,
 
   frame: null,
+  history: null,
+  historyPending: false,
   toast: null,
   exited: [],
+  answerRefused: null,
   expectSession: null,
 
   setNotifyNudge: (notifyNudge) => set({ notifyNudge }),
@@ -302,6 +369,16 @@ export const useStore = create<AppState>()((set, get) => ({
 
   markExited: (sessionId) =>
     set((s) => (s.exited.includes(sessionId) ? s : { exited: [...s.exited, sessionId] })),
+  markAnswerRefused: (sessionId) =>
+    set((s) => ({ answerRefused: { sessionId, seq: (s.answerRefused?.seq ?? 0) + 1 } })),
+  addHistory: (page) =>
+    set((s) =>
+      // Only ever the answer to a request still outstanding. Hiding the panel
+      // clears the gate, and without this check a reply that landed after the
+      // press would open it again over the top of the hiding.
+      s.historyPending ? { historyPending: false, history: withPage(s.history, page) } : s,
+    ),
+  clearHistory: () => set({ history: null, historyPending: false }),
   showToast: (toast) => {
     window.clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => set({ toast: null }), 5000)
@@ -363,7 +440,17 @@ export const useStore = create<AppState>()((set, get) => ({
   resetConversation: () => {
     for (const timer of pendingTimers.values()) window.clearTimeout(timer)
     pendingTimers.clear()
-    set({ events: [], messages: [], pending: [], frame: null, prompt: null })
+    set({
+      events: [],
+      messages: [],
+      pending: [],
+      frame: null,
+      history: null,
+      historyPending: false,
+      prompt: null,
+      answerRefused: null,
+      attached: false,
+    })
   },
 
   t: (key, vars) => translate(get().lang, key, vars),

@@ -93,6 +93,30 @@
   color: var(--dim);
 }
 
+/*
+ * A drawn list is a claim about the CLI, not a reading of the agent, and it
+ * wears the same dashed edge an inferred status does (INV-11): the reader
+ * should be able to tell a label the transcript stated from one this app
+ * asserted before they press it.
+ */
+.drawnNote {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--waiting);
+}
+.drawnOption {
+  border-style: dashed;
+}
+
+/* The pane, live, so a drawn label or a highlighted row can be checked here. */
+.peek {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .keys {
   display: flex;
   flex-wrap: wrap;

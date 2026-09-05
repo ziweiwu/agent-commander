@@ -22,6 +22,7 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -44,8 +45,8 @@ use crate::pane_hub::HubEvent;
 use crate::pending::SpawnedSession;
 use crate::sources::{Deps, PaneApi, PaneSample, Submit, TailApi, Unsubscribe};
 use crate::types::{
-    Agent, AgentTree, ClientMessage, ControlResponse, DirListing, ErrorKind, FleetTree, Geom,
-    GoalState, NewAgentRequest, NewAgentResponse, ServerEnv, ServerMessage,
+    Agent, AgentStatus, AgentTree, ClientMessage, ControlResponse, DirListing, ErrorKind,
+    FleetTree, Geom, GoalState, NewAgentRequest, NewAgentResponse, ServerEnv, ServerMessage,
 };
 
 /// How often a focused tab's transcript is re-read.
@@ -268,6 +269,65 @@ pub struct App {
     /// What this server's credential may do. `Grants::ALL` unless `--grant`
     /// narrowed it.
     pub grants: Grants,
+    /// How many browsers are connected. See [`Viewers`].
+    pub viewers: Viewers,
+}
+
+/// How many browsers are connected, and what to do when that changes.
+///
+/// INV-4 opens with "nothing polls what nobody is watching", and the fleet
+/// enricher is the loop that rule was written for. It has always been able to
+/// idle — `FleetEnricher::watch` and `unwatch` — and nothing outside its own
+/// tests ever called them, so with no browser connected at all it went on
+/// tailing every transcript on the machine every five seconds, and now would
+/// fork a `ps` over the whole process table beside them. Three documents said
+/// otherwise. This is the count they describe.
+///
+/// Only the edges matter: the first browser to arrive starts the work and the
+/// last to leave stops it. A socket that went silent is dropped by the
+/// heartbeat, which is what makes "left" true of a phone that slept rather
+/// than only of a tab that said goodbye.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watched {
+    /// Somebody has arrived and there was nobody before them.
+    Started,
+    /// The last of them has gone.
+    Stopped,
+}
+
+#[derive(Default)]
+pub struct Viewers {
+    count: AtomicUsize,
+    listener: std::sync::OnceLock<Box<dyn Fn(Watched) + Send + Sync>>,
+}
+
+impl Viewers {
+    /// Run this whenever the fleet goes from unwatched to watched, or back.
+    pub fn on_change(&self, listener: Box<dyn Fn(Watched) + Send + Sync>) {
+        let _ = self.listener.set(listener);
+    }
+
+    pub fn count(&self) -> usize {
+        self.count.load(Ordering::SeqCst)
+    }
+
+    fn joined(&self) {
+        if self.count.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.announce(Watched::Started);
+        }
+    }
+
+    fn left(&self) {
+        if self.count.fetch_sub(1, Ordering::SeqCst) == 1 {
+            self.announce(Watched::Stopped);
+        }
+    }
+
+    fn announce(&self, edge: Watched) {
+        if let Some(listener) = self.listener.get() {
+            listener(edge);
+        }
+    }
 }
 
 /* -------------------------------------------------------------------------
@@ -1418,6 +1478,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
 
     let viewer = Arc::new(Viewer::new(tx));
     let (off, off_limits) = subscribe_viewer(&viewer, &app);
+    app.viewers.joined();
 
     while let Some(Ok(frame)) = stream.next().await {
         let raw = match incoming(frame) {
@@ -1436,6 +1497,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     off_limits();
     viewer.clear_timers();
     writer.abort();
+    app.viewers.left();
 }
 
 /// What a WebSocket frame turned out to be worth reading.
@@ -1532,6 +1594,9 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
         ClientMessage::Answer { session_id, prompt_id, choice } => {
             on_answer(&Answer { session_id, prompt_id, choice }, viewer, app).await;
         }
+        ClientMessage::History { session_id, before, lines } => {
+            on_history(&session_id, (before, lines), viewer, app).await;
+        }
     }
 }
 
@@ -1547,13 +1612,16 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
         ClientMessage::Attach { session_id, .. }
         | ClientMessage::Paste { session_id, .. }
         | ClientMessage::Key { session_id, .. }
-        | ClientMessage::Answer { session_id, .. } => Some(session_id),
+        | ClientMessage::Answer { session_id, .. }
+        | ClientMessage::History { session_id, .. } => Some(session_id),
     }
 }
 
 fn grant_for_message(message: &ClientMessage) -> Grant {
     match message {
-        ClientMessage::Focus { .. } | ClientMessage::Attach { .. } => Grant::Read,
+        ClientMessage::Focus { .. } | ClientMessage::Attach { .. } | ClientMessage::History { .. } => {
+            Grant::Read
+        }
         ClientMessage::Answer { .. } => Grant::Respond,
         ClientMessage::Paste { .. } | ClientMessage::Key { .. } => Grant::Drive,
     }
@@ -1579,7 +1647,16 @@ async fn on_answer(answer: &Answer, viewer: &Arc<Viewer>, app: &Arc<App>) {
     let (pane_id, key) = match answer_keystroke(&agent, answer, app).await {
         Ok(found) => found,
         Err(why) => {
-            viewer.error(session_id, why.to_string());
+            // Kinded, because the card acts on it: nothing was typed, so the
+            // question is still open and the card releases its one-press latch.
+            // The failure below is not kinded — a key that errored after it
+            // reached tmux has an unknown outcome, and a second press could be
+            // the second digit INV-2 forbids.
+            viewer.send(ServerMessage::Error {
+                session_id: Some(session_id.to_string()),
+                message: why.to_string(),
+                kind: Some(ErrorKind::AnswerRefused),
+            });
             return;
         }
     };
@@ -1614,6 +1691,14 @@ async fn answer_keystroke(
     // the answer arrived, not what was true when the card was drawn.
     let Some(mut tail) = (app.deps.tail_for)(agent) else { return Err(CANNOT_READ_TRANSCRIPT) };
     let Ok(read) = tail.read().await else { return Err(CANNOT_READ_TRANSCRIPT) };
+    // Both halves, here as well as in the card (INV-16): an open call is on
+    // disk for as long as a tool runs, and its fingerprint does not change
+    // when the agent is let go at the terminal and starts working — so a card
+    // one broadcast behind, or any socket peer, could otherwise type a digit
+    // into a busy agent.
+    if agent.status != AgentStatus::Waiting {
+        return Err("the agent is not waiting on anything now — the answer was not sent");
+    }
     let current = read.prompt.ok_or("that question has already been answered")?;
     if current.fingerprint(&answer.session_id) != answer.prompt_id {
         return Err("the agent is asking something else now — the answer was not sent");
@@ -1624,9 +1709,72 @@ async fn answer_keystroke(
         return Err("no such option");
     }
     let pane_id = agent.pane_id.clone().ok_or("agent is no longer available")?;
+    // A drawn choice is a claim about the CLI, and the pane is what can refute
+    // it: Claude Code draws the permission dialog with two rows as often as
+    // three, and the plan dialog with two to five. The digit goes only where
+    // the pane is numbering that label right now.
+    if current.options_drawn == Some(true) {
+        let label = current.options.get(answer.choice).map(|o| o.label.as_str()).unwrap_or("");
+        let sample = app.deps.panes.sample(&pane_id).await.map_err(|_| CANNOT_READ_PANE)?;
+        if !crate::transcript::drawn_row_matches(&sample.lines, answer.choice, label) {
+            return Err(CHOICE_NOT_ON_SCREEN);
+        }
+    }
     // The digit is a literal the server owns, never a string off the wire.
     let digit = DIGIT_KEYS.get(answer.choice).ok_or("no such option")?;
     Ok((pane_id, SendableKey::server_composed(digit)))
+}
+
+const CANNOT_READ_PANE: &str = "could not read the terminal to check that choice — nothing was sent";
+const CHOICE_NOT_ON_SCREEN: &str =
+    "the terminal is not showing that choice under that number — use the keys, or the terminal";
+
+/// Lines above the attached pane's visible screen, once, on request.
+///
+/// INV-4. Only a tab focused on this session may ask — otherwise a socket
+/// looking at nothing could read any pane on the machine one window at a
+/// time. Focus rather than attachment, because a pane that has exited ends the
+/// attachment and its last output is exactly what a reader then wants; focus
+/// is already what opens that agent's transcript to the tab, so it grants
+/// nothing wider. The read goes to the pane directly rather than through the
+/// hub: it is a single request, not something to share between watchers or to
+/// keep polling. One tab's messages are handled in order, so two reads are
+/// never in flight for one tab, and the browser sends the next only once the
+/// last has answered.
+///
+/// It is not charged to the write budget, which counts what reaches the agent
+/// (INV-12); this reaches tmux and nothing else. And it never touches the
+/// viewer's frame diff, so the live capture underneath carries on unchanged.
+async fn on_history(session_id: &str, window: (u32, u32), viewer: &Arc<Viewer>, app: &Arc<App>) {
+    let (before, lines) = crate::pane::clamp_history(window.0, window.1);
+    if viewer.state.lock().unwrap().focused.as_deref() != Some(session_id) {
+        return;
+    }
+    // An agent that never had a pane and one that has gone are different
+    // reasons, and the agent itself carries the first (INV-5, INV-11).
+    let agent = app.deps.source.get(session_id);
+    let result = match agent.as_ref().and_then(|a| a.pane_id.clone()) {
+        Some(pane_id) => app.deps.panes.history(&pane_id, before, lines).await,
+        None => Err(anyhow::anyhow!(
+            "{}",
+            agent
+                .and_then(|a| a.attach_blocked_reason)
+                .unwrap_or_else(|| "agent is no longer available".to_string())
+        )),
+    };
+    match result {
+        Ok(history) => viewer.send(ServerMessage::History {
+            session_id: session_id.to_string(),
+            before,
+            lines: history.lines,
+            total: history.total,
+        }),
+        Err(err) => viewer.send(ServerMessage::Error {
+            session_id: Some(session_id.to_string()),
+            message: format!("could not read earlier output: {err}"),
+            kind: Some(ErrorKind::HistoryFailed),
+        }),
+    }
 }
 
 fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
@@ -1639,28 +1787,79 @@ fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
     }
     let Some(session_id) = session_id else { return };
     let Some(agent) = app.deps.source.get(&session_id) else { return };
-    let Some(tail) = (app.deps.tail_for)(&agent) else { return };
+    /*
+     * A transcript that is not there yet is not the same as one that will
+     * never be. A freshly started agent writes nothing until its first prompt
+     * is processed, and its first tool call can stop it on a permission dialog
+     * before it has said a word — so a tab that opened it early used to sit on
+     * an empty conversation with no answer card, for as long as it stayed
+     * open: nothing re-sent `focus`, and the enricher's own retry feeds the
+     * card, not this viewer. The tail is retried until it resolves. Only for a
+     * CLI that keeps transcripts at all, because for one that does not the
+     * probe below is a directory scan that can never succeed (INV-4).
+     */
+    let tail = (app.deps.tail_for)(&agent);
+    if tail.is_none() && !crate::agent_kinds::has_transcripts(&agent.agent_kind) {
+        return;
+    }
 
-    // The TS arms a `setInterval` and guards it with a `tailBusy` flag,
-    // because a read can outlast the interval. A task that sleeps *after* each
-    // read cannot overlap with itself at all, so the flag has nothing left to
-    // guard; the cost is that the period is measured from the end of a read
-    // rather than its start.
-    let task = {
-        let viewer = viewer.clone();
-        let app = app.clone();
-        tokio::spawn(async move {
-            let mut tail = tail;
-            loop {
-                pump_timeline(&mut tail, &viewer, &app, &session_id).await;
-                tokio::time::sleep(Duration::from_millis(TIMELINE_MS)).await;
-            }
-        })
-    };
+    let task = spawn_timeline_pump(viewer, app, Conversation { agent, session_id, ready: tail });
     let old = viewer.state.lock().unwrap().tail_task.replace(task);
     if let Some(old) = old {
         old.abort();
     }
+}
+
+/// The tail this viewer will read, waiting for one that is not on disk yet.
+///
+/// A freshly started agent writes nothing until its first prompt is processed,
+/// and the caller has already established that this CLI keeps transcripts at
+/// all — so this waits rather than giving up (INV-5).
+async fn tail_once_it_exists(
+    app: &Arc<App>,
+    agent: &Agent,
+    ready: Option<Box<dyn TailApi>>,
+) -> Box<dyn TailApi> {
+    if let Some(tail) = ready {
+        return tail;
+    }
+    loop {
+        tokio::time::sleep(Duration::from_millis(TIMELINE_MS)).await;
+        if let Some(tail) = (app.deps.tail_for)(agent) {
+            return tail;
+        }
+    }
+}
+
+/// Read this viewer's conversation to it until the tab looks somewhere else.
+///
+/// The TS arms a `setInterval` and guards it with a `tailBusy` flag, because a
+/// read can outlast the interval. A task that sleeps *after* each read cannot
+/// overlap with itself at all, so the flag has nothing left to guard; the cost
+/// is that the period is measured from the end of a read rather than its start.
+fn spawn_timeline_pump(
+    viewer: &Arc<Viewer>,
+    app: &Arc<App>,
+    conversation: Conversation,
+) -> JoinHandle<()> {
+    let viewer = viewer.clone();
+    let app = app.clone();
+    tokio::spawn(async move {
+        let Conversation { agent, session_id, ready } = conversation;
+        let mut tail = tail_once_it_exists(&app, &agent, ready).await;
+        loop {
+            pump_timeline(&mut tail, &viewer, &app, &session_id).await;
+            tokio::time::sleep(Duration::from_millis(TIMELINE_MS)).await;
+        }
+    })
+}
+
+/// The conversation a viewer has just focused, and the reader for it if one
+/// already resolved.
+struct Conversation {
+    agent: Agent,
+    session_id: String,
+    ready: Option<Box<dyn TailApi>>,
 }
 
 fn on_attach(session_id: &str, view: Terminal, viewer: &Arc<Viewer>, app: &Arc<App>) {
@@ -2428,6 +2627,7 @@ async fn build_app(
         origin_names,
         grants: opts.grants,
         tree: Some(tree_reader(opts)),
+        viewers: Viewers::default(),
     })
 }
 
@@ -2495,10 +2695,22 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     deps.limits.start();
 
     // Keeps the activity line on every card current, not just the open one.
-    let enricher = crate::enrich::FleetEnricher::new(deps.source.clone(), deps.tail_for.clone());
-    enricher.start().await;
+    // The mock fleet sets what each fixture is running by hand, so it reads no
+    // process table: the fixtures are the whole story there.
+    let procs: Option<Arc<dyn crate::procs::ProcApi>> = if opts.mock {
+        None
+    } else {
+        Some(Arc::new(crate::procs::PsReader::new(Arc::new(crate::env::ExecRunner))))
+    };
+    let enricher =
+        crate::enrich::FleetEnricher::new(deps.source.clone(), deps.tail_for.clone(), procs);
+    // Idle until somebody is looking (INV-4). `watch` starts the loop and takes
+    // a pass at once, so the first tab to connect paints filled cards rather
+    // than waiting a tick for them.
+    enricher.unwatch().await;
 
     let app = build_app(&opts, deps, pending, mock_source).await;
+    idle_the_enricher_on_viewers(&app, &enricher);
     let count = app.deps.source.list().len();
     let listener = bind(&opts).await?;
     announce(&opts, count);
@@ -2531,6 +2743,25 @@ fn fleet_for(
     };
     let (deps, source) = crate::mock::mock_deps(fleet);
     (deps, Some(source))
+}
+
+/// INV-4's first rule, wired: the enricher runs only while a browser is here.
+///
+/// `watch` and `unwatch` are async and this is called from a synchronous
+/// listener, so each edge becomes its own task. They cannot race each other
+/// into the wrong state: both are idempotent, and the edges arrive in order
+/// from the counter.
+fn idle_the_enricher_on_viewers(app: &Arc<App>, enricher: &Arc<crate::enrich::FleetEnricher>) {
+    let enricher = enricher.clone();
+    app.viewers.on_change(Box::new(move |edge| {
+        let enricher = enricher.clone();
+        tokio::spawn(async move {
+            match edge {
+                Watched::Started => enricher.watch().await,
+                Watched::Stopped => enricher.unwatch().await,
+            }
+        });
+    }));
 }
 
 /// Undo the setup, in the reverse of the order it was done in.
@@ -2587,12 +2818,12 @@ pub async fn run(app: Arc<App>, listener: tokio::net::TcpListener) -> anyhow::Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sources::{AgentPatch, AgentSource, LimitsApi, PaneMeta, TailRead};
+    use crate::sources::{AgentPatch, AgentSource, History, LimitsApi, PaneMeta, TailRead};
     use crate::types::{
         AgentStatus, PendingPrompt, PromptOption, RateLimits, TimelineEvent, TimelineKind,
     };
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicI64, AtomicUsize, Ordering};
+    use std::sync::atomic::AtomicI64;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -2617,6 +2848,8 @@ mod tests {
     const BLOCKED: &str = SESSION;
     /// Long enough for one answer to have reached the fake pane.
     const ANSWER_SETTLE: Duration = Duration::from_millis(300);
+    /// Long enough for a dropped socket's handler to run its teardown.
+    const SOCKET_SETTLES: Duration = Duration::from_millis(300);
     const PANE: &str = "%1";
     const DOC: &str = "<!doctype html>\n<html lang=\"en\">\n<body><div id=\"root\"></div></body>\n</html>\n";
 
@@ -2695,6 +2928,20 @@ mod tests {
         fail: AtomicI64,
         dead: bool,
         tick: AtomicUsize,
+        /// Every key sent, in order, so a test can read which digit answered.
+        keys: Mutex<Vec<String>>,
+        /// The dialog rows at the top of every capture, so a drawn answer has
+        /// something to be checked against. Three rows unless a test says two.
+        dialog: Mutex<Vec<String>>,
+        history_reads: AtomicUsize,
+    }
+
+    fn three_row_permission_dialog() -> Vec<String> {
+        vec![
+            " ❯ 1. Yes".to_string(),
+            "   2. Yes, and don't ask again for `rm -rf dist` commands in /tmp".to_string(),
+            "   3. No, and tell Claude what to do differently (esc)".to_string(),
+        ]
     }
 
     impl FakePanes {
@@ -2704,6 +2951,9 @@ mod tests {
                 fail: AtomicI64::new(0),
                 dead: false,
                 tick: AtomicUsize::new(0),
+                keys: Mutex::new(Vec::new()),
+                dialog: Mutex::new(three_row_permission_dialog()),
+                history_reads: AtomicUsize::new(0),
             })
         }
         fn dead() -> Arc<Self> {
@@ -2712,6 +2962,9 @@ mod tests {
                 fail: AtomicI64::new(0),
                 dead: true,
                 tick: AtomicUsize::new(0),
+                keys: Mutex::new(Vec::new()),
+                dialog: Mutex::new(three_row_permission_dialog()),
+                history_reads: AtomicUsize::new(0),
             })
         }
         fn flaky(n: i64) -> Arc<Self> {
@@ -2720,10 +2973,22 @@ mod tests {
                 fail: AtomicI64::new(n),
                 dead: false,
                 tick: AtomicUsize::new(0),
+                keys: Mutex::new(Vec::new()),
+                dialog: Mutex::new(three_row_permission_dialog()),
+                history_reads: AtomicUsize::new(0),
             })
         }
         fn writes(&self) -> usize {
             self.writes.load(Ordering::SeqCst)
+        }
+        fn last_key(&self) -> Option<String> {
+            self.keys.lock().unwrap().last().cloned()
+        }
+        fn draw(&self, dialog: Vec<String>) {
+            *self.dialog.lock().unwrap() = dialog;
+        }
+        fn history_reads(&self) -> usize {
+            self.history_reads.load(Ordering::SeqCst)
         }
     }
 
@@ -2745,17 +3010,32 @@ mod tests {
         async fn capture(&self, _pane_id: &str, rows: usize) -> anyhow::Result<Vec<String>> {
             // Every read differs from the last, so a frame is never a no-op.
             let n = self.tick.fetch_add(1, Ordering::SeqCst);
-            Ok((0..rows).map(|i| format!("row {i} @{n}")).collect())
+            let mut lines = self.dialog.lock().unwrap().clone();
+            lines.extend((lines.len()..rows).map(|i| format!("row {i} @{n}")));
+            Ok(lines)
         }
         async fn paste(&self, _pane_id: &str, _text: &str, _submit: Submit) -> anyhow::Result<()> {
             self.writes.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
-        async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
+        async fn key(&self, _pane_id: &str, key: &SendableKey) -> anyhow::Result<()> {
             self.writes.fetch_add(1, Ordering::SeqCst);
+            self.keys.lock().unwrap().push(key.as_str().to_string());
             Ok(())
         }
+        /// A pane with `FAKE_HISTORY` lines above its screen, each named by
+        /// its distance from the top, nearest the screen last.
+        async fn history(&self, _pane_id: &str, before: u32, lines: u32) -> anyhow::Result<History> {
+            self.history_reads.fetch_add(1, Ordering::SeqCst);
+            let end = FAKE_HISTORY.saturating_sub(before);
+            let start = end.saturating_sub(lines);
+            let lines = (start..end).map(|i| format!("above {}", FAKE_HISTORY - i)).collect();
+            Ok(History { lines, total: FAKE_HISTORY })
+        }
     }
+
+    /// How deep the fake pane's history is: more than one window, less than two.
+    const FAKE_HISTORY: u32 = 300;
 
     struct FakeLimits;
 
@@ -2961,6 +3241,9 @@ mod tests {
         source: Arc<FakeSource>,
         control: Arc<RecordingControl>,
         web_root: tempfile::TempDir,
+        /// The same `App` the server is running, for the state a socket moves
+        /// but does not report — the viewer count.
+        app: Arc<App>,
     }
 
     impl Harness {
@@ -2992,6 +3275,7 @@ mod tests {
                 PromptOption { label: "Swap the table".into(), description: None },
             ],
             multi_select: None,
+            options_drawn: None,
             more_questions: Some(1),
             detail: None,
             id: String::new(),
@@ -3001,6 +3285,102 @@ mod tests {
     fn tails_reporting_a_prompt() -> Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync> {
         Arc::new(|_agent: &Agent| {
             Some(Box::new(FakeTail { n: 0, prompt: Some(blocked_prompt()) }) as Box<dyn TailApi>)
+        })
+    }
+
+    /// A tail factory that misses `misses` times before it resolves, counting
+    /// every probe — the shape of an agent whose transcript does not exist yet.
+    fn tails_appearing_after(
+        misses: usize,
+    ) -> (Arc<AtomicUsize>, Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>) {
+        let probes = Arc::new(AtomicUsize::new(0));
+        let seen = probes.clone();
+        let factory = Arc::new(move |_agent: &Agent| {
+            if seen.fetch_add(1, Ordering::SeqCst) < misses {
+                return None;
+            }
+            Some(Box::new(FakeTail { n: 0, prompt: None }) as Box<dyn TailApi>)
+        });
+        (probes, factory)
+    }
+
+    /// A second agent beside the fixture one, of the given CLI kind.
+    fn add_agent(source: &FakeSource, session_id: &str, agent_kind: &str) {
+        source.agents.lock().unwrap().push(Agent {
+            session_id: session_id.into(),
+            pid: 2,
+            name: session_id.into(),
+            cwd: "/tmp".into(),
+            folder: "tmp".into(),
+            status: AgentStatus::Busy,
+            kind: "interactive".into(),
+            started_at: 0,
+            pane_id: Some(PANE.into()),
+            agent_kind: agent_kind.into(),
+            ..Default::default()
+        });
+    }
+
+    async fn serve_with_tails(
+        parts: &HarnessParts,
+        tails: Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>,
+    ) -> u16 {
+        let mut app = harness_app(parts, Fixtures::Real, None);
+        Arc::get_mut(&mut app).expect("sole owner").deps.tail_for = tails;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        port
+    }
+
+    /// A freshly started agent has no transcript until its first prompt is
+    /// processed, and can be stopped on a permission dialog before it has said
+    /// a word. A tab that opened it early used to get an empty conversation and
+    /// no answer card for as long as it stayed open (INV-5).
+    #[tokio::test]
+    async fn inv5_a_focus_before_the_transcript_exists_starts_the_timeline_once_it_does() {
+        let parts = harness_parts(FakePanes::new());
+        add_agent(&parts.source, "fresh", crate::agent_kinds::CLAUDE_KIND);
+        let (probes, tails) = tails_appearing_after(1);
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"fresh"})).await;
+        let timeline = next_msg(&mut client, |m| is_type(m, "timeline")).await;
+        assert!(timeline.is_some(), "the timeline starts once the transcript appears");
+        assert!(probes.load(Ordering::SeqCst) >= 2, "the tail was asked for again");
+    }
+
+    /// The retry is only for a CLI that will ever write a transcript. For one
+    /// that keeps none the probe is a directory scan that cannot succeed, and
+    /// running it every second for as long as the tab is open is exactly the
+    /// loop INV-4 forbids.
+    #[tokio::test]
+    async fn inv4_a_focus_on_a_cli_with_no_transcripts_probes_once() {
+        let parts = harness_parts(FakePanes::new());
+        add_agent(&parts.source, "kiro-1", "kiro");
+        let (probes, tails) = tails_appearing_after(usize::MAX);
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"kiro-1"})).await;
+        const PAST_TWO_TICKS_MS: u64 = TIMELINE_MS * 5 / 2;
+        tokio::time::sleep(Duration::from_millis(PAST_TWO_TICKS_MS)).await;
+        assert_eq!(probes.load(Ordering::SeqCst), 1, "asked once, never again");
+    }
+
+    /// A tail blocked on a permission prompt: the transcript names the tool and
+    /// its input, and the choices offered are the drawn ones (INV-16).
+    fn tails_reporting_a_drawn_prompt() -> Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>
+    {
+        Arc::new(|_agent: &Agent| {
+            let prompt = crate::transcript::pending_prompt(
+                "Bash",
+                Some(&serde_json::json!({ "command": "rm -rf dist", "description": "Clear dist" })),
+            );
+            Some(Box::new(FakeTail { n: 0, prompt: Some(prompt) }) as Box<dyn TailApi>)
         })
     }
 
@@ -3029,6 +3409,7 @@ mod tests {
             origin_names: Vec::new(),
             grants: Grants::ALL,
             tree: None,
+            viewers: Viewers::default(),
         })
     }
 
@@ -3055,13 +3436,14 @@ mod tests {
     async fn start(token: Option<&str>, panes: Arc<FakePanes>, fixtures: Fixtures) -> Harness {
         let parts = harness_parts(panes);
         let app = harness_app(&parts, fixtures, token);
+        let served = app.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
-        Harness { port, panes, source, control, web_root }
+        Harness { port, panes, source, control, web_root, app: served }
     }
 
     async fn plain(panes: Arc<FakePanes>) -> Harness {
@@ -3071,15 +3453,19 @@ mod tests {
     /// A server whose agents are all parked on `blocked_prompt`.
     async fn blocked(panes: Arc<FakePanes>) -> Harness {
         let parts = harness_parts(panes);
+        // Blocked means waiting: the server refuses an answer for any other
+        // status, whatever the transcript still has open.
+        parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
         let mut app = harness_app(&parts, Fixtures::Real, None);
         Arc::get_mut(&mut app).expect("sole owner").deps.tail_for = tails_reporting_a_prompt();
+        let served = app.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
-        Harness { port, panes, source, control, web_root }
+        Harness { port, panes, source, control, web_root, app: served }
     }
 
     /* ---- raw HTTP, because `Host` is not a header a real client will set ---- */
@@ -3860,6 +4246,43 @@ mod tests {
         value.get("type").and_then(|kind| kind.as_str()) == Some(wanted)
     }
 
+    /// INV-4: the fleet enricher — one transcript tail per agent, and now a
+    /// `ps` over the whole machine beside them — may only run while somebody
+    /// is looking. The mechanism was always there and nothing outside its own
+    /// tests ever called it, so this covers the wiring rather than the switch:
+    /// only the edges, and the last socket to go turns it off.
+    #[tokio::test]
+    async fn inv4_the_first_browser_starts_the_work_and_the_last_to_leave_stops_it() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let seen: Arc<Mutex<Vec<Watched>>> = Arc::new(Mutex::new(Vec::new()));
+        {
+            let seen = seen.clone();
+            h.app.viewers.on_change(Box::new(move |edge| seen.lock().unwrap().push(edge)));
+        }
+        assert_eq!(h.app.viewers.count(), 0, "nobody is looking before a socket opens");
+
+        let mut first = open(h.port).await;
+        assert!(next_msg(&mut first, |m| is_type(m, "fleet")).await.is_some());
+        let mut second = open(h.port).await;
+        assert!(next_msg(&mut second, |m| is_type(m, "fleet")).await.is_some());
+        assert_eq!(h.app.viewers.count(), 2);
+        // The second tab is not a second start: only the edges are reported.
+        assert_eq!(*seen.lock().unwrap(), vec![Watched::Started]);
+
+        drop(first);
+        tokio::time::sleep(SOCKET_SETTLES).await;
+        assert_eq!(
+            *seen.lock().unwrap(),
+            vec![Watched::Started],
+            "one tab leaving is not nobody watching"
+        );
+
+        drop(second);
+        tokio::time::sleep(SOCKET_SETTLES).await;
+        assert_eq!(h.app.viewers.count(), 0);
+        assert_eq!(*seen.lock().unwrap(), vec![Watched::Started, Watched::Stopped]);
+    }
+
     #[tokio::test]
     async fn sends_the_fleet_the_moment_the_socket_opens() {
         let h = plain(FakePanes::new()).await;
@@ -3979,19 +4402,23 @@ mod tests {
     /// A server with a narrowed grant set, otherwise the blocked harness.
     async fn granting(grants: Grants, panes: Arc<FakePanes>) -> Harness {
         let parts = harness_parts(panes);
+        // Answered like `blocked()`: the server refuses an answer for any
+        // status but waiting, whatever the transcript still has open.
+        parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
         let mut app = harness_app(&parts, Fixtures::Real, None);
         {
             let app = Arc::get_mut(&mut app).expect("sole owner");
             app.deps.tail_for = tails_reporting_a_prompt();
             app.grants = grants;
         }
+        let served = app.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
-        Harness { port, panes, source, control, web_root }
+        Harness { port, panes, source, control, web_root, app: served }
     }
 
     #[test]
@@ -4104,6 +4531,110 @@ mod tests {
         assert_eq!(h.panes.writes(), 1, "the answer reaches the pane");
     }
 
+    /// A drawn choice answers the same way a stated one does: the card sends
+    /// the index, the server checks the id (which covers the drawn flag) and
+    /// composes the digit. The third choice of a permission prompt is `3`.
+    #[tokio::test]
+    async fn inv16_an_answer_to_a_drawn_choice_reaches_the_agent_as_its_digit() {
+        let panes = FakePanes::new();
+        let parts = harness_parts(panes.clone());
+        parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        Arc::get_mut(&mut app).expect("sole owner").deps.tail_for = tails_reporting_a_drawn_prompt();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":BLOCKED})).await;
+        let msg = next_msg(&mut client, |m| is_type(m, "timeline") && m["prompt"].is_object())
+            .await
+            .expect("the drawn prompt is reported");
+        assert_eq!(msg["prompt"]["optionsDrawn"], serde_json::json!(true));
+        const DRAWN_CHOICES: usize = 3;
+        assert_eq!(msg["prompt"]["options"].as_array().map(Vec::len), Some(DRAWN_CHOICES));
+        let id = msg["prompt"]["id"].as_str().unwrap().to_string();
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":2}),
+        )
+        .await;
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(panes.writes(), 1, "the answer reaches the pane");
+        assert_eq!(panes.last_key().as_deref(), Some("3"));
+    }
+
+    /// The table said three rows; the pane draws two. The label the card
+    /// showed for `2` is not what the pane numbers 2, so nothing is typed —
+    /// this is the case that made the pane check necessary.
+    #[tokio::test]
+    async fn inv16_a_drawn_choice_the_pane_is_not_showing_is_refused() {
+        let panes = FakePanes::new();
+        panes.draw(vec![
+            " ❯ 1. Yes".to_string(),
+            "   2. No, and tell Claude what to do differently (esc)".to_string(),
+        ]);
+        let parts = harness_parts(panes.clone());
+        parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
+        let port = serve_with_tails(&parts, tails_reporting_a_drawn_prompt()).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":BLOCKED})).await;
+        let msg = next_msg(&mut client, |m| is_type(m, "timeline") && m["prompt"].is_object())
+            .await
+            .expect("the drawn prompt is reported");
+        let id = msg["prompt"]["id"].as_str().unwrap().to_string();
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":1}),
+        )
+        .await;
+        let err = next_msg(&mut client, |m| {
+            is_type(m, "error") && m["message"].as_str().is_some_and(|s| s.contains("not showing"))
+        })
+        .await
+        .expect("refused, and said why");
+        // Kinded, so the card can release its latch for exactly this case.
+        assert_eq!(err["kind"], serde_json::json!("answer-refused"));
+        assert_eq!(panes.writes(), 0, "nothing reached the pane");
+
+        // The row that *is* there under its number still answers.
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":0}),
+        )
+        .await;
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(panes.last_key().as_deref(), Some("1"));
+    }
+
+    /// The card's gate, held server-side as well: an open call outlives the
+    /// moment the agent is let go at the terminal, and a stale card — or any
+    /// socket peer — must not type a digit into an agent that is working.
+    #[tokio::test]
+    async fn inv16_an_answer_for_an_agent_that_is_not_waiting_is_refused() {
+        let panes = FakePanes::new();
+        let parts = harness_parts(panes.clone());
+        // Busy: the default fixture, with an open call the tail still reports.
+        let port = serve_with_tails(&parts, tails_reporting_a_prompt()).await;
+        let mut client = open(port).await;
+        let id = prompt_id_for(&mut client).await;
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":0}),
+        )
+        .await;
+        let err = next_msg(&mut client, |m| {
+            is_type(m, "error") && m["message"].as_str().is_some_and(|s| s.contains("not waiting"))
+        })
+        .await;
+        assert!(err.is_some(), "refused, and said why");
+        assert_eq!(panes.writes(), 0);
+    }
+
     #[tokio::test]
     async fn inv2_an_answer_to_a_question_that_has_moved_on_is_refused() {
         // The hazard this exists for: a stale tab, a duplicated frame, or the
@@ -4190,6 +4721,138 @@ mod tests {
             next_msg(&mut client, |m| is_type(m, "timeline")).await.is_some(),
             "the transcript poll must survive the pane"
         );
+    }
+
+    /* ------------------------------------------------------------ history */
+
+    /// A page small enough to read in an assertion, and the real one.
+    const A_FEW_LINES: u32 = 5;
+    const TEN_LINES: u32 = 10;
+    const A_FULL_PAGE: u32 = crate::pane::HISTORY_LINES_MAX;
+    /// Larger than anything the server will serve in one read.
+    const FAR_TOO_MANY: u32 = 100_000;
+
+    fn history_request(session: &str, before: u32, lines: u32) -> serde_json::Value {
+        serde_json::json!({"type":"history","sessionId":session,"before":before,"lines":lines})
+    }
+
+    async fn focus_and_attach(client: &mut Client) {
+        send_json(client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        assert!(next_msg(client, |m| is_type(m, "timeline")).await.is_some());
+        send_json(client, serde_json::json!({"type":"attach","sessionId":SESSION,"on":true})).await;
+        assert!(next_msg(client, |m| is_type(m, "frame")).await.is_some());
+    }
+
+    /// INV-4: a tab reads history only for the agent it is looking at. A
+    /// socket focused on nothing could otherwise page through any pane on the
+    /// machine.
+    #[tokio::test]
+    async fn inv4_a_history_read_needs_a_focused_viewer() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, history_request(SESSION, 0, TEN_LINES)).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "history")).await.is_none());
+        assert_eq!(h.panes.history_reads(), 0);
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, history_request(SESSION, 0, TEN_LINES)).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "history")).await.unwrap();
+        assert_eq!(reply["sessionId"], serde_json::json!(SESSION));
+        assert_eq!(reply["before"], serde_json::json!(0));
+        assert_eq!(reply["total"], serde_json::json!(FAKE_HISTORY));
+        assert_eq!(reply["lines"].as_array().unwrap().len(), TEN_LINES as usize);
+        // Nearest the screen last, as the pane holds them.
+        assert_eq!(reply["lines"][TEN_LINES as usize - 1], serde_json::json!("above 1"));
+    }
+
+    /// Reading is all it is: a credential that may only watch may ask.
+    #[tokio::test]
+    async fn a_read_credential_may_ask_for_history() {
+        let h = granting(Grants::parse("read").unwrap(), FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, history_request(SESSION, 0, A_FEW_LINES)).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "history")).await.is_some());
+        assert_eq!(h.panes.writes(), 0);
+    }
+
+    /// INV-4: the window is the server's to size. Asking for the whole
+    /// history is answered with one page of it, not refused and not obeyed.
+    #[tokio::test]
+    async fn inv4_an_oversized_history_window_is_clamped() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, history_request(SESSION, 0, FAR_TOO_MANY)).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "history")).await.unwrap();
+        assert_eq!(
+            reply["lines"].as_array().unwrap().len(),
+            crate::pane::HISTORY_LINES_MAX as usize
+        );
+    }
+
+    /// Paging upward: each request is one read, and the last page is cut to
+    /// what the pane holds, with `total` saying so.
+    #[tokio::test]
+    async fn inv4_each_page_of_history_is_one_read_and_the_last_is_cut() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, history_request(SESSION, 0, A_FULL_PAGE)).await;
+        let first = next_msg(&mut client, |m| is_type(m, "history")).await.unwrap();
+        assert_eq!(first["lines"].as_array().unwrap().len(), A_FULL_PAGE as usize);
+        send_json(&mut client, history_request(SESSION, A_FULL_PAGE, A_FULL_PAGE)).await;
+        let second = next_msg(&mut client, |m| is_type(m, "history")).await.unwrap();
+        assert_eq!(second["before"], serde_json::json!(A_FULL_PAGE));
+        assert_eq!(second["lines"].as_array().unwrap().len(), (FAKE_HISTORY - A_FULL_PAGE) as usize);
+        assert_eq!(second["lines"][0], serde_json::json!(format!("above {FAKE_HISTORY}")));
+        assert_eq!(h.panes.history_reads(), 2);
+    }
+
+    /// The live capture underneath carries on as a delta: a history reply
+    /// must not reset the viewer's frame diff into a full repaint.
+    #[tokio::test]
+    async fn a_history_reply_leaves_the_live_frames_alone() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        // Rows that change every read, so there is a delta to see.
+        h.panes.draw(Vec::new());
+        let mut client = open(h.port).await;
+        focus_and_attach(&mut client).await;
+        send_json(&mut client, history_request(SESSION, 0, A_FEW_LINES)).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "history")).await.is_some());
+        let frame = next_msg(&mut client, |m| is_type(m, "frame")).await.unwrap();
+        assert!(frame["frame"]["lines"].is_null(), "a full repaint followed a history read");
+        assert!(frame["frame"]["changed"].is_array());
+    }
+
+    /// The browser holds one history request at a time, so a read that fails
+    /// has to be tellable from every other error that names the session — or
+    /// releasing the latch on one of those swallows the reply still coming.
+    #[tokio::test]
+    async fn a_history_read_that_fails_says_which_read_failed() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        // No pane to read: the agent is there, its pane is not.
+        h.source.agents.lock().unwrap()[0].pane_id = None;
+        send_json(&mut client, history_request(SESSION, 0, A_FEW_LINES)).await;
+        let err = next_msg(&mut client, |m| is_type(m, "error")).await.unwrap();
+        assert_eq!(err["kind"], serde_json::json!("history-failed"));
+        assert_eq!(err["sessionId"], serde_json::json!(SESSION));
+    }
+
+    /// A pane that has exited keeps its history, and its last output is what
+    /// a reader then wants most.
+    #[tokio::test]
+    async fn a_dead_pane_still_answers_history() {
+        let h = start(None, FakePanes::dead(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, serde_json::json!({"type":"attach","sessionId":SESSION,"on":true}))
+            .await;
+        assert!(next_msg(&mut client, |m| is_type(m, "error")).await.is_some());
+        send_json(&mut client, history_request(SESSION, 0, A_FEW_LINES)).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "history")).await.is_some());
     }
 
     #[tokio::test]

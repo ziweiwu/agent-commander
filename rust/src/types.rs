@@ -87,6 +87,28 @@ pub struct Agent {
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub goal: Option<GoalState>,
+    /// The tool process a busy agent is inside, read from the process table.
+    ///
+    /// INV-11: a measurement, not a claim — the process exists or it does not
+    /// — and captioned as read from the process table wherever it is drawn.
+    /// Absent for an agent that is not busy, or whose process has no child
+    /// worth naming. Never a formatted duration: `since` is a timestamp so the
+    /// payload is byte-stable for the life of the process (INV-4) and the
+    /// browser does the arithmetic.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub running: Option<RunningProcess>,
+}
+
+/// One process under a busy agent — see `procs.rs` for how it is chosen.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningProcess {
+    pub pid: i64,
+    /// Program and first argument, e.g. `cargo test`, trimmed for a card.
+    pub command: String,
+    /// Epoch milliseconds when the process started.
+    pub since: i64,
 }
 
 /// A Claude Code session goal, as recorded by `/goal` in the transcript.
@@ -300,11 +322,12 @@ pub struct PromptOption {
 /// app may name an option at all: it is *read*, never inferred from the screen
 /// (INV-16).
 ///
-/// The other two blocked shapes are deliberately thinner. `ExitPlanMode` writes
-/// its plan but not the three approval choices, which the CLI composes; a tool
-/// permission request writes the tool and its input but not the numbered list.
-/// For those `options` stays empty and the interface offers keys rather than
-/// labels it would have had to invent.
+/// The other two blocked shapes are thinner. `ExitPlanMode` writes its plan but
+/// not the approval choices, which the CLI composes; a tool permission request
+/// writes the tool and its input but not the numbered list. For those `options`
+/// carries the choices Claude Code draws, with `options_drawn` set so the
+/// interface can say they are a claim about the CLI — and the server reads the
+/// pane before typing an answer to one, refusing if that row is not there.
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -314,13 +337,21 @@ pub struct PendingPrompt {
     /// The question, where the transcript states one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<String>,
-    /// Only ever what the transcript named. Absent means "not knowable here".
+    /// What the transcript named, or — with `options_drawn` — what Claude Code
+    /// draws for this dialog. Absent means "not knowable here".
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     #[cfg_attr(test, ts(as = "Option<Vec<PromptOption>>", optional))]
     pub options: Vec<PromptOption>,
     /// True when the picker takes several answers, so one digit cannot finish it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub multi_select: Option<bool>,
+    /// True when `options` are what Claude Code *draws* for this dialog rather
+    /// than what the transcript wrote. A plan approval and a permission prompt
+    /// number their choices at the terminal and record none of them, so these
+    /// labels are a claim about the CLI, marked as one and shown beside a live
+    /// capture of the pane that can contradict them (INV-16).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options_drawn: Option<bool>,
     /// How many questions this one call asks, when it asks more than one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub more_questions: Option<usize>,
@@ -356,6 +387,9 @@ impl PendingPrompt {
             self.question.as_deref().unwrap_or(""),
             self.detail.as_deref().unwrap_or(""),
             &self.more_questions.map(|n| n.to_string()).unwrap_or_default(),
+            // A drawn list and a written one with the same labels are different
+            // claims, and an answer given to one must not be accepted for the other.
+            if self.options_drawn == Some(true) { "drawn" } else { "" },
         ] {
             // Length-prefixed, so ("ab", "c") and ("a", "bc") differ.
             hasher.update((part.len() as u64).to_le_bytes());
@@ -481,6 +515,17 @@ pub enum ClientMessage {
         prompt_id: String,
         choice: usize,
     },
+    /// Lines above the visible screen of the attached pane: `lines` of them,
+    /// ending `before` lines above the top. One read per request, never
+    /// polled, and only for a tab that is focused and attached to that
+    /// session (INV-4). Both numbers are clamped by the server.
+    #[serde(rename = "history")]
+    History {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        before: u32,
+        lines: u32,
+    },
 }
 
 /* ---- server -> client ---- */
@@ -510,6 +555,17 @@ pub enum ServerMessage {
     },
     #[serde(rename = "frame")]
     Frame { frame: Frame },
+    /// The answer to a `history` request: the lines, ending `before` lines
+    /// above the visible top, and `total`, how many lines of history the pane
+    /// holds — which is how a reader knows there is no more.
+    #[serde(rename = "history")]
+    History {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        before: u32,
+        lines: Vec<String>,
+        total: u32,
+    },
     /// A paste has finished being written to tmux. Flow control only: it never
     /// causes anything to be sent again (INV-2).
     #[serde(rename = "paste-ack")]
@@ -539,6 +595,19 @@ pub enum ServerMessage {
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorKind {
     PaneExited,
+    /// A read of the lines above the pane could not be made. Named, because
+    /// the browser holds one request at a time and has to know *this* is the
+    /// one that will not answer: releasing that latch on any error naming the
+    /// session made an unrelated one — a dead pane, a run of failed frame
+    /// reads — swallow the reply that was on its way, and the press was lost
+    /// with nothing said (INV-11).
+    HistoryFailed,
+    /// An `answer` the server declined to type — the question moved on, the
+    /// agent is not waiting, or the pane is not drawing that choice under that
+    /// number. Nothing reached the agent, so the card may offer the question
+    /// again; without the kind it could not tell this from any other error on
+    /// the socket, and stayed disabled saying "Answer sent" (INV-11).
+    AnswerRefused,
 }
 
 /*
@@ -828,6 +897,7 @@ mod tests {
             ],
             multi_select: None,
             more_questions: None,
+            options_drawn: None,
             detail: None,
             id: String::new(),
         }
@@ -860,6 +930,12 @@ mod tests {
         let mut later = base.clone();
         later.more_questions = Some(1);
         assert_ne!(later.fingerprint("s1"), id);
+
+        // The same labels drawn by the CLI rather than written by the transcript
+        // are a different claim, so they get a different id.
+        let mut drawn = base.clone();
+        drawn.options_drawn = Some(true);
+        assert_ne!(drawn.fingerprint("s1"), id);
 
         // Stable across calls, or the client could never echo it back.
         assert_eq!(base.fingerprint("s1"), id);

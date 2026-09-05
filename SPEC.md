@@ -14,7 +14,7 @@ else, so its boundaries matter more than most:
 | `TODO.md` | What is queued, and what was rejected? |
 
 **The relationship to `INVARIANTS.md` is containment, not overlap.** INV-1 …
-INV-17 are the subset of this document's requirements that are (a) properties
+INV-18 are the subset of this document's requirements that are (a) properties
 whose violation is a defect rather than a preference, and (b) individually
 numbered and greppable from a test name. Where a requirement here restates an
 invariant it cites it, and **the invariant is authoritative** — if the two ever
@@ -224,6 +224,13 @@ the default for an unrecognised kind is deny.
   a current reading. When the fleet is not live, the view MUST say the data is a
   memory and disable the actions that depend on it being current. **(INV-11)**
   *`test/ui/stale-fleet.test.tsx`.*
+- **FR-CARD-6** — A busy card MAY name the process its agent is running and how
+  long it has run, read from the process table. It MUST be captioned as read
+  rather than reported, MUST stand in for the activity line only where the
+  agent's CLI keeps no transcript, MUST NOT feed the trail or the status, and
+  MUST be cleared when the agent goes idle or the process ends. The wire MUST
+  carry a start time, never a duration. **(INV-4, INV-11)**
+  *`test/ui/running-process.test.tsx`, `enrich::tests`, `procs::tests`.*
 
 ### 3.3 Delegates
 
@@ -299,23 +306,43 @@ over the list with a back control; on a wide one, a second column.
 - **FR-CHAT-10** — With the connection down, the composer MUST refuse rather
   than accept text it cannot deliver, and MUST say why. **(INV-2)**
   *`test/ui/chat-offline.test.tsx`.*
+- **FR-CHAT-11** — A URL in a message, bare or as a markdown link, MUST be
+  drawn as a link that opens in a new tab. Only `http` and `https` MAY become
+  an `href`; anything else MUST stay the literal text it arrived as, and the
+  link MUST carry `noopener` and `noreferrer`. **(INV-18)**
+  *`test/chat.test.ts`, `test/ui/message-links.test.tsx`, `e2e/chat.spec.ts`.*
 
 ### 4.2 Answering a blocked agent
 
 This is the app's reason to exist, and the requirement that governs it is
 epistemic rather than functional.
 
-- **FR-ANS-1** — Every option label the app offers MUST be read out of that
-  agent's own transcript. Where the transcript does not state the choices, the
-  app MUST say so and offer navigation keys instead of composing a list. A
-  mislabelled button here answers a live agent's question wrongly. **(INV-16)**
-  *`transcript::prompt_tests`, `test/ui/answer-card.test.tsx`.*
+- **FR-ANS-1** — An option label the app offers MUST be either read out of
+  that agent's own transcript, or the choice Claude Code draws for that dialog
+  — and the two MUST be told apart on screen. A drawn label is a claim about
+  the CLI, not a reading of the agent: it arrives flagged (`optionsDrawn`), is
+  captioned as drawn, wears the dashed edge an inferred status does, and sits
+  above a live capture of the pane that can contradict it — and the server
+  MUST read the pane before typing an answer to one, refusing when that label
+  is not drawn under that number, since Claude Code draws these dialogs with
+  varying row counts. The app MUST NOT compose a list for a dialog it has no
+  table for, and MUST NOT offer one for a delegation call. A mislabelled button
+  here answers a live agent's question wrongly. **(INV-16)**
+  *`transcript::prompt_tests`, `routes::tests` (the INV-16 group),
+  `test/ui/answer-card.test.tsx`.*
 - **FR-ANS-2** — The three blocked shapes MUST be treated to the depth each is
   knowable: `AskUserQuestion` states question and every option, so buttons are
-  labelled; `ExitPlanMode` states the plan but not its approval choices, so the
-  plan is shown and no choice named; a tool permission request states the tool
-  and its input but not the numbered list, so what it would do is shown and no
-  choice named. **(INV-16)**
+  labelled from it and nothing else is shown; `ExitPlanMode` states the plan
+  but not its approval choices, so the plan is shown and the drawn choices are
+  offered as drawn; a tool permission request states the tool and its input
+  but not the numbered list, so what it would do is shown and the drawn
+  choices are offered as drawn. Wherever a label is drawn or only keys are
+  offered, the pane MUST be shown live beside them, so a highlighted row can be
+  seen and a drawn label checked without leaving the Chat tab. **(INV-16)**
+  *`e2e/blocked-shapes.spec.ts`.*
+- **FR-ANS-2a** — The answer card MUST refuse while the socket is down, and
+  MUST NOT announce an answer it did not send. **(INV-11)**
+  *`test/ui/answer-card.test.tsx`.*
 - **FR-ANS-3** — The card MUST appear only when the status is `waiting` **and**
   the transcript names an open call. A tool merely *running* looks exactly like
   one waiting to be allowed. **(INV-16)**
@@ -380,6 +407,14 @@ epistemic rather than functional.
 - **FR-ATT-12** — Attaching MUST NOT begin polling until a tab explicitly opens
   the view, and MUST stop when it closes, disconnects or goes to sleep. Nothing
   polls what nobody is watching. **(INV-4)**
+- **FR-ATT-13** — An **Earlier output** control MUST offer the lines above the
+  pane's visible screen, one page per press, read on request and never polled.
+  The lines MUST render on a surface of their own above the live capture, never
+  inside it. The server MUST answer only a tab focused on that agent, MUST
+  bound the window, MUST cut the reply to what the pane holds and say how deep
+  its history is, and MUST NOT disturb the live frame diff. A pane that has
+  exited MUST still answer. **(INV-1, INV-4)** *`test/ui/term-history.test.tsx`,
+  `routes::inv4_a_history_read_needs_a_focused_viewer`, `e2e/attach.spec.ts`.*
 
 ---
 
@@ -840,6 +875,8 @@ requirements in this document look like refusals to be helpful.
 | `~/.claude/projects/*/<sessionId>.jsonl` | the timeline, tailed by byte offset |
 | `…/<sessionId>/subagents/agent-*.meta.json` | the delegation tree |
 | `tmux capture-pane` / `send-keys` | the Attach tab, and delivering input |
+| `tmux capture-pane -S -E` | earlier output, one page per press |
+| `ps -axo pid,ppid,etime,command` | what a busy agent is running, once per pass |
 | `~/.claude/agent-commander/rate-limits.json` | the quota meters |
 
 - **NFR-OPS-3** — Polling cost MUST be bounded by *properties*, not by a
@@ -890,6 +927,7 @@ unverified.
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7 |
+| INV-18 — a link goes where the text says | FR-CHAT-11 |
 
 ---
 

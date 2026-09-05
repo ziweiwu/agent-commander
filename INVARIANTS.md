@@ -425,6 +425,9 @@ were the reason for the rules, not the rules.
 - `enrich::inv4_stops_tailing_while_no_browser_is_connected` — the enricher idles while no browser is connected, runs
   a pass the moment one arrives, and paces itself by the work rather than by a
   wall clock
+- `routes::inv4_a_focus_on_a_cli_with_no_transcripts_probes_once` — the
+  retry above is only for a CLI that keeps transcripts; for one that does not,
+  the probe is a directory scan that cannot succeed, and it runs once
 - `registry::inv4_asks_once_for_a_ghost_not_once_per_scan` — an unconfirmed session is asked about at
   once rather than at the next 30s reconcile, and a ghost is asked about once
   rather than once per scan
@@ -435,6 +438,69 @@ were the reason for the rules, not the rules.
   carries the one just served; an unchanged answer does not blank a card's
   delegates; a changed one advances the tag; and unmounting the list stops the
   poll
+
+**Two reads that are new, and how each is held to the rules above.**
+
+*Earlier output.* The Attach tab can show the lines above the pane's visible
+screen — `capture-pane -S`/`-E`, which touches nothing (INV-1). It is a request
+and a reply, never a poll: one press is one read, the browser asks for the next
+page only once the last has answered, and a reconnect re-asks for nothing. It
+also stops: the two clamps below make a floor, and past it every further
+request comes back for a window already on screen, so the browser mirrors the
+depth, stops there, and says which end it reached — the pane having nothing
+older and the app reading no further are different claims (INV-11), and a
+button that silently does nothing is neither. The
+server answers only a tab *focused* on that session — a socket looking at
+nothing could otherwise page through any pane on the machine — and holds the
+window to `HISTORY_LINES_MAX` lines at most `HISTORY_BEFORE_MAX` above the top,
+whatever was asked. Focus rather than attachment, because a pane that has
+exited ends the attachment and its last output is exactly what a reader then
+wants. The reply carries the pane's history depth, so the browser knows when
+there is no more; tmux clamps a window past the oldest line to that line rather
+than answering with nothing, so the server cuts the reply to the depth. The
+read goes to the pane directly, never through the hub, and never touches the
+viewer's frame diff.
+
+*What a busy agent is running.* One `ps` over the whole machine per enrichment
+pass, however many agents there are — never one per agent — and none at all
+while nothing is busy or while no browser is connected, because it runs inside
+the same pass the `watched` flag gates. What it finds travels as a command and a
+start time, never a duration: `ps` reports elapsed time to the second, so a
+duration recomputed each pass would change every tick and re-broadcast the
+fleet for a process that had not. The pid says whether it is the same process,
+and the first reading's start time stands while it is.
+
+- `routes::inv4_the_first_browser_starts_the_work_and_the_last_to_leave_stops_it`
+  — the enricher's own switch had no production caller until this was wired,
+  so the loop it guards ran with nobody connected; the first browser starts
+  the work and the last to leave stops it
+- `routes::inv4_a_history_read_needs_a_focused_viewer`,
+  `routes::inv4_an_oversized_history_window_is_clamped`,
+  `routes::inv4_each_page_of_history_is_one_read_and_the_last_is_cut`,
+  `routes::a_history_reply_leaves_the_live_frames_alone`,
+  `routes::a_dead_pane_still_answers_history`,
+  `routes::a_read_credential_may_ask_for_history` — the gate, the clamp, the
+  paging, the untouched diff, the dead pane, and the grant
+- `pane::a_window_past_the_end_of_history_is_cut_to_what_is_there` — the cut,
+  against tmux's clamping
+A read that fails is named on the wire, `kind: 'history-failed'`, for the
+reason `answer-refused` is: the browser holds one request at a time, and a
+latch released by any error that happens to name the agent swallowed the reply
+that was still coming — a press lost with nothing said (INV-11).
+
+- `test/ui/term-history.test.tsx` — one press is one request, the next waits
+  for the answer, an error that is not this read failing does not release it,
+  nothing is re-asked on reconnect, the asking stops at the depth rather than
+  asking for a window already on screen, a drained pane and that depth are
+  told apart, the scroll is reachable by keyboard, the panel is hidden from
+  one place, and the lines are drawn on a surface of their own above the live
+  capture
+- `routes::a_history_read_that_fails_says_which_read_failed` — the failure
+  carries its kind
+- `enrich::inv4_one_ps_per_pass_however_many_agents`,
+  `enrich::inv4_no_ps_while_nothing_is_busy`,
+  `enrich::inv4_the_same_process_is_not_rebroadcast` — one read for the fleet,
+  none for an idle one, and no broadcast for a process that has not changed
 
 ## INV-5 — Degrade, don't error
 
@@ -478,6 +544,11 @@ off one call, so a pane that exited froze the chat for that tab as well.
   split across two reads, a transcript that moves, and one that is replaced
 - `routes::tests` (the frame-error group) — a dead pane ends the frames and not the
   conversation, and a run of failed reads is tolerated before either stops
+- `routes::inv5_a_focus_before_the_transcript_exists_starts_the_timeline_once_it_does`
+  — a tab that opens an agent before its first prompt has been processed gets
+  the conversation, and the answer card, once the transcript appears rather
+  than an empty pane for as long as it stays open; the viewer's tail is
+  retried, where it used to be given up on the first miss
 - `pending::inv5_a_tmux_that_could_not_be_reached_keeps_the_entry` — a tmux that could not be reached keeps a just-started
   agent visible, where only a positive "no such session" removes it: the same
   distinction as above, at the one moment an agent most needs to be reachable
@@ -919,6 +990,64 @@ rather than matching the server's English prose — a coupling that would have
 broken silently the day anyone reworded the string, in an app that ships a
 second language.
 
+**What a busy agent is running is measured, and said to be.** A Claude agent's
+transcript names the tool it called; a Kiro agent's says nothing, because there
+is none, and its card read "keeps no transcript" for as long as it worked. The
+process table knows either way: the tool a busy agent is inside is a child of
+its process, and `ps` reports when that child started. That is a fact — the
+process exists or it does not — but it is a fact this app *found* rather than
+one the agent *reported*, so it wears the same marking an inferred status does:
+captioned as read from the process table on the face, and in words in the fold,
+where a phone can read them. Three things it may never do: feed the trail,
+because a process start is not a transcript write; change the status, because a
+child process under an idle agent is an MCP server, not work; or outlive the
+work — an agent that goes idle, or whose tool call ends, stops being said to run
+it on the next successful read. A read that *fails* leaves the claim standing:
+`EAGAIN` at the process cap is ordinary, and a card blanked for one tick would
+be asserting an absence this app had not observed.
+
+**Which process is the work is structural, not a threshold.** Only a process
+with a shell between it and the agent counts. Measured against five live Claude
+sessions: every tool call sat under a `zsh -c source <shell snapshot> &&
+<command>` wrapper, while the MCP servers and the `caffeinate` that keeps the
+machine awake were direct children of the CLI. Two of those five were thinking
+rather than calling a tool and had nothing under them but MCP servers, so
+"the newest child" — which is what this first shipped as — would have captioned
+them `running node index.js · 1d 2h`: a true sentence about a process and a
+false one about the agent's work, which is this invariant's own failure mode.
+`caffeinate` restarts every few minutes, so it was the newest child on three of
+the five. For a tmux-discovered agent the root *is* the pane's shell, so
+everything under it qualifies, which is right: what its pane is running is the
+only account of that agent's work there is. A shell is never itself the answer,
+and neither is the agent's own program, or a Kiro sitting in its pane's shell
+would be reported as running itself. Among what is left the newest wins,
+because a tool call started after whatever else the agent has open.
+
+Two guards sit under that, and both are about claims nobody could support. A
+walk visits each pid once, because `ps` output is parsed rather than trusted and
+a process parented to itself would spin inside an enrichment pass — not a crash,
+a hang, taking every card's activity line with it. And a root of zero reports
+nothing: `pending.rs` gives a just-spawned agent `pid: 0` until the CLI writes
+its session file, and a walk from there reaches init and therefore the whole
+machine.
+
+- `procs::tests` — the tool call under the shell wrapper chosen; an agent with
+  nothing but its own MCP servers and `caffeinate` reported as running nothing;
+  a pane whose root is a shell reporting what runs in it; shells and the
+  agent's own program skipped; a process parented to itself not spinning; a
+  root of zero claiming nothing; and the command described by program and
+  first argument
+- `enrich::inv11_a_failed_read_leaves_the_claim_and_a_clean_read_clears_it`,
+  `enrich::inv11_a_failed_read_still_clears_an_agent_that_stopped`,
+  `enrich::inv11_an_agent_that_went_idle_stops_claiming_a_process` — the claim
+  survives a failed read and not a clean one; an agent that stopped being busy
+  is cleared even when the read failed, because that is read off its status;
+  and an idle agent runs nothing
+- `test/ui/running-process.test.tsx` — the line stands in for the activity of
+  a card with no transcript and is captioned; a Claude card keeps its
+  transcript on the face and folds the process; the trail stays absent; the
+  process is searchable
+
 ## INV-12 — Input to a live agent is bounded
 
 No client can queue unbounded work into a running agent. Writes are charged
@@ -1202,12 +1331,14 @@ quiet.
   "not a stall" note takes the same slot when a delegate is moving, and the
   question is withheld when no duration can be named
 
-## INV-16 — An answer names only what the transcript named
+## INV-16 — An answer names only what the transcript named, or what the pane confirms
 
 The Chat tab offers to answer a question the agent is blocked on. Every option
-it labels is **read out of that agent's own transcript**, never inferred from
-the screen, and where the transcript does not state the choices the interface
-says so instead of composing a list.
+it labels is either **read out of that agent's own transcript**, or is the
+choice Claude Code draws for that dialog — **marked as drawn, and sent only
+after the pane has been read and found to be numbering that label that way.**
+Nothing is ever composed for a dialog this app has no table for, and nothing
+is typed on the strength of the table alone.
 
 **Why this can be read at all.** Claude Code flushes a `tool_use` record before
 the dialog it raises is answered. Three independent proofs, all from real
@@ -1221,11 +1352,76 @@ their descriptions, and `multiSelect`.
 **Why the three blocked shapes are treated differently.** They are knowable to
 different depths, and flattening that would mean inventing the difference:
 
-- `AskUserQuestion` states the question and every option. Buttons are labelled.
-- `ExitPlanMode` states the plan but not the three approval choices, which the
-  CLI composes at the terminal. The plan is shown; no choice is named.
+- `AskUserQuestion` states the question and every option. Buttons are labelled
+  from it, and nothing else is shown beside them.
+- `ExitPlanMode` states the plan but not the approval choices, which the CLI
+  composes at the terminal. The plan is shown, and the choices offered are the
+  ones Claude Code *draws* — marked as drawn.
 - A tool permission request states the tool and its input but never the numbered
-  list. What it would do is shown; no choice is named.
+  list. What it would do is shown, and the choices offered are the drawn ones —
+  marked as drawn.
+
+**Amended: a drawn choice is offered, as a claim, beside the thing that can
+refute it.** This file used to say the second and third shapes named no choice
+at all, and offered ↑ ↓ Enter instead. That was the honest answer and it was
+also the one that sent every permission prompt back to the terminal: the keys
+move a highlight the Chat tab could not see, so the only way to know which row
+`Enter` would commit was to open Attach — on a phone, for the most common
+thing an agent blocks on. A card that cannot be used from where it is drawn is
+not much of a card.
+
+So the two dialogs now carry the numbered choices Claude Code draws for them,
+from one table (`transcript::drawn_choices`, verified against Claude Code
+2.1.260) that the mock fixtures read as well, so the fixture cannot show a
+list the server would not. The label is the part of each row that does not
+move — the CLI varies the wording of a plan's first choice with how the
+session was started, and of a permission prompt's second with the tool — and
+the description says what the terminal fills in. Three properties keep this
+inside the rule rather than an exception to it:
+
+- **It is marked.** `optionsDrawn` travels on the wire, the fingerprint covers
+  it (a drawn list and a stated one with identical labels are different
+  claims, and an answer to one is refused for the other), the card captions
+  the list as drawn and gives it the dashed edge an inferred status wears
+  (INV-11). A reader can tell a label the transcript stated from one this app
+  asserted before pressing it.
+- **The pane is on screen.** Under a drawn list, and wherever only keys are
+  offered, the card shows the agent's terminal live — the same `capture-pane`
+  read the Attach tab makes, sized by a CSS transform and never by tmux
+  (INV-1), read-only and unable to send anything but `attach` (INV-2), and a
+  watcher only while the card is mounted (INV-4). A release that reorders its
+  dialog makes a label wrong *visibly*, three rows below the button, rather
+  than silently answering the wrong thing.
+- **The pane is read before the digit is sent — and this, not the table, is
+  the guarantee.** Measured against Claude Code 2.1.261, the permission dialog
+  is drawn with *two* rows as often as three (the "don't ask again" row is
+  absent when no persistable suggestion exists or fits), and the plan dialog
+  with anywhere from two to five. On such a pane a digit sent on the table's
+  word would select the row under that number, not the row under that label —
+  an approval typed as a refusal. So `answer_keystroke` captures the pane and
+  `drawn_row_matches` looks for that number with that label as its prefix;
+  when it is not there the answer is refused, in words, and nothing is typed.
+  The keys and the capture remain, which is how that dialog is then answered.
+- **Both halves are held server-side.** The card shows only when the status is
+  `waiting` *and* the transcript names an open call; the server now refuses an
+  answer for any status but `waiting` as well, because an open call outlives
+  the moment the agent is let go at the terminal, its fingerprint does not
+  change, and a card one broadcast behind — or any socket peer — could
+  otherwise type a digit into an agent that is working.
+- **A refusal is typed, so the card can let go.** Every reason the server
+  declines an answer — the pane not drawing that row, the agent not waiting,
+  the question having moved on — arrives as an `error` of kind
+  `answer-refused` naming the session. The card releases its one-press latch
+  on exactly that, and on nothing else: an untyped error might follow a key
+  that reached tmux, and a second press after one of those could be the second
+  digit INV-2 forbids. Without the kind the card sat disabled saying "Answer
+  sent" about an answer that never went (INV-11).
+- **A delegation call gets no list.** A parent's `Task` is open for as long as
+  the delegate runs and raises no dialog of its own; what its pane shows is
+  the delegate's question. Laying the permission triple over that would be
+  the mislabelled button this invariant exists to prevent, so `drawn_choices`
+  returns nothing for it and the card falls back to what was written and the
+  keys.
 
 `waitingFor` cannot stand in for any of this. It is a closed set — `dialog
 open`, `permission prompt`, `input needed`, `sandbox request`, `goal proposal`,
@@ -1254,23 +1450,47 @@ question, which the user has not read. The guard is a ref, cleared
 synchronously, for the reason the composer's is.
 
 - `transcript::prompt_tests` — the options an `AskUserQuestion` states are read
-  back exactly; `ExitPlanMode` yields its plan and no choices; a permission
-  request yields its subject and no choices; a malformed payload yields nothing
-  rather than an empty question; a call is held open until its `tool_result`
-  arrives; the newest open call wins; a sidechain's call is ignored
+  back exactly and are not marked as drawn; `ExitPlanMode` yields its plan and
+  the drawn choices, marked; a permission request yields its subject and the
+  drawn choices, marked; every drawn list is three; a malformed payload yields
+  nothing rather than an empty question; a call is held open until its
+  `tool_result` arrives; the newest open call wins; a sidechain's call is
+  ignored
+- `types::tests::inv2_a_prompt_id_changes_with_every_field_a_reader_reads` — the
+  drawn flag moves the id
+- `routes::inv16_an_answer_to_a_drawn_choice_reaches_the_agent_as_its_digit` —
+  the third drawn choice arrives at the pane as `3`, the pane having drawn it
+- `routes::inv16_a_drawn_choice_the_pane_is_not_showing_is_refused` — against
+  a two-row pane the middle choice is refused with nothing typed, and the row
+  that is there still answers
+- `routes::inv16_an_answer_for_an_agent_that_is_not_waiting_is_refused` — an
+  open call on a busy agent is not an answerable question
+- `transcript::inv16_a_drawn_choice_is_matched_against_the_pane_by_number_and_label`
+  and `inv16_drawn_choices_cover_dialogs_and_never_a_delegation_call` — the
+  pane check through highlight marks and colour codes, the two-row dialog, a
+  delegate's picker; and no table for `Task`
 - `control::inv2_allows_single_digits_and_nothing_that_merely_looks_like_one` —
   `1`–`9` pass, `0`, `10`, `1 ` and `1;2` are refused
 - `test/ui/answer-card.test.tsx` — a labelled button per stated option, the
-  answer sent as its number, one answer from a double click, no invented labels
-  for a plan or a permission request, keys instead of digits for a multi-select,
+  answer sent as its number, one answer from a double click, the drawn choices
+  for a plan and a permission request captioned and edged as drawn with the
+  pane beside them, no caveat and no pane for a stated question, the pane
+  wherever only keys are offered, keys instead of digits for a multi-select,
   the raw keys demoted below a labelled answer and primary where nothing was
-  labelled, and the card withheld unless status and transcript agree
+  labelled, the card refusing offline without claiming an answer, a frame the
+  socket dropped never latching the card, a typed refusal for this agent
+  releasing it while another agent's does not, and the card withheld unless
+  status and transcript agree
+- `test/ui/pane-peek.test.tsx` — the capture attaches on mount and detaches
+  on unmount, sends nothing else, never takes focus, and renders the exited
+  copy for a dead pane
 - `e2e/control.spec.ts` — INV-16 end to end against the mock fleet's blocked
   fixture, which carries a real `AskUserQuestion` payload
-- `mock::inv16_the_plan_and_permission_fixtures_name_no_option` and
+- `mock::inv16_the_plan_and_permission_fixtures_offer_only_drawn_options` and
   `e2e/blocked-shapes.spec.ts` — the two thinner shapes, a plan and a tool
-  permission, show what was written and name no option; the same spec drives
-  the fixture whose pane has exited onto the dead-pane notice
+  permission, show what was written, offer the drawn choices marked as drawn
+  from the same table the server uses, and draw the live pane under them; the
+  same spec drives the fixture whose pane has exited onto the dead-pane notice
 
 ## INV-17 — Every shape is the whole app
 
@@ -1322,6 +1542,32 @@ name to announce, in every layout — not only in the one the audit happened to
 open. Text inputs stay at 16px or larger on touch, because iOS zooms the page
 when a smaller one takes focus.
 
+**An on-screen keyboard is the fourth shape, and it is the one CSS cannot
+see.** It covers between a third and a half of a phone, and on iOS Safari it
+does so invisibly to the stylesheet: the *layout* viewport keeps its height and
+`dvh` with it, only the *visual* viewport shrinks, and Safari pans that visible
+rectangle down to follow the focused field. So every surface a reader types
+into or reads while typing lays out from `--vvh` and `--vvt`, the visible
+rectangle `useVisualViewport` writes onto the root: the mobile sheet, the
+full-screen overlay, the new-agent dialog and the toast that reports a failed
+control.
+
+The way this failed is the reason it is written down. Three separate pieces of
+correct keyboard handling existed — the hook, the sheet's height, and the
+conversation re-pinning itself when its scroller shrinks, each with a comment
+naming the keyboard — and all three were inert, because `.app`'s own
+`min-height: 100dvh` floors a `height`, so the box stayed at its full height
+inside a rectangle half of which was behind the keys. Every unit test passed
+throughout: they proved the variable was written, and nothing asked whether
+anything laid out from it.
+
+- `e2e/responsive.spec.ts` (the keyboard group) — the visible rectangle is set
+  to what a keyboard leaves, shrunk and then panned as iOS does, and the
+  composer, the Send button and the new-agent dialog are each required to be
+  inside it. Reverting either fix fails it
+- `test/ui/visual-viewport.test.tsx`, `test/viewport.test.ts` — the other half:
+  that the rectangle written to the root is the right one
+
 - `test/responsive.test.ts` — enumerates every selector a viewport query hides
   and fails on one the list does not account for, so hiding a label is a line
   of documentation and hiding a control means writing down what reaches it
@@ -1336,3 +1582,47 @@ when a smaller one takes focus.
 - `npm run audit:a11y` — WCAG 2.2 AA at five profiles (desktop, tablet both
   ways, phone both ways) in both themes, which is where contrast and naming
   are judged; `npm run audit:mobile` carries the 16px input rule
+
+## INV-18 — A link goes where the text says, and nowhere else
+
+The Chat tab draws a URL an agent wrote as a link, so a phone can follow the
+page it is talking about without retyping it. That is the first thing this
+app renders that reaches *outside* the page, and everything the conversation
+shows is transcript content — text an agent produced, which may in turn be
+text it read out of a file or fetched from the web. Rendering it as React
+elements rather than HTML has always kept markup from executing; an `href` is
+the one attribute that carries a scheme, and that is where a rendering of
+untrusted text can still run something.
+
+So what may become an `href` is decided in one place, `parseInline`, and by two
+independent checks that both have to pass: the pattern admits only `http://`
+and `https://`, and `linkHref` parses the result with `new URL` and refuses
+anything whose protocol is not one of those two or whose host is empty. A
+regex is a claim about the text and `new URL` is a claim about the URL; either
+alone has been fooled before. Anything that fails is rendered as the literal
+text it arrived as — `[click](javascript:alert(1))` reads exactly that way on
+screen, with no anchor under it — because leaving it out would silently edit
+what the agent said (INV-11).
+
+Every link opens in a new tab with `noopener` and `noreferrer`. New tab,
+because navigating this one away drops the socket and every focus with it.
+`noopener`, so the page it opens cannot reach back into this one. `noreferrer`,
+so the dashboard's own address — a tailnet name, when it is being used from a
+phone (INV-3) — is not handed to whatever the agent linked to.
+
+A bare URL's end is a guess, because prose does not delimit it. Trailing
+sentence punctuation is handed back to the text, and a closing bracket is kept
+only when the URL itself opened one, so a Wikipedia title survives and
+"(https://x.test)" does not swallow its paren. A URL an agent quoted in
+backticks stays code: it was shown as a literal, and is rendered as one.
+
+- `test/chat.test.ts` (the INV-18 group) — a bare URL and a markdown link
+  become link spans; every other scheme, a protocol-relative path and a
+  same-origin path stay literal text with no `href`; a hostless URL is
+  refused; trailing punctuation is prose; a paren the URL opened is kept; the
+  `_` and `*` in a path are never emphasis; a URL in backticks is code
+- `test/ui/message-links.test.tsx` — the element is an `<a>` with the vetted
+  `href`, `target="_blank"` and both `rel` tokens, and a hostile scheme
+  produces no anchor at all
+- `e2e/chat.spec.ts` — the fixture conversation carries one of each shape, so
+  the real bundle draws them and the punctuation stays outside the link

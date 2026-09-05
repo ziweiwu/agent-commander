@@ -85,6 +85,14 @@
   cursor: pointer;
   box-shadow: var(--shadow);
 }
+/* A raw button rather than `Button`, so the 44px touch floor (INV-17) has to
+   be stated here; the e2e sweep found it at 28px on a phone. */
+@media (pointer: coarse) {
+  .jump {
+    min-height: 44px;
+    padding: 10px 18px;
+  }
+}
 
 .composer {
   display: flex;

@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
-import type { Agent } from '../../shared/types.ts'
+import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
 import { PaneTerm } from '../lib/term.ts'
 import { useStore } from '../store/store.ts'
-import { sendConfirmedKey, sendKey, sendText, setAttached } from '../store/transport.ts'
+import { requestHistory, sendConfirmedKey, sendKey, sendText, setAttached } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { Button } from './ui/Button.tsx'
+import { TermHistory } from './TermHistory.tsx'
 import styles from './Terminal.module.css'
 
 /**
@@ -63,7 +64,7 @@ const MAX_SIZING_ATTEMPTS = 30
  * tab is attached to one pane at a time, so a toast carrying this text always
  * refers to the pane on screen.
  */
-function usePaneExited(agent: Agent): boolean {
+export function usePaneExited(agent: Agent): boolean {
   /*
    * Read as a fact rather than inferred from a notice.
    *
@@ -87,6 +88,8 @@ interface PaneTermOptions {
   onExit: () => void
   fullscreen: boolean
   exited: boolean
+  /** Whether the earlier-output panel is taking room above the capture. */
+  historyOpen: boolean
 }
 
 /** The DOM and xterm handles the hooks below share. */
@@ -159,12 +162,16 @@ function usePaneInput(options: PaneTermOptions): PaneInput {
  * Opening anyway once the attempts run out is the deliberate half of that: a
  * container that never gains a width would otherwise leave the pane blank for
  * good, which is a worse answer than a mis-measured one.
+ *
+ * `onOpen` is what the surface does with a terminal that is now in the DOM —
+ * the Attach tab focuses it and asks for a repaint, the Chat tab's peek only
+ * attaches. Shared because the wait is the part that was got wrong once.
  */
-function openWhenSized(
+export function openWhenSized(
   term: PaneTerm,
   wrap: HTMLDivElement,
   scale: HTMLDivElement,
-  viewport: PaneViewport,
+  onOpen: (opened: PaneTerm) => void,
 ): () => void {
   let cancelled = false
   let attempts = 0
@@ -176,23 +183,28 @@ function openWhenSized(
       return
     }
     term.mount(wrap, scale)
-    term.setMaxFont(viewport.fullscreen ? FULLSCREEN_MAX_FONT : PANEL_MAX_FONT)
-    // Always measure after mounting. The usual trigger is the first frame
-    // changing geometry, but a frame that arrives before this deferred mount
-    // finds no host to measure and is silently skipped — leaving the pane
-    // unscaled and clipped, with no later geometry change to recover.
-    term.scheduleRescale()
-    if (!viewport.coarse) term.focus()
-    // Ask the server to re-attach: that resets its frame diff so this new
-    // terminal gets a full repaint rather than a delta against rows it never
-    // drew.
-    setAttached(true)
+    onOpen(term)
   }
   attempt()
 
   return () => {
     cancelled = true
   }
+}
+
+/** What the Attach tab does with a terminal the moment it is in the DOM. */
+function openTerminal(term: PaneTerm, viewport: PaneViewport): void {
+  term.setMaxFont(viewport.fullscreen ? FULLSCREEN_MAX_FONT : PANEL_MAX_FONT)
+  // Always measure after mounting. The usual trigger is the first frame
+  // changing geometry, but a frame that arrives before this deferred mount
+  // finds no host to measure and is silently skipped — leaving the pane
+  // unscaled and clipped, with no later geometry change to recover.
+  term.scheduleRescale()
+  if (!viewport.coarse) term.focus()
+  // Ask the server to re-attach: that resets its frame diff so this new
+  // terminal gets a full repaint rather than a delta against rows it never
+  // drew.
+  setAttached(true)
 }
 
 /** Build one terminal per pane, and take it down when the pane changes. */
@@ -218,7 +230,9 @@ function usePaneLifecycle(
     term.onZoomChange(() => forceRender((n) => n + 1))
     host.termRef.current = term
 
-    const cancel = openWhenSized(term, wrap, scale, { fullscreen, coarse })
+    const cancel = openWhenSized(term, wrap, scale, (opened) =>
+      openTerminal(opened, { fullscreen, coarse }),
+    )
 
     return () => {
       cancel()
@@ -230,14 +244,22 @@ function usePaneLifecycle(
   }, [agent.sessionId, agent.paneId, fullscreen])
 }
 
-/** Feed the terminal the frames that belong to the pane it is drawing. */
-function usePaneFrames(options: PaneTermOptions, termRef: RefObject<PaneTerm | null>): void {
+/**
+ * Feed the terminal the frames that belong to the pane it is drawing, and hand
+ * back the one it is showing — null while none has arrived for this pane.
+ */
+export function usePaneFrames(
+  sessionId: string,
+  termRef: RefObject<PaneTerm | null>,
+): Frame | null {
   const frame = useStore((s) => s.frame)
-  const { sessionId } = options.agent
+  const own = frame && frame.sessionId === sessionId ? frame : null
 
   useEffect(() => {
-    if (frame && frame.sessionId === sessionId) termRef.current?.apply(frame)
-  }, [frame, sessionId, termRef])
+    if (own) termRef.current?.apply(own)
+  }, [own, termRef])
+
+  return own
 }
 
 /**
@@ -261,16 +283,29 @@ function useBlurAfterExit(
 }
 
 /**
- * The notice and caption a dead pane gains sit above the capture, inside the
- * same box, so the room the capture has just shrank — and the box itself did
- * not change size, so the observer that would otherwise notice has nothing to
- * report. Measure again by hand.
+ * Measure again when something above the capture changes the room it has.
+ *
+ * A dead pane's notice and the earlier-output panel both sit above the capture
+ * *inside the same box*, so the room it has just changed while the box itself
+ * did not — and the container observer, which watches the box, has nothing to
+ * report. Nothing else would ask for a measurement.
+ *
+ * Both directions, unlike the dead pane, which only ever happens once: closing
+ * the panel hands the room back and the capture should take it.
+ *
+ * What this cannot do is make room that is not there. A capture already at the
+ * legibility floor (FR-ATT-3) does not shrink further whatever the room, and
+ * the panel scrolls instead — which is what a 40-row pane in an 844px window
+ * does here, with or without the history open.
  */
-function useRefitAfterExit(options: PaneTermOptions, termRef: RefObject<PaneTerm | null>): void {
-  const { exited } = options
+function useRefitWhenTheRoomChanges(
+  options: PaneTermOptions,
+  termRef: RefObject<PaneTerm | null>,
+): void {
+  const { exited, historyOpen } = options
   useEffect(() => {
-    if (exited) termRef.current?.scheduleRescale()
-  }, [exited, termRef])
+    termRef.current?.scheduleRescale()
+  }, [exited, historyOpen, termRef])
 }
 
 /**
@@ -301,9 +336,9 @@ function usePaneTerm(options: PaneTermOptions) {
   handlers.current = { guarded, typed, onExit: options.onExit }
 
   usePaneLifecycle(options, { wrapRef, scaleRef, termRef }, handlers)
-  usePaneFrames(options, termRef)
+  usePaneFrames(options.agent.sessionId, termRef)
   useBlurAfterExit(options, wrapRef)
-  useRefitAfterExit(options, termRef)
+  useRefitWhenTheRoomChanges(options, termRef)
 
   return { wrapRef, scaleRef, term: termRef.current, guarded }
 }
@@ -317,7 +352,15 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   const t = useTranslate()
   const fullscreen = useStore((s) => s.fullscreen)
   const exited = usePaneExited(agent)
-  const { wrapRef, scaleRef, term, guarded } = usePaneTerm({ agent, onExit, fullscreen, exited })
+  const history = useStore((s) => (s.history?.sessionId === agent.sessionId ? s.history : null))
+  const historyPending = useStore((s) => s.historyPending)
+  const { wrapRef, scaleRef, term, guarded } = usePaneTerm({
+    agent,
+    onExit,
+    fullscreen,
+    exited,
+    historyOpen: history !== null,
+  })
 
   if (!agent.paneId) {
     return (
@@ -381,6 +424,27 @@ export function Terminal({ agent, onExit }: TerminalProps) {
           </Button>
         )}
         {/*
+         * The pane's scrollback, on request. Not disabled for a pane that has
+         * exited: its last output is exactly what a reader then wants, and
+         * tmux keeps it (INV-4: one read per press, never polled).
+         *
+         * It opens and does not close (FR-CTL-12). Relabelling it to "Hide
+         * earlier output" put a second button with those exact words, and that
+         * exact action, two inches from the panel's own — the "two Clear
+         * buttons for one action" shape the rule was written for. The panel
+         * owns hiding the panel.
+         */}
+        {history === null && (
+          <Button
+            variant="compact"
+            data-testid="history-toggle"
+            disabled={historyPending}
+            onClick={() => requestHistory()}
+          >
+            {t('earlierOutput')}
+          </Button>
+        )}
+        {/*
          * No full-screen button here. There was one, on the reasoning that the
          * cramped view is where the control belongs — and that made three ⤢
          * buttons on one screen, with this one two rows below the tab row's.
@@ -394,8 +458,8 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   )
 
   /*
-   * Four fixed child slots, and the pane stays in the third of them whether or
-   * not the notice is showing. React reconciles static children by position, so
+   * Five fixed child slots, and the pane stays in the fourth of them whether or
+   * not the notice or the history is showing. React reconciles static children by position, so
    * moving the pane into a wrapper — a <figure> around capture and caption, say
    * — would give it a fresh DOM node while PaneTerm still held the old one, and
    * the last frame this surface exists to preserve would go blank.
@@ -422,6 +486,9 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         <p className={styles.lastFrame} data-testid="pane-exited-caption">
           {t('staleFleetNoTime')}
         </p>
+      ) : null}
+      {history ? (
+        <TermHistory history={history} maxFont={fullscreen ? FULLSCREEN_MAX_FONT : PANEL_MAX_FONT} />
       ) : null}
       {pane}
       {keybar}

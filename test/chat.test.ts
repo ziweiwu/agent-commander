@@ -338,3 +338,153 @@ describe('reconcile with a message that has been sent before', () => {
     expect(countSaid([inFlight], 'Continue')).toBe(1)
   })
 })
+
+/*
+ * INV-18. A link is the one span that reaches outside the page, so what may
+ * become an `href` is decided here and nowhere else: `http` and `https`, parsed
+ * by `new URL`, or the literal text it arrived as.
+ */
+describe('parseInline: links (INV-18)', () => {
+  const links = (text: string) => parseInline(text).filter((s) => s.kind === 'link')
+  const render = (text: string): string =>
+    parseInline(text)
+      .map((s) => (s.kind === 'link' ? `<a ${s.href}>${s.text}</a>` : s.text))
+      .join('')
+
+  it('turns a bare URL into a link and leaves the sentence around it', () => {
+    expect(render('see https://example.test/docs for more')).toBe(
+      'see <a https://example.test/docs>https://example.test/docs</a> for more',
+    )
+  })
+
+  it('turns a markdown link into a link with its own label', () => {
+    expect(render('read the [MDN page](https://developer.mozilla.org/x) first')).toBe(
+      'read the <a https://developer.mozilla.org/x>MDN page</a> first',
+    )
+  })
+
+  it('does not swallow the punctuation a sentence leaves after a URL', () => {
+    expect(render('done: https://example.test/a.')).toBe(
+      'done: <a https://example.test/a>https://example.test/a</a>.',
+    )
+    expect(render('(https://example.test)')).toBe(
+      '(<a https://example.test/>https://example.test</a>)',
+    )
+    expect(render('https://example.test/a, https://example.test/b')).toBe(
+      '<a https://example.test/a>https://example.test/a</a>, <a https://example.test/b>https://example.test/b</a>',
+    )
+  })
+
+  it('keeps a closing paren the URL itself opened', () => {
+    const [span] = links('https://en.wikipedia.org/wiki/Bash_(Unix_shell) is it')
+    expect(span?.href).toBe('https://en.wikipedia.org/wiki/Bash_(Unix_shell)')
+  })
+
+  /*
+   * The rule is about brackets, not about parens: `]` and `}` were on the
+   * strip list with no exemption, so a `{id}` path template lost its brace and
+   * became a live link to the wrong resource, and `https://[::1]` lost its `]`
+   * and then failed `new URL` altogether.
+   */
+  it('keeps a closing bracket or brace the URL itself opened', () => {
+    expect(links('try https://api.test/v1/users/{id} next')[0]?.text).toBe(
+      'https://api.test/v1/users/{id}',
+    )
+    expect(links('local: https://[::1]/health')[0]?.href).toBe('https://[::1]/health')
+    expect(links('local: https://[::1]')[0]?.href).toBe('https://[::1]/')
+  })
+
+  it('still sheds a bracket the sentence opened, and everything after it', () => {
+    expect(render('[https://example.test/a]')).toBe(
+      '[<a https://example.test/a>https://example.test/a</a>]',
+    )
+    expect(render('{https://example.test/a}')).toBe(
+      '{<a https://example.test/a>https://example.test/a</a>}',
+    )
+    expect(render('https://x.test/a).')).toBe('<a https://x.test/a>https://x.test/a</a>).')
+  })
+
+  // Recounting the prefix per shed character was quadratic: 20k parens took
+  // seconds, on the main thread, for one message.
+  it('sheds a long run of punctuation in linear time', () => {
+    const text = `https://x.test/a${')'.repeat(20_000)}`
+    const started = performance.now()
+    const [span] = links(text)
+    expect(performance.now() - started).toBeLessThan(100)
+    expect(span?.href).toBe('https://x.test/a')
+  })
+
+  /*
+   * A markdown link's URL may hold parens of its own, and closing at the first
+   * `)` produced a valid link to the wrong page plus a stray `)` in the prose
+   * — the worst shape, because nothing about it looks broken.
+   */
+  it('closes a markdown link at the paren that balances, not the first one', () => {
+    expect(render('see [Bash](https://en.wikipedia.org/wiki/Bash_(Unix_shell)) first')).toBe(
+      'see <a https://en.wikipedia.org/wiki/Bash_(Unix_shell)>Bash</a> first',
+    )
+  })
+
+  it('closes a markdown link at the first paren when the URL opened none', () => {
+    expect(render('[x](https://a.test) tail')).toBe('<a https://a.test/>x</a> tail')
+    expect(render('[x](https://a.test).')).toBe('<a https://a.test/>x</a>.')
+  })
+
+  it('leaves a markdown link that never closes as the text it is', () => {
+    expect(render('[x](https://a.test')).toBe('[x](https://a.test')
+    expect(links('[x](https://a.test')).toEqual([])
+  })
+
+  it('never reads the underscores or stars in a URL as emphasis', () => {
+    expect(render('https://example.test/_a_/*b*/c')).toBe(
+      '<a https://example.test/_a_/*b*/c>https://example.test/_a_/*b*/c</a>',
+    )
+  })
+
+  it('leaves a URL in backticks as code', () => {
+    const spans = parseInline('run `curl https://example.test`')
+    expect(spans.find((s) => s.kind === 'link')).toBeUndefined()
+    expect(spans.find((s) => s.kind === 'code')?.text).toBe('curl https://example.test')
+  })
+
+  // The regex is a claim about the text; these are the strings that pass a
+  // looser one. Each must arrive on screen as text and never as an `href`.
+  it('refuses every scheme but http and https, as literal text', () => {
+    for (const hostile of [
+      '[click](javascript:alert(1))',
+      '[click](data:text/html,<script>alert(1)</script>)',
+      '[click](vbscript:msgbox)',
+      '[click](file:///etc/passwd)',
+      'javascript:alert(1)',
+      'ftp://example.test/x',
+      '[click](//example.test)',
+      '[click](/api/agents)',
+    ]) {
+      expect(links(hostile), hostile).toEqual([])
+      expect(plainText(hostile), hostile).toBe(hostile)
+    }
+  })
+
+  it('refuses a URL with no host', () => {
+    expect(links('https://')).toEqual([])
+    expect(links('https://.')).toEqual([])
+    expect(plainText('https://.')).toBe('https://.')
+  })
+
+  it('carries a normalised href and the text as written', () => {
+    const [span] = links('https://Example.test/a b'.replace(' ', ''))
+    expect(span?.text).toBe('https://Example.test/ab')
+    expect(span?.href).toBe('https://example.test/ab')
+  })
+
+  it('takes the inner link when brackets nest, rather than a label with a bracket in it', () => {
+    expect(render('[a [b](https://x.test)](https://y.test)')).toBe(
+      '[a <a https://x.test/>b</a>](<a https://y.test/>https://y.test</a>)',
+    )
+  })
+
+  it('renders as its label on a card, where a link cannot be followed', () => {
+    expect(plainText('see [the docs](https://example.test/d) now')).toBe('see the docs now')
+    expect(plainText('see https://example.test/d.')).toBe('see https://example.test/d.')
+  })
+})

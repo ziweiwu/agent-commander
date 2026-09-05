@@ -42,6 +42,11 @@
         "met": false,
         "at": 1786599700000,
         "reason": "Two locale snapshots still differ at 80 columns."
+      },
+      "running": {
+        "pid": 4422,
+        "command": "cargo test",
+        "since": 1786599340000
       }
     },
     {
@@ -204,7 +209,12 @@
       "paneId": "%302",
       "tmuxSession": "kiro-1787832510",
       "lastActivityAt": 1786599996000,
-      "derivedName": true
+      "derivedName": true,
+      "running": {
+        "pid": 84639,
+        "command": "npm test",
+        "since": 1786599760000
+      }
     },
     {
       "sessionId": "mock-plan",

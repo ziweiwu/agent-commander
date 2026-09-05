@@ -232,6 +232,75 @@ fn capture_cmd(pane_id: &str) -> String {
     format!("capture-pane -e -p -t {pane_id}")
 }
 
+/// The most lines one history request may ask for, and how far above the
+/// visible top it may start.
+///
+/// The depth is a real limit rather than a guess about tmux: a pane here holds
+/// 11,973 lines, and reading all of them would put that many rows into an
+/// xterm on a phone. So the browser mirrors this number, stops at it, and says
+/// that it has — a control that silently does nothing at the floor is the
+/// failure this pair of clamps caused when only the server knew about them.
+pub const HISTORY_LINES_MAX: u32 = 200;
+pub const HISTORY_BEFORE_MAX: u32 = 2_000;
+
+/// Hold a request to the bounds above. `lines` of zero asks for the maximum.
+pub fn clamp_history(before: u32, lines: u32) -> (u32, u32) {
+    let lines = if lines == 0 { HISTORY_LINES_MAX } else { lines.min(HISTORY_LINES_MAX) };
+    (before.min(HISTORY_BEFORE_MAX), lines)
+}
+
+/// How much of a pane's history it holds — `history_size` alone.
+const HISTORY_FORMAT: &str = "#{history_size}";
+
+/// Lines above the visible screen: `lines` of them, ending `before` lines
+/// above the top. Negative offsets are tmux's spelling for "into the history".
+///
+/// Sent with the size, in one round trip, because tmux clamps a window that
+/// reaches past the oldest line to that line rather than answering with
+/// nothing — so a request past the end would otherwise come back with one
+/// spurious row, and the caller could not tell the end from a pane one line
+/// deep. `cut_history` uses the size to keep only what is really there.
+fn history_args(pane_id: &str, before: u32, lines: u32) -> Vec<String> {
+    let mut args = strs(&["display-message", "-p", "-t", pane_id, HISTORY_FORMAT, ";"]);
+    args.extend(strs(&["capture-pane", "-e", "-p", "-t", pane_id]));
+    args.extend([
+        "-S".to_string(),
+        format!("-{}", before + lines),
+        "-E".to_string(),
+        format!("-{}", before + 1),
+    ]);
+    args
+}
+
+fn history_cmds(pane_id: &str, before: u32, lines: u32) -> Vec<String> {
+    vec![
+        format!("display-message -p -t {pane_id} '{HISTORY_FORMAT}'"),
+        format!("capture-pane -e -p -t {pane_id} -S -{} -E -{}", before + lines, before + 1),
+    ]
+}
+
+/// What a history read hands back: the lines, and how deep the pane's
+/// history is, so a reader knows when there is no more.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct History {
+    pub lines: Vec<String>,
+    pub total: u32,
+}
+
+/// Keep only the lines the pane really holds above `before`.
+///
+/// tmux clamps the start of a window to the oldest line, so a window that
+/// reaches past it comes back shorter — and one that starts past it comes
+/// back as that one oldest line, which is not a line above `before` at all.
+/// Without the size there is no way to tell that reply from a pane one line
+/// deep.
+fn cut_history(mut reply: Vec<String>, before: u32, lines: u32, total: u32) -> Vec<String> {
+    let genuine = total.saturating_sub(before).min(lines) as usize;
+    let excess = reply.len().saturating_sub(genuine);
+    reply.drain(..excess);
+    reply
+}
+
 fn sample_args(pane_id: &str) -> Vec<String> {
     let mut args = meta_args(pane_id);
     args.push(";".to_string());
@@ -946,6 +1015,28 @@ impl Panes {
         Ok(pad_capture(split_lines(&out), rows))
     }
 
+    /// Lines above the visible screen, on demand. Never polled: this is one
+    /// read per press of a button (INV-4), and it touches nothing (INV-1).
+    pub async fn capture_history(
+        &self,
+        pane_id: &str,
+        before: u32,
+        lines: u32,
+    ) -> Result<History, PaneError> {
+        assert_pane(pane_id)?;
+        let (before, lines) = clamp_history(before, lines);
+        let out = self
+            .exec_read(&history_args(pane_id, before, lines), &history_cmds(pane_id, before, lines))
+            .await?;
+        let mut reply = split_lines(&out);
+        let head = if reply.is_empty() { String::new() } else { reply.remove(0) };
+        let total: u32 = head
+            .trim()
+            .parse()
+            .map_err(|_| PaneError::msg(format!("unexpected history size: {head}")))?;
+        Ok(History { lines: cut_history(reply, before, lines, total), total })
+    }
+
     /// Geometry and content in a single round trip.
     ///
     /// This is what the Attach view actually polls. As two calls it cost p50
@@ -1117,6 +1208,10 @@ impl PaneApi for Panes {
 
     async fn sample(&self, pane_id: &str) -> anyhow::Result<PaneSample> {
         Ok(self.read_sample(pane_id).await?)
+    }
+
+    async fn history(&self, pane_id: &str, before: u32, lines: u32) -> anyhow::Result<History> {
+        Ok(self.capture_history(pane_id, before, lines).await?)
     }
 
     async fn paste(&self, pane_id: &str, text: &str, submit: Submit) -> anyhow::Result<()> {
@@ -1878,6 +1973,8 @@ mod tests {
             paste_cmds("b", "/tmp/b", "%1", Submit::Yes).join(" "),
             paste_args("b", "%1", Submit::Yes).join(" "),
             sample_args("%1").join(" "),
+            history_cmds("%1", 0, HISTORY_LINES_MAX).join(" "),
+            history_args("%1", 0, HISTORY_LINES_MAX).join(" "),
             format!("list-panes -a -F '{FACTS_FORMAT}'"),
             format!("list-panes -a -F '{PATH_FORMAT}'"),
         ];
@@ -1886,6 +1983,64 @@ mod tests {
                 assert!(!command.contains(size_flag), "INV-1: a size in `{command}`");
             }
         }
+    }
+
+    /* ------------------------------------------------------------ history */
+
+    /// A history window is spelled the same down both paths: the size first,
+    /// then the capture, with tmux's negative offsets counting up from the
+    /// visible top.
+    #[test]
+    fn a_history_read_names_its_window_in_lines_above_the_top() {
+        let page = HISTORY_LINES_MAX;
+        let one_page_up = page;
+        assert_eq!(
+            history_cmds("%9", one_page_up, page),
+            vec![
+                "display-message -p -t %9 '#{history_size}'".to_string(),
+                "capture-pane -e -p -t %9 -S -400 -E -201".to_string(),
+            ]
+        );
+        let small = 50;
+        let args = history_args("%9", 0, small);
+        assert_eq!(args[0], "display-message");
+        assert!(args.contains(&";".to_string()));
+        let window: Vec<&str> = args.iter().map(String::as_str).collect();
+        assert!(window.ends_with(&["-S", "-50", "-E", "-1"]));
+    }
+
+    #[test]
+    fn a_history_request_is_held_to_its_bounds() {
+        let far_too_many = HISTORY_LINES_MAX * 10;
+        let far_too_deep = HISTORY_BEFORE_MAX * 10;
+        let modest = 10;
+        assert_eq!(clamp_history(0, 0), (0, HISTORY_LINES_MAX));
+        assert_eq!(clamp_history(0, far_too_many), (0, HISTORY_LINES_MAX));
+        assert_eq!(clamp_history(far_too_deep, modest), (HISTORY_BEFORE_MAX, modest));
+    }
+
+    /// tmux clamps a window to the oldest line rather than answering with
+    /// nothing, so the size is what says which lines are real.
+    #[test]
+    fn a_window_past_the_end_of_history_is_cut_to_what_is_there() {
+        let reply = |n: usize| (0..n).map(|i| format!("l{i}")).collect::<Vec<_>>();
+        let asked: u32 = 5;
+        let deep: u32 = 100;
+        let shallow: u32 = 10;
+        let near_the_end: u32 = 8;
+        let past_the_end: u32 = 20;
+        let short_reply: usize = 3;
+        let one_line: usize = 1;
+        // Fully inside the history: everything asked for is genuine.
+        assert_eq!(cut_history(reply(asked as usize), 0, asked, deep).len(), asked as usize);
+        // Reaching past it: only the last `total - before` are real.
+        assert_eq!(
+            cut_history(reply(short_reply), near_the_end, asked, shallow),
+            vec!["l1", "l2"]
+        );
+        // Starting past it: tmux answered with the oldest line; there is none.
+        assert!(cut_history(reply(one_line), past_the_end, asked, shallow).is_empty());
+        assert!(cut_history(Vec::new(), 0, asked, 0).is_empty());
     }
 
     /* ------------------------------------------------- fleet-wide discovery */

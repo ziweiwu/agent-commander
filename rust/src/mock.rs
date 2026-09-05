@@ -17,13 +17,14 @@ use std::sync::{Arc, LazyLock, Mutex};
 use async_trait::async_trait;
 
 use crate::agent_kinds::{has_transcripts, CLAUDE_KIND};
-use crate::sources::{
+use crate::sources::{History, 
     AgentPatch, AgentSource, Deps, LimitsApi, PaneApi, PaneMeta, PaneSample, Submit, TailApi,
     TailRead, Unsubscribe,
 };
+use crate::transcript::drawn_choices;
 use crate::types::{
     now_ms, Agent, AgentStatus, AgentTree, GoalState, PendingPrompt, PromptOption, RateLimits,
-    SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
+    RunningProcess, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
 };
 
 /// Frozen clock. Every fixture timestamp is an offset from this, so two runs —
@@ -38,6 +39,11 @@ const SCAN_LATENCY_MS: u64 = 50;
 
 /// Real escape byte, so mock frames exercise the same ANSI path as live captures.
 const ESC: &str = "\u{001b}[";
+
+/// The panes of the two fixtures blocked on a dialog Claude Code draws, whose
+/// mock frames draw that dialog (see `MockPanes::capture`).
+const PLAN_PANE: &str = "%82";
+const PERMISSION_PANE: &str = "%83";
 
 /// How often `--mock-transitions` moves the blocked fixture. Slow enough to
 /// watch a card change, fast enough that a review does not have to wait for it.
@@ -111,9 +117,10 @@ fn fixtures() -> Vec<Agent> {
     ]
 }
 
-/// Blocked on `ExitPlanMode`: the plan is on disk, the three approval choices
-/// are not, so the card shows the plan and offers keys rather than labels it
-/// would have had to invent (INV-16).
+/// Blocked on `ExitPlanMode`: the plan is on disk, the approval choices are
+/// not, so the card shows the plan and the choices Claude Code draws, marked
+/// as drawn, over a live capture of the pane — whose fixture frame below draws
+/// that very dialog, so an answer here passes the pane check (INV-16).
 fn blocked_on_a_plan() -> Agent {
     Agent {
         session_id: "mock-plan".into(),
@@ -126,7 +133,7 @@ fn blocked_on_a_plan() -> Agent {
         kind: "interactive".into(),
         started_at: START - 1_500_000,
         version: Some("2.1.232".into()),
-        pane_id: Some("%82".into()),
+        pane_id: Some(PLAN_PANE.into()),
         tmux_session: Some("claude-mock-plan".into()),
         activity: Some("ExitPlanMode".into()),
         last_activity_at: Some(START - 90_000),
@@ -138,7 +145,9 @@ fn blocked_on_a_plan() -> Agent {
 }
 
 /// Blocked on a tool permission: the transcript names the tool and what it
-/// would do, and nothing else — no numbered list to read the options from.
+/// would do, and nothing else — the numbered list is drawn, not written, so
+/// the card offers Claude Code's drawn choices over a capture of this pane,
+/// whose fixture frame draws that dialog.
 fn blocked_on_a_permission() -> Agent {
     Agent {
         session_id: "mock-permission".into(),
@@ -151,7 +160,7 @@ fn blocked_on_a_permission() -> Agent {
         kind: "interactive".into(),
         started_at: START - 700_000,
         version: Some("2.1.232".into()),
-        pane_id: Some("%83".into()),
+        pane_id: Some(PERMISSION_PANE.into()),
         tmux_session: Some("claude-mock-perm".into()),
         activity: Some("Bash: rm -rf dist && npm run build".into()),
         last_activity_at: Some(START - 30_000),
@@ -247,6 +256,14 @@ fn working_towards_a_rejected_goal() -> Agent {
             fresh: None,
         }),
         agent_kind: CLAUDE_KIND.into(),
+        // A tool call that has run long enough to be the thing a reader wants
+        // to know about: the transcript says `Bash`, the process table says
+        // which one and for how long.
+        running: Some(RunningProcess {
+            pid: BUSY_PID + 1,
+            command: "cargo test".into(),
+            since: START - 660_000,
+        }),
         ..Default::default()
     }
 }
@@ -488,6 +505,13 @@ fn kiro_seen_only_from_tmux() -> Agent {
         pane_id: Some("%302".into()),
         tmux_session: Some("kiro-1787832510".into()),
         last_activity_at: Some(START - 4_000),
+        // The one activity signal a CLI with no transcript has: the tool
+        // process under its pane, read from the process table.
+        running: Some(RunningProcess {
+            pid: KIRO_PID + 1,
+            command: "npm test".into(),
+            since: START - 240_000,
+        }),
         ..Default::default()
     }
 }
@@ -551,6 +575,17 @@ fn auditing_the_theme() -> Vec<TimelineFixture> {
             TimelineKind::Assistant,
             None,
             "The theme tokens already exist but are only defined for light mode.",
+        ),
+        // One bare URL and one markdown link, so the chat's link rendering
+        // (INV-18) is on screen in `--mock` and not only in a unit test. The
+        // trailing full stop is deliberate: it is prose, not part of the URL.
+        (
+            START - 245_000,
+            TimelineKind::Assistant,
+            None,
+            "The approach follows https://web.dev/articles/prefers-color-scheme. \
+             See the [MDN reference](https://developer.mozilla.org/docs/Web/CSS/color-scheme) \
+             for what `color-scheme` covers.",
         ),
         (
             START - 240_000,
@@ -999,6 +1034,36 @@ impl LimitsApi for MockLimits {
 
 pub struct MockPanes;
 
+/// How many tool calls the fixture pane's history holds. Three lines each,
+/// so more than one page at the largest window and fewer than two: the first
+/// press fills a page, the second gets the remainder, and the third has
+/// nothing to ask for — the whole behaviour the control has.
+const MOCK_HISTORY_CALLS: usize = 90;
+
+/// A pane's scrollback as Claude Code draws it: a tool call, its result,
+/// repeated. Oldest first, ending just above the visible screen.
+fn mock_history() -> Vec<String> {
+    let dim = format!("{ESC}38;5;246m");
+    let off = format!("{ESC}39m");
+    let mut lines = vec![
+        format!("{ESC}1m▐▛███▛█   Claude Code v2.1.259{ESC}0m"),
+        format!("{dim}   Welcome back. Opening the mock fleet.{off}"),
+        String::new(),
+    ];
+    for n in 0..MOCK_HISTORY_CALLS {
+        let file = format!("src/web/components/Part{n}.tsx");
+        lines.push(format!("{ESC}38;5;44m⏺{off} Read {file}"));
+        // A different, growing number on each result line, so a reader can
+        // tell one page of history from another.
+        const FIRST_FILE_LINES: usize = 40;
+        const LINES_PER_FILE: usize = 3;
+        let read = FIRST_FILE_LINES + n * LINES_PER_FILE;
+        lines.push(format!("  {dim}⎿  Read {read} lines{off}"));
+        lines.push(String::new());
+    }
+    lines
+}
+
 #[async_trait]
 impl PaneApi for MockPanes {
     async fn meta(&self, pane_id: &str) -> anyhow::Result<PaneMeta> {
@@ -1026,18 +1091,51 @@ impl PaneApi for MockPanes {
             format!("{ESC}38;5;44m⏺{off} Reading src/components/Header.astro"),
             format!("  {dim}Read 1 file, ran 2 shell commands{off}"),
             String::new(),
-            format!("{ESC}38;5;220m✻{off} Hyperspacing… (2m 14s · {dim}↓ 48.1k tokens{off})"),
-            String::new(),
-            format!("{dim}{rule}{off}"),
-            "❯ ".to_string(),
-            format!("{dim}{rule}{off}"),
-            format!("  {ESC}38;5;220m⏵⏵ auto mode on{dim} · esc to interrupt{off}"),
         ];
+        // The two blocked fixtures draw the dialog they are blocked on, the
+        // way Claude Code draws it, so the answer card's pane check has a real
+        // row to find and the live capture under the buttons shows one.
+        match pane_id {
+            PLAN_PANE => lines.extend([
+                format!("{ESC}1mWould you like to proceed?{ESC}0m"),
+                format!(" {ESC}36m❯{ESC}39m 1. Yes, auto-accept edits"),
+                "   2. Yes, manually approve edits".to_string(),
+                "   3. No, keep planning".to_string(),
+            ]),
+            PERMISSION_PANE => lines.extend([
+                format!("{ESC}1mBash command{ESC}0m"),
+                "  rm -rf dist && npm run build".to_string(),
+                format!("{ESC}1mDo you want to proceed?{ESC}0m"),
+                format!(" {ESC}36m❯{ESC}39m 1. Yes"),
+                "   2. Yes, and don't ask again for npm run build commands in ~/Projects/lego-deals"
+                    .to_string(),
+                "   3. No, and tell Claude what to do differently (esc)".to_string(),
+            ]),
+            _ => lines.extend([
+                format!("{ESC}38;5;220m✻{off} Hyperspacing… (2m 14s · {dim}↓ 48.1k tokens{off})"),
+                String::new(),
+                format!("{dim}{rule}{off}"),
+                "❯ ".to_string(),
+                format!("{dim}{rule}{off}"),
+                format!("  {ESC}38;5;220m⏵⏵ auto mode on{dim} · esc to interrupt{off}"),
+            ]),
+        }
         while lines.len() < rows {
             lines.push(String::new());
         }
         lines.truncate(rows);
         Ok(lines)
+    }
+
+    /// Earlier output, for the Attach tab's "earlier output" control. The
+    /// dead pane answers too: tmux keeps a dead pane's history under
+    /// `remain-on-exit`, and its last output is exactly what a reader wants.
+    async fn history(&self, _pane_id: &str, before: u32, lines: u32) -> anyhow::Result<History> {
+        let all = mock_history();
+        let total = all.len() as u32;
+        let end = total.saturating_sub(before) as usize;
+        let start = end.saturating_sub(lines as usize);
+        Ok(History { lines: all[start..end].to_vec(), total })
     }
 
     /// The same one-round-trip shape the real adapter has, so the hub is exercised.
@@ -1154,14 +1252,16 @@ impl MockTail {
 
     /// The other two blocked shapes INV-16 names, thinner on purpose: the
     /// transcript states what is being asked, not what the numbered choices
-    /// are, so `options` stays empty and the card offers keys.
+    /// are, so the options are the drawn ones — from the same table the real
+    /// tail uses, so the fixture cannot show a list the server would not.
     fn plan_awaiting_approval() -> PendingPrompt {
         PendingPrompt {
             tool: "ExitPlanMode".into(),
             question: None,
-            options: Vec::new(),
+            options: drawn_choices("ExitPlanMode"),
             multi_select: None,
             more_questions: None,
+            options_drawn: Some(true),
             detail: Some(
                 "## Plan\n1. Backfill the index behind a feature flag\n2. Swap the table once the \
                  backfill has caught up\n3. Drop the old table after a week of reads"
@@ -1175,9 +1275,10 @@ impl MockTail {
         PendingPrompt {
             tool: "Bash".into(),
             question: None,
-            options: Vec::new(),
+            options: drawn_choices("Bash"),
             multi_select: None,
             more_questions: None,
+            options_drawn: Some(true),
             detail: Some("rm -rf dist && npm run build".into()),
             id: String::new(),
         }
@@ -1199,6 +1300,7 @@ impl MockTail {
             ],
             multi_select: None,
             more_questions: Some(1),
+            options_drawn: None,
             detail: None,
             id: String::new(),
         }
@@ -1419,16 +1521,19 @@ mod tests {
         assert_eq!(got, want);
     }
 
-    /// The two thinner blocked shapes INV-16 names: something to read, no
-    /// option to name. A card that invented "Yes / No" here would be claiming
-    /// to know what the CLI's picker shows.
+    /// The two thinner blocked shapes INV-16 names: something to read, and the
+    /// drawn choices marked as drawn — from the server's own table, so the
+    /// fixture cannot offer a list the server would not.
     #[test]
-    fn inv16_the_plan_and_permission_fixtures_name_no_option() {
+    fn inv16_the_plan_and_permission_fixtures_offer_only_drawn_options() {
         for id in ["mock-plan", "mock-permission"] {
             let prompt = MockTail::new(id.into()).blocked_on().expect(id);
-            assert!(prompt.options.is_empty(), "{id} invented options");
+            assert_eq!(prompt.options_drawn, Some(true), "{id} must mark its list as drawn");
+            assert_eq!(prompt.options, drawn_choices(&prompt.tool), "{id} drifted from the table");
             assert!(prompt.detail.as_deref().is_some_and(|d| !d.is_empty()), "{id} has nothing to read");
         }
+        let question = MockTail::new("mock-waiting".into()).blocked_on().unwrap();
+        assert_eq!(question.options_drawn, None, "a stated question is not a drawn one");
         assert_eq!(MockTail::new("mock-plan".into()).blocked_on().unwrap().tool, "ExitPlanMode");
         assert!(MockTail::new("mock-gone".into()).blocked_on().is_none());
     }

@@ -113,10 +113,42 @@ test.describe('sending a message', () => {
       PIN_SLACK,
     )
     if (overflowing) {
-      await scroll.evaluate((el) => el.scrollTo({ top: 0 }))
+      // The scroller is `scroll-behavior: smooth`, so the pin to the end on
+      // mount is an animation that is still at the top when the first message
+      // becomes visible. A `scrollTo(0)` issued then is a no-op — no scroll
+      // event, so nothing unpins — and the animation carries on to the end.
+      // Let it land first, then leave instantly so one scroll event carries
+      // the whole distance.
+      await expect
+        .poll(() => scroll.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+        .toBeLessThan(2)
+      await scroll.evaluate((el) => el.scrollTo({ top: 0, behavior: 'instant' }))
       await expect(page.getByTestId('jump-to-latest')).toBeVisible()
       await page.getByTestId('jump-to-latest').click()
       await expect(page.getByTestId('jump-to-latest')).toBeHidden()
     }
+  })
+})
+
+/*
+ * INV-18 against the real bundle. The fixture conversation carries one bare
+ * URL followed by a full stop and one markdown link, so this is the shape a
+ * user sees rather than a string a unit test chose.
+ */
+test.describe('links in the conversation', () => {
+  test('a URL is a link that opens elsewhere, and its full stop is not', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    const bare = page.getByTestId('message-link').filter({ hasText: 'web.dev' })
+    await expect(bare).toHaveAttribute('href', 'https://web.dev/articles/prefers-color-scheme')
+    await expect(bare).toHaveAttribute('target', '_blank')
+    await expect(bare).toHaveAttribute('rel', /noopener/)
+    await expect(bare).toHaveAttribute('rel', /noreferrer/)
+    await expect(bare).not.toHaveText(/\.$/)
+
+    const labelled = page.getByTestId('message-link').filter({ hasText: 'MDN reference' })
+    await expect(labelled).toHaveAttribute(
+      'href',
+      'https://developer.mozilla.org/docs/Web/CSS/color-scheme',
+    )
   })
 })

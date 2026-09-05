@@ -39,6 +39,7 @@ mod pane_hub;
 mod pane_props;
 mod pending;
 mod poll;
+mod procs;
 mod registry;
 mod routes;
 mod sources;

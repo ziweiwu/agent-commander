@@ -80,6 +80,30 @@
   background: color-mix(in srgb, var(--focus) 15%, transparent);
 }
 
+/* Sized by width as well as pointer type, so a narrowed desktop window gets the
+   same comfortable targets as a phone. */
+@media (max-width: 560px) {
+  .chip {
+    min-height: 40px;
+    padding: 7px 13px;
+  }
+  .icon {
+    min-height: 40px;
+    width: 40px;
+    min-width: 40px;
+  }
+  .compact {
+    min-height: 40px;
+    min-width: 40px;
+  }
+}
+
+/*
+ * After the width rule, deliberately. Same specificity, so the later block
+ * wins — and a phone is both narrow and coarse. With the width rule last, every
+ * compact and icon button on a phone was 40px, four short of the floor INV-17
+ * states, while the audit that measures it only ran at the desktop width.
+ */
 @media (pointer: coarse) {
   .btn {
     min-height: 44px;
@@ -99,20 +123,3 @@
   }
 }
 
-/* Sized by width as well as pointer type, so a narrowed desktop window gets the
-   same comfortable targets as a phone. */
-@media (max-width: 560px) {
-  .chip {
-    min-height: 40px;
-    padding: 7px 13px;
-  }
-  .icon {
-    min-height: 40px;
-    width: 40px;
-    min-width: 40px;
-  }
-  .compact {
-    min-height: 40px;
-    min-width: 40px;
-  }
-}

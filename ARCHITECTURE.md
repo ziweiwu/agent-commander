@@ -39,7 +39,7 @@ Everything below is downstream of those two.
    │ pending.ts      │ browse.ts         │            │
    │                 │ control.ts ──┐    │            │
  enrich.ts           │ spawn.ts ─┐  │  pane-hub.ts    │
-   │                 │ frames.ts │  │    │            │
+   │ procs.rs        │ frames.ts │  │    │            │
  transcript.ts       │ subagents.ts │  └── pane.ts ── tmux-client.ts
    │                 │        options.ts        │
    └─────────────────┴──────────── sources.ts ── shared/types.ts
@@ -155,6 +155,15 @@ dead one are identical. The subagent's transcript mtime is the thing still
 moving, so it overrides `lastActivityAt`. The directory is `stat`ed before it is
 read, because most agents never delegate and the common case should cost one
 syscall.
+
+`procs.rs` is the enricher's other source, and the only one that is not a file
+Claude Code wrote. One `ps` over the machine per pass, when anything is busy,
+names the tool process each busy agent is inside — the newest non-shell child of
+its pid — and when it started. That is the whole activity signal a CLI with no
+transcript has, and for a Claude agent it adds the one thing the transcript's
+`Bash: cargo test` cannot say, which is how long. It travels as a command and a
+start time so the payload is byte-stable for the life of the process (INV-4),
+and the card captions it as read from the process table (INV-11).
 
 `subagents.rs` reads the *other* files in that directory, and they turn the same
 count into a shape. Beside every `agent-<id>.jsonl` sits an `agent-<id>.meta.json`
@@ -274,6 +283,8 @@ Pushed: two `fs.watch` registrations, `AgentSource.onChange` and
 | Session-file scan | 2s | `registry.ts:24` |
 | `claude agents --json` reconcile | 30s | `registry.ts:23` |
 | Fleet-wide transcript enrichment | 5s | `enrich.ts:14` |
+| Process table, in the same pass, while anything is busy | 5s | `enrich.rs`, `procs.rs` |
+| Earlier output above the pane | on request, one page per press | `routes.rs` `on_history` |
 | Focused-agent transcript tail | 1s | `routes.ts:43` |
 | Quota file `stat` | 2s | `limits.ts:37` |
 | Pane capture (focused + attached only) | 140ms → 1s | `pane-hub.ts:40`, `:42` |

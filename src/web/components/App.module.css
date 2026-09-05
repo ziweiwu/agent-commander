@@ -126,7 +126,17 @@
 .toast {
   position: fixed;
   overflow-wrap: anywhere;
-  bottom: max(18px, env(safe-area-inset-bottom));
+  /*
+   * Above the keyboard, for the same reason as the dialog: `bottom` on a fixed
+   * element is the bottom of the *layout* viewport, which is behind the keys.
+   * The subtraction is how much of that viewport is not visible — zero when
+   * nothing covers it, so this is the old value until a keyboard is up. A
+   * toast is how a control failure is reported, and typing is exactly when
+   * one is likely.
+   */
+  bottom: calc(
+    max(18px, env(safe-area-inset-bottom)) + 100dvh - var(--vvt, 0px) - var(--vvh, 100dvh)
+  );
   left: 50%;
   transform: translateX(-50%);
   background: var(--panel-2);
@@ -161,6 +171,15 @@
     position: relative;
     top: var(--vvt, 0px);
     height: var(--vvh, 100dvh);
+    /*
+     * `.app` sets `min-height: 100dvh` so a short page still fills the screen,
+     * and a min-height *floors* a height: the box stayed 844px tall inside a
+     * 444px visible band, so `--vvh` did nothing at all and the composer sat
+     * under the keys. Everything above this line was already right, and none
+     * of it could take effect. Measured on a 390x844 phone with the variable
+     * set by hand to what an open keyboard leaves.
+     */
+    min-height: 0;
     overflow: hidden;
   }
   .sheetMode .layout {

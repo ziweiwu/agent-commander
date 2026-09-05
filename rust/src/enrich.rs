@@ -19,8 +19,9 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::agent_kinds::has_transcripts;
+use crate::procs::{running_of, ProcApi, ProcTable};
 use crate::sources::{AgentPatch, AgentSource, TailApi};
-use crate::types::Agent;
+use crate::types::{Agent, AgentStatus, RunningProcess};
 
 const TICK: Duration = Duration::from_millis(5000);
 
@@ -30,6 +31,9 @@ pub type TailFactory = Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + S
 pub struct FleetEnricher {
     source: Arc<dyn AgentSource>,
     tail_for: TailFactory,
+    /// The process table, for what a busy agent is running. `None` in mock
+    /// mode, where the fixtures say so themselves.
+    procs: Option<Arc<dyn ProcApi>>,
     interval: Duration,
     tails: Mutex<HashMap<String, Box<dyn TailApi>>>,
     /// One tick at a time. The spawned loop is already serial, but `tick` is
@@ -41,18 +45,24 @@ pub struct FleetEnricher {
 }
 
 impl FleetEnricher {
-    pub fn new(source: Arc<dyn AgentSource>, tail_for: TailFactory) -> Arc<Self> {
-        Self::with_interval(source, tail_for, TICK)
+    pub fn new(
+        source: Arc<dyn AgentSource>,
+        tail_for: TailFactory,
+        procs: Option<Arc<dyn ProcApi>>,
+    ) -> Arc<Self> {
+        Self::with_interval(source, tail_for, procs, TICK)
     }
 
     pub fn with_interval(
         source: Arc<dyn AgentSource>,
         tail_for: TailFactory,
+        procs: Option<Arc<dyn ProcApi>>,
         interval: Duration,
     ) -> Arc<Self> {
         Arc::new(FleetEnricher {
             source,
             tail_for,
+            procs,
             interval,
             tails: Mutex::new(HashMap::new()),
             running: AtomicBool::new(false),
@@ -180,9 +190,83 @@ impl FleetEnricher {
             }
         }
         drop(tails);
+        if self.refresh_running(&agents).await {
+            changed = true;
+        }
         if changed {
             self.source.notify();
         }
+    }
+
+    /*
+     * What each busy agent is running, from one read of the process table.
+     *
+     * INV-4: one `ps` per pass however many agents there are, none at all when
+     * nothing is busy — an idle agent has no tool call to name — and none while
+     * no browser is connected, because this runs inside the same pass the
+     * `watched` flag already gates.
+     *
+     * A read that fails leaves the claims it cannot check as they were:
+     * `EAGAIN` at the process cap is ordinary, and blanking a card for one tick
+     * would assert an absence nothing observed. What the read has no say in
+     * still happens — an agent that is no longer busy is running nothing, and
+     * that is read off its status, so a failed `ps` must not leave a finished
+     * agent captioned with the tool call it was making (INV-11).
+     */
+    async fn refresh_running(&self, agents: &[Agent]) -> bool {
+        let Some(procs) = &self.procs else { return false };
+        let anything_busy = agents.iter().any(|a| a.status == AgentStatus::Busy);
+        let table = match anything_busy {
+            true => procs.table(now_ms()).await,
+            false => None,
+        };
+        let unreadable = anything_busy && table.is_none();
+        let mut changed = false;
+        for agent in agents {
+            // Nothing was read, so a busy agent's claim is not this pass's to
+            // move; every other agent's is, and it is `None`.
+            if unreadable && agent.status == AgentStatus::Busy {
+                continue;
+            }
+            let next = next_running(agent, table.as_ref());
+            if same_process(&agent.running, &next) {
+                continue;
+            }
+            let patch = AgentPatch { running: Some(next), ..AgentPatch::default() };
+            self.source.enrich(&agent.session_id, patch);
+            changed = true;
+        }
+        changed
+    }
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+/// Only a busy agent is running anything; an idle one's claim is cleared.
+fn next_running(agent: &Agent, table: Option<&ProcTable>) -> Option<RunningProcess> {
+    if agent.status != AgentStatus::Busy {
+        return None;
+    }
+    running_of(table?, agent.pid, &agent.agent_kind)
+}
+
+/// The same process, so nothing to re-send.
+///
+/// `since` is deliberately not compared: `ps` reports elapsed time to the
+/// second, so a start time recomputed each pass drifts by up to a second and
+/// would re-broadcast the fleet every tick for a process that has not changed.
+/// The pid says whether it is the same process; the first reading's `since`
+/// stands for as long as it is.
+fn same_process(current: &Option<RunningProcess>, next: &Option<RunningProcess>) -> bool {
+    match (current, next) {
+        (None, None) => true,
+        (Some(a), Some(b)) => a.pid == b.pid && a.command == b.command,
+        _ => false,
     }
 }
 
@@ -209,6 +293,7 @@ fn card_fields(patch: AgentPatch) -> AgentPatch {
         status: None,
         waiting_for: None,
         cwd: None,
+        running: None,
     }
 }
 
@@ -226,6 +311,9 @@ fn differs(agent: &Agent, patch: &AgentPatch) -> bool {
         || text_differs(&patch.model, &agent.model)
         || text_differs(&patch.git_branch, &agent.git_branch)
     {
+        return true;
+    }
+    if matches!(&patch.running, Some(v) if !same_process(&agent.running, v)) {
         return true;
     }
     if matches!(patch.last_activity_at, Some(v) if agent.last_activity_at != Some(v))
@@ -391,6 +479,7 @@ mod tests {
                 patch.git_branch = Some("main".into());
                 Some(Box::new(FakeTail(patch)))
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.find("a").unwrap().activity.as_deref(), Some("doing a"));
@@ -414,6 +503,7 @@ mod tests {
                 patch.tokens = Some(UNCHANGED_TOKENS);
                 Some(Box::new(FakeTail(patch)))
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.notifications(), 0);
@@ -427,6 +517,7 @@ mod tests {
         let enricher = FleetEnricher::new(
             source.clone(),
             factory(|_| Some(Box::new(FakeTail(AgentPatch::default())))),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.find("a").unwrap().activity.as_deref(), Some("kept"));
@@ -446,6 +537,7 @@ mod tests {
                     Box::new(FakeTail(activity("fine")))
                 })
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.find("good").unwrap().activity.as_deref(), Some("fine"));
@@ -463,6 +555,7 @@ mod tests {
                 *n += 1;
                 Some(Box::new(FakeTail(activity(&format!("v{n}")))))
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(*built.lock().unwrap(), 1);
@@ -491,6 +584,7 @@ mod tests {
                 }
                 Some(Box::new(FakeTail(activity("now visible"))))
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.find("a").unwrap().activity, None);
@@ -521,6 +615,7 @@ mod tests {
                     ..AgentPatch::default()
                 })))
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.notifications(), 0);
@@ -537,6 +632,7 @@ mod tests {
                     ..AgentPatch::default()
                 })))
             }),
+            None,
         );
         moved.tick().await;
         assert_eq!(source.notifications(), 1);
@@ -559,6 +655,7 @@ mod tests {
                     ..AgentPatch::default()
                 })))
             }),
+            None,
         );
         enricher.tick().await;
         assert_eq!(source.find("a").unwrap().status, AgentStatus::Idle);
@@ -573,6 +670,7 @@ mod tests {
         let enricher = FleetEnricher::with_interval(
             source.clone(),
             factory(|_| Some(Box::new(FakeTail(activity("running"))))),
+            None,
             BRISK_TICK,
         );
         enricher.start().await;
@@ -633,6 +731,7 @@ mod tests {
         let enricher = FleetEnricher::with_interval(
             source.clone(),
             counting(&reads, Duration::ZERO),
+            None,
             Duration::from_millis(10),
         );
 
@@ -664,6 +763,7 @@ mod tests {
             source.clone(),
             // A fleet large enough that one pass overruns its own interval.
             counting(&reads, OVERRUNNING_PASS),
+            None,
             Duration::from_millis(10),
         );
 
@@ -682,6 +782,207 @@ mod tests {
         );
     }
 
+    /// A process table that answers with a fixed tree, counting how often it
+    /// was asked, and that can be told to stop answering.
+    struct FakeProcs {
+        text: String,
+        reads: StdMutex<usize>,
+        broken: StdMutex<bool>,
+    }
+
+    impl FakeProcs {
+        fn with(text: impl Into<String>) -> Arc<Self> {
+            Arc::new(FakeProcs {
+                text: text.into(),
+                reads: StdMutex::new(0),
+                broken: StdMutex::new(false),
+            })
+        }
+        fn reads(&self) -> usize {
+            *self.reads.lock().unwrap()
+        }
+        /// From here on, every read fails — `EAGAIN` at the process cap.
+        fn start_failing(&self) {
+            *self.broken.lock().unwrap() = true;
+        }
+    }
+
+    /// How far apart the fake puts two passes. Real `ps` reports elapsed time
+    /// to the second, so a start time recomputed a pass later *drifts* — and a
+    /// fake that answers every pass against the same instant makes the drift
+    /// impossible, which is what a test for `since` stability must see.
+    /// Without this, reverting `same_process` to compare `since` passed 19 runs
+    /// in 20: both ticks landed in the same millisecond.
+    const PASSES_APART_MS: i64 = 5_000;
+
+    #[async_trait]
+    impl ProcApi for FakeProcs {
+        async fn table(&self, now: i64) -> Option<ProcTable> {
+            let reads = {
+                let mut reads = self.reads.lock().unwrap();
+                *reads += 1;
+                *reads as i64
+            };
+            if *self.broken.lock().unwrap() {
+                return None;
+            }
+            Some(crate::procs::parse_table(&self.text, now + (reads - 1) * PASSES_APART_MS))
+        }
+    }
+
+    /*
+     * Two agents' trees in one table, with the pids named: one has a tool call
+     * under a shell, the other has nothing but the shell.
+     */
+    const WORKING_AGENT: i64 = 1;
+    const SHELL_ONLY_AGENT: i64 = 2;
+    const ITS_SHELL: i64 = 10;
+    const ITS_TOOL_CALL: i64 = 11;
+    const THE_OTHER_SHELL: i64 = 20;
+
+    fn two_trees() -> String {
+        let row = |pid: i64, ppid: i64, etime: &str, command: &str| {
+            format!("{pid} {ppid} {etime} {command}\n")
+        };
+        [
+            row(ITS_SHELL, WORKING_AGENT, "00:05", "/bin/zsh -c cargo test"),
+            row(ITS_TOOL_CALL, ITS_SHELL, "00:04", "cargo test --manifest-path rust/Cargo.toml"),
+            row(THE_OTHER_SHELL, SHELL_ONLY_AGENT, "00:09", "-zsh"),
+        ]
+        .concat()
+    }
+
+    fn busy(session_id: &str, pid: i64) -> Agent {
+        Agent { pid, status: AgentStatus::Busy, ..agent(session_id) }
+    }
+
+    fn no_tails() -> TailFactory {
+        factory(|_| None)
+    }
+
+    fn with_procs(source: Arc<FakeSource>, procs: Arc<FakeProcs>) -> Arc<FleetEnricher> {
+        FleetEnricher::new(source, no_tails(), Some(procs))
+    }
+
+    #[tokio::test]
+    async fn names_the_process_a_busy_agent_is_running() {
+        let source = FakeSource::with(vec![busy("a", 1), busy("b", 2)]);
+        let enricher = with_procs(source.clone(), FakeProcs::with(two_trees()));
+        enricher.tick().await;
+        let running = source.find("a").unwrap().running.unwrap();
+        assert_eq!(running.command, "cargo test");
+        assert_eq!(running.pid, ITS_TOOL_CALL);
+        // A shell is not a tool call, so the other card claims nothing.
+        assert_eq!(source.find("b").unwrap().running, None);
+        assert_eq!(source.notifications(), 1);
+    }
+
+    /// INV-4: one query for the whole machine, never one per agent.
+    #[tokio::test]
+    async fn inv4_one_ps_per_pass_however_many_agents() {
+        /// More agents than the one read is allowed to scale with.
+        const A_FLEET: i64 = 8;
+        let fleet: Vec<Agent> =
+            (1..=A_FLEET).map(|pid| busy(&format!("s{pid}"), pid)).collect();
+        let source = FakeSource::with(fleet);
+        let procs = FakeProcs::with(two_trees());
+        let enricher = with_procs(source, procs.clone());
+        enricher.tick().await;
+        assert_eq!(procs.reads(), 1);
+    }
+
+    /// INV-4: an idle fleet has no tool call to name, so nothing is asked.
+    #[tokio::test]
+    async fn inv4_no_ps_while_nothing_is_busy() {
+        let source = FakeSource::with(vec![agent("a"), agent("b")]);
+        let procs = FakeProcs::with(two_trees());
+        let enricher = with_procs(source, procs.clone());
+        enricher.tick().await;
+        assert_eq!(procs.reads(), 0);
+    }
+
+    /// INV-4: the same process a pass later is not news. `ps` reports elapsed
+    /// time to the second, so a start time recomputed each pass drifts; the
+    /// pid is what says it is the same process, and the first `since` stands.
+    #[tokio::test]
+    async fn inv4_the_same_process_is_not_rebroadcast() {
+        let source = FakeSource::with(vec![busy("a", 1)]);
+        let enricher = with_procs(source.clone(), FakeProcs::with(two_trees()));
+        enricher.tick().await;
+        let first = source.find("a").unwrap().running.unwrap();
+        enricher.tick().await;
+        assert_eq!(source.notifications(), 1);
+        assert_eq!(source.find("a").unwrap().running.unwrap().since, first.since);
+    }
+
+    /// INV-11: a read that failed is not a fleet that stopped running things.
+    /// The claim stands until a read that succeeds says otherwise.
+    #[tokio::test]
+    async fn inv11_a_failed_read_leaves_the_claim_and_a_clean_read_clears_it() {
+        let source = FakeSource::with(vec![busy("a", 1)]);
+        let procs = FakeProcs::with(two_trees());
+        let enricher = with_procs(source.clone(), procs.clone());
+        enricher.tick().await;
+        assert!(source.find("a").unwrap().running.is_some());
+
+        procs.start_failing();
+        enricher.tick().await;
+        assert!(source.find("a").unwrap().running.is_some(), "a failed read blanked the card");
+        assert_eq!(source.notifications(), 1);
+
+        // The tool call ended: the same agent, still busy, with only its shell
+        // left under it.
+        let ended = FakeProcs::with(format!("{ITS_SHELL} {WORKING_AGENT} 00:05 /bin/zsh -c true\n"));
+        let enricher = with_procs(source.clone(), ended);
+        enricher.tick().await;
+        assert_eq!(source.find("a").unwrap().running, None);
+    }
+
+    /// INV-11: what the read has no say in still happens. An agent that
+    /// stopped being busy is running nothing, and that is read off its status
+    /// rather than out of `ps` — so a failed read must not leave a finished
+    /// agent captioned with the tool call it was making.
+    #[tokio::test]
+    async fn inv11_a_failed_read_still_clears_an_agent_that_stopped() {
+        let source = FakeSource::with(vec![busy("a", 1), busy("b", 2)]);
+        let procs = FakeProcs::with(two_trees());
+        let enricher = with_procs(source.clone(), procs.clone());
+        enricher.tick().await;
+        assert!(source.find("a").unwrap().running.is_some());
+
+        // "a" finishes its turn in the same pass that `ps` cannot be read. "b"
+        // stays busy, so the read is attempted and fails.
+        let mut done = source.find("a").unwrap();
+        done.status = AgentStatus::Idle;
+        source.remove("a");
+        source.add(done);
+        procs.start_failing();
+        enricher.tick().await;
+
+        assert_eq!(source.find("a").unwrap().running, None, "an idle agent kept its claim");
+    }
+
+    /// INV-11: an agent that went idle is no longer running anything, and the
+    /// card must stop saying so — without a `ps`, which an idle fleet does not
+    /// get.
+    #[tokio::test]
+    async fn inv11_an_agent_that_went_idle_stops_claiming_a_process() {
+        let source = FakeSource::with(vec![busy("a", 1)]);
+        let procs = FakeProcs::with(two_trees());
+        let enricher = with_procs(source.clone(), procs.clone());
+        enricher.tick().await;
+        assert!(source.find("a").unwrap().running.is_some());
+
+        let mut idle = source.find("a").unwrap();
+        idle.status = AgentStatus::Idle;
+        source.remove("a");
+        source.add(idle);
+        enricher.tick().await;
+        assert_eq!(source.find("a").unwrap().running, None);
+        assert_eq!(procs.reads(), 1);
+        assert_eq!(source.notifications(), 2);
+    }
+
     /// INV-4: no transcript tail for a CLI that keeps no transcripts. Without
     /// this guard, `find_transcript` stats every project directory looking for
     /// a file a Kiro session will never have, every five seconds, forever.
@@ -697,6 +998,7 @@ mod tests {
                 seen.lock().unwrap().push(a.session_id.clone());
                 Some(Box::new(FakeTail(activity("read"))))
             }),
+            None,
         );
 
         enricher.tick().await;

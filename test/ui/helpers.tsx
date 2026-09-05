@@ -25,6 +25,7 @@ export function resetStore(): void {
     conn: 'open',
     selected: null,
     tab: 'chat',
+    attached: false,
     fullscreen: false,
     newAgentOpen: false,
     fleet: { query: '', filter: 'all', sort: 'recent', dir: 'desc' },
@@ -40,6 +41,8 @@ export function resetStore(): void {
     pending: [],
     pendingSeq: 0,
     frame: null,
+    history: null,
+    historyPending: false,
     toast: null,
     expectSession: null,
   })

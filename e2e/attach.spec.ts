@@ -24,6 +24,51 @@ test.describe('the terminal', () => {
     })
   })
 
+  test('INV-4 shows earlier output on request, one page per press', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/\S/, {
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId('term-history')).toHaveCount(0)
+
+    await page.getByTestId('history-toggle').click()
+    await expect(page.getByTestId('term-history')).toBeVisible()
+    // The mock pane's scrollback is a run of tool calls; the first page is
+    // the nearest 200 lines of it, drawn on a surface of its own.
+    await expect(page.locator('[data-testid="history-wrap"] .xterm-rows')).toContainText(/Read src/, {
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId('history-caption')).toHaveText(/200 lines/)
+
+    // The next press reads further up; the mock holds fewer than two pages.
+    await page.getByTestId('history-more').click()
+    await expect(page.getByTestId('history-caption')).toHaveText(/273 lines/)
+    await expect(page.getByTestId('history-more')).toBeDisabled()
+
+    // Nothing scrolls sideways for it, at any of the five shapes.
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    )
+    expect(overflow).toBeLessThanOrEqual(0)
+
+    // One way to hide it, and it belongs to the panel (FR-CTL-12).
+    await expect(page.getByTestId('history-toggle')).toHaveCount(0)
+    await page.getByTestId('history-hide').click()
+    await expect(page.getByTestId('term-history')).toHaveCount(0)
+    await expect(page.getByTestId('history-toggle')).toHaveCount(1)
+  })
+
+  test('a pane that has exited still has its earlier output', async ({ page }) => {
+    await openAgent(page, AGENT.gone)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.getByTestId('pane-exited')).toBeVisible()
+    await page.getByTestId('history-toggle').click()
+    await expect(page.locator('[data-testid="history-wrap"] .xterm-rows')).toContainText(/Read src/, {
+      timeout: 15_000,
+    })
+  })
+
   test('does not resize the pane when the window changes @desktop', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()

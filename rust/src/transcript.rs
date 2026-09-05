@@ -350,15 +350,17 @@ pub fn summarize_tool(name: &str, input: Option<&Value>) -> String {
 
 /// Build the prompt a still-unanswered tool call is asking, where it says one.
 ///
-/// Only three shapes carry anything worth showing, and they carry different
-/// amounts. `AskUserQuestion` states the question and every option, so the
-/// interface may label buttons with them. `ExitPlanMode` states the plan but
-/// not the approval choices, which the CLI composes at the terminal. Anything
-/// else is a tool waiting on permission: its input says what it would do, and
-/// nothing on disk says what the numbered list will look like.
+/// Three shapes, knowable to different depths. `AskUserQuestion` states the
+/// question and every option, so the interface labels buttons with them and
+/// nothing else. `ExitPlanMode` states the plan but not the approval choices,
+/// which the CLI composes at the terminal. Anything else is a tool waiting on
+/// permission: its input says what it would do, and nothing on disk says what
+/// the numbered list will look like.
 ///
-/// Whatever is not on disk stays absent here rather than being guessed at, and
-/// the interface offers keys where it has no labels (INV-16).
+/// For the second and third, the choices offered are the ones Claude Code
+/// *draws* (`drawn_choices`), marked `options_drawn` so the interface can say
+/// so — and an answer to one is sent only after `drawn_row_matches` has read
+/// the pane and found that row under that number (INV-16).
 pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
     let mut prompt = PendingPrompt {
         tool: name.to_string(),
@@ -366,6 +368,7 @@ pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
         options: Vec::new(),
         multi_select: None,
         more_questions: None,
+        options_drawn: None,
         detail: None,
         id: String::new(),
     };
@@ -373,6 +376,8 @@ pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
         "AskUserQuestion" => fill_from_questions(&mut prompt, input),
         "ExitPlanMode" => {
             prompt.detail = text_field_of(input, "plan").map(str::to_string);
+            prompt.options = drawn_choices(name);
+            prompt.options_drawn = Some(true);
         }
         _ => {
             // What it would do, in the words the tool itself used.
@@ -380,9 +385,100 @@ pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
             if !summary.is_empty() {
                 prompt.detail = Some(summary);
             }
+            let drawn = drawn_choices(name);
+            if !drawn.is_empty() {
+                prompt.options = drawn;
+                prompt.options_drawn = Some(true);
+            }
         }
     }
     prompt
+}
+
+/// The numbered choices Claude Code usually draws for a dialog it never writes
+/// down.
+///
+/// A claim about the CLI, not a reading of the transcript, and it is carried as
+/// one: `options_drawn` marks it on the wire, the card says so, and a live
+/// capture of the pane sits under the buttons. **The table is not the
+/// guarantee; `drawn_row_matches` is.** Measured against Claude Code 2.1.261,
+/// the permission dialog is drawn with *two* rows when no persistable
+/// suggestion exists or fits (the "don't ask again" row is simply absent), and
+/// the plan dialog with anywhere from two to five — so a digit sent on the
+/// strength of this table alone would, on such a pane, select the row under
+/// that number rather than the row under that label. An answer to a drawn
+/// choice is therefore sent only after the pane has been read and that row
+/// found under that number (INV-16).
+///
+/// Where the CLI varies the wording — the first plan choice says "use auto
+/// mode", "auto-accept edits" or "switch to BYPASS PERMISSIONS" depending on
+/// how the session was started, and a permission prompt's second choice names
+/// the command, the domain or "all edits" — the label here is the prefix that
+/// does not move, which is also what the pane check compares.
+///
+/// A delegation call (`Task` and friends) is open for as long as the delegate
+/// runs and raises no dialog of its own, so it gets no list: what its parent's
+/// pane shows is the delegate's question, and this table must not be laid
+/// over it.
+pub fn drawn_choices(tool: &str) -> Vec<PromptOption> {
+    let choice = |label: &str, description: &str| PromptOption {
+        label: label.to_string(),
+        description: Some(description.to_string()),
+    };
+    if SUBAGENT_TOOLS.contains(&tool) {
+        return Vec::new();
+    }
+    match tool {
+        "ExitPlanMode" => vec![
+            choice("Yes", "Proceed: auto mode or auto-accept edits, as the terminal says"),
+            choice("Yes, manually approve edits", "Proceed, asking before each edit"),
+            choice("No, keep planning", "Stay in plan mode and say what to change"),
+        ],
+        _ => vec![
+            choice("Yes", "Allow this once"),
+            choice("Yes, and don't ask again", "For this command, domain or all edits — as the terminal says"),
+            choice("No, and tell Claude what to do differently", "Refuse, and say why in the message box"),
+        ],
+    }
+}
+
+/// Whether the pane is drawing `label` as choice number `choice + 1`.
+///
+/// The check that makes a drawn choice sendable. Claude Code's pickers number
+/// their rows from 1 and mark the highlighted one with `❯`; the row is found
+/// by its number and its text must begin with the label the card showed — a
+/// prefix, because the CLI appends what varies ("… for `npm test` commands in
+/// ~/x", "(esc)"). A pane that draws two rows where the table said three fails
+/// this for the row that is not there; one that draws the rows in another
+/// order fails it for the label that moved. Either way nothing is typed.
+pub fn drawn_row_matches(lines: &[String], choice: usize, label: &str) -> bool {
+    let wanted = choice + 1;
+    lines.iter().any(|line| {
+        let plain = strip_ansi(line);
+        let Some((number, text)) = numbered_row(&plain) else { return false };
+        number == wanted && text.starts_with(label.trim())
+    })
+}
+
+/// `"  ❯ 2. Yes, and …"` → `(2, "Yes, and …")`, or nothing for any other row.
+fn numbered_row(line: &str) -> Option<(usize, &str)> {
+    let rest = line.trim_start().trim_start_matches(['❯', '>', ' ']);
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return None;
+    }
+    let after = rest[digits.len()..].strip_prefix('.')?;
+    Some((digits.parse().ok()?, after.trim()))
+}
+
+/// Text with terminal escape sequences removed — CSI (`ESC [ … m`) and OSC
+/// (`ESC ] … BEL`), which is all a `capture-pane -e` carries.
+pub fn strip_ansi(text: &str) -> String {
+    static ESCAPES: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = ESCAPES.get_or_init(|| {
+        regex::Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)").expect("valid")
+    });
+    re.replace_all(text, "").into_owned()
 }
 
 /// The first question of an `AskUserQuestion` set, as the card will show it.
@@ -2284,26 +2380,102 @@ mod prompt_tests {
     }
 
     /// Claude Code writes the plan but composes the approval choices at the
-    /// terminal, so this is the case where the app must show and not name.
+    /// terminal, so the choices offered are the drawn ones — and say so.
     #[test]
-    fn inv16_takes_the_plan_from_exit_plan_mode_and_invents_no_choices() {
+    fn inv16_takes_the_plan_from_exit_plan_mode_and_marks_its_choices_as_drawn() {
         let prompt =
             pending_prompt("ExitPlanMode", Some(&json!({ "plan": "## Steps\n1. Do the thing" })));
-        assert!(prompt.options.is_empty(), "named choices nothing wrote down");
         assert_eq!(prompt.detail.as_deref(), Some("## Steps\n1. Do the thing"));
+        assert_eq!(prompt.options, drawn_choices("ExitPlanMode"));
+        assert_eq!(prompt.options_drawn, Some(true), "a drawn list must be marked as one");
+        assert_eq!(prompt.options[2].label, "No, keep planning");
     }
 
     /// A permission request writes the tool and its input, never the numbered
-    /// list the dialog will draw.
+    /// list the dialog will draw; the list offered is the drawn one, marked.
     #[test]
-    fn inv16_describes_a_permission_request_without_naming_its_options() {
+    fn inv16_describes_a_permission_request_and_marks_its_choices_as_drawn() {
         let prompt = pending_prompt(
             "Bash",
             Some(&json!({ "command": "rm -rf build", "description": "Clear the build tree" })),
         );
-        assert!(prompt.options.is_empty(), "named choices nothing wrote down");
         assert_eq!(prompt.detail.as_deref(), Some("Clear the build tree"));
         assert_eq!(prompt.question, None);
+        assert_eq!(prompt.options, drawn_choices("Bash"));
+        assert_eq!(prompt.options_drawn, Some(true));
+        assert_eq!(prompt.options[0].label, "Yes");
+    }
+
+    /// The one shape whose choices the transcript states is never marked as
+    /// drawn: those labels are read, and the card must not caveat them.
+    #[test]
+    fn inv16_a_question_the_transcript_states_is_not_marked_as_drawn() {
+        let prompt = pending_prompt(
+            "AskUserQuestion",
+            Some(&json!({ "questions": [{ "question": "Which?", "options": [
+                { "label": "A" }, { "label": "B" }
+            ]}]})),
+        );
+        assert_eq!(prompt.options_drawn, None);
+        assert_eq!(prompt.options.len(), 2);
+    }
+
+    /// The table is three rows for every dialog it covers, and covers no
+    /// delegation call: a parent's open `Task` is the delegate still running,
+    /// and the pane under it shows the delegate's question, not a permission
+    /// prompt.
+    #[test]
+    fn inv16_drawn_choices_cover_dialogs_and_never_a_delegation_call() {
+        /// Claude Code numbers three rows for each of these dialogs.
+        const DRAWN_CHOICES_PER_DIALOG: usize = 3;
+        for tool in ["ExitPlanMode", "Bash", "Edit", "WebFetch", "mcp__x__y"] {
+            assert_eq!(drawn_choices(tool).len(), DRAWN_CHOICES_PER_DIALOG, "{tool}");
+        }
+        for tool in SUBAGENT_TOOLS {
+            assert!(drawn_choices(tool).is_empty(), "{tool} is not a dialog");
+            let prompt = pending_prompt(tool, Some(&json!({ "description": "audit" })));
+            assert!(prompt.options.is_empty());
+            assert_eq!(prompt.options_drawn, None);
+            assert_eq!(prompt.detail.as_deref(), Some("audit"));
+        }
+    }
+
+    /// The pane check behind every drawn choice: the row has to be there,
+    /// under that number, starting with that label — through the highlight
+    /// mark and the colour codes a real capture carries.
+    #[test]
+    fn inv16_a_drawn_choice_is_matched_against_the_pane_by_number_and_label() {
+        let three = vec![
+            "\u{1b}[1mDo you want to proceed?\u{1b}[0m".to_string(),
+            " \u{1b}[36m❯\u{1b}[39m 1. Yes".to_string(),
+            "   2. Yes, and don't ask again for `npm test` commands in ~/x".to_string(),
+            "   3. No, and tell Claude what to do differently (esc)".to_string(),
+        ];
+        assert!(drawn_row_matches(&three, 0, "Yes"));
+        assert!(drawn_row_matches(&three, 1, "Yes, and don't ask again"));
+        assert!(drawn_row_matches(&three, 2, "No, and tell Claude what to do differently"));
+
+        // The two-row dialog: no suggestion to persist, so no middle row. The
+        // label the card showed for `2` is not what the pane numbers 2.
+        let two = vec![
+            " ❯ 1. Yes".to_string(),
+            "   2. No, and tell Claude what to do differently (esc)".to_string(),
+        ];
+        assert!(drawn_row_matches(&two, 0, "Yes"));
+        assert!(!drawn_row_matches(&two, 1, "Yes, and don't ask again"), "a row that moved");
+        assert!(!drawn_row_matches(&two, 2, "No, and tell Claude what to do differently"), "a row that is not there");
+
+        // Not a dialog at all: a delegate's picker, or an ordinary prompt.
+        let picker = vec!["❯ 1. Postgres".to_string(), "  2. SQLite".to_string(), "  3. Skip".to_string()];
+        assert!(!drawn_row_matches(&picker, 2, "No, and tell Claude what to do differently"));
+        assert!(!drawn_row_matches(&["❯ ".to_string()], 0, "Yes"));
+    }
+
+    #[test]
+    fn strip_ansi_removes_colour_and_title_sequences_and_nothing_else() {
+        assert_eq!(strip_ansi("\u{1b}[38;5;220m✻\u{1b}[39m done"), "✻ done");
+        assert_eq!(strip_ansi("\u{1b}]0;title\u{7}text"), "text");
+        assert_eq!(strip_ansi("plain 1. Yes"), "plain 1. Yes");
     }
 
     /// A malformed or empty payload must degrade to "something is open" rather

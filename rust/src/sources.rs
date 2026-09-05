@@ -6,6 +6,7 @@
 //! rather than a pile of conditionals.
 
 use crate::control::SendableKey;
+pub use crate::pane::History;
 use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -63,6 +64,9 @@ pub struct AgentPatch {
     /// `transcript.ts:241`. Setting this also re-derives `folder`, since the
     /// card header renders the basename and the two must never disagree.
     pub cwd: Option<String>,
+    /// `Some(None)` clears it: an agent that went idle, or whose tool call
+    /// ended, must stop being reported as running it (INV-11).
+    pub running: Option<Option<crate::types::RunningProcess>>,
 }
 
 impl AgentPatch {
@@ -82,6 +86,7 @@ impl AgentPatch {
             && self.waiting_for.is_none()
             && self.git_branch.is_none()
             && self.cwd.is_none()
+            && self.running.is_none()
     }
 
     /// Apply this patch onto an agent in place.
@@ -99,6 +104,7 @@ impl AgentPatch {
         if let Some(v) = self.status { agent.status = v }
         if let Some(v) = &self.waiting_for { agent.waiting_for = v.clone() }
         if let Some(v) = &self.git_branch { agent.git_branch = Some(v.clone()) }
+        if let Some(v) = &self.running { agent.running = v.clone() }
         if let Some(v) = &self.cwd {
             agent.cwd = v.clone();
             // Keep the precomputed basename in step with the path it describes.
@@ -158,6 +164,13 @@ pub trait PaneApi: Send + Sync + 'static {
         let meta = self.meta(pane_id).await?;
         let lines = self.capture(pane_id, meta.rows).await?;
         Ok(PaneSample { meta, lines })
+    }
+    /// Lines above the visible screen, `lines` of them ending `before` lines
+    /// above the top, with the pane's history depth. On demand only, never
+    /// polled (INV-4). The default answers with nothing, so an adapter that
+    /// keeps no history need not say so.
+    async fn history(&self, _pane_id: &str, _before: u32, _lines: u32) -> anyhow::Result<History> {
+        Ok(History { lines: Vec::new(), total: 0 })
     }
     async fn paste(&self, pane_id: &str, text: &str, submit: Submit) -> anyhow::Result<()>;
     /// Send one control key. Only a [`SendableKey`] gets here, which is where

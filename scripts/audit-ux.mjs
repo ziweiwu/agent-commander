@@ -1,4 +1,5 @@
 import { chromium } from 'playwright'
+import { TOUCH_TARGETS } from './lib/targets.mjs'
 
 const OUT = process.env.SHOTS ?? '/tmp/agent-commander-audit'
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
@@ -358,7 +359,7 @@ for (const vp of VIEWPORTS) {
   }
 
   if (vp.width < 500) {
-    const small = await page.$$eval('button, a, input', (els) =>
+    const small = await page.$$eval(TOUCH_TARGETS, (els) =>
       els
         .filter((e) => e.offsetParent !== null)
         .map((e) => ({ t: (e.textContent || e.tagName).trim().slice(0, 14), h: Math.round(e.getBoundingClientRect().height) }))

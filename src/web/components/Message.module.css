@@ -91,6 +91,19 @@
   font-style: italic;
   color: var(--dim);
 }
+/* `--busy` rather than `--focus`: the contrast audit holds `busy` to 4.5:1 as
+   text on both surfaces in every scheme, and `focus` only to 3:1 as a ring.
+   The underline is the cue a colour-blind reader gets, so it is always on. */
+.text a {
+  color: var(--busy);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+  text-decoration-thickness: 1px;
+  overflow-wrap: anywhere;
+}
+.text a:hover {
+  text-decoration-thickness: 2px;
+}
 
 /* What the agent did, as opposed to what it said. */
 .tools {

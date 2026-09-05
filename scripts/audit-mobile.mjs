@@ -1,7 +1,10 @@
 import { chromium, devices, webkit } from 'playwright'
+import { TOUCH_TARGETS } from './lib/targets.mjs'
 
 const OUT = process.env.SHOTS ?? '/tmp/agent-commander-audit'
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
+/** Long enough for the history capture to have been drawn and measured. */
+const HISTORY_SETTLE_MS = 900
 const findings = []
 const add = (sev, area, msg) => findings.push({ sev, area, msg })
 
@@ -180,10 +183,21 @@ for (const { name, device } of PROFILES) {
       }
     }
     await page.screenshot({ path: `${OUT}/31-${name}-attach.png`, fullPage: false })
+
+    // Earlier output, whose own two controls exist only while it is open — so
+    // the sweep below is the only thing that would ever measure them, and only
+    // if it is opened first.
+    const earlier = await page.$('[data-testid="history-toggle"]')
+    if (earlier) {
+      await earlier.click()
+      await page.waitForSelector('[data-testid="term-history"]', { timeout: 6000 }).catch(() => {})
+      await page.waitForTimeout(HISTORY_SETTLE_MS)
+      await page.screenshot({ path: `${OUT}/32-${name}-history.png`, fullPage: false })
+    }
   }
 
   // 8. Tap targets across the whole UI.
-  const small = await page.$$eval('button, a, input', (els) =>
+  const small = await page.$$eval(TOUCH_TARGETS, (els) =>
     els
       .filter((e) => e.offsetParent !== null)
       .map((e) => ({ t: (e.textContent || e.tagName).trim().slice(0, 16), h: Math.round(e.getBoundingClientRect().height), w: Math.round(e.getBoundingClientRect().width) }))

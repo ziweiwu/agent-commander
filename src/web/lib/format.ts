@@ -136,6 +136,7 @@ export function matches(agent: Agent, query: string): boolean {
     agent.folder,
     agent.gitBranch,
     agent.activity,
+    agent.running?.command,
     agent.status,
     agent.agentKind,
     specOf(agent.agentKind)?.label,

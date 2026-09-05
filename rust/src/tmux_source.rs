@@ -242,6 +242,7 @@ fn merge_patch(dst: &mut AgentPatch, src: AgentPatch) {
         waiting_for,
         git_branch,
         cwd,
+        running,
     );
 }
 

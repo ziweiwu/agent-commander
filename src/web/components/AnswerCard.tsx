@@ -4,6 +4,7 @@ import { useStore } from '../store/store.ts'
 import { answerPrompt, sendConfirmedKey, sendKey } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
+import { LazyPanePeek } from './LazyTerminal.tsx'
 import { shortName } from '../lib/naming.ts'
 import styles from './AnswerCard.module.css'
 
@@ -23,13 +24,15 @@ const KEYS = ['Up', 'Down', 'Space', 'Enter'] as const
  * question is guessed: `PendingPrompt` is read out of the agent's own
  * transcript, which Claude Code flushes *before* the dialog is answered.
  *
- * **INV-16.** A button is labelled only where the transcript stated a label.
- * `AskUserQuestion` states all of them; `ExitPlanMode` states its plan but not
- * its three approval choices; a permission request states neither. Where the
- * labels are unknown this offers the keys and says why, rather than inventing a
- * list that a Claude Code release could quietly invalidate — a mislabelled
- * button here answers a live agent's question wrongly, which is the failure
- * INV-11 exists to prevent.
+ * **INV-16.** A button is labelled from the transcript where it stated a label
+ * — `AskUserQuestion` states all of them — and from what Claude Code *draws*
+ * where it did not: `ExitPlanMode` states its plan but not its approval
+ * choices, and a permission request states neither. A drawn list is a claim
+ * about the CLI rather than a reading of the agent, so it arrives flagged
+ * (`optionsDrawn`), is captioned as such, and is shown above a live capture of
+ * the pane that can contradict it. A release that reorders its dialog would
+ * make a label wrong; the capture is what makes that visible rather than
+ * silently answered, which is the failure INV-11 exists to prevent.
  *
  * **INV-2.** A digit is an *absolute* choice: `2` picks the second option
  * wherever the highlight sits, so nothing has to assume where the cursor
@@ -40,6 +43,15 @@ const KEYS = ['Up', 'Down', 'Space', 'Enter'] as const
 export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPrompt }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
+  /*
+   * With the socket down `answerPrompt` sends nothing, and this card used to
+   * disable itself and announce "Answer sent" anyway — then stay dead through
+   * the reconnect, because `sent` only resets on a new question. The composer
+   * already refuses offline and says so (INV-11); the card holds the same line.
+   * This flag is the visible half; `press` below reads what the socket
+   * actually did, because `conn` lags a socket that is already closing.
+   */
+  const online = useStore((s) => s.conn === 'open')
   /*
    * INV-2's "exactly once", and the reason it is a ref: `sent` is React state
    * and does not land until React flushes, so two presses in one batch — key
@@ -59,11 +71,36 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
     // have read, which content-keying only approximated.
   }, [prompt.id, prompt.question, prompt.tool, prompt.detail])
 
+  /*
+   * A refusal releases the latch. The server declines to type when the pane is
+   * not drawing that choice, the agent is not waiting, or the question has
+   * moved on — and says so with a kind, because from here an untyped error is
+   * indistinguishable from any other. Without this the card sat disabled
+   * saying "Answer sent" about an answer that never went (INV-11). Releasing
+   * is safe for the same reason it is needed: nothing reached the agent, so a
+   * second press is not a second digit (INV-2).
+   */
+  const refused = useStore((s) => s.answerRefused)
+  useEffect(() => {
+    if (!refused || refused.sessionId !== agent.sessionId) return
+    sendingRef.current = false
+    setSent(false)
+  }, [refused, agent.sessionId])
+
   const options = prompt.options ?? []
   // One digit cannot finish a multi-select, so it must not be offered as if it
   // could. The keys below do that job instead.
   const answerable = options.length > 0 && prompt.multiSelect !== true
-  const disabled = sent || !agent.paneId
+  const drawn = prompt.optionsDrawn === true
+  const disabled = sent || !agent.paneId || !online
+  /*
+   * The live pane is shown wherever the buttons are not the transcript's own
+   * words: under a drawn list, so the labels can be checked against what the
+   * terminal actually numbers, and wherever only keys are offered, so ↑ ↓ and
+   * Enter can be aimed at a highlight the user can see. A question the
+   * transcript stated in full needs no second opinion.
+   */
+  const peek = agent.paneId !== undefined && (drawn || !answerable)
 
   /*
    * Sends the *choice*, not the keystroke. The server holds the prompt's id and
@@ -74,15 +111,25 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
   const press = (choice: number): void => {
     if (sendingRef.current || disabled) return
     sendingRef.current = true
+    /*
+     * The latch is spent only by a frame that was written. `send` drops one
+     * silently when the socket has begun closing and `conn` has not yet
+     * caught up; a card that latched anyway said "Answer sent" about nothing
+     * and stayed dead for this question through the reconnect (INV-11).
+     */
+    if (!answerPrompt(agent.sessionId, prompt.id ?? '', choice)) {
+      sendingRef.current = false
+      showToast(t('answerNotSent', { name: shortName(agent) }))
+      return
+    }
     setSent(true)
-    answerPrompt(agent.sessionId, prompt.id ?? '', choice)
     showToast(t('answerSent', { name: shortName(agent) }))
   }
 
   /* A picker key moves or confirms; it does not commit an answer by itself, so
      it does not spend the one-press guard the labelled options do. */
   const nudge = (key: string): void => {
-    if (!agent.paneId) return
+    if (!agent.paneId || !online) return
     sendKey(key)
   }
 
@@ -105,16 +152,23 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </>
       )}
 
+      {answerable && drawn && (
+        <p className={styles.drawnNote} id="answer-drawn-note" data-testid="answer-drawn">
+          {t('answerDrawn')}
+        </p>
+      )}
+
       {answerable ? (
-        <div className={styles.options} data-testid="answer-options">
+        <div className={styles.options} data-testid="answer-options" data-drawn={drawn || undefined}>
           {options.map((option, index) => (
             <Button
               key={option.label}
-              className={styles.option}
+              className={`${styles.option} ${drawn ? styles.drawnOption : ''}`}
               data-testid="answer-option"
               disabled={disabled}
               title={option.description ?? option.label}
               aria-label={t('answerOption', { label: option.label })}
+              aria-describedby={drawn ? 'answer-drawn-note' : undefined}
               /*
                * The number is what is sent, and showing it is not decoration:
                * it is the same key the terminal is offering, so the two
@@ -149,6 +203,13 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </p>
       )}
 
+      {peek && (
+        <figure className={styles.peek} data-testid="answer-peek">
+          <figcaption className={styles.label}>{t('answerPeek')}</figcaption>
+          <LazyPanePeek agent={agent} />
+        </figure>
+      )}
+
       {/*
         * Where the transcript named the options, the labelled buttons above
         * are the verified answer and these keys are the escape hatch: `Enter`
@@ -174,7 +235,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
             key={key}
             variant="compact"
             data-testid={`answer-key-${key}`}
-            disabled={!agent.paneId}
+            disabled={!agent.paneId || !online}
             onClick={() => nudge(key)}
           >
             {key === 'Up' ? '↑' : key === 'Down' ? '↓' : key}
@@ -185,7 +246,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         <Button
           variant="compact"
           data-testid="answer-key-Escape"
-          disabled={!agent.paneId}
+          disabled={!agent.paneId || !online}
           onClick={() => {
             if (!window.confirm(t('confirmInterrupt'))) return
             sendConfirmedKey('Escape')

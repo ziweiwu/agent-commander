@@ -193,11 +193,13 @@ export function reconcile(confirmed: ChatMessage[], pending: ChatMessage[]): Cha
 
 /* ---- inline formatting ---- */
 
-export type SpanKind = 'text' | 'code' | 'bold' | 'italic'
+export type SpanKind = 'text' | 'code' | 'bold' | 'italic' | 'link'
 
 export interface Span {
   kind: SpanKind
   text: string
+  /** Set on a `link` span and nothing else; always `http:` or `https:`. */
+  href?: string
 }
 
 /*
@@ -210,9 +212,116 @@ export interface Span {
  * `_init_.py` and `react_hig_datepicker` lost its underscores. Underscore
  * emphasis therefore also requires a non-word character on each side, which is
  * how CommonMark avoids exactly this.
+ *
+ * Links sit between code and emphasis. After code, so a URL an agent quoted in
+ * backticks stays the literal text it was shown as. Before emphasis, so the
+ * `_` and `*` a URL path can carry are never read as markers — though a URL
+ * *inside* `**bold**` is still bold text rather than a link, because the
+ * earlier marker wins the position and this parser does not nest.
+ *
+ * Only `http` and `https` are ever matched. The pattern is one of two gates —
+ * `linkHref` below is the other — and both have to agree before a string from
+ * a transcript becomes somewhere the browser will go.
  */
 const INLINE =
-  /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(?<![A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])/g
+  /`([^`\n]+)`|\[([^[\]\n]+)\]\((https?:\/\/[^\s]*)|(https?:\/\/[^\s<>"'`]+)|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(?<![A-Za-z0-9_])_([^_\n]+)_(?![A-Za-z0-9_])/g
+
+/*
+ * A link's label may not itself contain `[`: with it allowed, the outer half
+ * of `[a [b](https://x.test)](https://y.test)` matched as one label ending at
+ * the *inner* close bracket, and the rest rendered as stray `](` text beside a
+ * second link. Refusing the opener makes the inner link the one that matches,
+ * which is what a reader would have pointed at.
+ *
+ * The markdown URL runs to whitespace and the pattern names no closing paren:
+ * `markdownUrlEnd` finds it, because the URL may hold parens of its own.
+ * `[^\s)]+\)` closed at the *first* `)`, which cut
+ * `[Bash](https://en.wikipedia.org/wiki/Bash_(Unix_shell))` to a valid link
+ * for the wrong page and left a stray `)` in the prose.
+ */
+
+/**
+ * Where a markdown link's URL ends: the first `)` that no `(` inside the URL
+ * is still waiting for. `undefined` when there is none, in which case the text
+ * was never a link.
+ */
+function markdownUrlEnd(candidate: string): number | undefined {
+  let depth = 0
+  for (let i = 0; i < candidate.length; i += 1) {
+    const ch = candidate[i]
+    if (ch === '(') depth += 1
+    else if (ch === ')') {
+      if (depth === 0) return i
+      depth -= 1
+    }
+  }
+  return undefined
+}
+
+/** What a sentence leaves after a URL and a URL never ends with. */
+const TRAILING_PUNCTUATION = new Set(['.', ',', ';', ':', '!', '?', ')', ']', '}'])
+
+/** Each closing bracket a sentence might leave, and the opener that keeps it. */
+const OPENER_OF: Record<string, string> = { ')': '(', ']': '[', '}': '{' }
+const OPENERS = new Set(Object.values(OPENER_OF))
+
+/**
+ * A bare URL's end is a guess, because prose does not delimit it: "see
+ * https://x.test/a." ends at the `a`, not the `.`. A closing bracket is kept
+ * only when the URL itself opened one, which is how a Wikipedia title, a
+ * `{id}` path template and an IPv6 host all survive while "(https://x.test)"
+ * does not swallow its paren.
+ *
+ * The balance is taken once and walked back as characters are shed, because
+ * recounting the prefix per shed character was quadratic, and a run of twenty
+ * thousand parens — which a transcript can carry — took seconds to strip.
+ */
+function withoutTrailingPunctuation(url: string): string {
+  // Opens minus closes, per bracket pair, over the whole candidate.
+  const balance = new Map<string, number>()
+  for (const ch of url) {
+    if (OPENERS.has(ch)) balance.set(ch, (balance.get(ch) ?? 0) + 1)
+    const opener = OPENER_OF[ch]
+    if (opener !== undefined) balance.set(opener, (balance.get(opener) ?? 0) - 1)
+  }
+
+  let end = url.length
+  while (end > 0) {
+    const last = url[end - 1] as string
+    if (!TRAILING_PUNCTUATION.has(last)) break
+    const opener = OPENER_OF[last]
+    if (opener !== undefined) {
+      const opened = balance.get(opener) ?? 0
+      // Nothing before it is left unclosed: the URL opened this one.
+      if (opened >= 0) break
+      balance.set(opener, opened + 1)
+    }
+    end -= 1
+  }
+  return url.slice(0, end)
+}
+
+/**
+ * The one place a string from a transcript becomes an `href`.
+ *
+ * Spans are rendered as React elements rather than HTML, so nothing here can
+ * inject markup — but an `href` is the one attribute that carries a scheme,
+ * and `javascript:` in one runs. The pattern above admits only `http://` and
+ * `https://`; this checks the parsed result as well, because a regex is a
+ * claim about the text and `new URL` is a claim about the URL. Anything that
+ * fails either stays the literal text it arrived as (INV-18).
+ */
+export function linkHref(raw: string): string | undefined {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return undefined
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return undefined
+  if (url.hostname === '') return undefined
+  return url.href
+}
 
 /**
  * Parse the small subset of markdown agents actually use in prose.
@@ -227,14 +336,41 @@ export function parseInline(text: string): Span[] {
 
   for (let m = INLINE.exec(text); m !== null; m = INLINE.exec(text)) {
     if (m.index > last) spans.push({ kind: 'text', text: text.slice(last, m.index) })
-    if (m[1] !== undefined) spans.push({ kind: 'code', text: m[1] })
-    else if (m[2] !== undefined) spans.push({ kind: 'bold', text: m[2] })
-    else if (m[3] !== undefined) spans.push({ kind: 'italic', text: m[3] })
-    else if (m[4] !== undefined) spans.push({ kind: 'italic', text: m[4] })
-    last = m.index + m[0].length
+    let end = m.index + m[0].length
+    // The alternatives of INLINE, in the order it spells them.
+    const [whole, code, label, labelled, bare, bold, starred, underscored] = m
+    if (code !== undefined) spans.push({ kind: 'code', text: code })
+    else if (labelled !== undefined) {
+      // The match ran to whitespace; the link ends at its own close paren, and
+      // whatever follows that is prose the next match may start inside.
+      const close = markdownUrlEnd(labelled)
+      if (close === undefined) spans.push({ kind: 'text', text: whole })
+      else {
+        const before = whole.length - labelled.length
+        end = m.index + before + close + 1
+        spans.push(link(label as string, labelled.slice(0, close), text.slice(m.index, end)))
+        INLINE.lastIndex = end
+      }
+    } else if (bare !== undefined) {
+      const url = withoutTrailingPunctuation(bare)
+      spans.push(link(url, url, url))
+      // The punctuation handed back is prose, and the next match may start
+      // inside it — "(https://a.test)(https://b.test)" is two links.
+      end = m.index + url.length
+      INLINE.lastIndex = end
+    } else if (bold !== undefined) spans.push({ kind: 'bold', text: bold })
+    else if (starred !== undefined) spans.push({ kind: 'italic', text: starred })
+    else if (underscored !== undefined) spans.push({ kind: 'italic', text: underscored })
+    last = end
   }
   if (last < text.length) spans.push({ kind: 'text', text: text.slice(last) })
   return spans.length > 0 ? spans : [{ kind: 'text', text }]
+}
+
+/** A link where `linkHref` agrees, and the text it was written as where not. */
+function link(label: string, raw: string, literal: string): Span {
+  const href = linkHref(raw)
+  return href === undefined ? { kind: 'text', text: literal } : { kind: 'link', text: label, href }
 }
 
 /**

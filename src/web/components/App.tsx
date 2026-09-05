@@ -293,8 +293,16 @@ export function FleetRoute() {
     }
   }, [agent?.sessionId, agent?.paneId, agent?.agentKind, wantTab, navigate, agent])
 
+  /*
+   * The route decides the tab; the attachment follows it here for the Attach
+   * tab, whose terminal is the one watcher that does not detach itself. The
+   * Chat tab's peek attaches and detaches on its own and waits for `tab` to
+   * read 'chat' before it does — this effect runs after it, since React runs
+   * a child's effects first, and would otherwise detach it straight away.
+   */
   useEffect(() => {
     if (!sessionId) return
+    useStore.setState({ tab: wantTab })
     setAttached(wantTab === 'attach')
   }, [sessionId, wantTab])
 

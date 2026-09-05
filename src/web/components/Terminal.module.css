@@ -144,6 +144,118 @@
   pointer-events: none;
 }
 
+/* ---- earlier output: the pane's scrollback, above the live capture ---- */
+
+/*
+ * Its own surface rather than xterm's scrollback. The live terminal is a
+ * fixed grid with its viewport locked (see above, and why); this is a second
+ * capture of `n` rows in a plain DOM scroll box, which never involves xterm's
+ * viewport at all. Capped so the live capture keeps most of the screen.
+ */
+.history {
+  align-self: stretch;
+  margin-bottom: 8px;
+}
+.historyBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+.historyCaption {
+  margin-right: auto;
+}
+/*
+ * A third of the window rather than a half, and not an attempt to make
+ * everything fit at once.
+ *
+ * Measured in a 614px detail panel: a 40-row capture sits at its legibility
+ * floor at 263px and will not shrink further whatever room it is given
+ * (FR-ATT-3), and the key bar is 88px, so the two already claim 351px before
+ * any history is drawn. No fraction of the *viewport* can guarantee the rest
+ * fits a *container* it knows nothing about. So this is sized to be useful and
+ * to leave the capture visible beside it; where the sum does not fit, the
+ * panel scrolls — the same answer the detail pane already gives — and every
+ * control stays reachable, which is what INV-17 asks for.
+ */
+.historyScroll {
+  max-height: 30vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #000;
+  border-radius: var(--radius-md);
+}
+/* Sized by the component from the capture's own measured height, so the box scrolls. */
+.historySpacer {
+  position: relative;
+}
+/*
+ * The box `heightBudget()` in `term.ts` measures. Zero high on purpose, as
+ * the peek's anchor is: given a height it would shrink `n` rows of history to
+ * fit inside it, and the point is the capture at the pane's width with the
+ * box scrolling over it.
+ */
+.historyBox {
+  height: 0;
+  overflow: visible;
+}
+/* Where `rescale()` reads the available width. */
+.historyRoot {
+  width: 100%;
+}
+.historyEmpty {
+  margin: 0;
+  padding: 8px 2px;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
+/* ---- the peek: the bottom of the pane, on the Chat tab ---- */
+
+/*
+ * Clips the capture to its last rows. The height is written by the component
+ * from the capture's own measured height, and is 0 until a frame has said how
+ * tall the pane is.
+ */
+.peek {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background: #000;
+  border-radius: var(--radius-md);
+}
+/*
+ * The box `heightBudget()` in `term.ts` measures. Zero high on purpose: given
+ * a height it would shrink the pane to fit inside it, and the peek wants the
+ * pane at the card's width with its top cut off, not a smaller pane. Nothing
+ * under it takes a pointer, so a tap cannot hand focus to xterm; `inert` on
+ * the same element keeps it out of the tab order and the accessibility tree,
+ * where the `role="img"` above speaks for it.
+ */
+.peekAnchor {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  pointer-events: none;
+}
+/* Where `rescale()` reads the available width; pinned to the bottom so the cut is at the top. */
+.peekRoot {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+}
+.peekGone {
+  margin: 0;
+  color: var(--dim);
+  font-size: var(--text-sm);
+}
+
 /*
  * The pane's measuring parent is `.host`'s own parent — the detail panel's
  * pane, or the full-screen body — and both are bounded by the layout. That is

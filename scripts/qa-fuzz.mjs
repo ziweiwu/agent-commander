@@ -10,6 +10,13 @@
  *
  * Always point it at a --mock server. It types into whatever it finds, and in
  * mock mode nothing it does can reach a real agent.
+ *
+ * It also never leaves the machine. Chat messages carry real links that open in
+ * a new tab (INV-18), so a fuzzer that clicked every anchor would open one
+ * external site per click and leave each in a popup for the life of the run.
+ * Every request to a host other than loopback is aborted at the context, and
+ * any page that opens beside the one being driven is closed on sight; the
+ * report counts both so a run that tried to escape says so.
  */
 import { chromium, devices } from 'playwright'
 
@@ -67,6 +74,26 @@ const browser = await chromium.launch()
 const context = await browser.newContext(PROFILES[PROFILE] ?? PROFILES.desktop)
 const page = await context.newPage()
 
+/*
+ * The fuzzer is confined to this machine. The mock server is on loopback —
+ * 4500 for the sweep, 4598 for `--mock-empty`, whatever `--base` names — and
+ * the port does not matter to this rule, only the host: any request bound for
+ * anywhere else is aborted before it leaves the context, popup tabs included.
+ */
+const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
+const egress = { abortedExternalRequests: 0, popupsClosed: 0 }
+await context.route('**/*', (route) => {
+  if (LOOPBACK_HOSTS.has(new URL(route.request().url()).hostname)) return route.continue()
+  egress.abortedExternalRequests += 1
+  return route.abort('blockedbyclient')
+})
+// A click that slips past the selector below still cannot leave a tab open.
+context.on('page', (opened) => {
+  if (opened === page) return
+  egress.popupsClosed += 1
+  opened.close().catch(() => {})
+})
+
 page.on('pageerror', (e) => {
   const frames = (e.stack || '').split('\n').slice(1, 5).map((l) => l.trim()).join(' | ')
   add('pageerror', `${e.message}${frames ? ' :: ' + frames : ''}`, log.length)
@@ -118,8 +145,12 @@ for (let step = 0; step < STEPS; step += 1) {
 
   try {
     if (action === 'click') {
+      // Links that open a new tab are the chat's external URLs; the app's own
+      // navigation never targets one. The RNG draws once per click whatever
+      // the list holds, so this narrows what a seed lands on without touching
+      // the sequence it draws.
       const targets = await page.$$(
-        'button:visible:not([disabled]), a:visible, [role="tab"]:visible:not([disabled])',
+        'button:visible:not([disabled]), a:visible:not([target="_blank"]), [role="tab"]:visible:not([disabled])',
       )
       if (targets.length === 0) {
         add('blank', 'no clickable control on the page', step)
@@ -263,6 +294,9 @@ console.log(
       steps: STEPS,
       ok: unique.length === 0,
       findings: unique,
+      // Both should read zero; either being non-zero means a click reached for
+      // the network and was stopped, not that the app is at fault.
+      egress,
       // The last actions before the first finding are the reproduction.
       trail: log.slice(-40),
     },

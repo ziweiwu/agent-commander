@@ -150,6 +150,18 @@ export const AgentCard = memo(function AgentCard({
   const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
   const onFace = delegatesOnFace(agent, claim)
   const canAnswer = agent.status === 'waiting' && Boolean(agent.paneId)
+  /*
+   * INV-11. What the agent's process is running, read from the process table:
+   * a measurement rather than a report, so it is captioned as such wherever it
+   * is drawn. The server sends a start time, never a duration, and the age is
+   * computed here — which is why a card whose process has not changed costs no
+   * broadcast (INV-4). It never feeds the trail: a process start is not a
+   * transcript write.
+   */
+  const runningFor = agent.running ? formatUptime(lang, uptimeParts(agent.running.since)) : ''
+  const runningLine = agent.running
+    ? t('runningProcess', { cmd: agent.running.command, t: runningFor })
+    : ''
 
   return (
     <div className={styles.wrap} data-testid="agent-entry" data-session-id={agent.sessionId}>
@@ -188,6 +200,15 @@ export const AgentCard = memo(function AgentCard({
         {agent.activity ? (
           <div className={styles.activity} data-testid="agent-activity" title={agent.activity}>
             {plainText(agent.activity)}
+          </div>
+        ) : agent.running ? (
+          <div
+            className={styles.activity}
+            data-testid="agent-activity"
+            data-running="true"
+            title={t('runningFromProcessTable')}
+          >
+            {runningLine}
           </div>
         ) : (
           <div
@@ -285,6 +306,14 @@ export const AgentCard = memo(function AgentCard({
               <dt>{t('pathLabel')}</dt>
               <dd className={styles.path}>{agent.cwd}</dd>
             </div>
+            {/* INV-11: the source is named in visible words, as the token
+                caveat is, because a phone cannot show a hover title. */}
+            {agent.running && (
+              <div className={styles.fact} data-testid="agent-running">
+                <dt>{t('runningLabel')}</dt>
+                <dd>{t('runningFold', { cmd: agent.running.command, t: runningFor })}</dd>
+              </div>
+            )}
           </dl>
           {!onFace && <DelegateLine agent={agent} claim={claim} />}
           {claim.kind === 'some' && tree && <DelegationTree nodes={tree.children} />}

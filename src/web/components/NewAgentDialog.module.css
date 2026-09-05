@@ -7,11 +7,21 @@
 .modal {
   position: fixed;
   z-index: 91;
-  top: 50%;
+  /*
+   * Centred in the *visible* rectangle, not the layout viewport, and never
+   * taller than it. A fixed element is positioned against the layout
+   * viewport, which iOS does not shrink for the keyboard and pans out from
+   * under — so with a keyboard up this was centred on 844px while 444px was
+   * visible, and the folder and name fields it exists to collect sat under
+   * the keys. `--vvt` and `--vvh` are the pair the sheet and the full-screen
+   * overlay already lay out from; without them both fall back to the same
+   * values this used to have.
+   */
+  top: calc(var(--vvt, 0px) + var(--vvh, 100dvh) / 2);
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(520px, calc(100vw - 24px));
-  max-height: min(90dvh, 720px);
+  max-height: min(calc(var(--vvh, 100dvh) * 0.9), 720px);
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
