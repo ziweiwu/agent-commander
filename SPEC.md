@@ -224,6 +224,23 @@ the default for an unrecognised kind is deny.
   a current reading. When the fleet is not live, the view MUST say the data is a
   memory and disable the actions that depend on it being current. **(INV-11)**
   *`test/ui/stale-fleet.test.tsx`.*
+- **FR-DET-2** — The agent's name, its status, the tabs and the header's own
+  actions MUST share one row where they fit, and the tabs MUST drop to a
+  second only when they do not. As two fixed rows they came to 108px of a
+  phone screen while the tab row itself used 202px of 474 and left 272 empty.
+  What decides whether they fit is the agent's *name*, which no breakpoint
+  knows, so the wrap MUST be a `flex-wrap` rather than a media query, and the
+  name is what elides. Full screen MUST be drawn once rather than once per
+  layout. *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`.*
+- **FR-DET-1** — The line under the agent's tabs MUST carry only what it can
+  actually say, and MUST NOT be drawn when that is nothing. A mode reading of
+  "not reported yet" is the ordinary state, because Claude Code writes the
+  record at the end of a turn — as a permanent caption beside "delegated
+  nothing" it was 31px of a conversation screen saying nothing at all. The
+  mode is still stated where it is actionable: on the control that changes it
+  **(INV-11)**. `none` follows the fleet card's rule and is withheld from an
+  agent that is not working; `unknown` and `some` stay **(INV-13)**.
+  *`test/ui/AgentDetail.test.tsx`, `test/ui/composer-menu.test.tsx`.*
 - **FR-CARD-6** — A busy card MAY name the process its agent is running and how
   long it has run, read from the process table. It MUST be captioned as read
   rather than reported, MUST stand in for the activity line only where the
@@ -289,10 +306,10 @@ over the list with a back control; on a wide one, a second column.
   `Shift+Tab` in the box MUST send the chord to the agent (§5.1); the cost — that
   it no longer tabs focus backwards — is accepted, and `Tab` and `Escape` MUST
   still move focus. *`test/ui/escape-levels.test.tsx`.*
-- **FR-CHAT-7** — The quick replies MUST be offered from one menu in the strip
-  above the box, closed at rest. As a row of chips they overflowed the strip at
-  every width the detail panel has — two of five out of sight at 1280px — and a
-  shortcut nobody can see is not one. Picking one sends it as it reads, closes
+- **FR-CHAT-7** — The quick replies MUST be offered from the composer's menu
+  (FR-CTL-12), closed at rest. As a row of chips they overflowed the row that
+  held them at every width the detail panel has — two of five out of sight at
+  1280px — and a shortcut nobody can see is not one. Picking one sends it as it reads, closes
   the menu, and MUST leave anything half-typed in the box alone. Opening it
   MUST move focus into the list, and Escape MUST close the list and nothing
   else (FR-UI-14): the list is portalled, so a guard that only saw keys from
@@ -392,7 +409,15 @@ epistemic rather than functional.
   a second answer to a question already answered is noise. `Esc` leaves it.
   *`test/ui/inv17-parity.test.tsx`, `test/ui/one-place.test.tsx`.*
 - **FR-ATT-8** — Quick keys (`Enter`, `↑`, `↓`, `Tab`, `Esc`, `Ctrl-C`) MUST sit
-  under the terminal, because a phone keyboard has none of them.
+  under the terminal, because a phone keyboard has none of them. **Shift+Tab**
+  MUST be among them for a CLI that speaks it: it is how Claude Code's own
+  keyboard cycles the permission mode, deciding that the next step should run
+  in plan mode happens while watching the agent work, and a phone has no
+  hardware keyboard to send the chord with. A hardware Shift+Tab pressed in
+  the terminal MUST do the same thing and MUST NOT send plain `Tab`, which is
+  a different key — autocomplete — and was what it sent. Both go through the
+  control action the server composes, never as a key (INV-8).
+  *`test/ui/term-mode.test.tsx`, `test/ui/key-map.test.tsx`.*
 - **FR-ATT-9** — `Ctrl-C`, `Ctrl-D` and `Escape` MUST require a confirmation
   step, and the server MUST refuse them unless the client states the user was
   asked. **(INV-6)** *`test/ui/key-map.test.tsx`, `control::tests`.*
@@ -484,19 +509,26 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 ### 5.2 Where the controls live
 
 - **FR-CTL-12** — Shift+Tab, Model, Goal, Compact and Clear MUST live in the
-  composer strip beside the message box, and nowhere else. The panel's control
+  composer's menu beside the message box, and nowhere else. The panel's control
   row sits above the tabs, folds behind `⋯` on a phone and does not exist in
   full screen — which is exactly where a conversation gets long enough to want
-  compacting, and where its model is read — so the strip is the one surface
+  compacting, and where its model is read — so the composer is the one surface
   every layout keeps; the row keeps Close, which ends the session rather than
   steering it. They used to be in both, and at a desktop width both were
   visible: two Clear buttons for one action. Every control on the agent screen
   MUST be drawn once. *`test/ui/one-place.test.tsx`,
   `test/ui/AgentControls.test.tsx`, `e2e/control.spec.ts`.*
+- **FR-CTL-14** — Everything that is not typing MUST sit in one menu opened
+  from a single named button beside Send: the replies, the send-mode choice,
+  and the five controls above. It was a permanent row, and the row cost 50px
+  of every screen at rest — 6% of a phone — while being unable to show what it
+  held: measured at 500px wide, 721px of controls inside a 450px sideways
+  scroller. The conversation MUST NOT lose height to it, so the menu overlays
+  rather than pushes. A dialog raised from inside the menu MUST keep it open,
+  or the action it asks about is lost with the panel.
+  *`test/ui/composer-menu.test.tsx`, `test/ui/inv17-parity.test.tsx`.*
 - **FR-CTL-13** — On a narrow screen the panel's control row MUST collapse behind
-  a single control; it cost 111px of a 568px screen. On a landscape phone the
-  composer strip MUST hide itself entirely — there are ~380px of height and the
-  conversation needs them. This is a measured, accepted gap, not an oversight.
+  a single control; it cost 111px of a 568px screen.
 
 ### 5.3 Send behaviour
 

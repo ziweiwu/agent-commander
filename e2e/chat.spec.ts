@@ -53,7 +53,7 @@ test.describe('sending a message', () => {
     await openAgent(page, AGENT.idle)
     // The replies are behind one menu, which closes on a pick — so the reflex
     // this guards against is reopen-and-pick, not a second tap in place.
-    const menu = page.getByTestId('quick-menu')
+    const menu = page.getByTestId('strip-toggle')
     await menu.click()
     const chip = page.getByTestId('quick-prompt').first()
     // The chip's visible text carries a ➤ that the message does not; the

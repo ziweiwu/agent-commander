@@ -109,33 +109,20 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           {sheet ? shortStatus(agent) : statusText(agent)}
         </span>
         <span className={styles.path}>{subtitle}</span>
-        {/* One group, so the two buttons wrap together onto the same line.
-            Left as separate children, the wider labelled ⤢ pushed `close` onto
-            a row of its own and grew the header by a whole line. */}
-        <div className={styles.headActions}>
-          {!narrow && (
-            <Button
-              variant="compact"
-              data-testid="fullscreen-toggle"
-              title={t('expand')}
-              onClick={() => setFullscreen(true)}
-            >
-              {/* Named rather than a lone ⤢: the glyph is not a word anyone
-                  knows, and the header has the room that the tab row does not. */}
-              ⤢ {t('expand')}
-            </Button>
-          )}
-          {/* Keeps `.close`: the sheet hides this button, where `‹ Agents` is
-              the way back and a second one would be two answers to one question. */}
-          <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
-            {t('close')}
-          </Button>
-        </div>
-      </div>
 
-      {showControls && <AgentControls agent={agent} />}
-
-      <div className={styles.tabs} role="tablist">
+        {/*
+          * The tabs share the header's row.
+          *
+          * They had one of their own, and the two rows came to 108px of a
+          * phone screen whose whole job is showing a conversation — while the
+          * tab row itself used 202px of 474 and left 272 empty. Merged, the
+          * header carries both and the conversation gets the row back. It is
+          * a `flex-wrap` rather than a breakpoint: what decides whether they
+          * fit is the agent's *name*, which no media query knows, so on a
+          * screen too narrow for both the tabs drop to their own line exactly
+          * as they used to and nothing is lost.
+          */}
+        <div className={styles.tabs} role="tablist">
         {/*
           Hidden rather than empty. This agent's CLI keeps no transcript this
           app can read, so the conversation would be blank forever — and a blank
@@ -182,8 +169,20 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           </span>
         )}
 
-        {narrow && (
-          <div className={styles.tabActions}>
+        </div>
+
+        {/*
+          * One group, so the buttons wrap together onto the same line. Left as
+          * separate children, the wider labelled ⤢ pushed `close` onto a row
+          * of its own and grew the header by a whole line.
+          *
+          * Full screen is rendered once now rather than once per layout: it
+          * used to be drawn in the header on a desktop and in the tab row on a
+          * phone, which was two copies of one control kept apart only by the
+          * breakpoint between them (FR-CTL-12).
+          */}
+        <div className={styles.headActions}>
+          {narrow && (
             <Button
               variant="compact"
               data-testid="controls-toggle"
@@ -194,17 +193,26 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
             >
               ⋯
             </Button>
-            <Button
-              variant="compact"
-              data-testid="fullscreen-toggle"
-              title={t('expand')}
-              onClick={() => setFullscreen(true)}
-            >
-              ⤢ <span className={styles.actionLabel}>{t('expand')}</span>
-            </Button>
-          </div>
-        )}
+          )}
+          <Button
+            variant="compact"
+            data-testid="fullscreen-toggle"
+            title={t('expand')}
+            onClick={() => setFullscreen(true)}
+          >
+            {/* The word is dropped where the row is tightest, and the glyph is
+                never the accessible name: `title` carries it either way. */}
+            ⤢ <span className={styles.actionLabel}>{t('expand')}</span>
+          </Button>
+          {/* Keeps `.close`: the sheet hides this button, where `‹ Agents` is
+              the way back and a second one would be two answers to one question. */}
+          <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
+            {t('close')}
+          </Button>
+        </div>
       </div>
+
+      {showControls && <AgentControls agent={agent} />}
 
       <StatusLine agent={agent} />
 
@@ -246,19 +254,43 @@ function StatusLine({ agent }: { agent: Agent }) {
   const mode = agent.permissionMode ? modeLabel(agent.permissionMode, t) : undefined
   const model = aliasOfModel(agent.model)
 
+  /*
+   * Only what this line can actually say. It used to carry a mode reading of
+   * "not reported yet" — which is the usual answer, because Claude Code writes
+   * the record at the end of a turn (INV-8) — beside "delegated nothing", and
+   * for an ordinary idle agent that was 31px of screen saying nothing at all,
+   * on the surface whose whole job is showing a conversation. The mode is on
+   * the same screen either way: the composer's menu carries the control, and
+   * a control that names its own state is a better home for it than a caption
+   * that repeats it.
+   *
+   * `none` follows the fleet card's rule for the same reason it does there
+   * (INV-13): "delegated nothing" answers a question a *working* agent raises
+   * and nobody else asks. `unknown` and `some` stay whatever the status —
+   * a count is worth a glance, and "cannot tell" is not something to bury.
+   */
+  const showDelegates = claim.kind !== 'unread' && (agent.status === 'busy' || claim.kind !== 'none')
+  // Truthiness, not `!== undefined`: `aliasOfModel` answers with an empty
+  // string for a model it cannot name, and an empty row is the thing being
+  // removed here.
+  const facts = [Boolean(mode), Boolean(model), showDelegates, stalled]
+  if (!facts.some(Boolean)) return null
+
   return (
     <div className={styles.statusLine} data-testid="detail-status-line">
-      <span className={styles.fact} data-testid="detail-mode" data-reported={mode !== undefined}>
-        <span className={styles.factLabel}>{t('modeLabel')}</span>
-        {mode ?? <em>{t('modeUnreported')}</em>}
-      </span>
+      {mode !== undefined && (
+        <span className={styles.fact} data-testid="detail-mode" data-reported="true">
+          <span className={styles.factLabel}>{t('modeLabel')}</span>
+          {mode}
+        </span>
+      )}
       {model && (
         <span className={styles.fact} data-testid="detail-model">
           <span className={styles.factLabel}>{t('modelLabel')}</span>
           {model}
         </span>
       )}
-      <DelegateLine agent={agent} claim={claim} />
+      {showDelegates && <DelegateLine agent={agent} claim={claim} />}
       {stalled && (
         <span className={styles.stall} data-testid="detail-stall" title={t('stallQuestionTitle')}>
           {t('stallQuestion', { t: quietFor })}

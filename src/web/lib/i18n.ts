@@ -220,8 +220,9 @@ const EN = {
     'Interrupt mode: sending while this agent is working will stop it mid-task ' +
     'first, discarding whatever it had in flight. It stays on for this agent ' +
     'until you switch it back. Continue?',
-  sendModeLabel: 'What Send does while the agent is working',
-  moreOptions: 'Send options, goal and common replies',
+  sendModeLabel: 'While the agent is working, Send',
+  moreOptions: 'More: replies, send options and the agent',
+  menuAgentHeading: 'This agent',
   sendModeQueue: 'Queue',
   sendModeInterrupt: 'Interrupt',
   sendModeQueueTitle: 'Let the agent finish; your message waits at its prompt.',
@@ -601,8 +602,9 @@ const ZH: Record<Key, string> = {
   confirmInterruptMode:
     '中断模式：在该助手工作时发送消息，会先打断它并丢弃正在进行的工作。' +
     '此设置对该助手持续生效，直到你切换回来。是否继续？',
-  sendModeLabel: '助手工作时，发送键的行为',
-  moreOptions: '发送选项、目标与常用回复',
+  sendModeLabel: '助手工作时，发送键会',
+  moreOptions: '更多：快捷回复、发送选项与助手设置',
+  menuAgentHeading: '此助手',
   sendModeQueue: '排队',
   sendModeInterrupt: '中断',
   sendModeQueueTitle: '让助手做完，你的消息在提示符处等待。',

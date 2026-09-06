@@ -680,6 +680,17 @@ happens *while* the agent is running. So it is permitted at any point in the
 flow, from the detail panel, from the chat strip, and from Shift+Tab in the
 composer — the same chord the CLI itself uses.
 
+**It is on both surfaces that show a running agent.** The chord decides that
+the *next* step should run in plan mode, which is a thing decided while
+watching the agent work — so it is in the composer's menu on the Chat tab and
+in the key bar on the Attach tab. The Attach tab had neither the button nor a
+working chord: `mapKey` mapped Shift+Tab to plain `Tab`, so a hardware press
+sent autocomplete into a live session instead, silently, and a phone has no
+hardware keyboard to press anyway. Both routes now call the same control
+action, because `BTab` is not on `ALLOWED_KEYS` and never should be: the server
+composes this key (`control::server_composed`), so nothing that arrived on the
+wire can be it.
+
 **One press, and nothing claimed about where it lands. Every previous shape of
 this control claimed one, and every one of them was reported as broken.** It
 was first a `<select>`: the user named a mode, and the server pressed `BTab`
@@ -737,10 +748,21 @@ does not fire on an id the registry has not scanned yet.
 `test/ui/one-place.test.tsx` enumerates every control on the agent screen and
 fails on one drawn twice.
 
-One gap is accepted rather than fixed: under `@media (max-height: 420px)` the
-whole strip is hidden, so a landscape phone in full screen still cannot reach
-them. Exempting them costs ~44px of the 66px left for the conversation, which
-`Chat.module.css` records as measured and rejected.
+That gap is closed, and by the change that made the conversation bigger
+everywhere. These five, the send-mode choice and the quick replies now open
+from one named button beside Send, at every width and every height — so the
+landscape phone that could not reach them reaches them the same way a desktop
+does. What they were in before was a permanent row costing 50px of every
+screen, which could not show its own contents either: measured at 500px wide,
+721px of controls inside a 450px sideways scroller. A menu overlays instead of
+pushing, so the conversation keeps that row.
+
+One thing about it is load-bearing rather than incidental: **a dialog raised
+from inside the menu keeps the menu open.** Clear asks before it acts and its
+confirmation is portalled to the body, so the press on "Clear it" lands outside
+the panel; treated as a press away it closed the menu, unmounted the controls
+that owned the dialog, and took the dialog with them. The clear then quietly
+did not happen, which is the worst way for a destructive action to fail.
 
 **Model, which does still report, remains observable only late.** It is read
 back out of the transcript, which a busy session writes at the end of its turn,
@@ -1228,9 +1250,13 @@ tell" is an admission this app does not get to bury (INV-11).
   the fold of an idle one; `test/ui/fleet-delegates.test.tsx` opens the fold
   to read it
 
-**The same line is drawn under the agent's own tabs.** The card is glanced at;
-the detail is where the work is read, and "is the delegate still going" is a
-question asked from there. It is the one `DelegateLine`, fed from the graph in
+**The same line is drawn under the agent's own tabs, under the same rule.**
+The card is glanced at; the detail is where the work is read, and "is the
+delegate still going" is a question asked from there. `none` is withheld there
+too on an agent that is not working, for the reason it is withheld on a resting
+card: "delegated nothing" answers a question only a working agent raises, and
+on the detail it was a permanent row on the surface whose whole job is showing
+a conversation. It is the one `DelegateLine`, fed from the graph in
 the store rather than a second poll: the fleet list holds the poll, and on a
 phone, where the sheet unmounts the list, a stand-in holds it instead — one
 holder at a time (INV-4). `test/ui/AgentDetail.test.tsx` reads the claims off
@@ -1526,8 +1552,10 @@ and the quick replies — was `display: none` below 420px of height, on the
 stated and correct grounds that it cost 48px of the 66px a landscape phone had
 left for the conversation. But those three live nowhere else in the app, so a
 landscape phone was a shape of agent-commander that could not set a goal at
-all. The strip now collapses behind a `⋯` beside Send at that height, which
-costs the conversation nothing until it is asked for and takes nothing away.
+all. It first collapsed behind a `⋯` beside Send at that height; the strip is
+now that menu at every height and width, which is the same fix applied where
+it was always true — the row cost 50px of *every* screen, and could not show
+what it held at any of them.
 
 **The disclosures are part of the contract, not an implementation detail.**
 Below 900px the agent's settings row folds behind `⋯` in the tab strip, and the

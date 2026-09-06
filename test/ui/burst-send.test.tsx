@@ -91,7 +91,7 @@ describe('burst send', () => {
 
   /** A reply is behind the menu now, so picking one is open-then-pick. */
   const pick = async (user: ReturnType<typeof userEvent.setup>, index: number): Promise<void> => {
-    await user.click(screen.getByTestId('quick-menu'))
+    await user.click(screen.getByTestId('strip-toggle'))
     await user.click(screen.getAllByTestId('quick-prompt')[index] as HTMLElement)
   }
 

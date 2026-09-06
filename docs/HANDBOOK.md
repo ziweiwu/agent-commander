@@ -439,19 +439,29 @@ it is busy, so a keystroke never interleaves with a tool call in flight. On a
 phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
 screen.
 
-**Shift+Tab, Goal, Compact and Clear also sit in the composer strip**, beside
-the message box. That row is above the tabs and does not exist in full screen,
-which is precisely where a conversation gets long enough to want compacting —
-so the four that belong next to what you are typing are repeated there. Clear
+**Shift+Tab, Goal, Compact and Clear also sit in the composer's menu**, beside
+the message box. The panel's row is above the tabs and does not exist in full
+screen, which is precisely where a conversation gets long enough to want
+compacting — so the four that belong next to what you are typing live there. Clear
 and Compact share one hook rather than one component, because what has to be
 identical between the two copies is a *sequence*: a guard so a double click
 cannot discard the session the first click just created, a refusal to claim
 anything when no new session appeared, and following the agent to its new id in
-the right order. One place to get that wrong is enough. (One gap, measured and
-accepted: a landscape phone hides the whole strip to keep 66px of conversation,
-so there they stay in the panel's row.)
+the right order. One place to get that wrong is enough.
 
-**Shift+Tab** sends that chord to the agent, which is how the CLI's own keyboard
+The agent's header is one row: the way back, its name, its status, the Chat
+and Attach tabs, and the header's own buttons. They used to be two, which came
+to 108px of a phone screen while the tab row was two-fifths full. If the name
+is long enough that they cannot share a line, the tabs drop to their own —
+which is a wrap rather than a breakpoint, because what decides it is the name
+and no breakpoint knows that.
+
+**Shift+Tab** sits in the composer's menu and in the terminal's key bar, since
+deciding that the next step should run in plan mode happens while watching the
+agent work. Pressing the chord on a hardware keyboard inside the terminal does
+the same thing; it used to send plain `Tab`, which is autocomplete.
+
+It sends that chord to the agent, which is how the CLI's own keyboard
 cycles the permission mode. The button says it sent the key and nothing more —
 watch the agent's terminal to see which mode it moved to.
 
@@ -479,15 +489,19 @@ goes with the old one.
 
 ### From the chat itself
 
-Directly above the message box, sharing the line with the quick replies, sit
-the switches you reach for while reading a conversation rather than before
-opening it: **Shift+Tab**, a **Goal** toggle, and the choice of what Send does to an
-agent that is already working. Deciding that the next instruction should run in
-plan mode happens while typing that instruction. They share that line rather
-than taking one of their own because a row of their own cost 44px of a 568px
-phone — enough to push the conversation itself under the layout audit's floor.
-Opening the goal field gives it the whole strip, so its Set and Cancel are
-never scrolled off the end.
+Behind the **⋯** beside Send sit the things you reach for while reading a
+conversation rather than before opening it: the **quick replies**, the choice
+of what Send does to an agent that is already working, **Shift+Tab**, the
+**model**, a **Goal** toggle, and **Compact** and **Clear**. Deciding that the
+next instruction should run in plan mode happens while typing that
+instruction, so they belong beside the box rather than in a header.
+
+They are in a menu because the row that held them was the most expensive thing
+on the screen and could not show its own contents: 50px of every screen at
+rest, with 721px of controls inside a 450px sideways scroller at phone width,
+so most of it was already past the end of a scroll nobody could see. The menu
+overlays the conversation instead of pushing it, so the conversation is a row
+taller everywhere — 56% of a phone screen before, 63% after.
 
 **Shift+Tab and model both work while the agent is working**, unlike Goal and
 Close, which still wait for idle. Those two submit an instruction that changes
@@ -532,9 +546,8 @@ switching to Attach and finding Esc.
 
 Being part of the conversation view means they are there in full screen too,
 unlike the panel's control row — and full screen is where a phone actually
-reads a conversation. The one place they are not is a landscape phone, where
-the strip hides itself exactly as the quick replies already do: there are 380px
-of height there and the conversation needs them.
+reads a conversation. A landscape phone is no longer the exception it used to
+be: one button opens the same menu at every width and every height.
 
 **Goal** drives Claude Code's own `/goal`, which is a stop condition: the
 session keeps working, checking itself against the condition each time it would

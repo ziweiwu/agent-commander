@@ -62,7 +62,7 @@ const ACTIONS = [
   'send-mode-queue',
   'send-mode-interrupt',
   'goal-toggle',
-  'quick-menu',
+  'strip-toggle',
   'shift-tab',
 ] as const
 
@@ -134,14 +134,30 @@ describe('INV-17 every shape offers every action', () => {
   })
 
   /*
-   * And the other direction: the desktop must not be carrying a disclosure
-   * that exists to buy back space it has. A `⋯` there would hide settings
-   * behind a click for no reason, which is the same drift in reverse.
+   * And the other direction, which is now two different answers.
+   *
+   * The detail row's `⋯` still exists only where the width takes the row
+   * away: folding it on a desktop would hide settings behind a click to buy
+   * back space that shape already has.
+   *
+   * The composer's menu is the opposite case and folds at every width. What
+   * it replaced was a permanent row that cost 50px of every screen and could
+   * not show its own contents — measured at 500px wide, 721px of controls
+   * inside a 450px sideways scroller. A row that is both the most expensive
+   * thing on the screen and unable to display what it holds is not a row that
+   * a desktop has room for; it is a menu nobody had written yet.
    */
-  it('folds nothing away where there is room', () => {
+  it('folds the settings row away only where the width takes it', () => {
     setViewport(DESKTOP)
     open()
     expect(screen.queryByTestId('controls-toggle')).toBeNull()
-    expect(screen.queryByTestId('strip-toggle')).toBeNull()
+  })
+
+  it('folds the composer menu away at every width, including a desktop', () => {
+    setViewport(DESKTOP)
+    open()
+    const menu = screen.getByTestId('strip-toggle')
+    expect(menu.getAttribute('aria-label')).toBeTruthy()
+    expect(menu.getAttribute('aria-expanded')).toBe('false')
   })
 })

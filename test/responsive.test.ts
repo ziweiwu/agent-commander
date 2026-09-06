@@ -44,10 +44,17 @@ const ALLOWED: Record<string, Hidden> = {
   '.sheet .backLabel': { reason: 'the ‹ chevron is still the way back' },
   '.stopLabel': { reason: 'replaced by .stopGlyph, which is shown in the same query' },
   '.senseLabel': { reason: 'the arrow carries the direction; the word is the tooltip' },
-  '.label': { reason: 'the select still names the mode, and .labelShort replaces the chip label' },
-  '.note': { reason: 'the toggle still says whether a goal is running' },
   ":global([data-sheet='true']) .reset": {
     reason: 'how full is the number you act on; when it refills is not',
+  },
+
+  '.label': {
+    reason:
+      "the usage chip's window label — the meter beside it carries the number, " +
+      'and the chip\'s own title says which window it is. The composer\'s model ' +
+      'label is no longer hidden with it: that one lives in the menu now, which ' +
+      'has a full row for it, and a select reading an em dash says nothing at ' +
+      'all about what it sets',
   },
 
   // Keyboard hints, which are true but not load-bearing — and describe keys a

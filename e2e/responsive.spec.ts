@@ -44,7 +44,7 @@ const ACTIONS = [
   'send-mode-queue',
   'send-mode-interrupt',
   'goal-toggle',
-  'quick-menu',
+  'strip-toggle',
   'shift-tab',
 ]
 
@@ -99,12 +99,11 @@ test.describe('INV-17 every shape is the whole app', () => {
   })
 
   /*
-   * The shape none of the five projects is by default, and the one that used to
-   * lose four features: at this height the composer strip is closed, so the
-   * send-mode choice, the goal and the quick replies are behind the `⋯` beside
-   * Send. Nothing else in the app offers them.
+   * The composer's menu holds everything that is not typing, at every width —
+   * this is the shape with the least room, so it is where the fold is checked.
+   * Nothing else in the app offers what is in there.
    */
-  test('a landscape phone folds the strip away and still reaches it', async ({ page }) => {
+  test('a landscape phone reaches everything through the composer menu', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.setViewportSize({ width: 844, height: 380 })
     const toggle = page.getByTestId('strip-toggle')
@@ -113,7 +112,7 @@ test.describe('INV-17 every shape is the whole app', () => {
     await expect(page.getByTestId('composer-strip')).toBeHidden()
     await toggle.click()
     await expect(page.getByTestId('composer-strip')).toBeVisible()
-    for (const id of ['send-mode-queue', 'send-mode-interrupt', 'goal-toggle', 'quick-menu']) {
+    for (const id of ['send-mode-queue', 'send-mode-interrupt', 'goal-toggle', 'quick-prompt']) {
       await expect(page.getByTestId(id).first()).toBeVisible()
     }
     expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(1)

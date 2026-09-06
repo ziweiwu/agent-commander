@@ -16,6 +16,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { AgentDetail } from '../../src/web/components/AgentDetail.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
@@ -58,15 +59,42 @@ const CONTROLS = [
   'goal-toggle',
   'compact-agent',
   'clear-agent',
-  'quick-menu',
+  'strip-toggle',
   'composer-input',
   'composer-send',
 ] as const
+
+/**
+ * One control rendered once per item, rather than one control drawn twice.
+ *
+ * The menu's replies are a list of five prompts behind a single affordance —
+ * "drawn more than once" is what they are, and the rule this file enforces is
+ * about the same *action* having two homes.
+ */
+const LISTS = ['quick-prompt'] as const
 
 beforeEach(() => {
   resetStore()
   setViewport(() => false)
 })
+
+/**
+ * Everything the composer folds away, revealed.
+ *
+ * INV-17 allows a control to sit behind a disclosure that is itself on screen
+ * and labelled, and the composer's menu is one: so the sweep opens it, the
+ * same way a reader would, rather than counting the screen with it shut.
+ */
+async function revealEverything(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const menu = screen.queryByTestId('strip-toggle')
+  if (menu && menu.getAttribute('aria-expanded') === 'false') await user.click(menu)
+}
+
+/** The agent screen and whatever it has portalled out of itself. */
+function surfaces(): HTMLElement[] {
+  const panel = screen.queryByTestId('composer-strip')
+  return [screen.getByTestId('agent-detail'), ...(panel ? [panel] : [])]
+}
 
 function open(): void {
   useStore.setState({ selected: 'a', tab: 'chat' })
@@ -82,20 +110,25 @@ function open(): void {
 }
 
 describe('FR-CTL-12 one control, one place', () => {
-  it('draws each control exactly once at a desktop width', () => {
+  it('draws each control exactly once at a desktop width', async () => {
+    const user = userEvent.setup()
     open()
+    await revealEverything(user)
     const twice = CONTROLS.filter((id) => screen.queryAllByTestId(id).length > 1)
     expect(twice, `drawn more than once: ${twice.join(', ')}`).toEqual([])
     const missing = CONTROLS.filter((id) => screen.queryAllByTestId(id).length === 0)
     expect(missing, `not on the screen: ${missing.join(', ')}`).toEqual([])
   })
 
-  it('offers no control this list does not name', () => {
+  it('offers no control this list does not name', async () => {
+    const user = userEvent.setup()
     open()
-    const known = new Set<string>(CONTROLS)
-    const unlisted = Array.from(
-      screen.getByTestId('agent-detail').querySelectorAll<HTMLElement>('button, select, textarea, input'),
-    )
+    await revealEverything(user)
+    const known = new Set<string>([...CONTROLS, ...LISTS])
+    const unlisted = surfaces()
+      .flatMap((root) =>
+        Array.from(root.querySelectorAll<HTMLElement>('button, select, textarea, input')),
+      )
       .map((el) => el.dataset.testid ?? el.tagName.toLowerCase())
       .filter((id) => !known.has(id))
     expect(unlisted, `a control the list does not account for: ${unlisted.join(', ')}`).toEqual([])

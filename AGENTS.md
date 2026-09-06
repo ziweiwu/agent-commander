@@ -302,13 +302,14 @@ commit.
   projects. It is the WebKit navigation stalling under load, not the app: a
   red full run naming only those is worth a rerun of that spec before it is
   believed.
-- **`fades.spec.ts` flaked once under a full run.** "the detail pane fades at
-  the bottom only while content is past it" failed on `phone` in one full run
-  and passed in the two full runs either side of it, plus 3 of 3 on its own.
-  It scrolls a pane to its end and waits for the fade to lift, so anything that
-  changes the pane's height after the scroll puts it back off the bottom. One
-  occurrence, recorded here so the next person reruns it rather than chasing
-  it; worth root-causing if it ever fails twice on different runs.
+- **A test that scrolls and then waits is a race, not a wait.**
+  `fades.spec.ts` scrolled the detail pane to its end and waited for the fade
+  to lift. That pane's content is still arriving — the conversation lands over
+  the socket a beat after the answer card — so a re-render between the scroll
+  and the read put the box back at the top, with the fade correctly reporting
+  that there was more below. It failed in two full runs and passed 7 of 7 on
+  its own, which is the signature: the assertion held the *content* still, not
+  the thing it was about. The scroll now happens inside the poll.
 - **The e2e `/clear` follow test flakes on slow CI runners.** `control.spec.ts`
   "INV-8 follows the agent to the session it is now running" failed both
   attempts on one GitHub runner and passed on rerun with nothing changed. One

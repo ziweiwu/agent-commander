@@ -10,7 +10,7 @@
  * the failure they would get for real.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { AGENT, openAgent, openFleet, stamp } from './helpers.ts'
+import { AGENT, openAgent, openComposerMenu, openFleet, stamp } from './helpers.ts'
 
 test.describe('starting an agent', () => {
   test('INV-7 refuses a directory that is not there, and says so', async ({ page }) => {
@@ -83,6 +83,7 @@ test.describe('acting on a running agent', () => {
     await openAgent(page, AGENT.idle)
     // Two of these are on screen — the composer strip and the detail panel's
     // control row. Scoped to the composer.
+    await openComposerMenu(page)
     const button = page.getByTestId('chat-controls').getByTestId('shift-tab')
     await expect(button).toBeEnabled()
 
@@ -105,6 +106,7 @@ test.describe('acting on a running agent', () => {
     // Typing into the prompt of an agent that is mid-tool-call would interleave
     // with work in flight, so the controls that type are drawn as unavailable
     // rather than being offered and then refused.
+    await openComposerMenu(page)
     await expect(page.getByTestId('goal-toggle')).toBeDisabled()
   })
 
@@ -119,6 +121,7 @@ test.describe('acting on a running agent', () => {
 
     // Two of these are on screen — the composer strip and the detail panel's
     // control row. Scoped to the composer.
+    await openComposerMenu(page)
     const button = page.getByTestId('chat-controls').getByTestId('shift-tab')
     await expect(button).toBeEnabled()
 
@@ -160,6 +163,7 @@ test.describe('acting on a running agent', () => {
   test('INV-8 follows the agent to the session it is now running @once', async ({ page }) => {
     await openAgent(page, AGENT.clearable)
 
+    await openComposerMenu(page)
     await strip(page).getByTestId('clear-agent').click()
     await page.getByTestId('confirm-accept').click()
 
@@ -179,6 +183,7 @@ test.describe('acting on a running agent', () => {
     await openAgent(page, AGENT.idle)
     const row = await controls(page)
     await expect(row.getByTestId('close-agent')).toBeVisible()
+    await openComposerMenu(page)
     for (const id of ['shift-tab', 'model-select', 'goal-toggle', 'clear-agent', 'compact-agent']) {
       await expect(row.getByTestId(id)).toHaveCount(0)
       await expect(page.getByTestId(id)).toHaveCount(1)
@@ -187,6 +192,7 @@ test.describe('acting on a running agent', () => {
 
   test('INV-8 sets a goal and clears it again', async ({ page }) => {
     await openAgent(page, AGENT.idleAlt)
+    await openComposerMenu(page)
     const toggle = page.getByTestId('goal-toggle')
     await expect(toggle).toHaveAttribute('aria-pressed', 'false')
 
@@ -207,6 +213,7 @@ test.describe('acting on a running agent', () => {
 
   test('INV-8 refuses a goal condition that would submit early', async ({ page }) => {
     await openAgent(page, AGENT.idleAlt)
+    await openComposerMenu(page)
     await page.getByTestId('goal-toggle').click()
 
     // A leading slash would run some other slash command in a live prompt
@@ -242,6 +249,7 @@ test.describe('acting on a running agent', () => {
     await expect(page.getByTestId('fullscreen-tab-chat')).toBeVisible()
     // Not merely hidden here — it does not exist, which is what the strip is for.
     await expect(page.getByTestId('agent-controls')).toHaveCount(0)
+    await openComposerMenu(page)
     await expect(strip(page).getByTestId('clear-agent')).toBeEnabled()
     await expect(strip(page).getByTestId('compact-agent')).toBeEnabled()
   })
@@ -252,6 +260,7 @@ test.describe('acting on a running agent', () => {
     page,
   }) => {
     await openAgent(page, AGENT.idle)
+    await openComposerMenu(page)
     await strip(page).getByTestId('clear-agent').click()
     await page.getByTestId('confirm-cancel').click()
     await expect(page.getByTestId('confirm-dialog')).toHaveCount(0)
@@ -261,12 +270,14 @@ test.describe('acting on a running agent', () => {
 
   test('INV-8 compacts from the composer strip', async ({ page }) => {
     await openAgent(page, AGENT.idle)
+    await openComposerMenu(page)
     await strip(page).getByTestId('compact-agent').click()
     await expect(page.getByTestId('toast')).toContainText(/requested/i, { timeout: 15_000 })
   })
 
   test('INV-8 offers neither from the strip to a busy agent', async ({ page }) => {
     await openAgent(page, AGENT.busy)
+    await openComposerMenu(page)
     await expect(strip(page).getByTestId('clear-agent')).toBeDisabled()
     await expect(strip(page).getByTestId('compact-agent')).toBeDisabled()
   })

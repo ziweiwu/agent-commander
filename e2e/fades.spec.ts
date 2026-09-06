@@ -21,9 +21,23 @@ test.describe('scroll edges', () => {
     await page.setViewportSize({ width: 844, height: 390 })
     await expect(pane).toHaveAttribute('data-overflow', /bottom/)
 
-    // Scrolled to the end, the fade lifts: nothing is past the edge any more.
-    await pane.evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
-    await expect(pane).toHaveAttribute('data-overflow', /^(none|right)$/)
+    /*
+     * Scrolled to the end, the fade lifts: nothing is past the edge any more.
+     *
+     * Scrolled *inside* the poll, because this pane's content is still
+     * arriving: the conversation lands over the socket a beat after the card
+     * does, and a re-render between the scroll and the read puts the box back
+     * at the top with the fade correctly saying there is more below. Scrolling
+     * once and waiting asserted that the content had stopped changing, which
+     * is not what this test is about and is not true on a loaded machine —
+     * measured, it failed in two full runs and passed 7 of 7 on its own.
+     */
+    await expect
+      .poll(async () => {
+        await pane.evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
+        return await pane.getAttribute('data-overflow')
+      })
+      .toMatch(/^(none|right)$/)
   })
 
   test('a pane that holds its content draws no fade', async ({ page }) => {

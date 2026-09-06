@@ -139,3 +139,4 @@ describe('controls that would type a Claude command are not offered', () => {
     expect(screen.queryByTestId('compact-agent')).toBeNull()
   })
 })
+

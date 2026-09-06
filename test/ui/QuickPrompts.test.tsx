@@ -41,7 +41,7 @@ const label = (item: HTMLElement): string => (item.textContent ?? '').replace('�
 
 /** Open the replies menu, the one press that precedes every reply. */
 async function openReplies(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  await user.click(screen.getByTestId('quick-menu'))
+  await user.click(screen.getByTestId('strip-toggle'))
 }
 
 describe('quick replies', () => {
@@ -70,7 +70,7 @@ describe('quick replies', () => {
     expect(sendMessage).toHaveBeenCalledWith('continue')
     // One press, one reply: the list does not stay open inviting a second.
     expect(screen.queryAllByTestId('quick-prompt')).toEqual([])
-    expect(screen.getByTestId('quick-menu').getAttribute('aria-expanded')).toBe('false')
+    expect(screen.getByTestId('strip-toggle').getAttribute('aria-expanded')).toBe('false')
   })
 
   // What is in the box is the user's, not an argument to the reply.
@@ -92,8 +92,12 @@ describe('quick replies', () => {
   it('announces that picking one sends it', async () => {
     const user = userEvent.setup()
     renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
-    const menu = screen.getByTestId('quick-menu')
-    expect(menu.getAttribute('aria-haspopup')).toBe('menu')
+    const menu = screen.getByTestId('strip-toggle')
+    // `true` rather than `menu`: what opens is a panel holding the replies
+    // *and* the send-mode choice and the agent's own controls, so calling the
+    // whole popup a menu would promise a keyboard behaviour it does not have.
+    // The replies inside it are still a real `menu` with real `menuitem`s.
+    expect(menu.getAttribute('aria-haspopup')).toBe('true')
     await openReplies(user)
     expect(screen.getByRole('menu', { name: 'Common replies' })).toBeTruthy()
     expect(screen.getByRole('menuitem', { name: 'Send “run the tests”' })).toBeTruthy()
@@ -111,20 +115,20 @@ describe('quick replies', () => {
     renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
     const original = HTMLElement.prototype.getBoundingClientRect
     HTMLElement.prototype.getBoundingClientRect = function () {
-      // The list is measured after it renders; the anchor is the chip's box.
-      if (this.getAttribute('role') === 'menu') {
+      // The panel is measured after it renders; the anchor is the button's box.
+      if (this.getAttribute('data-testid') === 'composer-strip') {
         return { left: 1100, top: 400, width: 280, height: 200, right: 1380, bottom: 600 } as DOMRect
       }
-      if (this.querySelector(':scope > [data-testid="quick-menu"]')) {
+      if (this.querySelector(':scope > [data-testid="strip-toggle"]')) {
         return { left: 1100, top: 700, width: 80, height: 30, right: 1180, bottom: 730 } as DOMRect
       }
       return original.call(this)
     }
     try {
       await openReplies(user)
-      const list = screen.getByRole('menu', { name: 'Common replies' }) as HTMLElement
-      // 1100 + 280 = 1380 overshoots 1280 - 8 by 108, so the list moves left by that.
-      expect(list.style.left).toBe('992px')
+      const panel = screen.getByTestId('composer-strip')
+      // 1100 + 280 = 1380 overshoots 1280 - 8 by 108, so the panel moves left by that.
+      expect(panel.style.left).toBe('992px')
     } finally {
       HTMLElement.prototype.getBoundingClientRect = original
     }
@@ -147,7 +151,7 @@ describe('quick replies', () => {
     // Still on the agent: Escape stopped at the menu.
     expect(useStore.getState().selected).toBe('a')
     // And focus is back where the list was opened from.
-    expect(document.activeElement).toBe(screen.getByTestId('quick-menu'))
+    expect(document.activeElement).toBe(screen.getByTestId('strip-toggle'))
   })
 
   it('closes on Escape from the chip itself, before focus has moved', async () => {
@@ -155,7 +159,7 @@ describe('quick replies', () => {
     useStore.setState({ selected: 'a' })
     renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
     await openReplies(user)
-    screen.getByTestId('quick-menu').focus()
+    screen.getByTestId('strip-toggle').focus()
     await user.keyboard('{Escape}')
     expect(screen.queryAllByTestId('quick-prompt')).toEqual([])
     expect(useStore.getState().selected).toBe('a')
@@ -165,7 +169,7 @@ describe('quick replies', () => {
   // offering an action that cannot work.
   it('is hidden for an agent with no terminal', () => {
     renderApp(<Chat agent={agent({ sessionId: 'a', paneId: undefined })} />)
-    expect(screen.queryByTestId('quick-menu')).toBeNull()
+    expect(screen.queryByTestId('strip-toggle')).toBeNull()
   })
 
   /*

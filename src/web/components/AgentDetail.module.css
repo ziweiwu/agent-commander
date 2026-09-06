@@ -27,12 +27,21 @@
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
+/*
+ * The name yields first. Everything else in this row is a fixed width or a
+ * word that cannot be shortened, so when the row runs out it is the name that
+ * elides — its full text is in its own `title`, and the reader picked this
+ * agent a moment ago.
+ */
 .head h2 {
   margin: 0;
   font-size: var(--text-md);
   font-weight: 650;
+  flex: 1 1 6ch;
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .path {
   font: 12px ui-monospace, Menlo, monospace;
@@ -72,12 +81,17 @@
   min-height: 40px;
 }
 
+/*
+ * Inside the header's row rather than below it. No padding and no rule of its
+ * own: the header already draws the line under both, and the two rows it used
+ * to take came to 108px of a phone screen. `margin-bottom` of -11px pulls the
+ * tabs' underline down onto that rule, so the selected tab still meets it.
+ */
 .tabs {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 14px 0;
-  border-bottom: 1px solid var(--line);
+  margin-bottom: -11px;
 }
 
 /*

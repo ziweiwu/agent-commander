@@ -4,23 +4,22 @@
  * invalid HTML and a way to send a chat message by accident.
  */
 /*
- * `flex: none` is load-bearing. Inside the strip's horizontal scroller a
- * growable, shrinkable child is allowed to shrink below its own content, and
- * the toggle's content then rendered *underneath* the quick-prompt chips, which
- * took the clicks meant for it: an active goal with a long condition could not
- * be turned off at all. In a scroller the right answer is to keep the
- * intrinsic width and let the strip scroll.
+ * A column, because these now live in the composer's menu rather than in a
+ * row above it. The row was a horizontal scroller that could not show its own
+ * contents — 721px of controls in a 450px strip at phone width — which is
+ * what made a menu the right shape for them.
  */
 .controls {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   flex: none;
 }
 
 .field {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
   flex: none;
   min-width: 0;
@@ -55,8 +54,9 @@
 
 .goal {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -158,19 +158,15 @@
 }
 
 /*
- * On a narrow screen the mode label and the goal's own text are the first
- * things to go: the select still says which mode it is in, and the toggle
- * still says whether a goal is running.
+ * The label and the goal's note used to go here, on the reasoning that the
+ * select still names the mode and the toggle still says whether a goal is
+ * running. That was true of a cramped horizontal strip and is not true of the
+ * menu these now live in, which has a full row for each of them — and a bare
+ * select reading "—" says nothing at all about what it sets.
  */
 @media (max-width: 560px) {
-  .label {
-    display: none;
-  }
   .condition {
     max-width: 12ch;
-  }
-  .note {
-    display: none;
   }
   /*
    * 44px by width as well as by pointer type. A phone-sized viewport in a

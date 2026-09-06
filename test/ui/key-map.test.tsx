@@ -81,6 +81,18 @@ describe('INV-2 mapKey can only produce keys the server forwards', () => {
     }
   })
 
+  /*
+   * Shift+Tab is not Tab. It is Claude Code's mode chord, which the CLI
+   * receives as `BTab`, and mapping it here sent plain Tab into a live
+   * session instead — autocomplete rather than a mode change, silently.
+   * `BTab` is deliberately not on `ALLOWED_KEYS`, because the server composes
+   * that one (INV-8), so the surface handles the chord and this sends nothing.
+   */
+  it('refuses to send plain Tab for the mode chord', () => {
+    expect(mapKey(press({ key: 'Tab' }))).toBe('Tab')
+    expect(mapKey(press({ key: 'Tab', shiftKey: true }))).toBeNull()
+  })
+
   it('does not turn a Ctrl chord into a control key when Alt or Meta is held', () => {
     // Those are the browser's own shortcuts and the OS's; treating them as a
     // C-c would interrupt a working agent because someone reached for a menu.

@@ -4,10 +4,19 @@ import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
 import { PaneTerm } from '../lib/term.ts'
 import { useStore } from '../store/store.ts'
-import { requestHistory, sendConfirmedKey, sendKey, sendText, setAttached } from '../store/transport.ts'
+import {
+  requestHistory,
+  sendConfirmedKey,
+  sendKey,
+  sendShiftTab,
+  sendText,
+  setAttached,
+} from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { Button } from './ui/Button.tsx'
+import { ShiftTabButton } from './ShiftTabButton.tsx'
+import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
 import { TermHistory } from './TermHistory.tsx'
 import styles from './Terminal.module.css'
 
@@ -105,9 +114,10 @@ interface PaneInput {
   typed: (text: string) => void
 }
 
-/** The same, plus the way out of a pane that has ended. */
+/** The same, plus the way out of a pane that has ended, and the mode chord. */
 interface PaneHandlers extends PaneInput {
   onExit: () => void
+  onModeChord: () => void
 }
 
 /** What the browser, rather than the agent, decides about the capture. */
@@ -226,6 +236,7 @@ function usePaneLifecycle(
       (key) => handlers.current.guarded(key),
       (text) => handlers.current.typed(text),
       () => handlers.current.onExit(),
+      () => handlers.current.onModeChord(),
     )
     term.onZoomChange(() => forceRender((n) => n + 1))
     host.termRef.current = term
@@ -309,6 +320,29 @@ function useRefitWhenTheRoomChanges(
 }
 
 /**
+ * Send the mode chord, exactly once per press.
+ *
+ * The same action the key bar's button runs, so a hardware Shift+Tab and a tap
+ * do the same thing — and the same INV-2 guard, because key repeat on a held
+ * chord is precisely the burst the ref exists for. A CLI that does not speak
+ * Claude Code's slash commands gets nothing (INV-7).
+ */
+function useModeChord(agent: Agent): () => void {
+  const sending = useRef(false)
+  return (): void => {
+    if (sending.current || !agent.paneId || !allowsSlashCommands(agent.agentKind)) return
+    sending.current = true
+    void (async () => {
+      try {
+        await sendShiftTab()
+      } finally {
+        sending.current = false
+      }
+    })()
+  }
+}
+
+/**
  * The one place React meets an imperative library.
  *
  * PaneTerm owns xterm and the scaling maths; this component owns its lifetime
@@ -332,8 +366,14 @@ function usePaneTerm(options: PaneTermOptions) {
    * The ref is read at call time, so all three stay current without rebuilding
    * the terminal.
    */
-  const handlers = useRef<PaneHandlers>({ guarded, typed, onExit: options.onExit })
-  handlers.current = { guarded, typed, onExit: options.onExit }
+  const modeChord = useModeChord(options.agent)
+  const handlers = useRef<PaneHandlers>({
+    guarded,
+    typed,
+    onExit: options.onExit,
+    onModeChord: modeChord,
+  })
+  handlers.current = { guarded, typed, onExit: options.onExit, onModeChord: modeChord }
 
   usePaneLifecycle(options, { wrapRef, scaleRef, termRef }, handlers)
   usePaneFrames(options.agent.sessionId, termRef)
@@ -411,6 +451,21 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       <Button variant="compact" disabled={exited} onClick={() => guarded('C-c')}>
         Ctrl-C
       </Button>
+      {/*
+        * The mode chord, on the surface that is the terminal.
+        *
+        * Shift+Tab is how Claude Code's own keyboard cycles the permission
+        * mode, and deciding "this next step should run in plan mode" happens
+        * while watching the agent work — which is this tab. It was reachable
+        * only from the Chat tab's composer, and a phone has no hardware
+        * keyboard to send the chord with either, so from here the mode could
+        * not be changed at all.
+        *
+        * It sends through the same control action the composer's button uses
+        * rather than as a key: `BTab` is not on `ALLOWED_KEYS`, deliberately,
+        * because the server composes this one (INV-8).
+        */}
+      {allowsSlashCommands(agent.agentKind) && <ShiftTabButton agent={agent} size="compact" />}
       <div className={styles.view}>
         {term && (term.overflowing || term.scaled || term.zoom === 'fit') && (
           <Button

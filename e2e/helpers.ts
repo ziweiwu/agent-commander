@@ -60,6 +60,19 @@ export async function openFleet(page: Page): Promise<void> {
   await expect(page.getByTestId('agent-card').first()).toBeVisible()
 }
 
+/**
+ * Open the composer's menu, where everything that is not typing lives: the
+ * replies, what Send does to a working agent, the mode, the model, the goal
+ * and the two context actions. One button beside Send at every width — the
+ * row it replaced cost 50px of every screen and could not show its own
+ * contents.
+ */
+export async function openComposerMenu(page: Page): Promise<void> {
+  const toggle = page.getByTestId('strip-toggle')
+  if ((await toggle.getAttribute('aria-expanded')) === 'false') await toggle.click()
+  await expect(page.getByTestId('composer-strip')).toBeVisible()
+}
+
 /** Open one agent's detail view and wait for its conversation to arrive. */
 export async function openAgent(page: Page, sessionId: string): Promise<void> {
   await page.goto(`/agent/${sessionId}`)

@@ -37,13 +37,20 @@ describe('the status line', () => {
     expect(screen.getByTestId('detail-model').textContent).toContain('opus')
   })
 
-  // INV-11: a session that has not finished a turn has written no mode down,
-  // and that is said rather than filled with "default".
-  it('says the mode is not reported yet rather than guessing one', () => {
+  /*
+   * INV-11: a session that has not finished a turn has written no mode down,
+   * so nothing here fills one in. This line used to *say* "not reported yet",
+   * which is the usual answer and was 31px of a conversation screen spent on
+   * it — and the claim is not lost: the composer's menu carries it on the
+   * control that changes the mode, which is a better home for a fact than a
+   * caption that repeats it (`test/ui/composer-menu.test.tsx`).
+   */
+  it('claims no mode when the session has not reported one', () => {
     open({ sessionId: 'a', permissionMode: undefined, model: undefined })
-    expect(screen.getByTestId('detail-mode').textContent).toMatch(/not reported/i)
-    expect(screen.getByTestId('detail-mode').dataset.reported).toBe('false')
+    expect(screen.queryByTestId('detail-mode')).toBeNull()
     expect(screen.queryByTestId('detail-model')).toBeNull()
+    // Nothing left to say, so the row itself is not drawn.
+    expect(screen.queryByTestId('detail-status-line')).toBeNull()
   })
 
   it('reads the delegates from the graph the fleet polled', () => {

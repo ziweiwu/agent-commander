@@ -6,7 +6,7 @@ import { formatDay, translate } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
-import { useIsCoarse, useIsShort } from '../hooks/useMediaQuery.ts'
+import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
 import { interruptAndSend, sendConfirmedKey, sendMessage, sendShiftTab } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
@@ -72,42 +72,40 @@ export function Chat({ agent }: { agent: Agent }) {
   const lang = useLang()
   const coarse = useIsCoarse()
   /*
-   * A landscape phone cannot spare the strip's 48px by default, and may not
-   * lose what is in it either — the goal, the send-mode choice and the quick
-   * replies are nowhere else in the app (INV-17). So there it opens on
-   * request, and everywhere else it is simply there.
+   * Everything that is not the conversation, the message box or Send lives in
+   * one menu above the composer.
+   *
+   * It used to be a strip: a permanent row holding the send-mode choice, the
+   * mode chord, the model, the goal, compact, clear and the quick replies. It
+   * cost 50px of every screen at rest — 6% of a phone — and it did not even
+   * fit: measured at 500px wide, its children came to 721px in a 450px
+   * scroller, so most of what it exposed was already off the end of a sideways
+   * scroll. A row that is both the most expensive thing on the screen and
+   * unable to show its own contents is a menu that has not been written yet.
+   *
+   * Nothing became harder to reach. The quick replies were already a popover,
+   * so they are still two presses; everything else was one press and is now
+   * two, in exchange for the conversation being a row taller everywhere.
    */
-  const short = useIsShort()
-  const [stripOpen, setStripOpen] = useState(false)
-  const showStrip = !short || stripOpen
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const menuPanelRef = useRef<HTMLDivElement>(null)
   /*
-   * The quick replies are one menu rather than a row of five chips. As a row
-   * they overflowed the strip at every width the detail panel actually has —
-   * measured at 1280px: 1145px of chips in a 776px strip, two of five out of
-   * sight — and a shortcut nobody can see is not a shortcut. One press more
-   * for a frequent action is the trade; the chips' own guard against a
-   * double tap survives inside the menu.
+   * Where the panel goes, in viewport pixels. The composer is inside the
+   * detail pane, which clips, so the panel is portalled to the body instead
+   * and pinned above the button that opened it.
    */
-  const [repliesOpen, setRepliesOpen] = useState(false)
-  const repliesRef = useRef<HTMLDivElement>(null)
-  const repliesListRef = useRef<HTMLDivElement>(null)
-  /*
-   * Where the list goes, in viewport pixels. The strip is a horizontal
-   * scroller, and a scroller clips on both axes, so a list positioned inside
-   * it was drawn under the conversation and could not be reached. It is
-   * portalled to the body instead and pinned above the chip that opened it.
-   */
-  const [repliesAt, setRepliesAt] = useState<{ left: number; bottom: number } | null>(null)
-  const toggleReplies = (): void => {
-    if (repliesOpen) {
-      setRepliesOpen(false)
+  const [menuAt, setMenuAt] = useState<{ left: number; bottom: number } | null>(null)
+  const toggleMenu = (): void => {
+    if (menuOpen) {
+      setMenuOpen(false)
       return
     }
-    const rect = repliesRef.current?.getBoundingClientRect()
+    const rect = menuRef.current?.getBoundingClientRect()
     if (rect) {
-      setRepliesAt({ left: rect.left, bottom: window.innerHeight - rect.top + REPLIES_GAP_PX })
+      setMenuAt({ left: rect.left, bottom: window.innerHeight - rect.top + REPLIES_GAP_PX })
     }
-    setRepliesOpen(true)
+    setMenuOpen(true)
   }
   /*
    * Keep the list on screen. It is pinned to the chip's left edge, and the
@@ -116,13 +114,13 @@ export function Chat({ agent }: { agent: Agent }) {
    * once it has rendered, and shifted left by whatever does not fit.
    */
   useLayoutEffect(() => {
-    if (!repliesOpen) return
-    const list = repliesListRef.current
+    if (!menuOpen) return
+    const list = menuPanelRef.current
     if (!list) return
     const { left, width } = list.getBoundingClientRect()
     const overshoot = left + width - (window.innerWidth - VIEWPORT_EDGE_PX)
     if (overshoot > 0) {
-      setRepliesAt((at) => (at ? { ...at, left: Math.max(VIEWPORT_EDGE_PX, at.left - overshoot) } : at))
+      setMenuAt((at) => (at ? { ...at, left: Math.max(VIEWPORT_EDGE_PX, at.left - overshoot) } : at))
     }
     /*
      * Focus moves into the list, as a menu's does. Without this a click left
@@ -132,23 +130,33 @@ export function Chat({ agent }: { agent: Agent }) {
      * then closed the whole agent panel, menu and all.
      */
     list.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
-  }, [repliesOpen])
+  }, [menuOpen])
 
-  /** Close the list and hand focus back to the chip that opened it. */
-  const closeReplies = (): void => {
-    setRepliesOpen(false)
-    repliesRef.current?.querySelector<HTMLElement>('[data-testid="quick-menu"]')?.focus()
+  /** Close the panel and hand focus back to the button that opened it. */
+  const closeMenu = (): void => {
+    setMenuOpen(false)
+    menuRef.current?.querySelector<HTMLElement>('[data-testid="strip-toggle"]')?.focus()
   }
   useEffect(() => {
-    if (!repliesOpen) return
+    if (!menuOpen) return
     const away = (press: MouseEvent): void => {
       const target = press.target as Node
-      if (repliesRef.current?.contains(target) || repliesListRef.current?.contains(target)) return
-      setRepliesOpen(false)
+      if (menuRef.current?.contains(target) || menuPanelRef.current?.contains(target)) return
+      /*
+       * A dialog raised from inside the menu is not "away".
+       *
+       * Clear asks before it acts, and its confirmation is portalled to the
+       * body — so the press on "Clear it" landed outside the panel, closed the
+       * menu, and unmounted the controls that owned the dialog. The dialog
+       * went with them and the clear never happened: a destructive action that
+       * quietly did nothing, which is worse than one that fails loudly.
+       */
+      if (target instanceof Element && target.closest('[role="dialog"]')) return
+      setMenuOpen(false)
     }
     document.addEventListener('mousedown', away)
     return () => document.removeEventListener('mousedown', away)
-  }, [repliesOpen])
+  }, [menuOpen])
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
   const events = useStore((s) => s.events)
@@ -466,116 +474,94 @@ export function Chat({ agent }: { agent: Agent }) {
         * push the conversation itself under the audit's floor of 30% of the
         * viewport. Sharing the strip costs nothing at any width.
         */}
-      {attachable && showStrip && (
-        <div className={styles.strip} id={STRIP_ID} data-testid="composer-strip">
-
-          {/*
-            What Send does to an agent that is already working, and the stop
-            itself. Both live here rather than in the detail panel's control
-            row: that row sits above the tabs and is absent in full screen,
-            which is exactly where a long conversation gets read — and deciding
-            "stop what you are doing and read this instead" happens while
-            typing the instruction, not before opening the tab.
-          */}
-          <div className={styles.sendMode} role="group" aria-label={t('sendModeLabel')}>
-            {(['queue', 'interrupt'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={styles.sendModeOption}
-                data-testid={`send-mode-${mode}`}
-                aria-pressed={sendMode === mode}
-                title={t(mode === 'queue' ? 'sendModeQueueTitle' : 'sendModeInterruptTitle')}
-                onClick={() => chooseSendMode(mode)}
-              >
-                {t(mode === 'queue' ? 'sendModeQueue' : 'sendModeInterrupt')}
-              </button>
-            ))}
-          </div>
-
-          <ChatControls agent={agent} />
-
-
+      {/*
+        * The menu, portalled to the body and pinned above the button that
+        * opened it. Outside the composer's <form> for the reason the strip
+        * was: the goal field takes Enter of its own, and nesting a form
+        * inside one is both invalid and a way to send a message by accident.
+        */}
+      {attachable &&
+        menuOpen &&
+        createPortal(
           <div
-            className={styles.quick}
-            ref={repliesRef}
+            id={STRIP_ID}
+            ref={menuPanelRef}
+            className={styles.menuPanel}
+            data-testid="composer-strip"
+            role="group"
+            aria-label={t('moreOptions')}
+            style={menuAt ?? undefined}
             onKeyDown={(e) => {
-              // The chip's own Escape, for the moment between the click and
-              // focus landing in the list: the list is the innermost thing
-              // Escape can dismiss, and it must not take the panel with it.
-              if (e.key === 'Escape' && repliesOpen) {
+              if (e.key === 'Escape') {
+                // The panel is the innermost thing Escape can dismiss; it must
+                // not close the whole agent panel with it.
                 e.stopPropagation()
-                closeReplies()
+                closeMenu()
               }
             }}
           >
-            <Chip
-              className={styles.quickChip}
-              data-testid="quick-menu"
-              aria-haspopup="menu"
-              aria-expanded={repliesOpen}
-              aria-controls="quick-replies"
-              title={t('quickPromptsLabel')}
-              disabled={!online}
-              aria-describedby={online ? undefined : OFFLINE_HINT_ID}
-              onClick={toggleReplies}
-            >
-              {t('quickMenu')}
-              <span aria-hidden="true" className={styles.quickGlyph}>
-                ▾
-              </span>
-            </Chip>
-            {repliesOpen &&
-              createPortal(
-              <div
-                id="quick-replies"
-                ref={repliesListRef}
-                className={styles.quickList}
-                style={repliesAt ?? undefined}
-                role="menu"
-                aria-label={t('quickPromptsLabel')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') {
-                    // The menu is the innermost thing Escape can dismiss; it
-                    // must not close the whole agent panel with it.
-                    e.stopPropagation()
-                    closeReplies()
-                  }
-                }}
-              >
-                {QUICK_PROMPTS.map((key) => {
-                  const text = translate(promptLang, key)
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      role="menuitem"
-                      className={styles.quickItem}
-                      data-testid="quick-prompt"
-                      // Spelt out because an item reads as something that
-                      // fills the box in; it sends.
-                      title={t('quickPromptSend', { text })}
-                      aria-label={t('quickPromptSend', { text })}
-                      onClick={() => {
-                        setRepliesOpen(false)
-                        sendQuick(text)
-                      }}
-                    >
-                      {/* The glyph says "this commits". Hidden from the a11y
-                          tree — the accessible name already spells it out. */}
-                      <span aria-hidden="true" className={styles.quickGlyph}>
-                        ➤
-                      </span>
-                      {text}
-                    </button>
-                  )
-                })}
-              </div>,
-              document.body,
-            )}
-          </div>
-        </div>
-      )}
+            {/*
+              The replies first: they are the most frequent thing in here, and
+              on a phone the top of a panel that opens upward is the part
+              nearest the thumb.
+            */}
+            <p className={styles.menuHeading}>{t('quickPromptsLabel')}</p>
+            <div className={styles.menuGroup} role="menu" aria-label={t('quickPromptsLabel')}>
+              {QUICK_PROMPTS.map((key) => {
+                const text = translate(promptLang, key)
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="menuitem"
+                    className={styles.quickItem}
+                    data-testid="quick-prompt"
+                    // Spelt out because an item reads as something that fills
+                    // the box in; it sends.
+                    title={t('quickPromptSend', { text })}
+                    aria-label={t('quickPromptSend', { text })}
+                    disabled={!online}
+                    onClick={() => {
+                      setMenuOpen(false)
+                      sendQuick(text)
+                    }}
+                  >
+                    {text}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/*
+              What Send does to an agent that is already working. It lives with
+              the rest rather than in the detail panel's control row: that row
+              sits above the tabs and is absent in full screen, which is
+              exactly where a long conversation gets read — and deciding "stop
+              what you are doing and read this instead" happens while typing
+              the instruction, not before opening the tab.
+            */}
+            <p className={styles.menuHeading}>{t('sendModeLabel')}</p>
+            <div className={styles.sendMode} role="group" aria-label={t('sendModeLabel')}>
+              {(['queue', 'interrupt'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  className={styles.sendModeOption}
+                  data-testid={`send-mode-${mode}`}
+                  aria-pressed={sendMode === mode}
+                  title={t(mode === 'queue' ? 'sendModeQueueTitle' : 'sendModeInterruptTitle')}
+                  onClick={() => chooseSendMode(mode)}
+                >
+                  {t(mode === 'queue' ? 'sendModeQueue' : 'sendModeInterrupt')}
+                </button>
+              ))}
+            </div>
+
+            <p className={styles.menuHeading}>{t('menuAgentHeading')}</p>
+            <ChatControls agent={agent} />
+          </div>,
+          document.body,
+        )}
 
       <form className={styles.composer} onSubmit={submit}>
         <div className={styles.composerRow}>
@@ -651,24 +637,40 @@ export function Chat({ agent }: { agent: Agent }) {
             height than the audit's floor allows, so the redundant one goes.
           */}
           {/*
-            The strip's way back on a screen too short to hold it open.
-            Beside Send because that is where the choice it carries is made —
-            "what does Send do to an agent that is already working" — and
-            because the composer row is the one row this layout always has.
+            The one way to everything that is not typing: the replies, what
+            Send does to a working agent, the mode, the model, the goal, and
+            the two context actions. Beside Send because the composer row is
+            the one row this layout always has, at every width and height.
           */}
-          {attachable && short && (
-            <Button
-              type="button"
-              variant="compact"
-              data-testid="strip-toggle"
-              aria-expanded={stripOpen}
-              aria-controls={STRIP_ID}
-              title={t('moreOptions')}
-              aria-label={t('moreOptions')}
-              onClick={() => setStripOpen((open) => !open)}
+          {attachable && (
+            <div
+              className={styles.menu}
+              ref={menuRef}
+              onKeyDown={(e) => {
+                // The button's own Escape, for the moment between the click
+                // and focus landing in the panel: the panel is the innermost
+                // thing Escape can dismiss, and it must not take the agent
+                // panel with it.
+                if (e.key === 'Escape' && menuOpen) {
+                  e.stopPropagation()
+                  closeMenu()
+                }
+              }}
             >
-              ⋯
-            </Button>
+              <Button
+                type="button"
+                variant="compact"
+                data-testid="strip-toggle"
+                aria-haspopup="true"
+                aria-expanded={menuOpen}
+                aria-controls={STRIP_ID}
+                title={t('moreOptions')}
+                aria-label={t('moreOptions')}
+                onClick={toggleMenu}
+              >
+                ⋯
+              </Button>
+            </div>
           )}
           {busy && !interrupting && (
             <Button

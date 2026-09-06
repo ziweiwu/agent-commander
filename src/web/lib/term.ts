@@ -153,7 +153,18 @@ export class PaneTerm {
   /** The font xterm is rendering at. Enlarging changes it; shrinking never does. */
   #font = BASE_FONT
 
-  constructor(onKey: (key: string) => void, onText: (text: string) => void, onExit: () => void) {
+  constructor(
+    onKey: (key: string) => void,
+    onText: (text: string) => void,
+    onExit: () => void,
+    /*
+     * Shift+Tab, which is not a key this may send: the CLI's mode chord goes
+     * through the control action the server composes (INV-8). Optional because
+     * only the Attach tab can act on it — the peek and the history are
+     * pictures of a pane and send nothing at all.
+     */
+    onModeChord?: () => void,
+  ) {
     this.term = new Terminal({
       fontSize: BASE_FONT,
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
@@ -184,6 +195,15 @@ export class PaneTerm {
         e.preventDefault()
         e.stopPropagation()
         onExit()
+        return false
+      }
+
+      // The CLI's own chord for cycling the permission mode, on the surface
+      // that *is* the CLI's terminal. Sent as a control action rather than as
+      // a key; see `mapKey`, which refuses to send plain Tab for it.
+      if (e.key === 'Tab' && e.shiftKey && onModeChord) {
+        e.preventDefault()
+        onModeChord()
         return false
       }
 
@@ -541,7 +561,14 @@ export function mapKey(e: KeyboardEvent): string | null {
     case 'Escape':
       return 'Escape'
     case 'Tab':
-      return 'Tab'
+      /*
+       * Shift+Tab is not Tab. It is Claude Code's mode chord, and the CLI
+       * receives it as `BTab`; mapped here it sent plain `Tab` instead, which
+       * is autocomplete — a different key, silently, in a live session. `BTab`
+       * is deliberately not on `ALLOWED_KEYS` because the server composes that
+       * one (INV-8), so the chord is handled by the surface rather than here.
+       */
+      return e.shiftKey ? null : 'Tab'
     case 'Backspace':
       return 'BSpace'
     case 'ArrowUp':

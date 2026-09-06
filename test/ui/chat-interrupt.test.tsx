@@ -77,6 +77,15 @@ beforeEach(() => {
   vi.spyOn(window, 'confirm').mockReturnValue(true)
 })
 
+/**
+ * The send-mode choice lives in the composer's menu, with the replies and the
+ * agent's own controls: one button beside Send rather than a permanent row
+ * above it, which is what gives the conversation that row back.
+ */
+async function openMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByTestId('strip-toggle'))
+}
+
 describe('the standalone interrupt', () => {
   it('asks first, then sends a confirmed Escape', async () => {
     const user = userEvent.setup()
@@ -122,6 +131,7 @@ describe('what Send does to a working agent', () => {
     const user = userEvent.setup()
     open(working())
 
+    await openMenu(user)
     await user.click(screen.getByTestId('send-mode-interrupt'))
     expect(window.confirm).toHaveBeenCalledOnce()
 
@@ -138,6 +148,7 @@ describe('what Send does to a working agent', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false)
     open(working())
 
+    await openMenu(user)
     await user.click(screen.getByTestId('send-mode-interrupt'))
 
     expect(screen.getByTestId('send-mode-queue').getAttribute('aria-pressed')).toBe('true')
@@ -152,6 +163,7 @@ describe('what Send does to a working agent', () => {
     const user = userEvent.setup()
     open(working({ status: 'idle' }))
 
+    await openMenu(user)
     await user.click(screen.getByTestId('send-mode-interrupt'))
     await user.type(screen.getByTestId('composer-input'), 'next task please')
     await user.click(screen.getByTestId('composer-send'))
@@ -165,9 +177,12 @@ describe('the choice is remembered per agent', () => {
   it('survives reopening the same agent', async () => {
     const user = userEvent.setup()
     open(working())
+    await openMenu(user)
     await user.click(screen.getByTestId('send-mode-interrupt'))
 
+    // Reopened, and the menu with it: the choice is remembered, not the panel.
     open(working())
+    await openMenu(user)
     expect(screen.getByTestId('send-mode-interrupt').getAttribute('aria-pressed')).toBe('true')
   })
 
@@ -178,9 +193,11 @@ describe('the choice is remembered per agent', () => {
   it('does not carry onto a different agent', async () => {
     const user = userEvent.setup()
     open(working())
+    await openMenu(user)
     await user.click(screen.getByTestId('send-mode-interrupt'))
 
     open(working({ sessionId: 'b' }))
+    await openMenu(user)
     expect(screen.getByTestId('send-mode-queue').getAttribute('aria-pressed')).toBe('true')
   })
 })

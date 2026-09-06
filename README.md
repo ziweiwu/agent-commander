@@ -80,8 +80,9 @@ your phone from anything else.
 1. Open <http://127.0.0.1:4317>. Agents that need you are at the top.
 2. Tap a card. **Chat** shows the conversation, with an answer card when the
    agent is blocked. **Attach** shows the terminal.
-3. The strip above the message box holds the session controls: permission
-   mode, model, goal, compact and clear, and a menu of common replies.
+3. The **⋯** beside Send holds everything that is not typing: common replies,
+   what Send does to a working agent, permission mode, model, goal, compact
+   and clear. It is a menu so the conversation keeps the room.
 4. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent with **+ New agent**, and prune sessions you opened and never
