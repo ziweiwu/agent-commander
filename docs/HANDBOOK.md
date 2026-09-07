@@ -293,6 +293,20 @@ with a **Fit width** button when you want the whole pane at a glance, and a
 keys (`Enter`, arrows, `Tab`, `Esc`, `Ctrl-C`) sit under it, since a phone
 keyboard has none of them.
 
+Under those is a **line to paste into**, and it is there because the capture is
+not something you can paste into. xterm reads typing and pastes through a
+hidden textarea behind the pane, which is fine with a hardware keyboard and
+useless without one — a phone has no Cmd+V, and there is nothing on the capture
+to long-press for its own Paste menu. Reading the clipboard for you is not the
+answer either: on WebKit, and so on every browser on iOS, that is refused
+outright. So the line is an ordinary text field, the paste is your operating
+system's, and it keeps its newlines, which matters the moment you paste more
+than one line of shell. Enter sends what is in it to the prompt and does *not*
+run it — `Enter` in the key row above does that — so you can see what actually
+landed before it goes anywhere. The box grows to show a pasted snippet and
+scrolls past a few lines, rather than pushing the pane off the screen.
+Shift+Enter types a newline by hand.
+
 **Earlier output**, beside Fit width, answers "what did it print before this":
 one press reads the 200 lines above the pane's visible screen out of tmux's
 scrollback and draws them above the live capture, on a surface of their own
@@ -449,6 +463,13 @@ cannot discard the session the first click just created, a refusal to claim
 anything when no new session appeared, and following the agent to its new id in
 the right order. One place to get that wrong is enough.
 
+A reply shows the tool calls it produced underneath it — `Read src/app.ts`,
+`Bash npm test`, `Skill commit-guard`. A long run keeps its first four on
+screen and collapses the rest behind `▸ N more`, so the detail is there
+without the run burying the reply. A skill names itself; a slash command you
+typed reads as `/goal ship it` rather than as the markup Claude Code stores it
+as.
+
 The agent's header is one row: the way back, its name, its status, the Chat
 and Attach tabs, and the header's own buttons. They used to be two, which came
 to 108px of a phone screen while the tab row was two-fifths full. If the name
@@ -578,6 +599,30 @@ other session does. Directories from running agents are offered as shortcuts.
 The server validates the directory before spawning, and checks the model and
 permission mode against fixed allow-lists so an unrecognised value is refused
 rather than becoming a flag — see INV-7.
+
+## Opening a plain terminal
+
+The same dialog opens a **terminal**: a detached tmux session running your own
+shell in a folder you pick, with no agent in it. Choose *Terminal* at the top,
+give it a folder, and the model and permission mode fall away — both are flags
+on `claude`, and a shell would receive them as words rather than as settings.
+
+A terminal is the Attach tab and nothing else. There is no conversation to
+read, because it writes no transcript, and no goal, model, clear, compact or
+Shift+Tab, because every one of those works by typing Claude Code's own slash
+commands into the pane. That is the same capability table Kiro sessions are
+governed by, not a second set of checks.
+
+**Terminals stay out of the fleet until you ask for them.** The list answers
+"which agent needs me", and a shell never does — so a chip beside the status
+filters says how many there are and admits them when pressed, and the choice
+sticks across a reload. They are out of scope rather than hidden: a session
+this app knows about and shows nowhere would be a fleet with a hole in it.
+
+The session is marked with a tmux option as it is created, and that marker is
+the only reason it appears at all. A shell sitting at a prompt is exactly what
+tmux-resurrect leaves behind when an agent exits, and those are refused —
+otherwise the fleet fills with husks that look merely quiet.
 
 ## Pruning sessions you never used
 

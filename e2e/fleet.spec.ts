@@ -22,6 +22,44 @@ test.describe('the fleet', () => {
     await expect(card(page, AGENT.waiting).getByTestId('agent-status')).toHaveText(/dialog open/i)
   })
 
+  /*
+   * The terminal is the one session kind that answers none of the questions
+   * this list asks, so it is out of scope until asked for — and the chip that
+   * admits it is what keeps that a filter rather than a fleet with a hole in
+   * it (INV-11). The choice persists like the other three.
+   */
+  test('keeps terminals out of the fleet until the chip admits them', async ({ page }) => {
+    await openFleet(page)
+    const chip = page.getByTestId('terminal-chip')
+
+    await expect(card(page, AGENT.terminal)).toHaveCount(0)
+    await expect(chip).toBeVisible()
+    await expect(chip).toHaveAttribute('aria-pressed', 'false')
+
+    await chip.click()
+    await expect(card(page, AGENT.terminal)).toBeVisible()
+
+    await page.reload()
+    await expect(page.getByTestId('agent-card').first()).toBeVisible()
+    await expect(card(page, AGENT.terminal)).toBeVisible()
+  })
+
+  /*
+   * A shell keeps no transcript and answers no slash command, so the agent
+   * screen for one is the Attach tab alone. That falls out of the same
+   * capability table Kiro uses; this is what pins that it reaches the screen.
+   */
+  test('opens a terminal on its terminal, with no conversation to offer', async ({ page }) => {
+    await openFleet(page)
+    await page.getByTestId('terminal-chip').click()
+    await card(page, AGENT.terminal).click()
+
+    await expect(page.getByTestId('agent-detail')).toBeVisible()
+    await expect(page.getByTestId('tab-attach')).toBeVisible()
+    await expect(page.getByTestId('tab-chat')).toHaveCount(0)
+    await expect(page).toHaveURL(new RegExp(`/agent/${AGENT.terminal}/term$`))
+  })
+
   test('filters by status, and remembers the choice across a reload', async ({ page }) => {
     await openFleet(page)
     const waitingChip = page.locator('[data-testid="filter-chip"][data-key="waiting"]')

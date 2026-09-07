@@ -38,6 +38,7 @@ use subtle::ConstantTimeEq;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 
+use crate::agent_kinds::{CLAUDE_KIND, TERMINAL_KIND};
 use crate::browse::DotDirs;
 use crate::frames::{build_frame, is_noop};
 use crate::options::{Grant, Grants, Options};
@@ -46,7 +47,8 @@ use crate::pending::SpawnedSession;
 use crate::sources::{Deps, PaneApi, PaneSample, Submit, TailApi, Unsubscribe};
 use crate::types::{
     Agent, AgentStatus, AgentTree, ClientMessage, ControlResponse, DirListing, ErrorKind,
-    FleetTree, Geom, GoalState, NewAgentRequest, NewAgentResponse, ServerEnv, ServerMessage,
+    FleetTree, Geom, GoalState, NewAgentRequest, NewAgentResponse, NewTerminalRequest, ServerEnv,
+    ServerMessage,
 };
 
 /// How often a focused tab's transcript is re-read.
@@ -137,6 +139,8 @@ pub struct SpawnResult {
 #[async_trait]
 pub trait SpawnApi: Send + Sync + 'static {
     async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure>;
+    /// The second command shape: a plain tmux session with no agent in it.
+    async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure>;
 }
 
 #[async_trait]
@@ -770,6 +774,10 @@ fn grant_for(method: &Method, path: &str) -> Grant {
     if path == "/api/agents" && method == Method::POST {
         return Grant::Spawn;
     }
+    // Opening a terminal creates a process, which is the same power.
+    if path == "/api/terminals" && method == Method::POST {
+        return Grant::Spawn;
+    }
     if path == "/api/dirs" {
         return Grant::Spawn;
     }
@@ -867,6 +875,9 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
     }
     if path == "/api/env" {
         return json_of(StatusCode::OK, &app.env);
+    }
+    if path == "/api/terminals" && method == Method::POST {
+        return handle_new_terminal(&app, body).await;
     }
     if path == "/api/agents" && method == Method::POST {
         return handle_new_agent(&app, body).await;
@@ -1070,13 +1081,27 @@ async fn new_agent_request(body: Body) -> Result<NewAgentRequest, Failure> {
 }
 
 /// Show the session on the fleet at once, before it has registered itself.
-fn announce_pending(app: &App, result: &SpawnResult, name: Option<&str>) {
+///
+/// The kind travels with it. The placeholder card is built from nothing else,
+/// so a caller that leaves it out is a card claiming to be something it is not
+/// — which is why this takes it rather than defaulting.
+fn announce_pending(app: &App, result: &SpawnResult, name: Option<&str>, agent_kind: &str) {
     let Some(pending) = &app.pending else { return };
     pending.add(SpawnedSession {
         tmux_session: &result.tmux_session,
         cwd: &result.cwd,
         name,
+        agent_kind,
     });
+}
+
+/// The body of a terminal request, refused in the caller's own terms.
+async fn new_terminal_request(body: Body) -> Result<NewTerminalRequest, Failure> {
+    let parsed = read_json(body).await?;
+    if !parsed.get("cwd").map(|v| v.is_string()).unwrap_or(false) {
+        return Err(Failure::caller("cwd is required"));
+    }
+    serde_json::from_value(parsed).map_err(|e| Failure::caller(e.to_string()))
 }
 
 async fn handle_new_agent(app: &App, body: Body) -> Response {
@@ -1098,11 +1123,41 @@ async fn handle_new_agent(app: &App, body: Body) -> Response {
     // the one asked for is the wrong way round to be wrong.
     match app.spawn.start(req).await {
         Ok(result) => {
-            announce_pending(app, &result, name.as_deref());
+            announce_pending(app, &result, name.as_deref(), CLAUDE_KIND);
             json_of(StatusCode::OK, &NewAgentResponse::ok(result.tmux_session, result.cwd))
         }
         // A rejected model or mode is the caller's mistake, not the server's,
         // and the dialog renders a 400 as a reason it can show next to the field.
+        Err(f) => json_of(status_for(&f), &NewAgentResponse::err(f.message)),
+    }
+}
+
+/// Open a plain terminal: the second command shape (INV-7).
+///
+/// Deliberately its own handler rather than a branch inside the one above. It
+/// reads a request that has no model and no permission mode on it, so there is
+/// nothing to forward to a shell that would only receive the words — and the
+/// route table names both shapes instead of hiding one behind a flag.
+async fn handle_new_terminal(app: &App, body: Body) -> Response {
+    if !app.env.tmux {
+        return json_of(
+            StatusCode::CONFLICT,
+            &NewAgentResponse::err("tmux is not available on this machine"),
+        );
+    }
+    let req = match new_terminal_request(body).await {
+        Ok(req) => req,
+        Err(f) => return json_of(status_for(&f), &NewAgentResponse::err(f.message)),
+    };
+    let name = req.name.clone();
+    match app.spawn.start_terminal(req).await {
+        Ok(result) => {
+            // A terminal registers itself nowhere — no session file, no
+            // transcript — so the pending entry is what carries it until the
+            // tmux sweep three seconds later finds the marker.
+            announce_pending(app, &result, name.as_deref(), TERMINAL_KIND);
+            json_of(StatusCode::OK, &NewAgentResponse::ok(result.tmux_session, result.cwd))
+        }
         Err(f) => json_of(status_for(&f), &NewAgentResponse::err(f.message)),
     }
 }
@@ -2179,6 +2234,13 @@ mod live {
 
     #[async_trait]
     impl SpawnApi for Spawn {
+        async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure> {
+            match crate::spawn::start_terminal(&req, crate::types::now_ms()).await {
+                Ok(r) => Ok(SpawnResult { tmux_session: r.tmux_session, cwd: r.cwd }),
+                Err(e) => Err(Failure { message: e.message(), known: e.is_client_error() }),
+            }
+        }
+
         async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure> {
             match crate::spawn::start_agent(&req, crate::types::now_ms(), None).await {
                 Ok(r) => Ok(SpawnResult { tmux_session: r.tmux_session, cwd: r.cwd }),
@@ -2388,6 +2450,18 @@ mod mock_control {
 
     #[async_trait]
     impl SpawnApi for Spawn {
+        async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure> {
+            // The directory is validated by the same function the real path
+            // uses, and then nothing is spawned (INV-7's mock-parity clause).
+            let cwd = crate::spawn::validate_dir(&req.cwd, &crate::spawn::home_dir())
+                .await
+                .map_err(|e| Failure { message: e.to_string(), known: true })?;
+            Ok(SpawnResult {
+                tmux_session: "mock-terminal".into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+            })
+        }
+
         async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure> {
             // The same checks the real path runs — directory, model and mode —
             // so an unknown alias fails here exactly as it would for real.
@@ -3147,6 +3221,9 @@ mod tests {
     impl SpawnApi for OkSpawn {
         async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure> {
             Ok(SpawnResult { tmux_session: "test-session".into(), cwd: req.cwd })
+        }
+        async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure> {
+            Ok(SpawnResult { tmux_session: "test-terminal".into(), cwd: req.cwd })
         }
     }
 
@@ -4496,6 +4573,38 @@ mod tests {
         .await;
         assert!(refused.is_some());
         assert_eq!(h.panes.writes(), 0);
+    }
+
+    /// INV-7's second command shape, over HTTP.
+    ///
+    /// It carries no model and no permission mode, so a body that would be
+    /// rejected as an agent request is a valid terminal request — which is why
+    /// this is a route of its own rather than a flag on the one beside it.
+    #[tokio::test]
+    async fn inv7_a_terminal_is_opened_by_its_own_route() {
+        let h = blocked(FakePanes::new()).await;
+        let res = post(h.port, "/api/terminals", "", Some(r#"{"cwd":"~/Projects/x"}"#)).await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+        assert!(body(&res).contains("test-terminal"), "{}", body(&res));
+    }
+
+    /// A folder is the one thing a terminal request must carry, and a request
+    /// without one is the caller's mistake rather than the server's.
+    #[tokio::test]
+    async fn a_terminal_without_a_folder_is_refused_in_the_caller_s_terms() {
+        let h = blocked(FakePanes::new()).await;
+        let res = post(h.port, "/api/terminals", "", Some("{}")).await;
+        assert!(status(&res).contains("400"), "{}", status(&res));
+        assert!(body(&res).contains("cwd"), "{}", body(&res));
+    }
+
+    /// Opening a terminal creates a process, so it is the spawn power and not
+    /// a lesser one — otherwise `--grant read` would hand out a shell.
+    #[tokio::test]
+    async fn a_read_only_credential_cannot_open_a_terminal() {
+        let h = granting(Grants::parse("read").unwrap(), FakePanes::new()).await;
+        let res = post(h.port, "/api/terminals", "", Some(r#"{"cwd":"~"}"#)).await;
+        assert!(status(&res).contains("403"), "{}", status(&res));
     }
 
     #[tokio::test]

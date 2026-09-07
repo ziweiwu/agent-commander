@@ -574,7 +574,7 @@ struct PassOutcome {
 /// A pid can be reused, and the CLI is the authority on what is really live.
 /// Pending entries are ours rather than the CLI's, so they are exempt.
 fn is_unconfirmed(agent: &Agent, known: &Option<HashSet<String>>) -> bool {
-    if agent.session_id.starts_with("pending:") {
+    if crate::pending::is_placeholder(agent) {
         return false;
     }
     known.as_ref().is_some_and(|confirmed| !confirmed.contains(&agent.session_id))

@@ -4,7 +4,14 @@ import { clock } from '../lib/format.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import styles from './Message.module.css'
 
-/** How many tool calls show before the run collapses behind a summary. */
+/**
+ * How many tool calls show before the rest collapse behind a summary.
+ *
+ * They are *shown*, which is what this constant always said and not what the
+ * code did: a run long enough to collapse hid every row behind the toggle, so
+ * five calls rendered in full and six rendered as the word "6 actions" and
+ * nothing else. The reader lost the detail exactly where there was most of it.
+ */
 const VISIBLE_TOOLS = 4
 
 /** Compact 886876 to "887k" — a token count is read for its order of magnitude. */
@@ -143,7 +150,11 @@ function Tools({ message }: { message: ChatMessage }) {
   const t = useTranslate()
   const [open, setOpen] = useState(false)
   const tools = message.tools
-  const collapsible = tools.length - VISIBLE_TOOLS > 1
+  // Worth a toggle only when it hides more than one row: a control that
+  // reveals a single line costs a press to save a line.
+  const hidden = tools.length - VISIBLE_TOOLS
+  const collapsible = hidden > 1
+  const shown = collapsible && !open ? tools.slice(0, VISIBLE_TOOLS) : tools
 
   const row = (call: ToolCall) => (
     <div
@@ -157,20 +168,20 @@ function Tools({ message }: { message: ChatMessage }) {
     </div>
   )
 
-  if (!collapsible) return <div className={styles.tools}>{tools.map(row)}</div>
-
   return (
     <div className={styles.tools}>
-      <button
-        type="button"
-        className={styles.toggle}
-        data-testid="tools-toggle"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {open ? '▾' : '▸'} {t('actionsCount', { n: tools.length })}
-      </button>
-      {open && tools.map(row)}
+      {shown.map(row)}
+      {collapsible && (
+        <button
+          type="button"
+          className={styles.toggle}
+          data-testid="tools-toggle"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? `▾ ${t('actionsFewer')}` : `▸ ${t('actionsMore', { n: hidden })}`}
+        </button>
+      )}
     </div>
   )
 }

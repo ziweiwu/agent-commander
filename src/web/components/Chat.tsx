@@ -13,7 +13,7 @@ import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
 import { AnswerCard } from './AnswerCard.tsx'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
-import { Button, Chip } from './ui/Button.tsx'
+import { Button } from './ui/Button.tsx'
 import styles from './Chat.module.css'
 
 /** Distance from the bottom within which the view keeps following new messages. */

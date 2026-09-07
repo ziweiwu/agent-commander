@@ -28,7 +28,7 @@ export function resetStore(): void {
     attached: false,
     fullscreen: false,
     newAgentOpen: false,
-    fleet: { query: '', filter: 'all', sort: 'recent', dir: 'desc' },
+    fleet: { query: '', filter: 'all', sort: 'recent', dir: 'desc', terminals: false },
     theme: 'system',
     scheme: 'graphite',
     lang: 'en',

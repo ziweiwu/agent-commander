@@ -39,6 +39,8 @@ export const AGENT = {
   movingFamily: 'mock-busy-2',
   /** A CLI that writes no subagent records, so its tree is `unknown`. */
   noSidecars: 'tmux:kiro-1787832510',
+  /** A plain shell this app opened: out of the fleet until the chip admits it. */
+  terminal: 'tmux:term-1787832900',
 } as const
 
 export const card = (page: Page, sessionId: string) =>

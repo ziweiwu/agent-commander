@@ -93,9 +93,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
+npm test              # 1257 tests: 614 Rust (the server) + 643 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 369 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -162,13 +162,15 @@ Never point a fuzzer, an audit or a review agent at 4317. It drives real
 agents, and anything that types into whatever it finds will type into someone's
 session. `qa-sweep.sh` refuses that port outright and `--mock` on it is rejected.
 
-`npm run mock` serves a deliberately awkward fixture fleet — fourteen agents,
+`npm run mock` serves a deliberately awkward fixture fleet — fifteen sessions,
 five sharing a home directory, one name too long for its card, five never
 prompted, one Kiro session so the degraded card an agent with no transcript
 gets is on screen rather than only in a test, all three shapes an agent blocks
 on (a question with options, a plan awaiting approval, a tool awaiting
-permission — INV-16's three), and one whose pane has exited, so the Attach
-tab's dead-pane notice is a thing you can look at. `--mock-empty` serves the
+permission — INV-16's three), one whose pane has exited, so the Attach tab's
+dead-pane notice is a thing you can look at, and one plain terminal — which is
+*not* on screen at rest, because terminals are out of the fleet's scope until
+the chip admits them, and a filter with nothing behind it cannot be looked at. `--mock-empty` serves the
 same server with no agents in it, which is the only way to see the
 confirmed-empty screen rather than the loading one. The delegation trees behind them are
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
@@ -236,6 +238,38 @@ commit.
   `activity`, `goal` and `model` reach the browser only because the enricher
   calls `notify()` itself. Forget that and the UI lags indefinitely with nothing
   raising an error.
+- **A running server outlives the bundle it serves, and an unknown route is
+  not an error.** `npm run build` rewrites `dist/web` under a server that has
+  been up for days, so a page newer than the binary answering it is what a
+  rebuild ordinarily produces. A route that binary has never heard of is
+  answered with the SPA shell — `200 text/html`, because the app is served
+  from every path that is not an endpoint — so `res.json()` throws and the
+  *parser's* words reach the user as the server's reason: "Could not open the
+  terminal: The string did not match the expected pattern." Nothing 404s,
+  nothing logs, and the feature reads as broken. `spawnRequest` checks the
+  content type and says what it actually means. Every new endpoint inherits
+  that shape; the first thing to check when a new route "does not work" is
+  `ps` on the server that is answering it.
+- **A placeholder must never shadow the session it stands in for.** `pending`
+  announces a `pending:` card from the *Claude registry*, which is provider
+  zero in `CompositeSource`; a terminal is found by the tmux sweep, which is
+  provider one. On plain provider order the placeholder won the tmux session
+  and the real terminal was dropped for the five minutes a placeholder may
+  live — and `pending`'s own retirement rule could not end it either, because
+  that fires when the *Claude* list claims the session, which for a shell it
+  never does. Placeholders now claim last. The card was also hard-coded to
+  `CLAUDE_KIND` under a comment reading "this app spawns Claude and nothing
+  else (INV-7)" — true when written, false the moment a second command shape
+  existed, and it is the second time that exact lesson has been paid for.
+- **A shell in a tmux session is a husk unless this app marked it.** The
+  terminal feature and `tmux-resurrect`'s leftovers are the same pane to
+  anything that looks at the pane: a `zsh` sitting at a prompt in a session
+  somebody named. `is_live_agent` refuses those, and the only thing that
+  separates the two is the `@agent_commander` option `spawn::terminal_argv`
+  writes on the session as it creates it. It rides on the existing
+  `list-panes` format string, so it costs no round trip — but it is also the
+  kind of field that reads as decoration in a diff. Remove it and the terminal
+  a user just opened never appears in the fleet, with nothing failing.
 - **`Registry.enrich()` is a blind shallow merge** with two callers writing
   different field sets, and `undefined` overwrites. That is load-bearing for
   goal-clear and a trap for any new patch producer. A new `AgentPatch` field
@@ -294,6 +328,17 @@ commit.
   INV-4 tail-count flake that used to sit beside it went away with the port:
   `enrich.rs`'s cadence re-arms after the work instead of on a wall clock, so a
   slow pass no longer drops a tick.
+- **WebKit times out under a loaded machine, and it is not always the same
+  spec.** Measured on 2026-09-06 at load average 8.7: a full run failed
+  `responsive.spec.ts` "every control on screen can be hit and announced" on
+  `phone-safari` and `tablet.spec.ts` "both columns are visible at once" on
+  `tablet-safari`, both with `Test timeout of 30000ms` on `page.goto` or on
+  tearing the context down, twice in a row — and the *same two* failed with the
+  working tree stashed back to the released tag, which is what proves it is the
+  machine rather than the change. Both passed 2 of 2 run alone. The signature to
+  match is: WebKit only, a 30s timeout rather than a failed assertion, and near
+  the end of a project's run. Stash and re-run the baseline before believing a
+  WebKit failure belongs to your diff.
 - **`theme.spec.ts` on the two WebKit projects flakes under a full-suite run.**
   Two of its tests (`picking a scheme repaints the document` and `the scheme
   and the theme both survive a reload`) failed with `page.goto: Test timeout

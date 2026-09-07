@@ -135,6 +135,16 @@ export type NewAgentRequest = { cwd: string, name?: string, model?: string, perm
 export type NewAgentResponse = { ok: true, tmuxSession: string, cwd: string, } | { ok: false, error: string, };
 
 /**
+ * Open a plain tmux session, with the user's shell and no agent in it.
+ *
+ * Its own type rather than a flag on the request above, and the reason is the
+ * two fields it does not have: a model and a permission mode are Claude's,
+ * and a request that cannot carry them cannot forward them to a shell that
+ * would receive them as words to type (INV-7).
+ */
+export type NewTerminalRequest = { cwd: string, name?: string, };
+
+/**
  * Which compaction notice a `Notice` event is reporting.
  */
 export type NoticeKind = "compacted" | "compactedAuto";

@@ -269,6 +269,23 @@
       "activity": "exited",
       "lastActivityAt": 1786598200000,
       "tokens": 21006
+    },
+    {
+      "sessionId": "tmux:term-1787832900",
+      "pid": 71255,
+      "name": "scratch",
+      "cwd": "/Users/demo/Projects/scratch",
+      "folder": "scratch",
+      "status": "idle",
+      "statusInferred": true,
+      "agentKind": "terminal",
+      "kind": "interactive",
+      "startedAt": 1786599700000,
+      "gitBranch": "main",
+      "paneId": "%85",
+      "tmuxSession": "term-1787832900",
+      "lastActivityAt": 1786599955000,
+      "derivedName": true
     }
   ],
   "mock": true

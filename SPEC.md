@@ -288,8 +288,26 @@ over the list with a back control; on a wide one, a second column.
 ### 4.1 Chat
 
 - **FR-CHAT-1** — The Chat tab MUST render the session as an attributed
-  conversation, with the tool calls a reply produced folded underneath it and
-  long runs collapsed behind a count.
+  conversation, with the tool calls a reply produced folded underneath it.
+  A long run MUST keep its first calls on screen and collapse only the
+  remainder, naming how many are hidden. Collapsing the whole run is what it
+  used to do, and it took the detail away exactly where there was most of it:
+  five calls rendered in full while six rendered as the words "6 actions".
+  A run that would hide a single call MUST NOT be collapsed at all — the press
+  costs the reader more than the line it saves.
+  *`test/ui/message-tools.test.tsx`.*
+- **FR-CHAT-12** — A tool call MUST be named by what it did, from the fields
+  that tool actually carries. A **skill** invocation MUST name the skill it
+  ran: its record carries the name and nothing else worth showing, and without
+  its own case the generic reading finds no description, path, pattern or
+  command and the row reads as the bare word "Skill".
+  *`transcript::names_the_skill_a_skill_call_ran`.*
+- **FR-CHAT-13** — A slash command the user typed MUST read as the command it
+  ran. Claude Code stores one as `<command-name>` markup with the arguments
+  beside it, and rendering the record verbatim put three tags on screen with
+  the one fact they carry hardest to read. The tags MUST be found by name
+  rather than by position: their order is not stable and they are sometimes
+  indented. *`transcript::reads_a_typed_slash_command_as_the_command_it_ran`.*
 - **FR-CHAT-2** — A message the user sends MUST appear immediately as *sending…*
   and settle only when the agent's own transcript confirms it. *`test/ui/delivery.test.tsx`.*
 - **FR-CHAT-3** — A message the agent never echoes back MUST be marked **not
@@ -440,6 +458,21 @@ epistemic rather than functional.
   its history is, and MUST NOT disturb the live frame diff. A pane that has
   exited MUST still answer. **(INV-1, INV-4)** *`test/ui/term-history.test.tsx`,
   `routes::inv4_a_history_read_needs_a_focused_viewer`, `e2e/attach.spec.ts`.*
+- **FR-ATT-14** — A **line to paste into** MUST sit under the terminal, in
+  every layout. xterm reads typing and pastes through a hidden textarea behind
+  the capture, so both need a hardware keyboard: a phone has no Cmd+V and
+  nothing on that surface to long-press for its own Paste menu, which left the
+  Attach tab unable to accept a paste at all on the shape this app exists for.
+  It MUST be an ordinary editable field, so the paste belongs to the operating
+  system — reading the clipboard for the user is refused on WebKit, and
+  therefore on every browser on iOS. It MUST be a textarea rather than an
+  `<input>`, which strips CR and LF and so delivered a pasted snippet as one
+  run-together command. What it sends MUST be text and MUST NOT be submitted;
+  running it is the `Enter` key beside it, which is also what lets the reader
+  see what landed — so the field MUST grow to show a pasted snippet, up to a
+  bound past which it scrolls rather than pushing the pane off a phone. It
+  MUST send exactly once however many times the press is repeated. **(INV-2, INV-17)** *`test/ui/term-paste.test.tsx`,
+  `e2e/term-paste.spec.ts`.*
 
 ---
 
@@ -565,6 +598,32 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-SPAWN-4** — On a machine that cannot spawn anything, the dialog MUST
   refuse to offer a form rather than presenting one that will fail.
   *`test/ui/NewAgentDialog.test.tsx`.*
+
+### 6.1a Opening a plain terminal
+
+- **FR-TERM-1** — The same dialog MUST also open a **terminal**: a detached tmux
+  session running the user's own shell in a chosen directory, with no agent in
+  it. It MUST take a folder and an optional name and nothing else, because a
+  model and a permission mode are flags on `claude` and a shell would receive
+  them as words. **(INV-7)** *`spawn::inv7_builds_exactly_one_terminal_shape`,
+  `test/ui/terminals.test.tsx`.*
+- **FR-TERM-2** — The server MUST mark the session it creates with a tmux option
+  of its own, and MUST list a shell session only when that marker is present.
+  A shell at a prompt is otherwise exactly what tmux-resurrect leaves behind
+  when an agent exits, and listing those would fill the fleet with husks that
+  look merely quiet. **(INV-7, INV-11)**
+  *`tmux_agents::keeps_a_shell_this_app_marked_as_its_own_terminal`,
+  `still_drops_an_unmarked_shell_beside_a_marked_one`.*
+- **FR-TERM-3** — A terminal MUST offer the Attach tab and none of the controls
+  that type: no conversation, no goal, no model, no clear, no compact and no
+  Shift+Tab. This follows from the capability table rather than from a check
+  written a second time. **(INV-7)** *`test/ui/terminals.test.tsx`,
+  `e2e/fleet.spec.ts`.*
+- **FR-TERM-4** — Terminals MUST be out of the fleet's scope by default, and the
+  chip that admits them MUST be visible whenever there is one to admit, so a
+  hidden session is a filter the user can see rather than a fleet with a hole in
+  it. The choice MUST survive a reload, like the status filter and the sort.
+  **(INV-11)** *`test/fleet-ui.test.ts`, `e2e/fleet.spec.ts`.*
 
 ### 6.2 The folder browser
 
@@ -948,7 +1007,7 @@ unverified.
 | INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
-| INV-7 — one command shape | FR-KIND-1, FR-CTL-9, FR-SPAWN-3 |
+| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
@@ -958,7 +1017,7 @@ unverified.
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
-| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7 |
+| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14 |
 | INV-18 — a link goes where the text says | FR-CHAT-11 |
 
 ---

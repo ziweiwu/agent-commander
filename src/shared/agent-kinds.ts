@@ -36,6 +36,20 @@ export interface AgentKindSpec {
 export const CLAUDE_KIND = 'claude'
 
 /**
+ * A plain shell this app opened, with no agent in it.
+ *
+ * It is the one kind that is *created* rather than discovered, and the one
+ * that a shell command does not disqualify — a terminal is a shell prompt, so
+ * the rule that keeps tmux-resurrect husks out of the fleet would keep this
+ * out too. What separates them is a tmux option this app writes on the session
+ * at creation, which nothing else on the machine sets.
+ *
+ * It reads no transcript and answers no slash command, so every Claude-only
+ * control falls away from it by the same table that governs Kiro.
+ */
+export const TERMINAL_KIND = 'terminal'
+
+/**
  * Claude is discovered from the session files it writes about itself, never
  * from tmux, so it carries no matchers here — only its capabilities.
  */
@@ -49,6 +63,7 @@ export const AGENT_KINDS: readonly AgentKindSpec[] = [
     transcripts: false,
     slashCommands: false,
   },
+  { id: TERMINAL_KIND, label: 'Terminal', transcripts: false, slashCommands: false },
 ]
 
 /**

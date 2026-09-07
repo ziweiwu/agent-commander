@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useStore } from '../store/store.ts'
-import { loadEnv, startAgent } from '../store/transport.ts'
+import { loadEnv, startAgent, startTerminal } from '../store/transport.ts'
 import { tildePath } from '../lib/format.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
@@ -59,15 +59,81 @@ function saveDefaultDir(dir: string): void {
   }
 }
 
+interface AgentOptionsProps {
+  model: string
+  mode: string
+  onModel: (model: string) => void
+  onMode: (mode: string) => void
+}
+
+/**
+ * The two settings that exist only for an agent: which model, and which
+ * permission mode it starts in.
+ *
+ * Its own component because it is the deepest thing in this dialog — a row
+ * holding two labels, each holding a select, each holding its options — and
+ * inlined it put four levels of nesting inside a function that is otherwise a
+ * flat list of fields. Nothing about it is conditional; whether it is shown at
+ * all is the caller's business, for the reason stated where it is called.
+ */
+function AgentOptions({ model, mode, onModel, onMode }: AgentOptionsProps) {
+  const t = useTranslate()
+  return (
+    <div className={styles.row}>
+      <label className={styles.field}>
+        <span className={styles.label}>{t('modelLabel')}</span>
+        <select
+          className={styles.input}
+          data-testid="new-agent-model"
+          value={model}
+          onChange={(e) => onModel(e.target.value)}
+        >
+          {MODELS.map((m) => (
+            <option key={m} value={m}>
+              {m === 'default' ? t('modelDefault') : m}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className={styles.field}>
+        <span className={styles.label}>{t('modeLabel')}</span>
+        <select
+          className={styles.input}
+          data-testid="new-agent-mode"
+          value={mode}
+          onChange={(e) => onMode(e.target.value)}
+        >
+          {MODES.map((m) => (
+            <option key={m} value={m}>
+              {t(MODE_KEY[m] as Key)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
 export function NewAgentDialog() {
   const t = useTranslate()
   const open = useStore((s) => s.newAgentOpen)
   const setOpen = useStore((s) => s.setNewAgentOpen)
+  const setTerminals = useStore((s) => s.setTerminals)
   const agents = useStore((s) => s.agents)
   const env = useStore((s) => s.env)
 
   const [dir, setDir] = useState('')
   const [name, setName] = useState('')
+  /*
+   * Which of the two things this dialog opens.
+   *
+   * A choice inside one dialog rather than a second dialog beside it: the
+   * folder field, the browser, the recent list, the default-folder button and
+   * the double-submit guard are the same either way, and a copy of all five is
+   * how the two come to disagree about what a valid folder is.
+   */
+  const [terminal, setTerminal] = useState(false)
   const [model, setModel] = useState('default')
   const [mode, setMode] = useState('default')
   const [browsing, setBrowsing] = useState(false)
@@ -129,21 +195,31 @@ export function NewAgentDialog() {
     startingRef.current = true
     setBusy(true)
     setError('')
-    const result = await startAgent(dir.trim(), {
-      ...(name.trim() ? { name: name.trim() } : {}),
-      ...(model !== 'default' ? { model } : {}),
-      ...(mode !== 'default' ? { permissionMode: mode } : {}),
-    })
+    const named = name.trim() ? { name: name.trim() } : {}
+    const result = terminal
+      ? await startTerminal(dir.trim(), named)
+      : await startAgent(dir.trim(), {
+          ...named,
+          ...(model !== 'default' ? { model } : {}),
+          ...(mode !== 'default' ? { permissionMode: mode } : {}),
+        })
     startingRef.current = false
     setBusy(false)
     if (result.ok) {
+      /*
+       * Terminals are out of the fleet by default, and that default is about
+       * the sessions you did not ask for. This one you just asked for, so
+       * hiding it would read as the button having done nothing — which is
+       * exactly how this first shipped, and exactly how it was reported.
+       */
+      if (terminal) setTerminals(true)
       rememberDir(result.cwd)
       setDir('')
       setName('')
       close()
       // The new process registers itself; the fleet picks it up on the next tick.
     } else {
-      setError(t('newAgentFailed', { error: result.error }))
+      setError(t(terminal ? 'newTerminalFailed' : 'newAgentFailed', { error: result.error }))
     }
   }
 
@@ -168,6 +244,27 @@ export function NewAgentDialog() {
           <p className={styles.error}>{t('newAgentNoTmux')}</p>
         ) : (
           <form className={styles.body} onSubmit={submit}>
+            <div className={styles.field} role="group" aria-label={t('newAgentKind')}>
+              <span className={styles.label}>{t('newAgentKind')}</span>
+              <div className={styles.recentList}>
+                <Chip
+                  data-testid="new-kind-agent"
+                  aria-pressed={!terminal}
+                  onClick={() => setTerminal(false)}
+                >
+                  {t('newAgentKindAgent')}
+                </Chip>
+                <Chip
+                  data-testid="new-kind-terminal"
+                  aria-pressed={terminal}
+                  onClick={() => setTerminal(true)}
+                >
+                  {t('newAgentKindTerminal')}
+                </Chip>
+              </div>
+              {terminal && <span className={styles.hint}>{t('newTerminalHint')}</span>}
+            </div>
+
             <label className={styles.field}>
               <span className={styles.label}>{t('newAgentDir')}</span>
               <div className={styles.dirRow}>
@@ -228,42 +325,26 @@ export function NewAgentDialog() {
                 spellCheck={false}
                 onChange={(e) => setName(e.target.value)}
               />
-              <span className={styles.hint}>{t('newAgentNameHint')}</span>
+              {/*
+                * A terminal's card is named for its folder, because that is
+                * all a tmux-discovered session reports. Saying "shown in the
+                * list" there would be false (INV-11) — the name still does
+                * something, and the hint says what.
+                */}
+              <span className={styles.hint}>
+                {t(terminal ? 'newTerminalNameHint' : 'newAgentNameHint')}
+              </span>
             </label>
 
-            <div className={styles.row}>
-              <label className={styles.field}>
-                <span className={styles.label}>{t('modelLabel')}</span>
-                <select
-                  className={styles.input}
-                  data-testid="new-agent-model"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                >
-                  {MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m === 'default' ? t('modelDefault') : m}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className={styles.field}>
-                <span className={styles.label}>{t('modeLabel')}</span>
-                <select
-                  className={styles.input}
-                  data-testid="new-agent-mode"
-                  value={mode}
-                  onChange={(e) => setMode(e.target.value)}
-                >
-                  {MODES.map((m) => (
-                    <option key={m} value={m}>
-                      {t(MODE_KEY[m] as Key)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            {/*
+              * Withheld rather than disabled for a terminal: both are flags on
+              * `claude`, and there is no shell equivalent to grey out. A
+              * disabled select would imply the setting exists here and is
+              * merely unavailable (INV-11).
+              */}
+            {!terminal && (
+              <AgentOptions model={model} mode={mode} onModel={setModel} onMode={setMode} />
+            )}
 
             {error && (
               <p className={styles.error} data-testid="new-agent-error">
@@ -283,7 +364,7 @@ export function NewAgentDialog() {
               <span className={styles.spacer} />
               <Button onClick={close}>{t('newAgentCancel')}</Button>
               <Button type="submit" variant="primary" data-testid="new-agent-submit" disabled={busy}>
-                {busy ? t('newAgentStarting') : t('newAgentStart')}
+                {busy ? t('newAgentStarting') : t(terminal ? 'newTerminalStart' : 'newAgentStart')}
               </Button>
             </div>
           </form>

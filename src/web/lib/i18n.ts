@@ -195,7 +195,8 @@ const EN = {
   hintEnterSend: 'send',
   hintShiftEnter: 'newline',
   jumpToLatest: '↓ Jump to latest',
-  actionsCount: '{n} actions',
+  actionsMore: '{n} more',
+  actionsFewer: 'Show fewer',
   today: 'Today',
   yesterday: 'Yesterday',
   /* terminal */
@@ -215,6 +216,9 @@ const EN = {
   termLoading: 'Loading the terminal…',
   termNotAttachable: 'This agent cannot be attached to.',
   paneExited: 'pane has exited',
+  termComposeLabel: 'Text to put at this terminal\u2019s prompt',
+  termComposePlaceholder: 'Paste or type, then Send',
+  termComposeSend: 'Send',
   confirmInterrupt: 'Really interrupt this agent?',
   confirmInterruptMode:
     'Interrupt mode: sending while this agent is working will stop it mid-task ' +
@@ -428,6 +432,17 @@ const EN = {
   newAgentRecent: 'Recent directories',
   newAgentFailed: 'Could not start the agent: {error}',
   newAgentNoTmux: 'A new agent needs tmux, which is not available on this machine.',
+  /* the second thing this dialog can open */
+  newAgentKind: 'What to open',
+  newAgentKindAgent: 'Claude Code',
+  newAgentKindTerminal: 'Terminal',
+  newTerminalHint: 'A plain shell in a tmux session, with no agent in it.',
+  newTerminalNameHint: 'Names the tmux session, so you can attach to it from a terminal. The card is named for the folder.',
+  newTerminalStart: 'Open terminal',
+  newTerminalFailed: 'Could not open the terminal: {error}',
+  filterTerminals: 'terminals',
+  filterTerminalsHint: 'Terminals are hidden until you ask for them.',
+  staleServer: 'this server does not know that request — it is probably still running an older version. Restart it and reload.',
 } as const
 
 export type Key = keyof typeof EN
@@ -580,7 +595,8 @@ const ZH: Record<Key, string> = {
   hintEnterSend: '发送',
   hintShiftEnter: '换行',
   jumpToLatest: '↓ 跳到最新',
-  actionsCount: '{n} 个操作',
+  actionsMore: '还有 {n} 个',
+  actionsFewer: '收起',
   today: '今天',
   yesterday: '昨天',
   fitWidth: '适应宽度',
@@ -598,6 +614,9 @@ const ZH: Record<Key, string> = {
   termLoading: '正在加载终端…',
   termNotAttachable: '该代理无法接入终端。',
   paneExited: '终端窗格已退出',
+  termComposeLabel: '要送到该终端提示符的文本',
+  termComposePlaceholder: '粘贴或输入，然后发送',
+  termComposeSend: '发送',
   confirmInterrupt: '确定要中断这个代理吗？',
   confirmInterruptMode:
     '中断模式：在该助手工作时发送消息，会先打断它并丢弃正在进行的工作。' +
@@ -769,6 +788,16 @@ const ZH: Record<Key, string> = {
   newAgentRecent: '最近使用的目录',
   newAgentFailed: '无法启动代理：{error}',
   newAgentNoTmux: '新建代理需要 tmux，但本机没有可用的 tmux。',
+  newAgentKind: '要打开什么',
+  newAgentKindAgent: 'Claude Code',
+  newAgentKindTerminal: '终端',
+  newTerminalHint: '一个普通的 tmux shell 会话，里面没有代理。',
+  newTerminalNameHint: '用于命名 tmux 会话，方便从终端连接。列表中的卡片以文件夹命名。',
+  newTerminalStart: '打开终端',
+  newTerminalFailed: '无法打开终端：{error}',
+  filterTerminals: '个终端',
+  filterTerminalsHint: '终端默认不显示，需要时可以打开。',
+  staleServer: '这个服务端不认识该请求，多半仍在运行旧版本。重启服务端并刷新页面。',
 }
 
 const DICTS: Record<Lang, Record<Key, string>> = { en: EN, 'zh-CN': ZH }

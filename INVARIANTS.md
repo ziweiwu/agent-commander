@@ -600,7 +600,7 @@ forgot the check would have compiled.
   implementation can be handed a key that did not come from `check_key` or
   from a literal in the server
 
-## INV-7 — One command shape
+## INV-7 — Two command shapes, and no third
 
 **Claude Code's slash commands are only ever typed at Claude Code.** `/model`,
 `/goal`, `/clear`, `/compact`, `/exit` and the Shift+Tab mode cycle are how
@@ -612,8 +612,8 @@ not one (INV-6). Closing is the exception, and only because tmux can do it
 without the agent's cooperation: those sessions are closed by killing the tmux
 session rather than by asking.
 
-Starting an agent is the only place this app creates a process. It runs exactly
-one command:
+Starting a session is the only place this app creates a process, and there are
+exactly two shapes it will run. The first starts an agent:
 
 ```
 tmux new-session -d -s <generated> -c <validated dir> claude [-n <name>] \
@@ -629,8 +629,44 @@ guessed at. Model and permission mode are checked against the fixed allow-lists
 in `rust/src/types.rs` (and re-exported by `options.rs`), so an unrecognised value is refused rather than
 becoming a flag.
 
-Mock mode runs the same validation and then does not spawn, so the failure a
-user sees in `--mock` is the failure they would get for real.
+The second opens a **plain terminal** — a tmux session with the user's own
+shell in it and no agent at all:
+
+```
+tmux new-session -d -s <generated> -c <validated dir> \
+     ';' set-option -t <generated> @agent_commander terminal
+```
+
+No command follows `-c <dir>`, and that absence is what makes it a terminal:
+tmux runs the login shell rather than a program this app chose. The directory
+goes through the same `validate_dir`, so a missing folder is refused in the
+same words; there is no model and no permission mode to check, because both are
+flags on `claude` and a shell would receive them as words.
+
+**It is its own route and its own function, not a flag on the one above.** The
+two requests carry different fields, and a body that would be rejected as an
+agent request is a valid terminal request — a boolean would have made that a
+runtime branch inside one validator instead of two shapes named at the door.
+
+**The marker is not decoration.** A shell in a tmux session is exactly what
+tmux-resurrect leaves behind when an agent exits, and `is_live_agent` refuses
+those for good reason (INV-11's "absence of evidence"): a fleet of husks that
+look merely quiet is worse than no fleet. Nothing tmux-resurrect restores
+writes another program's options, so the marker this app sets at creation is
+the one thing that separates a terminal it opened from a husk it did not — and
+it is read back per pane on the same sweep that reads everything else, at no
+extra round trip.
+
+A terminal is a `TERMINAL_KIND` session in the same capability table Kiro uses,
+so every Claude-only control falls away from it by a rule already written and
+already tested: no transcript to read, so no Chat tab and no timeline tail; and
+`slashCommands: false`, so `/goal`, `/model`, `/clear`, `/compact` and the
+Shift+Tab chord are refused server-side and hidden in the browser. Closing it
+still works, because that kills the tmux session rather than asking the program
+inside it.
+
+Mock mode runs the same validation and then does not spawn, for both shapes, so
+the failure a user sees in `--mock` is the failure they would get for real.
 
 The model and the mode are part of the request, not decoration on it: the
 dialog offered both and the route forwarded neither, so choosing "plan" and
@@ -644,7 +680,20 @@ true rather than aspirational.
   typed on the way to the refusal
 - `spawn::inv7_*` — path expansion, absolute-path requirement, refusal of
   files and missing directories, session-name sanitising, and the model and
-  mode allow-lists
+  mode allow-lists; `inv7_builds_exactly_one_terminal_shape` pins that nothing
+  follows the directory, and `a_terminal_is_marked_as_this_app_s_own` that the
+  marker is set on the session just made
+- `tmux_agents::keeps_a_shell_this_app_marked_as_its_own_terminal` and
+  `still_drops_an_unmarked_shell_beside_a_marked_one` — the marked shell is
+  listed and the husk beside it is not
+- `routes::inv7_a_terminal_is_opened_by_its_own_route`,
+  `a_terminal_without_a_folder_is_refused_in_the_caller_s_terms` and
+  `a_read_only_credential_cannot_open_a_terminal` — the second route over
+  HTTP, its one required field, and the fact that opening a shell is the spawn
+  power rather than a lesser one
+- `test/ui/terminals.test.tsx` — the dialog sends the folder and nothing else
+  down the terminal route, offers no model or mode there, and the agent screen
+  for a terminal carries the Attach tab and none of the controls that type
 - `routes::tests` (the new-agent group) — what the dialog chose is what reaches the spawn,
   and an unrecognised alias is a 400 rather than a 500
 - `test/ui/NewAgentDialog.test.tsx` — a rejected directory surfaces the server's
@@ -1557,6 +1606,57 @@ now that menu at every height and width, which is the same fix applied where
 it was always true — the row cost 50px of *every* screen, and could not show
 what it held at any of them.
 
+**And it happened a second time, in a control nobody had written down.**
+Pasting into the Attach tab was xterm's own paste handler, which listens on the
+hidden 1px textarea behind the capture — so it needed a hardware Cmd+V. A phone
+has neither that nor any editable surface there to long-press, and the key bar
+offered Enter, the arrows, Tab, Esc and Ctrl-C but nothing for the clipboard.
+So the terminal could not be pasted into at all on the shape this app exists
+for, a phone over Tailscale, while every desktop test went on passing because
+the desktop path was never broken. This is the failure mode the invariant
+names, arriving through an *absence* rather than a `display: none`: nothing hid
+the action, it was simply only ever reachable one way.
+
+**The first fix for it was wrong, and wrong in this file's own manner.** It was
+a Paste button that read the clipboard for the user — one tap, no field to
+manage, and it worked in Chrome. Measured on WebKit, which is the engine behind
+every browser on iOS and therefore the entire population this was added for,
+`navigator.clipboard.readText()` is refused with `NotAllowedError` even from
+inside a trusted tap, and the button sent nothing at all. A control that fails
+on the one platform it exists for is worse than no control: it had a name, a
+place in the key bar and an error message, and every one of those asserted a
+capability the app did not have (INV-11). **A capability must be verified on
+the shape that needs it, not on the shape that is easiest to drive.**
+
+What replaced it needs no capability to verify. The Attach tab carries a real
+input — a line to paste into and send — so the paste belongs to the operating
+system: long-press and Paste on iOS, the same on Android, Cmd+V or Ctrl+V on a
+desktop. There is no permission to be granted, no secure context to require and
+no clipboard API to be absent, and nothing about it is conditional on the
+viewport, so it is the same control in all three shapes.
+
+**It is a textarea, and that is about the payload rather than about the size of
+the box.** `<input>` runs the value sanitisation algorithm, which strips CR and
+LF — so the three lines of a shell snippet pasted into one arrive as a single
+run-together command. A terminal is exactly where multi-line text gets pasted,
+and text quietly *altered* on its way to a live agent is a worse failure than
+text that never arrives: nothing reports it, and what runs is not what the
+reader pasted. Enter still sends, because a paste carries its newlines through
+the clipboard rather than through keystrokes, so the two never compete;
+Shift+Enter is how a newline is typed by hand, which is the convention the
+message composer already uses. It grows to show what was pasted, because
+"see what landed before running it" is the whole reason this sends text
+instead of submitting it, and a three-line paste in a one-line box cannot be
+read; it stops growing well short of the pane, since a hundred pasted lines
+pushing the capture off a phone would trade one of these failures for another. It sends through the
+same door xterm's own paste event uses, so the text is ordered and coalesced
+with anything else on its way to the pane (INV-2), and it stops there:
+submitting is the Enter key beside it, which also means the reader sees what
+actually landed before running it — on a phone, typing into a live agent, that
+review is the point rather than a cost. `draft` is guarded by a ref cleared
+synchronously, because two presses in one React batch would otherwise each read
+the same uncleared line and send it twice.
+
 **The disclosures are part of the contract, not an implementation detail.**
 Below 900px the agent's settings row folds behind `⋯` in the tab strip, and the
 fleet's filters are hidden while the sheet covers the list they filter. Both
@@ -1596,6 +1696,18 @@ anything laid out from it.
 - `test/ui/visual-viewport.test.tsx`, `test/viewport.test.ts` — the other half:
   that the rectangle written to the root is the right one
 
+- `test/ui/term-paste.test.tsx` — the line reaches the pane unsubmitted and
+  exactly once from a double press or a repeating return key, a multi-line
+  paste keeps its newlines and a hand-typed one does not send, it clears when
+  it has gone, an empty one offers nothing to send, a pane that has ended
+  closes it, it names itself — and the component reaches for
+  `navigator.clipboard` nowhere, which is the regression that sent the first
+  attempt back
+- `e2e/term-paste.spec.ts` — the same against the real server on every project,
+  WebKit included, since WebKit is what refuted the first attempt: the frame
+  on the wire carries the text and `submit: false`, a pasted snippet arrives
+  with its lines intact, the field is editable and named, and it renders at
+  16px or more wherever the pointer is coarse
 - `test/responsive.test.ts` — enumerates every selector a viewport query hides
   and fails on one the list does not account for, so hiding a label is a line
   of documentation and hiding a control means writing down what reaches it

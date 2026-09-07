@@ -20,7 +20,13 @@ a laptop or from a phone.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
   never resizes it: it is a capture, not a second terminal. **Earlier output**
   reads back through its scrollback a page at a time, including for a pane
-  whose process has exited.
+  whose process has exited. Under it is a line to paste into, because a capture
+  is not something a phone can paste into — the paste is your OS's, so it keeps
+  its newlines, and what it sends is text rather than a submission.
+- **Plain terminals, not only agents.** **+ New agent** offers a **Terminal**
+  as well: a tmux session running your own shell in a folder you pick. It gets
+  an Attach tab and none of the controls that type Claude Code's slash commands
+  at whatever is in the pane.
 - **What a busy agent is running**, read from the process table: the tool
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.
@@ -85,8 +91,9 @@ your phone from anything else.
    and clear. It is a menu so the conversation keeps the room.
 4. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
-Start a new agent with **+ New agent**, and prune sessions you opened and never
-used with **Prune**.
+Start a new agent — or a plain terminal — with **+ New agent**, and prune
+sessions you opened and never used with **Prune**. Terminals are kept out of
+the fleet at rest; the **terminals** chip in the header admits them.
 
 ## Safety
 

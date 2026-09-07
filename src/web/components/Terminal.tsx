@@ -33,6 +33,17 @@ import styles from './Terminal.module.css'
 const FULLSCREEN_MAX_FONT = 32
 
 /**
+ * How tall the paste line may grow, in CSS pixels.
+ *
+ * It grows so that a pasted snippet can be *read back* — seeing what landed
+ * before running it is the reason this sends text rather than submitting it —
+ * and it stops here so that a hundred pasted lines cannot push the pane
+ * itself off a phone. Past this it scrolls. Matches `max-height` in the
+ * stylesheet, which is what bounds it once the inline height is set.
+ */
+const COMPOSE_MAX_HEIGHT = 120
+
+/**
  * The same ceiling inside the detail panel.
  *
  * Lower than full screen because the panel shares the window with the fleet
@@ -380,7 +391,7 @@ function usePaneTerm(options: PaneTermOptions) {
   useBlurAfterExit(options, wrapRef)
   useRefitWhenTheRoomChanges(options, termRef)
 
-  return { wrapRef, scaleRef, term: termRef.current, guarded }
+  return { wrapRef, scaleRef, term: termRef.current, guarded, typed }
 }
 
 export interface TerminalProps {
@@ -394,13 +405,36 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   const exited = usePaneExited(agent)
   const history = useStore((s) => (s.history?.sessionId === agent.sessionId ? s.history : null))
   const historyPending = useStore((s) => s.historyPending)
-  const { wrapRef, scaleRef, term, guarded } = usePaneTerm({
+  const [draft, setDraft] = useState('')
+  /*
+   * INV-2's "exactly once", which React state cannot hold on its own: `draft`
+   * is read from a closure and `setDraft('')` does not land until React
+   * flushes, so a double-tapped Send — or a key repeat on a return key — reads
+   * the same uncleared draft twice and sends the text twice into a live agent.
+   * The ref is the authority and is cleared synchronously, which is the same
+   * shape the message composer uses for the same reason.
+   */
+  const draftRef = useRef('')
+  /* Held only to put the box back to one line once its text has gone. */
+  const boxRef = useRef<HTMLTextAreaElement>(null)
+  const { wrapRef, scaleRef, term, guarded, typed } = usePaneTerm({
     agent,
     onExit,
     fullscreen,
     exited,
     historyOpen: history !== null,
   })
+
+  const submitDraft = (): void => {
+    const text = draftRef.current
+    if (text.length === 0) return
+    draftRef.current = ''
+    setDraft('')
+    // The inline height `onChange` wrote outlives the text it was measured
+    // for, so an emptied box would keep the depth of the paste it just sent.
+    if (boxRef.current) boxRef.current.style.height = ''
+    typed(text)
+  }
 
   if (!agent.paneId) {
     return (
@@ -513,7 +547,105 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   )
 
   /*
-   * Five fixed child slots, and the pane stays in the fourth of them whether or
+   * A line to paste into, because the capture is not one.
+   *
+   * xterm reads typing and pastes through a hidden 1px textarea behind the
+   * pane, which is fine for a hardware keyboard and useless without one: a
+   * phone has no Cmd+V, and there is nothing on this surface it can long-press
+   * to get its own Paste menu. Measured on WebKit — the engine behind every
+   * browser on iOS — `navigator.clipboard.readText()` is refused outright
+   * (`NotAllowedError`) even from inside a tap, so reading the clipboard for
+   * the user is not an option either; a button doing that reported a failure
+   * on the one platform it existed for.
+   *
+   * A real field has none of those problems, because the paste is the
+   * operating system's rather than ours: long-press and Paste on iOS, the same
+   * on Android, Cmd+V or Ctrl+V on a desktop. It needs no permission, no
+   * secure context and no clipboard API, and it works the same in all three of
+   * INV-17's shapes because nothing about it is conditional on the viewport.
+   *
+   * It sends through `typed`, the same door xterm's own paste event uses, so
+   * the text is ordered and coalesced with anything else on its way to the
+   * pane (INV-2) — and it stops there. Submitting is the Enter key beside it,
+   * deliberately: a paste puts text at a prompt, and what the reader gets from
+   * this arrangement is the chance to see what actually landed before running
+   * it, which on a phone typing into a live agent is the whole point.
+   */
+  const composer = (
+    <form
+      className={styles.compose}
+      data-testid="term-compose"
+      onSubmit={(e) => {
+        e.preventDefault()
+        submitDraft()
+      }}
+    >
+      {/*
+       * A textarea rather than an input, and the reason is the payload this
+       * exists for. `<input>` runs the value sanitisation algorithm, which
+       * strips CR and LF — so pasting the three lines of a shell snippet into
+       * one silently delivered them run together as a single command. A
+       * terminal is precisely the place multi-line text gets pasted, and text
+       * quietly altered on its way to a live agent is the worst shape this
+       * could fail in.
+       *
+       * Enter still sends, because a paste carries its newlines through the
+       * clipboard rather than through keystrokes, so the two do not compete:
+       * Shift+Enter is the way to type a newline by hand, which is the same
+       * convention the message composer uses.
+       */}
+      <textarea
+        className={styles.composeInput}
+        data-testid="term-compose-input"
+        rows={1}
+        value={draft}
+        disabled={exited}
+        ref={boxRef}
+        onChange={(e) => {
+          draftRef.current = e.target.value
+          setDraft(e.target.value)
+          e.target.style.height = 'auto'
+          e.target.style.height = `${Math.min(e.target.scrollHeight, COMPOSE_MAX_HEIGHT)}px`
+        }}
+        onKeyDown={(e) => {
+          /*
+           * An IME's Enter commits its candidate; taken as a send it would
+           * swallow that keypress and deliver raw pinyin instead. This app
+           * ships a Chinese translation, so those are its users.
+           */
+          if (e.nativeEvent.isComposing) return
+          if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+            e.preventDefault()
+            submitDraft()
+          }
+        }}
+        aria-label={t('termComposeLabel')}
+        placeholder={t('termComposePlaceholder')}
+        /*
+         * The four a phone would otherwise apply to a command: a capitalised
+         * first letter, a "corrected" flag, a completion, a spelling mark.
+         * `enterkeyhint` names the key the keyboard draws, which sends the
+         * text to the prompt and does not run it.
+         */
+        autoCapitalize="off"
+        autoCorrect="off"
+        autoComplete="off"
+        spellCheck={false}
+        enterKeyHint="send"
+      />
+      <Button
+        variant="compact"
+        type="submit"
+        data-testid="term-compose-send"
+        disabled={exited || draft.length === 0}
+      >
+        {t('termComposeSend')}
+      </Button>
+    </form>
+  )
+
+  /*
+   * Six fixed child slots, and the pane stays in the fourth of them whether or
    * not the notice or the history is showing. React reconciles static children by position, so
    * moving the pane into a wrapper — a <figure> around capture and caption, say
    * — would give it a fresh DOM node while PaneTerm still held the old one, and
@@ -547,6 +679,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       ) : null}
       {pane}
       {keybar}
+      {composer}
     </div>
   )
 }

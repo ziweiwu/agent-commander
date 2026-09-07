@@ -17,6 +17,7 @@ import type {
   ServerEnv,
   ServerMessage,
 } from '../../shared/types.ts'
+import { translate } from '../lib/i18n.ts'
 import { notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed } from '../lib/prefs.ts'
 import { useStore } from './store.ts'
@@ -292,12 +293,48 @@ export async function startAgent(
   cwd: string,
   options: { name?: string; model?: string; permissionMode?: string } = {},
 ): Promise<NewAgentResponse> {
+  return spawnRequest('/api/agents', { cwd, ...options })
+}
+
+/**
+ * Open a plain terminal — the second thing this app can create.
+ *
+ * Its own route rather than a flag on the one above, because the request has
+ * no model and no permission mode on it and there is nothing at a shell prompt
+ * for either to mean. The server names both shapes for the same reason (INV-7).
+ */
+export async function startTerminal(
+  cwd: string,
+  options: { name?: string } = {},
+): Promise<NewAgentResponse> {
+  return spawnRequest('/api/terminals', { cwd, ...options })
+}
+
+async function spawnRequest(path: string, body: object): Promise<NewAgentResponse> {
   try {
-    const res = await fetch('/api/agents', {
+    const res = await fetch(path, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ cwd, ...options }),
+      body: JSON.stringify(body),
     })
+    /*
+     * A route this server has never heard of is not an error it reports — it
+     * is the SPA shell, `200 text/html`, because the app is served from every
+     * path that is not an endpoint. `res.json()` on that throws, and the
+     * *parser's* words then arrive at the dialog dressed as the server's
+     * reason for refusing: Safari says "The string did not match the expected
+     * pattern", which tells a user nothing and blames the wrong thing
+     * (INV-11).
+     *
+     * It is the ordinary upgrade path rather than an edge case. This server is
+     * left running for days while `dist/web` is rebuilt under it, so a page
+     * newer than the binary serving it is exactly what a rebuild produces —
+     * the same trap `AGENTS.md` already records for the macOS bundle, which
+     * keeps serving the code it started with.
+     */
+    if (!(res.headers.get('content-type') ?? '').includes('application/json')) {
+      return { ok: false, error: translate(useStore.getState().lang, 'staleServer') }
+    }
     return (await res.json()) as NewAgentResponse
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }

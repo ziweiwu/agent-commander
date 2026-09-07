@@ -47,6 +47,16 @@ pub struct AgentKindSpec {
 
 pub const CLAUDE_KIND: &str = "claude";
 
+/// A plain tmux session this app opened, with no agent in it.
+///
+/// It is a kind so that every capability gate already written applies to it
+/// unchanged: no transcript to read, and no slash command to type at a shell
+/// that would only receive the words. It is *not* tmux-discoverable — nothing
+/// about a shell's name or process says who made it, which is the whole reason
+/// husks are excluded — so it is recognised by the marker this app writes on
+/// the session instead (`pane::MARKER_OPTION`).
+pub const TERMINAL_KIND: &str = "terminal";
+
 /// Claude is discovered from the session files it writes about itself, never
 /// from tmux, so it carries no matchers here — only its capabilities.
 pub const AGENT_KINDS: &[AgentKindSpec] = &[
@@ -63,6 +73,17 @@ pub const AGENT_KINDS: &[AgentKindSpec] = &[
         label: "Kiro",
         session_prefix: Some(SessionPrefix { prefix: "kiro-" }),
         process_names: &["kiro-cli", "kiro-cli-chat"],
+        transcripts: false,
+        slash_commands: false,
+    },
+    AgentKindSpec {
+        id: TERMINAL_KIND,
+        label: "Terminal",
+        // Neither matcher: a plain shell is indistinguishable from every other
+        // plain shell, and that is exactly what `tmux_agents` refuses to guess
+        // at. The marker is what identifies one of these.
+        session_prefix: None,
+        process_names: &[],
         transcripts: false,
         slash_commands: false,
     },
@@ -133,9 +154,16 @@ mod tests {
         assert!(!has_transcripts("kiro"));
     }
 
+    /// Neither Claude nor a terminal is found by looking at a pane: Claude
+    /// writes a session file about itself, and a terminal is known only by the
+    /// marker this app put on it.
     #[test]
-    fn claude_is_not_tmux_discoverable() {
-        let ids: Vec<_> = tmux_discoverable().map(|k| k.id).collect();
+    fn only_a_foreign_cli_is_recognised_from_its_pane() {
+        let ids: Vec<&str> = tmux_discoverable().map(|k| k.id).collect();
         assert_eq!(ids, vec!["kiro"]);
+        assert!(!allows_slash_commands(TERMINAL_KIND));
+        assert!(!has_transcripts(TERMINAL_KIND));
+        assert_eq!(spec_of(TERMINAL_KIND).map(|k| k.label), Some("Terminal"));
     }
+
 }

@@ -13,7 +13,9 @@
 //! Everything here is a pure function of a [`PaneFacts`] snapshot, so the rules
 //! can be tested without a tmux server.
 
-use crate::agent_kinds::{is_shell_command, tmux_discoverable, AgentKindSpec};
+use crate::agent_kinds::{
+    is_shell_command, spec_of, tmux_discoverable, AgentKindSpec, TERMINAL_KIND,
+};
 use crate::pane::PaneFacts;
 use crate::types::{Agent, AgentStatus};
 
@@ -63,6 +65,11 @@ pub fn started_at_of(session: &str) -> i64 {
 /// then rejecting shells, keeps both doors open without letting a plain
 /// terminal through.
 pub fn kind_of(row: &PaneFacts) -> Option<&'static AgentKindSpec> {
+    // Asked first, because a terminal is known by what this app wrote on it
+    // rather than by anything the pane says about itself.
+    if is_our_terminal(row) {
+        return spec_of(TERMINAL_KIND);
+    }
     tmux_discoverable().find(|k| {
         k.process_names.contains(&row.command.as_str())
             || k.session_prefix.is_some_and(|p| p.matches(&row.session))
@@ -77,7 +84,21 @@ pub fn kind_of(row: &PaneFacts) -> Option<&'static AgentKindSpec> {
 /// is one of those. They are indistinguishable from a live agent by name alone,
 /// and listing them would be worse than listing nothing.
 pub fn is_live_agent(row: &PaneFacts) -> bool {
-    !row.dead && !is_shell_command(&row.command)
+    !row.dead && (!is_shell_command(&row.command) || is_our_terminal(row))
+}
+
+/// A plain terminal this app opened, rather than a husk that outlived its
+/// agent.
+///
+/// The distinction cannot be made from the pane: both are a shell sitting at a
+/// prompt with a name somebody chose. It is made from the marker this app
+/// writes on the session as it creates it (`pane::MARKER_OPTION`), which
+/// tmux-resurrect does not restore — it brings back names, windows and
+/// layouts, not another program's options. So a session that answers with the
+/// marker is one this process opened on purpose, and every other shell is
+/// still refused.
+pub fn is_our_terminal(row: &PaneFacts) -> bool {
+    row.marker == crate::pane::MARKER_TERMINAL
 }
 
 /// Working or not, judged only by whether the pane has produced output lately.
@@ -187,6 +208,7 @@ mod tests {
             window_panes: 1,
             dead: false,
             cwd: "/Users/ziweiwu/Projects/folio".into(),
+            marker: String::new(),
         }
     }
 
@@ -269,6 +291,47 @@ mod tests {
         let ids: Vec<_> =
             agents_from_panes(&rows, NOW).into_iter().map(|a| a.session_id).collect();
         assert_eq!(ids, vec!["tmux:kiro-1787832510"]);
+    }
+
+    /* ------------------------------------- a terminal this app opened */
+
+    fn terminal() -> PaneFacts {
+        PaneFacts {
+            session: "term-1787832900".into(),
+            pane_id: "%85".into(),
+            command: "zsh".into(),
+            marker: crate::pane::MARKER_TERMINAL.into(),
+            ..pane()
+        }
+    }
+
+    /// The one shell the fleet keeps, and the marker is the whole reason: the
+    /// pane is a `zsh` at a prompt, which is precisely what the rule above
+    /// refuses.
+    #[test]
+    fn keeps_a_shell_this_app_marked_as_its_own_terminal() {
+        assert!(is_live_agent(&terminal()));
+        assert_eq!(kind_of(&terminal()).map(|k| k.id), Some(TERMINAL_KIND));
+    }
+
+    /// A husk stays a husk. Nothing tmux-resurrect restores writes another
+    /// program's options, so an unmarked shell is refused exactly as before.
+    #[test]
+    fn still_drops_an_unmarked_shell_beside_a_marked_one() {
+        let rows = vec![
+            PaneFacts { session: "gemini-1780008794".into(), command: "zsh".into(), ..pane() },
+            terminal(),
+        ];
+        let ids: Vec<_> =
+            agents_from_panes(&rows, NOW).into_iter().map(|a| a.session_id).collect();
+        assert_eq!(ids, vec!["tmux:term-1787832900"]);
+    }
+
+    /// The marker says who opened the session, never that the pane is alive.
+    /// A terminal whose shell has exited is gone like any other dead pane.
+    #[test]
+    fn a_dead_terminal_pane_is_still_dropped() {
+        assert!(!is_live_agent(&PaneFacts { dead: true, ..terminal() }));
     }
 
     /* ------------------------------ status, inferred and labelled as such */

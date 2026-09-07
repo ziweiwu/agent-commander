@@ -3,7 +3,16 @@
  * make nine similar-looking sessions distinguishable.
  */
 import { describe, expect, it } from 'vitest'
-import { countByGroup, grouped, sortAgents, visibleAgents, type FleetState } from '../src/web/lib/filter.ts'
+import {
+  countByGroup,
+  grouped,
+  inScope,
+  isTerminal,
+  sortAgents,
+  visibleAgents,
+  type FleetState,
+} from '../src/web/lib/filter.ts'
+import { TERMINAL_KIND } from '../src/shared/agent-kinds.ts'
 import { matches, relative, tildePath, tokens, uptimeParts } from '../src/web/lib/format.ts'
 import { formatRelative, formatUptime } from '../src/web/lib/i18n.ts'
 import type { Agent } from '../src/shared/types.ts'
@@ -33,12 +42,51 @@ const state = (over: Partial<FleetState> = {}): FleetState => ({
   filter: 'all',
   sort: 'recent',
   dir: 'desc',
+  terminals: false,
   ...over,
 })
 
 describe('countByGroup', () => {
   it('counts each group, folding unknown in with idle', () => {
     expect(countByGroup(FLEET)).toEqual({ waiting: 1, busy: 1, idle: 3 })
+  })
+})
+
+/*
+ * A terminal is a session the user opened to type in themselves, so it answers
+ * none of the questions this list is asked. It is out of scope until the chip
+ * admits it — and the chip is what keeps that a filter rather than a hole.
+ */
+describe('terminals are out of the fleet until asked for', () => {
+  const WITH_TERMINAL = [
+    ...FLEET,
+    agent({ sessionId: 't', name: 'scratch', status: 'idle', agentKind: TERMINAL_KIND }),
+  ]
+
+  it('drops them by default and keeps them when asked', () => {
+    expect(inScope(WITH_TERMINAL, state()).map((a) => a.sessionId)).not.toContain('t')
+    expect(inScope(WITH_TERMINAL, state({ terminals: true })).map((a) => a.sessionId)).toContain('t')
+  })
+
+  it('takes them out of the list as well as the scope', () => {
+    expect(visibleAgents(WITH_TERMINAL, state())).toHaveLength(5)
+    expect(visibleAgents(WITH_TERMINAL, state({ terminals: true }))).toHaveLength(6)
+  })
+
+  /*
+   * The status filter runs after the scope, so an admitted terminal is subject
+   * to it like anything else — the two are orthogonal, which is why the choice
+   * is stored beside the filter rather than as one more value of it.
+   */
+  it('is still subject to the status filter once admitted', () => {
+    const idle = visibleAgents(WITH_TERMINAL, state({ terminals: true, filter: 'idle' }))
+    expect(idle.map((a) => a.sessionId)).toContain('t')
+    expect(visibleAgents(WITH_TERMINAL, state({ terminals: true, filter: 'busy' })).map((a) => a.sessionId)).not.toContain('t')
+  })
+
+  it('names one for what it is', () => {
+    expect(isTerminal(WITH_TERMINAL[5] as Agent)).toBe(true)
+    expect(isTerminal(FLEET[0] as Agent)).toBe(false)
   })
 })
 

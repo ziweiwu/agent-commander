@@ -192,6 +192,21 @@ pub struct NewAgentRequest {
     pub permission_mode: Option<String>,
 }
 
+/// Open a plain tmux session, with the user's shell and no agent in it.
+///
+/// Its own type rather than a flag on the request above, and the reason is the
+/// two fields it does not have: a model and a permission mode are Claude's,
+/// and a request that cannot carry them cannot forward them to a shell that
+/// would receive them as words to type (INV-7).
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTerminalRequest {
+    pub cwd: String,
+    #[serde(default)]
+    pub name: Option<String>,
+}
+
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -820,6 +835,7 @@ pub mod wire {
         ClientMessage::export_all(&cfg)?;
         ServerEnv::export_all(&cfg)?;
         NewAgentRequest::export_all(&cfg)?;
+        NewTerminalRequest::export_all(&cfg)?;
         DirListing::export_all(&cfg)?;
         ControlResponse::export_all(&cfg)?;
         NewAgentResponse::export_all(&cfg)?;

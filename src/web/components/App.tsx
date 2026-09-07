@@ -3,7 +3,7 @@ import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
-import { countByGroup, type StatusFilter } from '../lib/filter.ts'
+import { countByGroup, inScope, isTerminal, type StatusFilter } from '../lib/filter.ts'
 import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
 import { useVisualViewport } from '../hooks/useVisualViewport.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
@@ -193,7 +193,13 @@ function Filters() {
   const agents = useStore((s) => s.agents)
   const filter = useStore((s) => s.fleet.filter)
   const setFilter = useStore((s) => s.setFilter)
-  const counts = countByGroup(agents)
+  const fleet = useStore((s) => s.fleet)
+  const setTerminals = useStore((s) => s.setTerminals)
+  // The status chips count what the list is actually about, so a hidden
+  // terminal is missing from "8 idle" as well as from the list below it.
+  const inFleet = inScope(agents, fleet)
+  const counts = countByGroup(inFleet)
+  const terminals = agents.filter(isTerminal).length
 
   const chip = (key: StatusFilter, label: string, count: number) => (
     <Chip
@@ -221,10 +227,31 @@ function Filters() {
 
   return (
     <div className={styles.filters}>
-      {chip('all', t('filterAll'), agents.length)}
+      {chip('all', t('filterAll'), inFleet.length)}
       {counts.waiting > 0 && chip('waiting', t('filterWaiting'), counts.waiting)}
       {counts.busy > 0 && chip('busy', t('filterBusy'), counts.busy)}
       {counts.idle > 0 && chip('idle', t('filterIdle'), counts.idle)}
+      {/*
+        * Rendered only when there are terminals to admit, and then always —
+        * including while they are showing, which is the press that puts them
+        * away again. A count of hidden sessions that appears nowhere would be
+        * a fleet with a hole in it (INV-11); this is a filter you can see.
+        */}
+      {terminals > 0 && (
+        <Chip
+          data-testid="terminal-chip"
+          aria-pressed={fleet.terminals}
+          title={t('filterTerminalsHint')}
+          onClick={() => setTerminals(!fleet.terminals)}
+        >
+          {fleet.terminals && (
+            <span className={styles.chipMark} aria-hidden="true">
+              ✓
+            </span>
+          )}
+          <b>{terminals}</b> {t('filterTerminals')}
+        </Chip>
+      )}
     </div>
   )
 }

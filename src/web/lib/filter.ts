@@ -1,5 +1,5 @@
 /** Pure filtering and grouping for the agent list. */
-import { hasTranscripts } from '../../shared/agent-kinds.ts'
+import { TERMINAL_KIND, hasTranscripts } from '../../shared/agent-kinds.ts'
 import type { Agent, AgentStatus } from '../../shared/types.ts'
 import { GROUPS, type GroupKey, matches } from './format.ts'
 
@@ -15,6 +15,30 @@ export interface FleetState {
   filter: StatusFilter
   sort: SortKey
   dir: SortDir
+  /** Whether plain terminals are part of the fleet this view is about. */
+  terminals: boolean
+}
+
+/** A plain shell this app opened, with no agent inside it. */
+export function isTerminal(agent: Agent): boolean {
+  return agent.agentKind === TERMINAL_KIND
+}
+
+/**
+ * The sessions this view is about at all, before any status filter runs.
+ *
+ * A terminal is a session you opened to type in yourself, so it answers none
+ * of the questions this dashboard exists for — it is never blocked, never
+ * delegating, and never needs you. Left in the fleet it dilutes the counts the
+ * status chips report and pushes the agents that *do* need you further down,
+ * which is why it is out of scope rather than merely sorted last.
+ *
+ * Out of scope, not hidden: the chip that admits them says how many there are,
+ * so this is a filter the user can see rather than a fleet with a hole in it
+ * (INV-11).
+ */
+export function inScope(agents: Agent[], state: FleetState): Agent[] {
+  return state.terminals ? agents : agents.filter((a) => !isTerminal(a))
 }
 
 /**
@@ -97,7 +121,7 @@ export function countByGroup(agents: Agent[]): Record<GroupKey, number> {
 
 /** Apply the status filter and the free-text query. */
 export function visibleAgents(agents: Agent[], state: FleetState): Agent[] {
-  return agents.filter(
+  return inScope(agents, state).filter(
     (a) =>
       (state.filter === 'all' || IN_GROUP[state.filter].has(a.status)) && matches(a, state.query),
   )

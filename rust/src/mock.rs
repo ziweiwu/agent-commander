@@ -83,9 +83,12 @@ const KIRO_PID: i64 = 84638;
 const PLAN_PID: i64 = 61402;
 const PERMISSION_PID: i64 = 61577;
 const GONE_PID: i64 = 9034;
+const TERMINAL_PID: i64 = 71255;
 /// The one fixture pane tmux reports as dead: the agent's process has exited
 /// and the pane is showing its last frame (`mock-gone`).
 const DEAD_PANE: &str = "%84";
+/// The plain terminal's pane, which draws a shell prompt rather than a TUI.
+const TERMINAL_PANE: &str = "%85";
 
 /// How many delegates the busy fixture reports. Three, so the count is plural
 /// and does not collide with the two the delegating fixture carries.
@@ -114,7 +117,38 @@ fn fixtures() -> Vec<Agent> {
         blocked_on_a_plan(),
         blocked_on_a_permission(),
         whose_pane_has_exited(),
+        a_plain_terminal(),
     ]
+}
+
+/// A plain terminal this app opened: a shell, with no agent in it.
+///
+/// Here because it is the one kind the fleet hides by default, and a filter
+/// with nothing behind it cannot be looked at. It reads no transcript and
+/// answers no slash command, so the agent screen is the Attach tab alone —
+/// which is the shape this fixture exists to put on the mock server.
+fn a_plain_terminal() -> Agent {
+    Agent {
+        session_id: "tmux:term-1787832900".into(),
+        pid: TERMINAL_PID,
+        // A tmux-discovered session is named for its folder, never for
+        // anything it wrote about itself — so these three agree, the way a
+        // real one's do.
+        name: "scratch".into(),
+        derived_name: Some(true),
+        cwd: "/Users/demo/Projects/scratch".into(),
+        folder: "scratch".into(),
+        status: AgentStatus::Idle,
+        status_inferred: Some(true),
+        agent_kind: crate::agent_kinds::TERMINAL_KIND.into(),
+        kind: "interactive".into(),
+        started_at: START - 300_000,
+        git_branch: Some("main".into()),
+        pane_id: Some(TERMINAL_PANE.into()),
+        tmux_session: Some("term-1787832900".into()),
+        last_activity_at: Some(START - 45_000),
+        ..Default::default()
+    }
 }
 
 /// Blocked on `ExitPlanMode`: the plan is on disk, the approval choices are
@@ -526,6 +560,7 @@ type TimelineFixture = (i64, TimelineKind, Option<&'static str>, &'static str);
 fn mock_timeline() -> Vec<TimelineFixture> {
     let mut conversation = getting_oriented();
     conversation.extend(auditing_the_theme());
+    conversation.extend(a_long_run_and_a_skill());
     conversation
 }
 
@@ -562,6 +597,21 @@ fn getting_oriented() -> Vec<TimelineFixture> {
 /// The rest: a delegation, what it found, and the rebuild it led to. The
 /// `Subagent` entry is the one the chat renders differently, so it has to be in
 /// the fixture rather than only in a test.
+/// A run long enough that the reply collapses the tail of it, and a skill
+/// call — both render differently from an ordinary tool row, so both belong on
+/// screen in `--mock` rather than only in a test.
+fn a_long_run_and_a_skill() -> Vec<TimelineFixture> {
+    vec![
+        (START - 200_000, TimelineKind::Tool, Some("Skill"), "commit-guard"),
+        (START - 199_000, TimelineKind::Tool, Some("Read"), "AGENTS.md"),
+        (START - 198_000, TimelineKind::Tool, Some("Read"), "README.md"),
+        (START - 197_000, TimelineKind::Tool, Some("Grep"), "data-testid"),
+        (START - 196_000, TimelineKind::Tool, Some("Glob"), "src/**/*.tsx"),
+        (START - 195_000, TimelineKind::Tool, Some("Read"), "src/web/lib/chat.ts"),
+        (START - 194_000, TimelineKind::Tool, Some("Bash"), "npm run typecheck"),
+    ]
+}
+
 fn auditing_the_theme() -> Vec<TimelineFixture> {
     vec![
         (
@@ -1085,13 +1135,19 @@ impl PaneApi for MockPanes {
         let dim = format!("{ESC}38;5;246m");
         let off = format!("{ESC}39m");
         let rule = "─".repeat(RULE_WIDTH);
-        let mut lines = vec![
-            format!("{dim}╭─ mock pane {pane_id} ───────────────────╮{off}"),
-            String::new(),
-            format!("{ESC}38;5;44m⏺{off} Reading src/components/Header.astro"),
-            format!("  {dim}Read 1 file, ran 2 shell commands{off}"),
-            String::new(),
-        ];
+        // Every fixture pane but one has an agent drawing into it, so the
+        // preamble is the agent's. The terminal's has nobody in it.
+        let mut lines = if pane_id == TERMINAL_PANE {
+            vec![format!("{dim}Last login: Fri Sep  5 09:14:02 on ttys004{off}"), String::new()]
+        } else {
+            vec![
+                format!("{dim}╭─ mock pane {pane_id} ───────────────────╮{off}"),
+                String::new(),
+                format!("{ESC}38;5;44m⏺{off} Reading src/components/Header.astro"),
+                format!("  {dim}Read 1 file, ran 2 shell commands{off}"),
+                String::new(),
+            ]
+        };
         // The two blocked fixtures draw the dialog they are blocked on, the
         // way Claude Code draws it, so the answer card's pane check has a real
         // row to find and the live capture under the buttons shows one.
@@ -1110,6 +1166,13 @@ impl PaneApi for MockPanes {
                 "   2. Yes, and don't ask again for npm run build commands in ~/Projects/lego-deals"
                     .to_string(),
                 "   3. No, and tell Claude what to do differently (esc)".to_string(),
+            ]),
+            // A shell prompt, not a TUI: the terminal fixture is the one pane
+            // here with no agent drawing into it.
+            TERMINAL_PANE => lines.extend([
+                format!("{dim}~/Projects/scratch{off} $ git status --short"),
+                " M src/scraper.ts".to_string(),
+                format!("{dim}~/Projects/scratch{off} $ "),
             ]),
             _ => lines.extend([
                 format!("{ESC}38;5;220m✻{off} Hyperspacing… (2m 14s · {dim}↓ 48.1k tokens{off})"),
@@ -1575,6 +1638,8 @@ mod tests {
                 "mock-plan",
                 "mock-permission",
                 "mock-gone",
+                // A plain terminal, which the fleet hides until asked for.
+                "tmux:term-1787832900",
             ]
         );
     }
@@ -1603,6 +1668,7 @@ mod tests {
                 (PLAN_PID, Some("%82")),
                 (PERMISSION_PID, Some("%83")),
                 (GONE_PID, Some(DEAD_PANE)),
+                (TERMINAL_PID, Some(TERMINAL_PANE)),
             ]
         );
     }
@@ -1633,7 +1699,10 @@ mod tests {
             .filter(|a| a.activity.is_none())
             .map(|a| a.session_id)
             .collect();
-        assert_eq!(never, vec!["mock-fresh", "tmux:kiro-1787832510"]);
+        assert_eq!(
+            never,
+            vec!["mock-fresh", "tmux:kiro-1787832510", "tmux:term-1787832900"]
+        );
         let a = by_id("mock-fresh");
         assert_eq!(a.tokens, None);
         assert_eq!(a.last_activity_at, None);
@@ -1664,7 +1733,14 @@ mod tests {
             .collect();
         assert_eq!(
             derived,
-            vec!["mock-waiting", "mock-idle-ce", "mock-idle-db", "mock-fresh", "tmux:kiro-1787832510"]
+            vec![
+                "mock-waiting",
+                "mock-idle-ce",
+                "mock-idle-db",
+                "mock-fresh",
+                "tmux:kiro-1787832510",
+                "tmux:term-1787832900",
+            ]
         );
         // Each auto-named one falls back differently, which is the point of
         // having four: title, last prompt, folder, and nothing at all.
@@ -1745,6 +1821,8 @@ mod tests {
                 Some(12_400),
                 Some(3_910),
                 Some(21_006),
+                // Nor has a shell with nobody in it.
+                None,
             ]
         );
     }

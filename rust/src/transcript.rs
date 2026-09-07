@@ -84,6 +84,42 @@ fn first_line(value: &str) -> String {
     value.split('\n').next().unwrap_or("").trim().to_string()
 }
 
+/// The text between `<tag>` and `</tag>`, if both are there.
+fn tagged<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    Some(text[start..end].trim())
+}
+
+/// A slash command the user typed, as the user typed it.
+///
+/// Claude Code stores one as markup rather than as prose:
+///
+/// ```text
+/// <command-message>find-movies</command-message>
+/// <command-name>/find-movies</command-name>
+/// <command-args>something to watch tonight</command-args>
+/// ```
+///
+/// Taken verbatim — which is what happened until now — the conversation showed
+/// those three tags to the reader, and the one thing they carry, *which
+/// command ran*, was the hardest part to read. The tags do not come in a
+/// stable order and are sometimes indented, so each is found by name rather
+/// than by position. `<command-message>` is dropped: it is the name again
+/// without its slash.
+fn slash_command(text: &str) -> Option<String> {
+    let name = tagged(text, "command-name")?;
+    if name.is_empty() {
+        return None;
+    }
+    Some(match tagged(text, "command-args").filter(|args| !args.is_empty()) {
+        Some(args) => format!("{name} {args}"),
+        None => name.to_string(),
+    })
+}
+
 /// Epoch ms for a record's `timestamp`, falling back to now.
 ///
 /// The TS does `Date.parse(...)` and falls back to `Date.now()` on NaN. This
@@ -334,6 +370,19 @@ pub fn summarize_tool(name: &str, input: Option<&Value>) -> String {
         "Bash" => text_of("description").unwrap_or_else(|| first_line(&text_of("command").unwrap_or_default())),
         "Read" | "Edit" | "Write" | "NotebookEdit" => text_of("file_path").unwrap_or_default(),
         "Grep" | "Glob" => text_of("pattern").unwrap_or_default(),
+        /*
+         * Which skill ran. `input` carries `skill` and, optionally, `args`,
+         * and nothing else — measured across 110 invocations on this machine,
+         * every one of them 1:1 with a result naming the same skill. Without
+         * this arm the generic branch below looks for a description, a path, a
+         * pattern and a command, finds none of them, and the row reads as the
+         * bare word "Skill": the one fact worth showing was the one dropped.
+         *
+         * The name is what is shown, not the arguments. A skill's args are the
+         * whole request that triggered it — a paragraph, often — and the row
+         * this lands in is a single elided line.
+         */
+        "Skill" => text_of("skill").unwrap_or_default(),
         "Task" | "Agent" => {
             text_of("description").unwrap_or_else(|| first_line(&text_of("prompt").unwrap_or_default()))
         }
@@ -746,11 +795,14 @@ impl Batch<'_> {
         if text.is_empty() {
             return;
         }
+        // A typed slash command is still the user speaking; it is only spelled
+        // in markup on disk.
+        let text = slash_command(text).unwrap_or_else(|| text.to_string());
         self.out.events.push(TimelineEvent {
             id: (self.seq)(),
             at: context.at,
             kind: TimelineKind::User,
-            text: text.to_string(),
+            text,
             tool: None,
             sidechain: context.sidechain,
             notice: None,
@@ -1547,6 +1599,37 @@ mod tests {
         assert!(parse(&[&a, &b]).events.is_empty());
     }
 
+    /*
+     * A slash command the user typed is stored as markup, and was shown that
+     * way: three tags on screen, with the command they name the hardest part
+     * to read. The tags do not come in a stable order and are sometimes
+     * indented, so each is found by name.
+     */
+    #[test]
+    fn reads_a_typed_slash_command_as_the_command_it_ran() {
+        let spelled = |content: &str| {
+            let line = serde_json::json!({
+                "type": "user",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "message": { "role": "user", "content": content },
+            })
+            .to_string();
+            parse(&[line.as_str()]).events.first().map(|e| e.text.clone()).unwrap_or_default()
+        };
+
+        assert_eq!(
+            spelled("<command-message>find-movies</command-message>\n<command-name>/find-movies</command-name>\n<command-args>something for tonight</command-args>"),
+            "/find-movies something for tonight"
+        );
+        // Name first, indented, and no arguments: the other shape on disk.
+        assert_eq!(
+            spelled("<command-name>/goal</command-name>\n            <command-message>goal</command-message>\n            <command-args></command-args>"),
+            "/goal"
+        );
+        // Prose that merely mentions the tag name is left alone.
+        assert_eq!(spelled("grep for <command-name in the logs"), "grep for <command-name in the logs");
+    }
+
     #[test]
     fn keeps_a_real_user_prompt() {
         let line = json!({
@@ -1704,6 +1787,22 @@ mod tests {
         assert_eq!(summarize_tool("Edit", Some(&json!({ "file_path": "/a/b.ts" }))), "/a/b.ts");
         assert_eq!(summarize_tool("Grep", Some(&json!({ "pattern": "TODO" }))), "TODO");
         assert_eq!(summarize_tool("Glob", Some(&json!({ "pattern": "**/*.rs" }))), "**/*.rs");
+    }
+
+    /*
+     * Which skill ran is the one fact a skill call carries, and it was the one
+     * being dropped: with no arm of its own the generic branch looks for a
+     * description, a path, a pattern and a command, finds none, and the row
+     * reads as the bare word "Skill".
+     */
+    #[test]
+    fn names_the_skill_a_skill_call_ran() {
+        let input = serde_json::json!({ "skill": "commit-guard", "args": "commit and push" });
+        assert_eq!(summarize_tool("Skill", Some(&input)), "commit-guard");
+        // A plugin-qualified name is passed through as written: the prefix is
+        // part of what was invoked.
+        let plugin = serde_json::json!({ "skill": "harness:nas-docker" });
+        assert_eq!(summarize_tool("Skill", Some(&plugin)), "harness:nas-docker");
     }
 
     #[test]

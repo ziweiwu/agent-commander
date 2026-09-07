@@ -57,6 +57,7 @@ const LANG_KEY = 'agent-commander.lang'
 const FILTER_KEY = 'agent-commander.filter'
 const SORT_KEY = 'agent-commander.sort'
 const DIR_KEY = 'agent-commander.dir'
+const TERMINALS_KEY = 'agent-commander.terminals'
 
 function isTheme(value: unknown): value is Theme {
   return typeof value === 'string' && (THEMES as readonly string[]).includes(value)
@@ -118,6 +119,28 @@ export function loadFilter(): StatusFilter {
 
 export function saveFilter(filter: StatusFilter): void {
   write(FILTER_KEY, filter)
+}
+
+/*
+ * Terminals are out of the fleet until asked for, and the ask sticks.
+ *
+ * Off by default because the fleet answers "which agent needs me" and a shell
+ * never does. It persists for the same reason the three above do: someone who
+ * keeps a couple of terminals open wants them there every morning, and
+ * re-admitting them daily is the friction that made the filter persist in the
+ * first place. It is stored separately rather than as a fourth `StatusFilter`
+ * because it is orthogonal — a terminal has a status like anything else, and
+ * folding the two together would make "busy only" and "with terminals"
+ * mutually exclusive.
+ */
+export type TerminalsChoice = 'on' | 'off'
+
+export function loadTerminals(): TerminalsChoice {
+  return read(TERMINALS_KEY) === 'on' ? 'on' : 'off'
+}
+
+export function saveTerminals(choice: TerminalsChoice): void {
+  write(TERMINALS_KEY, choice)
 }
 
 /*

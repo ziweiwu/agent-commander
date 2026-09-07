@@ -38,6 +38,9 @@ pub struct PendingSession {
     pub tmux_session: String,
     pub cwd: String,
     pub name: String,
+    /// Which of INV-7's two shapes was spawned. Carried rather than assumed:
+    /// see [`starting_up`] for the card that got this wrong.
+    pub agent_kind: String,
     pub started_at: i64,
 }
 
@@ -108,6 +111,18 @@ fn basename(cwd: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+/// The namespace every placeholder id sits in.
+///
+/// Public because two other modules have to recognise one: the registry, which
+/// exempts placeholders from the CLI's liveness check, and the composite,
+/// which must never let one shadow a real session.
+pub const PENDING_PREFIX: &str = "pending:";
+
+/// True when this entry is a placeholder for a session nobody has found yet.
+pub fn is_placeholder(agent: &Agent) -> bool {
+    agent.session_id.starts_with(PENDING_PREFIX)
+}
+
 /// What the card header shows: the last path segment, or the path itself.
 fn folder_of(cwd: &str) -> String {
     basename(cwd).unwrap_or_else(|| cwd.to_string())
@@ -122,6 +137,9 @@ pub struct SpawnedSession<'a> {
     pub tmux_session: &'a str,
     pub cwd: &'a str,
     pub name: Option<&'a str>,
+    /// The kind that was started. There are two shapes now (INV-7), and the
+    /// placeholder card is built entirely from this struct.
+    pub agent_kind: &'a str,
 }
 
 /// What a pane listing settles about a session that has not registered yet.
@@ -175,6 +193,7 @@ impl PendingStore {
                 tmux_session: spawned.tmux_session.to_string(),
                 cwd: spawned.cwd.to_string(),
                 name,
+                agent_kind: spawned.agent_kind.to_string(),
                 started_at: now,
             },
         );
@@ -264,24 +283,36 @@ impl PendingStore {
 }
 
 /// The fleet entry a still-unregistered session gets: attachable, and saying
-/// plainly that it may be sitting on a trust prompt.
+/// plainly what it is waiting on.
+///
+/// **The kind is carried, not assumed.** This used to hard-code Claude, under
+/// a comment reading "this app spawns Claude and nothing else (INV-7)" — true
+/// when it was written and false the moment a second command shape was added.
+/// A terminal wearing that kind is offered the Chat tab, `/goal`, `/model`,
+/// `/clear`, `/compact` and Shift+Tab, every one of which types Claude's own
+/// slash commands into what is actually a shell prompt: the precise failure
+/// INV-7 exists to prevent, reached through a placeholder rather than through
+/// the route.
+///
+/// The trust prompt is Claude's too. A shell asks nothing on the way up, so
+/// saying it might be is a claim about a program that is not running (INV-11).
 fn starting_up(session: &PendingSession, pane: String) -> Agent {
+    let claude = session.agent_kind == CLAUDE_KIND;
     Agent {
-        session_id: format!("pending:{}", session.tmux_session),
+        session_id: format!("{PENDING_PREFIX}{}", session.tmux_session),
         pid: 0,
         name: session.name.clone(),
         cwd: session.cwd.clone(),
         folder: folder_of(&session.cwd),
         status: AgentStatus::Waiting,
         waiting_for: Some("starting up".into()),
-        // This app spawns Claude and nothing else (INV-7), and an empty kind
-        // here would deny the very controls the card exists to offer.
-        agent_kind: CLAUDE_KIND.into(),
+        agent_kind: session.agent_kind.clone(),
         kind: "interactive".into(),
         started_at: session.started_at,
         pane_id: Some(pane),
         tmux_session: Some(session.tmux_session.clone()),
-        activity: Some("Starting — it may be asking whether this folder is trusted.".into()),
+        activity: claude
+            .then(|| "Starting — it may be asking whether this folder is trusted.".to_string()),
         ..Default::default()
     }
 }
@@ -327,7 +358,7 @@ mod tests {
 
     /// A spawn with no explicit name, which is what most of these tests want.
     fn spawned<'a>(tmux_session: &'a str, cwd: &'a str) -> SpawnedSession<'a> {
-        SpawnedSession { tmux_session, cwd, name: None }
+        SpawnedSession { tmux_session, cwd, name: None, agent_kind: CLAUDE_KIND }
     }
 
     fn answering(
@@ -427,10 +458,58 @@ mod tests {
                 tmux_session: "claude-1",
                 cwd: "/Users/me/Projects/app",
                 name: Some("nightly build"),
+                agent_kind: CLAUDE_KIND,
             },
             0,
         );
         assert_eq!(s.merge_at(vec![], 0).await[0].name, "nightly build");
+    }
+
+    /// The placeholder card is built from the spawn and nothing else, so it
+    /// has to carry the kind that was spawned.
+    ///
+    /// It used to hard-code Claude, under a comment saying this app spawned
+    /// nothing else — true when written, false as of INV-7's second command
+    /// shape. A terminal wearing the Claude kind is offered the Chat tab and
+    /// every control that types a slash command into what is a shell prompt.
+    #[tokio::test]
+    async fn inv7_a_placeholder_carries_the_kind_that_was_spawned() {
+        let (s, _) = store(Some("%1"));
+        s.add_at(
+            SpawnedSession {
+                tmux_session: "term-1",
+                cwd: "/Users/me/Projects/app",
+                name: None,
+                agent_kind: crate::agent_kinds::TERMINAL_KIND,
+            },
+            0,
+        );
+        let card = s.merge_at(vec![], 0).await.remove(0);
+        assert_eq!(card.agent_kind, crate::agent_kinds::TERMINAL_KIND);
+    }
+
+    /// A shell asks nothing on the way up, so saying it might be sitting on a
+    /// trust prompt is a claim about a program that is not running (INV-11).
+    #[tokio::test]
+    async fn inv11_only_claude_is_said_to_be_asking_about_trust() {
+        let (s, _) = store(Some("%1"));
+        s.add_at(
+            SpawnedSession {
+                tmux_session: "term-1",
+                cwd: "/w",
+                name: None,
+                agent_kind: crate::agent_kinds::TERMINAL_KIND,
+            },
+            0,
+        );
+        assert_eq!(s.merge_at(vec![], 0).await[0].activity, None);
+
+        let (claude, _) = store(Some("%1"));
+        claude.add_at(spawned("claude-1", "/w"), 0);
+        assert!(claude.merge_at(vec![], 0).await[0]
+            .activity
+            .as_deref()
+            .is_some_and(|line| line.contains("trusted")));
     }
 
     /// A cwd with no basename to take falls back to the session name rather

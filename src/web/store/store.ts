@@ -32,6 +32,7 @@ import {
   applyTheme,
   loadDir,
   loadFilter,
+  loadTerminals,
   loadLang,
   loadSort,
   loadScheme,
@@ -39,6 +40,7 @@ import {
   loadNotify,
   saveDir,
   saveFilter,
+  saveTerminals,
   saveLang,
   saveSort,
   saveScheme,
@@ -190,6 +192,7 @@ export interface AppState {
   setLang: (lang: Lang) => void
   setQuery: (query: string) => void
   setFilter: (filter: StatusFilter) => void
+  setTerminals: (shown: boolean) => void
   setSort: (sort: SortKey) => void
   setDir: (dir: SortDir) => void
   setFullscreen: (on: boolean) => void
@@ -304,7 +307,13 @@ export const useStore = create<AppState>()((set, get) => ({
   // chose. Query is deliberately *not* restored — an arrangement is a lasting
   // view, a search term is a one-off lookup that would be baffling to come back
   // to on a reload with no visible cause.
-  fleet: { query: '', filter: loadFilter(), sort: loadSort(), dir: loadDir() },
+  fleet: {
+    query: '',
+    filter: loadFilter(),
+    sort: loadSort(),
+    dir: loadDir(),
+    terminals: loadTerminals() === 'on',
+  },
   notify: loadNotify() === 'on',
   notifyNudge: false,
   theme: loadTheme(),
@@ -352,6 +361,10 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setQuery: (query) => set((s) => ({ fleet: { ...s.fleet, query } })),
+  setTerminals: (terminals) => {
+    saveTerminals(terminals ? 'on' : 'off')
+    set((s) => ({ fleet: { ...s.fleet, terminals } }))
+  },
   setFilter: (filter) => {
     saveFilter(filter)
     set((s) => ({ fleet: { ...s.fleet, filter } }))

@@ -765,16 +765,29 @@ pub struct PaneFacts {
     pub window_panes: i64,
     pub dead: bool,
     pub cwd: String,
+    /// What this app wrote on the session when it created it, if it did.
+    ///
+    /// A tmux user option, empty for every session this app did not make. It
+    /// is the one signal that separates a terminal *this* app opened from the
+    /// husks tmux-resurrect leaves behind, which restores names and layouts
+    /// and not another program's options — and a name alone cannot tell those
+    /// apart, which is why `is_live_agent` refuses a shell without it.
+    pub marker: String,
 }
+
+/// The tmux user option this app sets on a session it creates, and the value
+/// it sets for a plain terminal. Read back per pane in [`FACTS_FORMAT`].
+pub const MARKER_OPTION: &str = "@agent_commander";
+pub const MARKER_TERMINAL: &str = "terminal";
 
 const FACTS_FORMAT: &str = concat!(
     "#{pane_id}|#{session_name}|#{pane_pid}|#{window_activity}",
-    "|#{window_panes}|#{pane_dead}|#{pane_current_command}"
+    "|#{window_panes}|#{pane_dead}|#{@agent_commander}|#{pane_current_command}"
 );
 const PATH_FORMAT: &str = "#{pane_id}|#{pane_current_path}";
 
 /// Fields before the free-text one in [`FACTS_FORMAT`], which is taken whole.
-const COUNTED_FACTS: usize = 6;
+const COUNTED_FACTS: usize = 7;
 
 /// Where each counted field of [`FACTS_FORMAT`] lands once the row is split.
 /// tmux answers in the order it was asked, so these are the format string read
@@ -785,6 +798,7 @@ const FACT_PID: usize = 2;
 const FACT_ACTIVITY: usize = 3;
 const FACT_WINDOW_PANES: usize = 4;
 const FACT_DEAD: usize = 5;
+const FACT_MARKER: usize = 6;
 
 /// Every field of [`FACTS_FORMAT`], counting the free-text one.
 const FACTS_FIELDS: usize = COUNTED_FACTS + 1;
@@ -827,6 +841,7 @@ fn parse_facts(line: &str, cwd_of: &HashMap<String, String>) -> Option<PaneFacts
             Ok(count) => count,
         },
         dead: parts[FACT_DEAD] == "1",
+        marker: parts[FACT_MARKER].to_string(),
         cwd: cwd_of.get(pane_id).cloned().unwrap_or_default(),
     })
 }
@@ -2059,6 +2074,7 @@ mod tests {
         activity: String,
         window_panes: String,
         dead: String,
+        marker: String,
         command: String,
     }
 
@@ -2070,6 +2086,7 @@ mod tests {
                 activity: SAMPLE_ACTIVITY_AT.to_string(),
                 window_panes: "1".into(),
                 dead: "0".into(),
+                marker: String::new(),
                 command: "zsh".into(),
             }
         }
@@ -2078,12 +2095,13 @@ mod tests {
     impl FactsRow {
         fn line(&self) -> String {
             format!(
-                "{}|{}|{SAMPLE_PID}|{}|{}|{}|{}",
+                "{}|{}|{SAMPLE_PID}|{}|{}|{}|{}|{}",
                 self.pane,
                 self.session,
                 self.activity,
                 self.window_panes,
                 self.dead,
+                self.marker,
                 self.command
             )
         }
@@ -2119,9 +2137,24 @@ mod tests {
     #[test]
     fn a_row_that_is_not_a_pane_is_dropped_rather_than_guessed_at() {
         assert!(parse_facts("", &HashMap::new()).is_none());
-        assert!(parse_facts("%1|s|1|2|3|0", &HashMap::new()).is_none(), "too few fields");
+        assert!(parse_facts("%1|s|1|2|3|0|zsh", &HashMap::new()).is_none(), "too few fields");
         let not_a_pane = FactsRow { pane: "nonsense".into(), ..Default::default() }.line();
         assert!(parse_facts(&not_a_pane, &HashMap::new()).is_none());
+    }
+
+    /// The one field here that nothing on the machine sets but this app.
+    ///
+    /// It is read for every pane on every sweep, so a session with no option
+    /// on it must come back empty rather than absent — an empty field is what
+    /// keeps the count right and the command in its own column.
+    #[test]
+    fn reads_this_app_s_own_marker_off_the_session() {
+        let ours = FactsRow { marker: MARKER_TERMINAL.into(), ..Default::default() }.line();
+        assert_eq!(parse_facts(&ours, &HashMap::new()).unwrap().marker, MARKER_TERMINAL);
+        let theirs = FactsRow::default().line();
+        let row = parse_facts(&theirs, &HashMap::new()).unwrap();
+        assert_eq!(row.marker, "");
+        assert_eq!(row.command, "zsh", "an empty marker does not shift the columns");
     }
 
     #[test]

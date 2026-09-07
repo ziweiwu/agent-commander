@@ -2,11 +2,23 @@
 //!
 //! Port of `src/server/spawn.ts`.
 //!
-//! INV-7: this is the only place the app creates a process. It runs exactly
-//! one command shape — `tmux new-session -d -s <generated> -c <validated dir>
-//! claude` — with the directory validated first and every value passed as a
-//! separate argv entry, never through a shell. The session name is generated
-//! here, so nothing user-supplied reaches tmux's argument parser.
+//! INV-7: this is the only place the app creates a process, and it runs two
+//! command shapes, each written out here in full:
+//!
+//! ```text
+//! tmux new-session -d -s <generated> -c <validated dir> claude [flags]
+//! tmux new-session -d -s <generated> -c <validated dir> ; set-option …
+//! ```
+//!
+//! The second opens a plain terminal — no command, so tmux runs the user's own
+//! shell — and marks the session as one this app made. Neither shape carries a
+//! value the user typed into tmux's argument parser: the directory is
+//! validated first, the session name is generated here, and every value is a
+//! separate argv entry, never a shell string.
+//!
+//! They are separate functions rather than one with a flag because the second
+//! takes no model and no permission mode: those are Claude's, and a shape that
+//! cannot be handed them cannot forward them by accident.
 
 #![allow(dead_code)]
 
@@ -14,7 +26,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::options::{is_model_alias, is_permission_mode, normalize};
-use crate::types::NewAgentRequest;
+use crate::types::{NewAgentRequest, NewTerminalRequest};
+
+/// What a plain terminal's session is called, so `tmux ls` says which is which.
+pub const TERMINAL_PREFIX: &str = "term";
 
 /// Same shape Claude Code uses for its own tmux sessions.
 const SESSION_PREFIX: &str = "claude";
@@ -134,15 +149,20 @@ pub async fn check_spawn_request(req: &NewAgentRequest) -> Result<PathBuf, Spawn
 /// `[A-Za-z0-9-]` is dropped rather than escaped, because there is no escaping
 /// to get wrong if the characters are simply not there.
 pub fn session_name(now: i64, suffix: &str) -> String {
+    prefixed_session_name(SESSION_PREFIX, now, suffix)
+}
+
+/// The same, for a session that is not an agent.
+pub fn prefixed_session_name(prefix: &str, now: i64, suffix: &str) -> String {
     let clean: String = suffix
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
         .take(MAX_SUFFIX_CHARS)
         .collect();
     if clean.is_empty() {
-        format!("{SESSION_PREFIX}-{now}")
+        format!("{prefix}-{now}")
     } else {
-        format!("{SESSION_PREFIX}-{now}-{clean}")
+        format!("{prefix}-{now}-{clean}")
     }
 }
 
@@ -200,6 +220,50 @@ async fn tmux(args: &[String]) -> Result<String, SpawnError> {
         }));
     }
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// The argv for a plain terminal, built and returned rather than executed.
+///
+/// One tmux invocation, two commands: create the session, then write this
+/// app's marker on it. `;` is tmux's own separator and its own argv entry, the
+/// same way `pane::sample_args` chains a read. No command follows `-c <dir>`,
+/// which is what makes tmux run the user's login shell rather than a program
+/// this app chose.
+///
+/// The marker is the whole reason the fleet will list this session at all: a
+/// shell is otherwise indistinguishable from the husk tmux-resurrect leaves
+/// when an agent exits, and `tmux_agents::is_live_agent` refuses those.
+pub fn terminal_argv(session: &str, cwd: &Path) -> Vec<String> {
+    vec![
+        "new-session".into(),
+        "-d".into(),
+        "-s".into(),
+        session.to_string(),
+        "-c".into(),
+        cwd.to_string_lossy().into_owned(),
+        ";".into(),
+        "set-option".into(),
+        "-t".into(),
+        session.to_string(),
+        crate::pane::MARKER_OPTION.into(),
+        crate::pane::MARKER_TERMINAL.into(),
+    ]
+}
+
+/// Open a plain tmux session, with the user's shell and no agent in it.
+///
+/// The directory is validated exactly as an agent's is — the same function, so
+/// the same refusals in the same words — and there is no model or mode to
+/// check, because this shape has nowhere to put one.
+pub async fn start_terminal(
+    req: &NewTerminalRequest,
+    now: i64,
+) -> Result<SpawnResult, SpawnFailure> {
+    let cwd = validate_dir(&req.cwd, &home_dir()).await?;
+    let session =
+        prefixed_session_name(TERMINAL_PREFIX, now, req.name.as_deref().unwrap_or(""));
+    tmux(&terminal_argv(&session, &cwd)).await?;
+    Ok(SpawnResult { tmux_session: session, cwd: cwd.to_string_lossy().into_owned() })
 }
 
 /// Create a detached tmux session running `claude` in the chosen directory.
@@ -442,6 +506,57 @@ mod tests {
         // Nothing is ever concatenated into one string, so there is no quoting
         // rule to get wrong.
         assert!(argv.iter().all(|a| !a.contains('\n')));
+    }
+
+    /* ---- the second command shape ---- */
+
+    /// The terminal shape runs no program at all, which is the property that
+    /// makes it a terminal: tmux falls back to the user's login shell.
+    #[test]
+    fn inv7_builds_exactly_one_terminal_shape() {
+        let argv = terminal_argv("term-1-x", Path::new("/w"));
+        assert_eq!(
+            argv,
+            [
+                "new-session",
+                "-d",
+                "-s",
+                "term-1-x",
+                "-c",
+                "/w",
+                ";",
+                "set-option",
+                "-t",
+                "term-1-x",
+                crate::pane::MARKER_OPTION,
+                crate::pane::MARKER_TERMINAL,
+            ]
+        );
+        let after_dir = argv.iter().position(|a| a == "/w").unwrap() + 1;
+        assert_eq!(argv[after_dir], ";", "a command here is a program tmux would run instead");
+    }
+
+    /// The marker is not decoration. Without it the session is a shell in a
+    /// tmux session, which is exactly what a tmux-resurrect husk is, and
+    /// `tmux_agents::is_live_agent` refuses those — so the terminal a user
+    /// just opened would never appear in the fleet.
+    #[test]
+    fn a_terminal_is_marked_as_this_app_s_own() {
+        let argv = terminal_argv("term-1-x", Path::new("/w"));
+        let at = argv.iter().position(|a| a == crate::pane::MARKER_OPTION).unwrap();
+        assert_eq!(argv[at + 1], crate::pane::MARKER_TERMINAL);
+        assert_eq!(argv[at - 1], "term-1-x", "the option is set on the session just made");
+    }
+
+    /// The two shapes must not collide in the session namespace: a name is how
+    /// the fleet tells one session from another, and `session_name` sanitises
+    /// a user's suffix the same way for both.
+    #[test]
+    fn inv7_a_terminal_name_is_prefixed_and_sanitised_like_an_agent_s() {
+        let name = prefixed_session_name(TERMINAL_PREFIX, SPAWNED_AT, "my:notes.1");
+        assert!(name.starts_with("term-"), "{name}");
+        assert!(!name.contains(':') && !name.contains('.'), "{name}");
+        assert_ne!(name, session_name(SPAWNED_AT, "my:notes.1"));
     }
 
     /// A name is the one free-text value that still reaches argv — as `-n`'s

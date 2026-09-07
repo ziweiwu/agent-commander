@@ -56,6 +56,52 @@
   margin-top: 10px;
   align-items: center;
 }
+
+/*
+ * The paste target. Stretched rather than centred like the key row: it is a
+ * field to put a command in, and one shrink-wrapped to its placeholder would
+ * be the narrowest thing on the surface that most needs to be wide.
+ */
+.compose {
+  display: flex;
+  gap: 6px;
+  /* The button stays with the last line as the field grows, rather than
+     floating in the middle of a three-line paste. */
+  align-items: flex-end;
+  align-self: stretch;
+  margin-top: 6px;
+}
+.composeInput {
+  flex: 1;
+  min-width: 0;
+  /* A textarea, so a pasted snippet keeps its newlines; it grows to a few
+     lines and scrolls rather than pushing the pane off a short screen. */
+  resize: none;
+  min-height: 40px;
+  max-height: 120px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.composeInput:focus {
+  outline: 2px solid color-mix(in srgb, var(--focus) 55%, transparent);
+  outline-offset: -1px;
+}
+.composeInput:disabled {
+  opacity: 0.5;
+}
+/* iOS zooms the page when a focused field renders under 16px, and this is the
+   field a phone is most likely to focus. A module selector outranks the global
+   rule, so it is repeated here rather than inherited. */
+@media (pointer: coarse) {
+  .composeInput {
+    font-size: 16px;
+  }
+}
 /*
  * The controls that change how the pane is shown, rather than what is typed
  * into it. Grouped so they wrap as a pair onto the same row instead of the

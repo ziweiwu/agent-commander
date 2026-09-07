@@ -69,7 +69,11 @@ namespace, `TranscriptTail` and `RateLimitWatcher`; fakes are the four classes i
 `mock.rs`. That seam is why `--mock` is a genuine review gate rather than a demo:
 the mock fleet runs the same server, the same routes, and the same
 `checkSpawnRequest` (`spawn.ts:73`) that the real one does, so a validation
-failure seen in mock mode is the failure you would get for real.
+failure seen in mock mode is the failure you would get for real. `SpawnApi`
+carries both of INV-7's command shapes — `start` for an agent, `start_terminal`
+for a plain shell — because the two requests do not carry the same fields and a
+boolean would have made that a branch inside one validator rather than two
+shapes named at the door.
 
 `src/shared/types.ts` is the only module the browser imports for anything that
 has to mean the same thing on both sides: the wire types, `ALLOWED_KEYS` and

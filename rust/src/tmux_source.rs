@@ -267,19 +267,43 @@ fn claims_its_tmux_session(claimed: &mut HashSet<String>, agent: &Agent) -> bool
 }
 
 impl CompositeInner {
+    /// Every provider's agents, one winner per tmux session.
+    ///
+    /// **Placeholders claim last, whichever provider emitted them.** A
+    /// `pending:` entry stands in for a session nobody has found yet, so the
+    /// moment any provider finds it the placeholder is the weaker claim — and
+    /// provider order cannot decide that, because the placeholder and the
+    /// finding come from different providers with the spawner's first.
+    ///
+    /// Getting this wrong is not a wrong label, it is a session that never
+    /// appears: a spawned terminal is discovered by the tmux sweep, but the
+    /// Claude registry emits its placeholder and is asked first, so the real
+    /// entry was skipped for the full five minutes a placeholder is allowed
+    /// to live. `pending`'s own retirement rule could not end it either — that
+    /// fires when the *Claude* list claims the session, which for a shell it
+    /// never does.
     fn list(&self) -> Vec<Agent> {
         let patches = self.patches.lock().unwrap();
         let mut out: Vec<Agent> = Vec::new();
         let mut claimed: HashSet<String> = HashSet::new();
+        let mut placeholders: Vec<Agent> = Vec::new();
         for provider in &self.providers {
-            for mut agent in provider.list() {
-                if !claims_its_tmux_session(&mut claimed, &agent) {
-                    continue;
+            for agent in provider.list() {
+                if crate::pending::is_placeholder(&agent) {
+                    placeholders.push(agent);
+                } else if claims_its_tmux_session(&mut claimed, &agent) {
+                    out.push(agent);
                 }
-                if let Some(patch) = patches.get(&agent.session_id) {
-                    patch.apply(&mut agent);
-                }
+            }
+        }
+        for agent in placeholders {
+            if claims_its_tmux_session(&mut claimed, &agent) {
                 out.push(agent);
+            }
+        }
+        for agent in &mut out {
+            if let Some(patch) = patches.get(&agent.session_id) {
+                patch.apply(agent);
             }
         }
         sort_agents(&out)
@@ -401,6 +425,7 @@ mod tests {
             window_panes: 1,
             dead: false,
             cwd: "/Users/ziweiwu/Projects/folio".into(),
+            marker: String::new(),
         }
     }
 
@@ -672,6 +697,96 @@ mod tests {
         source.stop();
         provider.1.emit(&());
         assert_eq!(hits.load(Ordering::SeqCst), 0);
+    }
+
+    fn terminal_pane(session: &str) -> PaneFacts {
+        PaneFacts {
+            pane_id: "%85".into(),
+            command: "zsh".into(),
+            marker: crate::pane::MARKER_TERMINAL.into(),
+            ..kiro_pane(session)
+        }
+    }
+
+    fn placeholder(tmux_session: &str) -> Agent {
+        Agent {
+            session_id: format!("{}{tmux_session}", crate::pending::PENDING_PREFIX),
+            tmux_session: Some(tmux_session.into()),
+            ..claude(tmux_session, Some(tmux_session))
+        }
+    }
+
+    /// A provider that answers with exactly what it was handed.
+    struct Fixed(Vec<Agent>, Listeners<Vec<Agent>>);
+
+    #[async_trait]
+    impl AgentSource for Fixed {
+        fn list(&self) -> Vec<Agent> {
+            self.0.clone()
+        }
+        fn get(&self, session_id: &str) -> Option<Agent> {
+            self.list().into_iter().find(|a| a.session_id == session_id)
+        }
+        fn on_change(&self, listener: Box<dyn Fn(Vec<Agent>) + Send + Sync>) -> Unsubscribe {
+            self.1.add(listener)
+        }
+        fn enrich(&self, _session_id: &str, _patch: AgentPatch) {}
+        async fn start(&self) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn stop(&self) {}
+    }
+
+    async fn composite_of(claude: Vec<Agent>, panes: Vec<PaneFacts>) -> CompositeSource {
+        let bridged: Arc<dyn AgentProvider> = Arc::new(SourceAsProvider(
+            Arc::new(Fixed(claude, Listeners::new())) as Arc<dyn AgentSource>
+        ));
+        let tmux: Arc<dyn AgentProvider> =
+            Arc::new(TmuxProvider::new(FakeFacts::new(panes).reader()));
+        let source = CompositeSource::new(vec![bridged, tmux]);
+        source.start().await.unwrap();
+        source
+    }
+
+    /// The defect this rule exists for, as the user met it.
+    ///
+    /// Opening a terminal announces a `pending:` placeholder from the Claude
+    /// registry — which is provider *zero* — and the real session is found by
+    /// the tmux sweep, which is provider one. On plain provider order the
+    /// placeholder won its tmux session and the real terminal was dropped for
+    /// the five minutes a placeholder may live, wearing the Claude kind the
+    /// whole time. The session the user had just asked for simply never
+    /// appeared.
+    #[tokio::test]
+    async fn a_placeholder_never_shadows_the_session_it_stands_in_for() {
+        let source =
+            composite_of(vec![placeholder("term-1")], vec![terminal_pane("term-1")]).await;
+
+        let found: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(found, vec!["tmux:term-1"], "the finding wins, not the placeholder");
+    }
+
+    /// And the other half: while nothing has found it, the placeholder is the
+    /// only thing there is to show, so it must still be shown.
+    #[tokio::test]
+    async fn a_placeholder_still_stands_in_while_nothing_has_found_it() {
+        let source = composite_of(vec![placeholder("term-1")], vec![]).await;
+        let found: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(found, vec!["pending:term-1"]);
+    }
+
+    /// The ordering rule between two *real* providers is unchanged: Claude
+    /// still wins a session the tmux sweep also saw, because what it says
+    /// about itself is better evidence than what a pane can be read for.
+    #[tokio::test]
+    async fn a_real_claude_session_still_wins_over_the_sweep() {
+        let source = composite_of(
+            vec![claude("uuid-1", Some("kiro-1"))],
+            vec![kiro_pane("kiro-1")],
+        )
+        .await;
+        let found: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(found, vec!["uuid-1"]);
     }
 
     /// A plain `AgentSource` holding one Claude session, for the bridge test.

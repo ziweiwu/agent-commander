@@ -138,7 +138,18 @@
   white-space: nowrap;
   min-width: 0;
 }
+/*
+ * A control, and held to a control's floor.
+ *
+ * It was 20px high, under WCAG 2.5.8's 24 and well under the 44 a coarse
+ * pointer wants — and no gate had ever seen it, because no fixture produced a
+ * run long enough to collapse, so the one state this button exists in was
+ * never on screen for an audit to measure. It is on screen in `--mock` now.
+ */
 .toggle {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
   background: none;
   border: 0;
   color: var(--dim);
@@ -150,6 +161,11 @@
 }
 .toggle:hover {
   color: var(--text);
+}
+@media (pointer: coarse) {
+  .toggle {
+    min-height: 44px;
+  }
 }
 
 .working {
