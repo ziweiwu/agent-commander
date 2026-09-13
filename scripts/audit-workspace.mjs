@@ -50,6 +50,21 @@ const SHAPES = [
   { name: 'desktop', width: 1440, height: 900, enforced: true },
   { name: 'laptop', width: 1180, height: 800, enforced: true },
   { name: 'tablet', width: 834, height: 1112, enforced: true },
+  /*
+   * Measured, not enforced, and it exists because this script had a blind band.
+   *
+   * Sampling 1440, 1180, 834 and 390 left 901-1071px unmeasured — a window
+   * dragged to half a wide display, or a 1024x768 screen — and the agent header
+   * was wrapping to two rows across the whole of it, costing 5.5 points that no
+   * gate could see. The wrap is fixed; this row is here so the band cannot go
+   * quiet again.
+   *
+   * Not enforced because 768px of height is the binding constraint rather than
+   * the layout: the fixed chrome is the same absolute height as at 900px with
+   * 132 fewer pixels to spread it over, so clearing 80% here needs chrome
+   * removed rather than trimmed — the same argument as the phone.
+   */
+  { name: 'half-width', width: 1024, height: 768, enforced: false },
   { name: 'phone', width: 390, height: 844, enforced: false },
 ]
 
