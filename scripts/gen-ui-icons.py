@@ -7,11 +7,11 @@
 **Not to be confused with `gen-icons.py`, which is a different thing entirely.**
 That one draws the *application* icon — the PWA PNGs and the macOS `.iconset`,
 one picture of three lanes, guarded by `test/mac-app.test.ts`. This one draws
-the fifteen small control faces *inside* the app. They share nothing but a
+the sixteen small control faces *inside* the app. They share nothing but a
 prefix, and the near-collision is worth naming here because it has already
 caused one accident.
 
-Why a generator for fifteen shapes, rather than a hand-kept map.
+Why a generator for sixteen shapes, rather than a hand-kept map.
 
 The app drew its controls with Unicode glyphs: the settings ellipsis from Math
 Operators, the expand arrow from Miscellaneous Mathematical Symbols-B, the
@@ -29,8 +29,19 @@ whose output has drifted. That is the contract `gen-themes.py` has with
 nobody.
 
 The grid: 24x24, drawings kept inside a 3px margin so every icon carries the
-same optical weight in the same box. Stroke 1.7, chosen against the app's 13px
-body text — 1.4 disappears beside it, 2.4 competes with it.
+same optical weight in the same box. Stroke 2.1, and that is heavier than a
+first pass would choose.
+
+Five complete sets were drawn against this brief and rasterised together at a
+true 11px — strict-geometric, humanist, heavy, solid and duotone. 11px is where
+the decision actually happens, because that is the size the status chips and
+disclosure rows use, and four of the five fell apart there while looking fine
+at 16. The geometric panel pair became one indistinguishable smudge; the
+humanist gear collapsed into a mesh and the whole set went faint; the solid set
+lost bell-off to a blob and its chevron read as a play button; the duotone stop
+read as a record button. This one is the only set where all sixteen survived,
+and a dashboard glanced at from across a room is a legibility problem before it
+is a refinement problem.
 
 What is deliberately *not* here: keycap legends. The terminal key bar, the
 answer card and the help sheet draw arrows and a shift symbol that depict
@@ -50,49 +61,53 @@ OUT = Path("src/web/lib/icon-paths.ts")
 # The box, the weight, and the margin the drawings respect. Changing any of
 # these changes every icon at once, which is the point of them living here.
 VIEWBOX = 24
-STROKE = 1.7
+STROKE = 2.1
 
 # name -> the SVG child elements, drawn on the 24x24 grid.
 ICONS: dict[str, str] = {
-    # Disclosure. One chevron rotated, so an open row and a closed row are
-    # visibly the same control in two states rather than two different marks.
-    "chevron-right": '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
-    "chevron-down": '<path d="M5.5 9.5 12 16l6.5-6.5"/>',
-    # The overflow menu. Three dots on the optical centre.
-    "ellipsis": '<circle cx="5.2" cy="12" r="1.35"/><circle cx="12" cy="12" r="1.35"/>'
-    '<circle cx="18.8" cy="12" r="1.35"/>',
-    # Full screen: two arrows leaving a shared centre, which reads as "more
-    # room" where a single diagonal reads as "resize".
-    "expand": '<path d="M14 4h6v6M20 4l-7.2 7.2M10 20H4v-6M4 20l7.2-7.2"/>',
-    # The fleet column, hidden and shown. The bar is the edge of the screen and
-    # the arrow says which way the panel goes, so the pair is symmetrical.
-    "panel-hide": '<path d="M20 4.5v15M15.5 12H5M9.2 7.8 5 12l4.2 4.2"/>',
-    "panel-show": '<path d="M4 4.5v15M8.5 12H19M14.8 7.8 19 12l-4.2 4.2"/>',
-    # Direction, for sorting and for paging a list — never for a key legend.
-    "arrow-up": '<path d="M12 19.5V5M6.2 10.8 12 5l5.8 5.8"/>',
-    "arrow-down": '<path d="M12 4.5V19M6.2 13.2 12 19l5.8-5.8"/>',
-    "arrow-right": '<path d="M4.5 12h15M13.7 6.2 19.5 12l-5.8 5.8"/>',
+    # Disclosure. One chevron rotated, so a closed row and an open row are
+    # visibly the same control in two states.
+    "chevron-right": '<path d="M9 5L16 12L9 19"/>',
+    "chevron-down": '<path d="M5 9L12 16L19 9"/>',
+    # The overflow menu.
+    "ellipsis": '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+    # Full screen, as four corner brackets rather than a pair of diagonal
+    # arrows: at 11px the diagonals read as "resize" and the brackets read as
+    # "take the whole screen".
+    "expand": '<path d="M9 4.5H4.5V9"/><path d="M15 4.5H19.5V9"/><path d="M15 19.5H19.5V15"/><path d="M9 19.5H4.5V15"/>',
+    # The fleet column, hidden and shown. A bar for the screen edge and a
+    # chevron for the direction the panel goes. The teeth of this pair are what
+    # a reader tells apart at 11px, so the bar sits on opposite sides rather
+    # than the chevron alone flipping.
+    "panel-hide": '<path d="M5.5 4.5V19.5"/><path d="M16 6.5L11 12L16 17.5"/>',
+    "panel-show": '<path d="M18.5 4.5V19.5"/><path d="M8 6.5L13 12L8 17.5"/>',
+    # Direction: sorting, and paging a list. Never a key legend.
+    "arrow-up": '<path d="M12 19V5"/><path d="M6 11L12 5L18 11"/>',
+    "arrow-down": '<path d="M12 5V19"/><path d="M6 13L12 19L18 13"/>',
+    "arrow-right": '<path d="M5 12H19"/><path d="M13 6L19 12L13 18"/>',
     # Settled state.
-    "check": '<path d="M5 12.8 9.4 17.2 19 6.6"/>',
-    "close": '<path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8"/>',
-    # Stop: a square, not an octagon. It ends something the user started, which
-    # is a milder claim than a hazard sign.
-    "stop": '<rect x="6.4" y="6.4" width="11.2" height="11.2" rx="2.4"/>',
-    # Application settings, distinct from the per-agent overflow above.
-    "gear": '<circle cx="12" cy="12" r="3.1"/>'
-    '<path d="M12 3.4v2.3M12 18.3v2.3M20.6 12h-2.3M5.7 12H3.4'
-    'M18.08 5.92l-1.63 1.63M7.55 16.45l-1.63 1.63'
-    'M18.08 18.08l-1.63-1.63M7.55 7.55 5.92 5.92"/>',
-    "help": '<circle cx="12" cy="12" r="8.4"/>'
-    '<path d="M9.6 9.6a2.5 2.5 0 1 1 3.4 2.33c-.78.32-1 .84-1 1.57M12 16.9v.1"/>',
-    # The notification bell, redrawn from the 20x20 one that used to live inside
-    # NotifyButton so that it belongs to the same set as everything beside it.
-    "bell": '<path d="M12 3.6a5 5 0 0 0-5 5v3.4L5.4 15.2v1.1h13.2v-1.1L17 12V8.6a5 5 0 0 0-5-5Z"/>'
-    '<path d="M9.7 18.9a2.4 2.4 0 0 0 4.6 0"/>',
-    # Off is the same bell struck through: the state has to be readable without
-    # colour (INV-13).
-    "bell-off": '<path d="M12 3.6a5 5 0 0 0-5 5v3.4L5.4 15.2v1.1h13.2v-1.1L17 12V8.6a5 5 0 0 0-5-5Z"/>'
-    '<path d="M9.7 18.9a2.4 2.4 0 0 0 4.6 0"/><path d="M4.4 19.6 19.6 4.4"/>',
+    "check": '<path d="M5 12.5L9.5 17L19 6.5"/>',
+    "close": '<path d="M6 6L18 18"/><path d="M18 6L6 18"/>',
+    # Stop is a square, not an octagon: it ends something the user started,
+    # which is a milder claim than a hazard sign.
+    "stop": '<rect x="5.5" y="5.5" width="13" height="13" rx="2.5"/>',
+    # Application settings.
+    #
+    # The teeth begin exactly on the rim (r=5.2, and every tooth starts at
+    # 5.2 from centre) rather than floating outside it. That is the whole
+    # difference between a cog and a sunburst at 11px, and the set this
+    # replaced got it wrong: its spokes started at 3.4 against a rim at 3.1,
+    # so a third of a pixel of gap became a starburst once rasterised.
+    "gear": '<circle cx="12" cy="12" r="5.2"/><line x1="17.2" y1="12" x2="20.6" y2="12"/><line x1="14.6" y1="16.5" x2="16.3" y2="19.4"/><line x1="9.4" y1="16.5" x2="7.7" y2="19.4"/><line x1="6.8" y1="12" x2="3.4" y2="12"/><line x1="9.4" y1="7.5" x2="7.7" y2="4.6"/><line x1="14.6" y1="7.5" x2="16.3" y2="4.6"/>',
+    # No enclosing circle. At 11px the ring is what turns the mark to mush;
+    # the question mark alone is the most legible glyph in the set.
+    "help": '<path d="M8.6 9.6A3.8 3.8 0 1 1 12 12.4V13.9"/><circle cx="12" cy="18.6" r="1"/>',
+    # Notifications.
+    "bell": '<path d="M6.2 15.4H17.8V10.6A5.8 5.8 0 0 0 6.2 10.6Z"/><path d="M10.3 19.4H13.7"/>',
+    # Off drops the clapper as well as adding the strike, so the silhouette
+    # differs rather than just the detail — readable at 11px in greyscale
+    # (INV-13: never colour alone).
+    "bell-off": '<path d="M6.2 15.4H17.8V10.6A5.8 5.8 0 0 0 6.2 10.6Z"/><path d="M3.6 20.4L20.4 3.6"/>',
 }
 
 HEADER = """// Generated by scripts/gen-ui-icons.py -- do not edit.

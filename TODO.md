@@ -186,6 +186,65 @@ with the screen.
 leaves the last message visible; `npm run audit:workspace` does not regress; and
 the number appears once.
 
+### 9. Tune the palette against real theme gradients, not synthetic ramps
+
+**Filed 2026-09-13, requested.** Not started.
+
+`gen-themes.py` derives every colour in OKLCH from the contrast its role
+requires: pick a hue, pick a chroma, then solve lightness against the surfaces.
+That is why the palettes pass their gates, and it is also why they can feel
+mechanical — the hues are chosen per scheme and everything else falls out of an
+equation, so the *relationships* between colours are whatever the solver
+produced rather than anything anyone tuned.
+
+Sixteen of these palettes are named after real themes (dracula, monokai, solar,
+ember and the rest) and those originals have gradients a person shaped: a
+particular walk of hue and chroma across the ramp, which is most of what makes
+them recognisable. This app currently borrows their names and their approximate
+hues and none of their gradient.
+
+**The work:** take the real source palettes, measure the hue/chroma trajectory
+each one actually walks across its ramp, and use that as the input the solver
+shapes rather than a per-scheme constant. The gates stay exactly where they are
+— every result still has to clear `audit-contrast.py` — so this is about which
+of the many passing colours gets chosen, not about lowering the bar.
+
+**Watch for:** the solver's whole design is "closest to the surface that still
+clears the requirement", which is what stops a dark theme going pure-white on
+pure-black. A gradient fitted from a source palette must be an input to that
+search, never a replacement for it. And a real palette's own contrast is
+frequently *below* AA, which is the reason this app generates rather than
+copies; the fit has to be of the shape, not the values.
+
+**Done when:** `npm run audit:contrast` is still 0 failing pairs across 16
+palettes, `scheme.test.ts` still reproduces `tokens.css`, and the schemes are
+recognisably their namesakes side by side with the originals.
+
+### 10. Redesign the icon set with a fan-out, then pick one
+
+**Filed 2026-09-13, requested.** The set landed in `486d1cf` is one designer's
+first pass — a 24x24 grid at 1.7 stroke, drawn to be coherent rather than to be
+the best available.
+
+**The work:** five independent designs of the same sixteen icons, each a full
+set of SVG path data on the declared grid so they can be rendered side by side
+rather than described, then a critique that picks one and says why. Each should
+commit to a distinct direction (weight, corner treatment, geometric versus
+humanist, filled versus stroked, optical size) rather than five variations on
+the current one.
+
+**What makes this cheap to try:** the set is generated. Swapping a direction is
+editing `ICONS` in `scripts/gen-ui-icons.py` and re-running it; nothing in the
+app changes, because every call site names an icon rather than a shape.
+
+**Watch for:** `test/icons.test.ts` holds the grid, the stroke and the
+no-hard-coded-colour rule, so a candidate that sets its own fill fails rather
+than being merged. And the keycap exclusion stands — the terminal key bar and
+the help sheet depict physical keys and are not part of this set.
+
+**Done when:** five sets rendered together, one recommended with its reasoning,
+and the generator carrying whichever won.
+
 ## Not doing
 
 **TLA+ for the invariant set.** Evaluated and rejected. Of the 16, one (INV-2)

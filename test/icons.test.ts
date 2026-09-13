@@ -48,7 +48,7 @@ describe('the icon set is generated', () => {
 
   it('draws every icon on one grid at one weight', () => {
     expect(ICON_VIEWBOX).toBe(24)
-    expect(ICON_STROKE).toBe(1.7)
+    expect(ICON_STROKE).toBe(2.1)
     for (const [name, body] of Object.entries(ICON_PATHS)) {
       expect(body.length, `${name} is empty`).toBeGreaterThan(0)
       // A shape that sets its own colour would break in fifteen of the sixteen
