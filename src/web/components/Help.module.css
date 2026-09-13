@@ -59,7 +59,7 @@
   font-size: var(--text-base);
 }
 .keys kbd {
-  font: 11.5px ui-monospace, Menlo, monospace;
+  font: 12px var(--font-mono);
   border: 1px solid var(--line);
   background: var(--panel-2);
   border-radius: var(--radius-xs);
@@ -99,7 +99,7 @@
   padding: 8px 10px;
 }
 .codeRow code {
-  font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 13px var(--font-mono);
   overflow-x: auto;
   /* Wraps rather than forcing the page wide; still preserves runs of spaces. */
   white-space: pre-wrap;
@@ -122,7 +122,7 @@
   flex-wrap: wrap;
 }
 .detected code {
-  font: 12.5px ui-monospace, Menlo, monospace;
+  font: 13px var(--font-mono);
 }
 .ok {
   background: color-mix(in srgb, var(--accent) 12%, transparent);

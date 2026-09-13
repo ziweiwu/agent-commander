@@ -56,7 +56,7 @@
  * could break across lines, which is the behaviour being removed here.
  */
 .path {
-  font: 12px ui-monospace, Menlo, monospace;
+  font: 12px var(--font-mono);
   color: var(--dim);
   max-width: 240px;
   overflow: hidden;

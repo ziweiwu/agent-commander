@@ -18,7 +18,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  font: 14px/1.5 var(--font-ui);
   -webkit-text-size-adjust: 100%;
 }
 

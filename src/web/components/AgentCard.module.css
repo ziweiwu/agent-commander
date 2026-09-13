@@ -109,7 +109,7 @@
 .folder {
   color: var(--text);
   font-weight: 550;
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,11 +120,11 @@
 /* The auto-generated session name, kept as a hint once the AI title leads. */
 .derived {
   color: var(--faint);
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
 .branch {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
 .warn {
@@ -132,7 +132,7 @@
 }
 /* Which CLI this is, shown only when it is not the default one. */
 .kind {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--dim);
   border: 1px solid var(--line);
@@ -141,7 +141,7 @@
 }
 
 .activity {
-  font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 12px/1.45 var(--font-mono);
   color: var(--dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -270,7 +270,7 @@
   overflow-wrap: anywhere;
 }
 .path {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .disclosure {

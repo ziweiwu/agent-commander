@@ -35,7 +35,7 @@
   top: 6px;
   width: 42px;
   text-align: right;
-  font: 10.5px ui-monospace, Menlo, monospace;
+  font: 11px var(--font-mono);
   color: var(--faint);
   opacity: 0;
   transition: opacity 0.1s;
@@ -62,7 +62,7 @@
 }
 .time {
   color: var(--faint);
-  font: 11px ui-monospace, Menlo, monospace;
+  font: 11px var(--font-mono);
 }
 .state {
   color: var(--faint);
@@ -77,7 +77,7 @@
   white-space: pre-wrap;
 }
 .text code {
-  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 12px var(--font-mono);
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
@@ -116,7 +116,7 @@
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font: 11.8px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 12px/1.5 var(--font-mono);
   color: var(--dim);
   padding: 1px 0 1px 10px;
   border-left: 2px solid var(--line);
@@ -153,7 +153,7 @@
   background: none;
   border: 0;
   color: var(--dim);
-  font: 11.8px ui-monospace, Menlo, monospace;
+  font: 12px var(--font-mono);
   padding: 2px 0 2px 10px;
   border-left: 2px solid var(--line);
   cursor: pointer;

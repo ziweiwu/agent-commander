@@ -163,7 +163,7 @@
   margin-top: 16px;
 }
 .command {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-md);
   color: var(--text);
   background: var(--panel-2);

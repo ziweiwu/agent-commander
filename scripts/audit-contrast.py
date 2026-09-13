@@ -58,6 +58,11 @@ PAIRS = [
     ("line-strong", "panel-2", 3.0, "control boundary on a raised surface"),
     ("focus", "bg", 3.0, "focus ring on the page"),
     ("focus", "panel", 3.0, "focus ring on a panel"),
+    # The raised surface, where the chips, the control bar and the send-mode
+    # segment live. It was the one surface the ring was never checked against,
+    # and the generator was not solving for it either. This passes as of the
+    # re-solve, so it locks the fix in rather than reporting a new failure.
+    ("focus", "panel-2", 3.0, "focus ring on a raised surface"),
 ]
 
 # Surfaces built with color-mix rather than a flat token. Auditing only flat

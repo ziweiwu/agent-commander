@@ -17,7 +17,7 @@
 }
 
 .path {
-  font: 12px ui-monospace, Menlo, monospace;
+  font: 12px var(--font-mono);
   color: var(--dim);
   flex: 1;
   min-width: 0;

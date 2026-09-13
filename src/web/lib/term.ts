@@ -167,7 +167,13 @@ export class PaneTerm {
   ) {
     this.term = new Terminal({
       fontSize: BASE_FONT,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      // Read from the token rather than repeating it: xterm needs a resolved
+      // string because it measures the font to size a cell, so this is the one
+      // place the stack cannot simply be `var(--font-mono)`. The literal stays
+      // as a fallback for a call before the stylesheet has applied.
+      fontFamily:
+        getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() ||
+        'ui-monospace, SFMono-Regular, Menlo, monospace',
       convertEol: false,
       cursorBlink: true,
       scrollback: 0,
