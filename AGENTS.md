@@ -145,10 +145,28 @@ existing `scripts/` watch entry.
 
 `watch` entries are git pathspecs, not prefixes — git matches whole path
 components, so the manifests are spelled out individually. `scripts/` is on the
-list because `test/scheme.test.ts` re-runs `scripts/gen-themes.py` and fails if
-`tokens.css` no longer matches its output, and because `scripts/cargo.sh` is how
-every gate reaches the Rust toolchain. `rust/` is on it for the obvious reason:
-it is the server.
+list because three generated files are held to their generators by tests there,
+and because `scripts/cargo.sh` is how every gate reaches the Rust toolchain.
+`rust/` is on it for the obvious reason: it is the server.
+
+## Three things are generated, and each has a test that says so
+
+The pattern is the same every time: the generator carries the drawing and the
+reasoning, the output is committed, and a test re-runs the generator and fails
+a checkout where the two have drifted. Edit the generator, never the output.
+
+| Generator | Output | Held by |
+|---|---|---|
+| `scripts/gen-themes.py` | `src/web/styles/tokens.css` | `test/scheme.test.ts` |
+| `scripts/gen-ui-icons.py` | `src/web/lib/icon-paths.ts` | `test/icons.test.ts` |
+| `scripts/gen-icons.py` | `src/web/public/assets/icon-*.png` | `test/mac-app.test.ts` |
+
+**The last two are different scripts and the names are one word apart.**
+`gen-icons.py` draws the *application* icon — the PWA PNGs and the macOS
+`.iconset`, one picture of three lanes. `gen-ui-icons.py` draws the sixteen
+small control faces *inside* the app. They share a prefix and nothing else, and
+the collision has already cost one accidental overwrite; each file's docstring
+opens by saying which one it is.
 
 **Anything a gate shells out to must go through `scripts/cargo.sh`, never bare
 `cargo`.** `~/.cargo/bin` is put on PATH by a line in your shell profile, so it

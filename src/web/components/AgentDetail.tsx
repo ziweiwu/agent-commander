@@ -19,6 +19,7 @@ import { LazyTerminal } from './LazyTerminal.tsx'
 
 import { Button } from './ui/Button.tsx'
 import styles from './AgentDetail.module.css'
+import { Icon } from './ui/Icon.tsx'
 
 export interface AgentDetailProps {
   agent: Agent
@@ -224,7 +225,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
             aria-label={t('agentSettings')}
             onClick={() => setControlsOpen((v) => !v)}
           >
-            ⋯
+            <Icon name="ellipsis" />
           </Button>
           <Button
             variant="compact"
@@ -234,7 +235,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           >
             {/* The word is dropped where the row is tightest, and the glyph is
                 never the accessible name: `title` carries it either way. */}
-            ⤢ <span className={styles.actionLabel}>{t('expand')}</span>
+            <Icon name="expand" /> <span className={styles.actionLabel}>{t('expand')}</span>
           </Button>
           {/* Keeps `.close`: the sheet hides this button, where `‹ Agents` is
               the way back and a second one would be two answers to one question. */}

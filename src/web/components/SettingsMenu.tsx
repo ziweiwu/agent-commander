@@ -5,6 +5,7 @@ import { SCHEMES, THEMES, type Scheme, type Theme } from '../lib/prefs.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './SettingsMenu.module.css'
+import { Icon } from './ui/Icon.tsx'
 
 const THEME_KEY = {
   system: 'themeSystem',
@@ -166,7 +167,7 @@ export function SettingsMenu() {
         aria-label={t('settings')}
         onClick={() => setOpen((v) => !v)}
       >
-        ⚙
+        <Icon name="gear" />
       </Button>
 
       {open && (

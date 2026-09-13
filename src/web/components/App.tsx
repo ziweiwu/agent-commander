@@ -16,6 +16,7 @@ import { NotifyButton, NotifyNudge } from './NotifyButton.tsx'
 import { Button, Chip } from './ui/Button.tsx'
 import { UsageChips } from './UsageChips.tsx'
 import styles from './App.module.css'
+import { ICON_MARK, Icon } from './ui/Icon.tsx'
 
 /** Holds the delegation-graph poll while the fleet list is unmounted. */
 function TreePoll() {
@@ -229,7 +230,7 @@ function SidebarToggle() {
       aria-expanded={!collapsed}
       onClick={() => setSidebar(collapsed ? 'expanded' : 'collapsed')}
     >
-      {collapsed ? '⇥' : '⇤'}
+      <Icon name={collapsed ? 'panel-show' : 'panel-hide'} />
     </Button>
   )
 }
@@ -263,8 +264,8 @@ function Filters() {
         * vanished. aria-hidden because aria-pressed already says it.
         */}
       {filter === key && key !== 'all' && (
-        <span className={styles.chipMark} aria-hidden="true">
-          ✓
+        <span className={styles.chipMark}>
+          <Icon name="check" size={ICON_MARK} />
         </span>
       )}
       <b>{count}</b> {label}
@@ -291,8 +292,8 @@ function Filters() {
           onClick={() => setTerminals(!fleet.terminals)}
         >
           {fleet.terminals && (
-            <span className={styles.chipMark} aria-hidden="true">
-              ✓
+            <span className={styles.chipMark}>
+              <Icon name="check" size={ICON_MARK} />
             </span>
           )}
           <b>{terminals}</b> {t('filterTerminals')}

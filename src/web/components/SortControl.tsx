@@ -3,6 +3,7 @@ import { SORT_SENSE, SORTS, type SortKey } from '../lib/filter.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import type { Key } from '../lib/i18n.ts'
 import styles from './SortControl.module.css'
+import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 
 const SORT_KEY: Record<SortKey, Key> = {
   recent: 'sortRecent',
@@ -50,7 +51,7 @@ export function SortControl() {
         title={`${senseLabel} ${t('sortFirst')}`}
         onClick={() => setDir(dir === 'desc' ? 'asc' : 'desc')}
       >
-        <span aria-hidden="true">{dir === 'desc' ? '↓' : '↑'}</span>
+        <Icon name={dir === 'desc' ? 'arrow-down' : 'arrow-up'} size={ICON_INLINE} />
         <span className={styles.senseLabel}>{senseLabel}</span>
       </button>
     </label>
