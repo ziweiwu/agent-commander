@@ -80,7 +80,22 @@
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(340px, 430px) 1fr;
+  /*
+   * The fleet column is a preference, not a constant. `App` sets `--fleet-col`
+   * inline from the persisted width; 288px is the fallback so the first paint,
+   * before anything has been read back, is already the right shape.
+   *
+   * It was `minmax(340px, 430px)`, which resolves to its maximum on any desktop
+   * and left ~415px of content once `scrollbar-gutter` took its share — 21.5%
+   * of a 1440x900 viewport spent on the list while reading one agent. 288 is
+   * Claude Desktop's own `sidebarWidth` default on its 1200x800 window, which
+   * is the same kind of column beside the same kind of conversation.
+   *
+   * A custom property rather than a media query, deliberately: INV-17 allows
+   * this app two width cuts and `test/responsive.test.ts` fails on a third. A
+   * width that follows a preference is not a fourth layout.
+   */
+  grid-template-columns: var(--fleet-col, 288px) 1fr;
   gap: 16px;
   padding: 16px;
   padding-left: max(16px, env(safe-area-inset-left));
@@ -120,7 +135,45 @@
   .layout {
     align-items: stretch;
     overflow: hidden;
+    /*
+     * 8px rather than 16. Both columns draw their own border, so the gap to the
+     * topbar reads the same at half the size — and on a screen that does not
+     * scroll, every one of those 16px is taken off the conversation rather than
+     * off the end of the document.
+     */
+    padding-block: 6px;
+    /*
+     * And 8px at the sides rather than 16. The panel draws its own border and
+     * radius, so the inset still reads; on a screen that cannot scroll this is
+     * width handed to the conversation.
+     */
+    padding-inline: max(8px, env(safe-area-inset-left)) max(8px, env(safe-area-inset-right));
   }
+  /*
+   * The topbar is global chrome above a screen that cannot scroll, so its
+   * padding is charged to the transcript. 7px still clears the 44px touch
+   * floor for everything in it, because a desktop pointer is not coarse.
+   */
+  .topbar {
+    padding-block: 6px;
+  }
+}
+
+/*
+ * The filters go with the list they filter.
+ *
+ * This is the rule `.sheetMode .filters` already states, applied to the other
+ * way the list can be off screen. A collapsed column leaves the chips acting on
+ * something nobody can see, and on a 1180px laptop they were also what made the
+ * topbar wrap to a second row — measured at 105px against a desktop's 57px, so
+ * the narrower screen was paying 48px more for chrome than the wider one.
+ *
+ * Not a viewport query: it follows a preference, so it is keyed on the state
+ * stamped on the root. Expanding the column brings them straight back, which is
+ * what INV-17 requires of anything folded away.
+ */
+:global([data-sidebar='collapsed']) .filters {
+  display: none;
 }
 
 .toast {
@@ -152,9 +205,12 @@
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: 1fr;
-    padding: 12px;
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
+    /* 8px rather than 12, for the reason the desktop cut gives: the sheet is
+       sized from the visual viewport, so this inset is charged to the
+       conversation and not to the end of a scrolling page. */
+    padding: 8px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
   }
   /*
    * The detail owns the screen on a phone, so the shell must not scroll behind

@@ -93,7 +93,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1257 tests: 614 Rust (the server) + 643 vitest (the web app)
+npm test              # 1276 tests: 614 Rust (the server) + 662 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -101,6 +101,13 @@ npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phon
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
                       # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
+npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transcript
+                      # plus composer at desktop/laptop/tablet, measured in a real
+                      # browser against --mock. Not in `npm run audit`, because it
+                      # asserts a product target rather than a correctness property.
+                      # PORT/BASE move the server (4400 by default, and it refuses
+                      # 4317 outright), AGENT picks the fixture, BAR moves the
+                      # threshold — the same BASE/PORT the other audit scripts read
 npm run qa            # randomised exploration, deterministic per seed
 npm run verify:inv1   # attaching never resizes a real pane — server must be running
 ```

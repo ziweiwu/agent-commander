@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type CSSProperties } from 'react'
 import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore } from '../store/store.ts'
@@ -54,6 +54,18 @@ export function App() {
   // has no fleet to filter.
   const solo = isHelp
   const sheetMode = narrow && selected !== null && !solo
+
+  /*
+   * And the fleet column's effective state, for the same reason: the topbar is a
+   * sibling of the layout rather than a child, so a rule about a collapsed
+   * column cannot be written from inside `main`. "Effective" because collapsing
+   * only takes hold while an agent is open — see `FleetRoute`.
+   */
+  const sidebar = useStore((s) => s.sidebar)
+  const fleetHidden = sidebar === 'collapsed' && selected !== null && !isHelp
+  useEffect(() => {
+    document.documentElement.dataset.sidebar = fleetHidden ? 'collapsed' : 'expanded'
+  }, [fleetHidden])
 
   // Modals and the mobile sheet own the screen; the page behind must not scroll.
   useEffect(() => {
@@ -154,6 +166,7 @@ export function App() {
         <h1 className={styles.title}>
           agent<span>-commander</span>
         </h1>
+        {!narrow && selected !== null && !solo && <SidebarToggle />}
         {solo ? <span className={styles.spacer} /> : <Filters />}
         <UsageChips />
         <Button
@@ -185,6 +198,39 @@ export function App() {
       )}
       <div className="sr-only" id="live-region" role="status" aria-live="polite" />
     </div>
+  )
+}
+
+/*
+ * Collapse the fleet column, or bring it back.
+ *
+ * It renders on a desktop with an agent open, which is exactly the shape where
+ * the column is both present and costing something. Below 900px the sheet
+ * already covers the list, and with no agent open the list is the whole page —
+ * in neither case is there a column to trade away, and a control that cannot
+ * change the thing it names is worse than an absent one (INV-11).
+ *
+ * `aria-expanded` rather than `aria-pressed`: this discloses a region, it does
+ * not arm a mode. The glyph is never the accessible name (4.1.2) — `title` and
+ * `aria-label` both carry it, the way the help and notify buttons do.
+ */
+function SidebarToggle() {
+  const t = useTranslate()
+  const sidebar = useStore((s) => s.sidebar)
+  const setSidebar = useStore((s) => s.setSidebar)
+  const collapsed = sidebar === 'collapsed'
+  const label = t(collapsed ? 'showFleet' : 'hideFleet')
+  return (
+    <Button
+      variant="icon"
+      data-testid="sidebar-toggle"
+      title={label}
+      aria-label={label}
+      aria-expanded={!collapsed}
+      onClick={() => setSidebar(collapsed ? 'expanded' : 'collapsed')}
+    >
+      {collapsed ? '⇥' : '⇤'}
+    </Button>
   )
 }
 
@@ -291,6 +337,8 @@ export function FleetRoute() {
   const expectSession = useStore((s) => s.expectSession)
   const setExpectSession = useStore((s) => s.setExpectSession)
   const tab = useStore((s) => s.tab)
+  const sidebar = useStore((s) => s.sidebar)
+  const sidebarWidth = useStore((s) => s.sidebarWidth)
   const searchRef = useRef<HTMLInputElement>(null)
 
   const wantTab = location.pathname.endsWith('/term') ? 'attach' : 'chat'
@@ -364,10 +412,29 @@ export function FleetRoute() {
   }, [sessionId, agent, agents, expectSession, navigate])
 
   const showDetail = Boolean(agent)
+  /*
+   * Collapsing only means anything while an agent is open. With none, the list
+   * *is* the page — taking it away would leave an empty screen and nothing to
+   * put back, so the preference is ignored there rather than obeyed into a
+   * dead end.
+   */
+  const collapsed = sidebar === 'collapsed' && showDetail
+  const showFleet = !(narrow && showDetail) && !collapsed
+  /*
+   * One column whenever only one of the two is actually rendered. This used to
+   * key off `showDetail` alone, which was right while the fleet's only absence
+   * was the phone sheet — and below 900px the media query sets a single track
+   * anyway, so nothing noticed. A desktop can now be one-up too.
+   */
+  const twoUp = showFleet && showDetail
 
   return (
-    <main className={`${styles.layout} ${showDetail ? '' : styles.solo}`}>
-      {!(narrow && showDetail) && (
+    <main
+      className={`${styles.layout} ${twoUp ? '' : styles.solo}`}
+      style={{ '--fleet-col': `${sidebarWidth}px` } as CSSProperties}
+      data-sidebar={collapsed ? 'collapsed' : 'expanded'}
+    >
+      {showFleet && (
         <FleetList
           tiled={!showDetail}
           selected={selected}
@@ -377,11 +444,11 @@ export function FleetRoute() {
       )}
       {/*
         * The list is the graph's holder (INV-4: one poll for the fleet), and
-        * on a phone the sheet unmounts it. The detail's status line still
-        * reads the delegates, so while the list is away this takes the poll
-        * over — one holder at a time, never two.
+        * the sheet — or a collapsed sidebar — unmounts it. The detail's status
+        * line still reads the delegates, so while the list is away this takes
+        * the poll over — one holder at a time, never two.
         */}
-      {narrow && showDetail && <TreePoll />}
+      {!showFleet && showDetail && <TreePoll />}
       {agent && (
         <AgentDetail
           agent={agent}

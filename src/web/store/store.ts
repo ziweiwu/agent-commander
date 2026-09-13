@@ -30,6 +30,7 @@ import {
   applyLang,
   applyScheme,
   applyTheme,
+  clampSidebarWidth,
   loadDir,
   loadFilter,
   loadTerminals,
@@ -38,6 +39,8 @@ import {
   loadScheme,
   loadTheme,
   loadNotify,
+  loadSidebar,
+  loadSidebarWidth,
   saveDir,
   saveFilter,
   saveTerminals,
@@ -46,7 +49,10 @@ import {
   saveScheme,
   saveTheme,
   saveNotify,
+  saveSidebar,
+  saveSidebarWidth,
   type Scheme,
+  type SidebarState,
   type Theme,
 } from '../lib/prefs.ts'
 
@@ -126,6 +132,15 @@ export interface AppState {
   newAgentOpen: boolean
 
   fleet: FleetState
+  /**
+   * The fleet column: whether it is on screen, and how wide when it is.
+   *
+   * Both persist per browser. Collapsing trades the agents' names for work
+   * surface, and a trade a reader made deliberately must not be undone by a
+   * reload — which is the same reasoning that made the status filter persist.
+   */
+  sidebar: SidebarState
+  sidebarWidth: number
   notify: boolean
   /**
    * The one-time suggestion to turn notifications on, raised only after this
@@ -184,6 +199,8 @@ export interface AppState {
   expectSession: string | null
 
   /* actions */
+  setSidebar: (state: SidebarState) => void
+  setSidebarWidth: (width: number) => void
   setNotify: (notify: boolean) => void
   setNotifyNudge: (nudge: boolean) => void
   setTrees: (trees: FleetTree['trees'], etag: string | null) => void
@@ -314,6 +331,8 @@ export const useStore = create<AppState>()((set, get) => ({
     dir: loadDir(),
     terminals: loadTerminals() === 'on',
   },
+  sidebar: loadSidebar(),
+  sidebarWidth: loadSidebarWidth(),
   notify: loadNotify() === 'on',
   notifyNudge: false,
   theme: loadTheme(),
@@ -334,6 +353,20 @@ export const useStore = create<AppState>()((set, get) => ({
   answerRefused: null,
   expectSession: null,
 
+  setSidebar: (sidebar) => {
+    saveSidebar(sidebar)
+    set({ sidebar })
+  },
+  /*
+   * The width is clamped by `saveSidebarWidth` on the way to storage and by
+   * `clampSidebarWidth` on the way into state, so the two can never disagree
+   * about what was stored — a state holding a width the next load would refuse
+   * is the kind of drift nothing reports.
+   */
+  setSidebarWidth: (width) => {
+    saveSidebarWidth(width)
+    set({ sidebarWidth: clampSidebarWidth(width) })
+  },
   setNotifyNudge: (notifyNudge) => set({ notifyNudge }),
   setTrees: (trees, treesEtag) => set({ trees, treesEtag }),
   setNotify: (notify) => {

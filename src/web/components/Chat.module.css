@@ -261,14 +261,33 @@
   }
   .scroll {
     max-height: none;
+    /*
+     * The 6px reserved beside the scrollbar, returned.
+     *
+     * It keeps a classic scrollbar off the text on a desktop. Below 900px the
+     * scrollbar is an overlay that appears while scrolling and takes no width,
+     * so the inset was buying nothing and costing 6px of every line — measured,
+     * 0.6% of a tablet's viewport.
+     */
+    padding-right: 0;
+  }
+  /* Both charged to the conversation on a screen sized from the visual
+     viewport, exactly as on the desktop cut. */
+  .pane {
+    gap: 6px;
+  }
+  .composer {
+    padding-top: 6px;
   }
 }
 
-@media (max-width: 560px) {
-  .hint {
-    display: none;
-  }
-}
+/*
+ * `.hint` is now worn only by the offline notice — the `role="status"` line that
+ * says why Enter does not send. That is the last thing to hide on a small
+ * screen (INV-11: a composer that refuses must say so), so the phone rule that
+ * used to blanket-hide this class is gone. The key hint it was aimed at no
+ * longer occupies a row at any width; see `.keyHint`.
+ */
 
 @media (max-height: 520px) and (pointer: coarse) {
   .hint {
@@ -403,4 +422,62 @@
   .answer {
     padding: 6px 8px 0;
   }
+}
+
+/*
+ * The gaps around the conversation, on the shape that cannot scroll them away.
+ *
+ * The desktop shell is one screenful, so the 10px between the transcript and
+ * the composer and the 10px above the composer's rule are both charged to the
+ * transcript rather than to the end of a document. 6px keeps the composer
+ * visibly separate from the last message without spending a line on it.
+ */
+@media (min-width: 901px) {
+  .pane {
+    gap: 4px;
+  }
+  .composer {
+    padding-top: 4px;
+  }
+  /*
+   * The 46px the hover timestamps were reserving, handed back.
+   *
+   * `.list` held a 46px left inset purely so `.gutter` had somewhere to sit
+   * outside the text — 46 of 1424px on every row of the transcript, for
+   * something only visible under the pointer. The timestamp is not redundant
+   * (a grouped message has no header and this is its only time anchor), so it
+   * is not removed: `Message.module.css` floats it over the message's own top
+   * right corner on hover instead of renting a column for it.
+   */
+  .list {
+    padding-left: 0;
+  }
+}
+
+/*
+ * The keyboard hint: read aloud, never a row.
+ *
+ * It was a visible caption under the composer, and it was costing a row of a
+ * screen that cannot scroll — measured at 1180x800 it was the last 21px between
+ * the transcript and the composer, and on a 834x1112 tablet it was the 1% that
+ * stood between this app and its own work-surface bar.
+ *
+ * Hidden *visually*, and the distinction is load-bearing twice. The composer
+ * points `aria-describedby` at this element, and `display: none` takes a node
+ * out of the accessibility tree — so hiding it that way would have taken the
+ * field's description with the caption. It was already being hidden that way
+ * below 560px, which means a phone has been serving a composer whose
+ * `aria-describedby` resolved to nothing; this fixes that rather than spreading
+ * it. Out of flow, so it costs no height at any width, and still announced.
+ *
+ * Not keyed on a viewport at all: the sentence is equally true on every shape,
+ * and Enter-to-send is drawn on the phone keyboard's own key by `enterKeyHint`.
+ */
+.keyHint {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }

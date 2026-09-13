@@ -787,7 +787,14 @@ not for two homes, and at a plain desktop width both were visible — two Clear
 buttons for one action, on the app's central screen. Model followed the
 others a step later, for the same reason in reverse: left alone in the row, it
 was the one control about the next turn that a phone and a full screen could
-not see. The row keeps Close, which ends the session rather than steering it. Clear and Compact
+not see. The row keeps Close, which ends the session rather than steering it —
+and **the row itself now folds behind the `⋯` at every width**, where it used to
+fold only below 900px. The old reasoning was that a desktop has room for it;
+measured, the room cost 3.9% of a 1440x900 screen for a 960x53 band holding one
+103x36 button, so 857px of it was empty. That is the same argument that turned
+the composer strip into a menu, and it was always true here too — the phone was
+just where it hurt first. INV-17 permits the fold because the `⋯` is on screen
+and named at every width. Clear and Compact
 are still one *hook* (`web/hooks/useContextActions.ts`) with one caller,
 because their reasoning is a sequence rather than a widget: a `sendingRef` so
 a double click cannot discard the session the first click just created, a
@@ -1306,10 +1313,16 @@ too on an agent that is not working, for the reason it is withheld on a resting
 card: "delegated nothing" answers a question only a working agent raises, and
 on the detail it was a permanent row on the surface whose whole job is showing
 a conversation. It is the one `DelegateLine`, fed from the graph in
-the store rather than a second poll: the fleet list holds the poll, and on a
-phone, where the sheet unmounts the list, a stand-in holds it instead — one
-holder at a time (INV-4). `test/ui/AgentDetail.test.tsx` reads the claims off
-the line and asserts nothing is claimed before the graph has arrived.
+the store rather than a second poll: the fleet list holds the poll, and wherever
+the list is unmounted a stand-in holds it instead — one holder at a time
+(INV-4). There are two such places now rather than one. The phone sheet was the
+original, and a **collapsed fleet column** is the second: the column is a
+persisted preference, so a desktop can unmount the list too, and the hand-over
+rule had to stop being a fact about phones. `test/ui/AgentDetail.test.tsx` reads
+the claims off the line and asserts nothing is claimed before the graph has
+arrived; `test/ui/sidebar.test.tsx` asserts the poll survives the collapse,
+because a stalled graph would make the card claim `none` where it should say
+`unread` — two different sentences (INV-13).
 
 ## INV-14 — A notification is a transition, not a state
 
@@ -1658,11 +1671,72 @@ synchronously, because two presses in one React batch would otherwise each read
 the same uncleared line and send it twice.
 
 **The disclosures are part of the contract, not an implementation detail.**
-Below 900px the agent's settings row folds behind `⋯` in the tab strip, and the
-fleet's filters are hidden while the sheet covers the list they filter. Both
-are allowed *because* something reaches them: the `⋯` is on screen and named,
-and leaving the sheet brings the filters back. An action with nothing to reach
-it is not folded away, it is missing.
+The agent's settings row folds behind `⋯` in the tab strip, the fleet's filters
+are hidden while the sheet covers the list they filter, and the fleet column
+itself can be collapsed away behind a named toggle in the topbar. All three are
+allowed *because* something reaches them: the `⋯` is on screen and named, leaving
+the sheet brings the filters back, and the toggle stays drawn while the column is
+gone. An action with nothing to reach it is not folded away, it is missing.
+
+The settings row used to fold only below 900px, on the stated grounds that a
+desktop has room for it. It folds at every width now — see INV-8 for the
+measurement that changed the conclusion — which makes it the same shape of
+control as the composer's menu rather than a second rule to remember.
+
+**The fleet column is a preference, and that is not a fourth layout.** Its width
+is `--fleet-col`, set inline from a persisted value, defaulting to the 288px
+Claude Desktop uses for the same kind of column on its 1200x800 window; it was
+`minmax(340px, 430px)`, which resolves to its maximum on any desktop and left
+~415px of content, 21.5% of a 1440x900 viewport. Collapsing removes the column
+rather than shrinking it to icons: an icon rail keeps presence but loses the
+names the column exists for, and a 56px strip would be a third layout to reason
+about. Two things hold this inside the invariant rather than beside it. The
+width travels as a custom property and the collapse as an attribute, never as a
+media query, because this app gets exactly two width cuts and
+`test/responsive.test.ts` fails on a third. And the toggle renders only on a
+desktop with an agent open — the one shape where the column is both present and
+costing something — because below 900px the sheet already covers the list and
+with no agent open the list *is* the page, so there is nothing to trade away and
+a control that cannot change what it names is worse than an absent one (INV-11).
+
+- `test/prefs-sidebar.test.ts` — the default, the round trip, the clamp applied
+  on the way out of storage as well as in, a junk or older-release value falling
+  back rather than resolving to no column, and a `localStorage` that throws
+- `test/ui/sidebar.test.tsx` — 288px on the track, the collapse and the return,
+  the label naming which way the toggle goes, the preference remembered, no
+  toggle where it could change nothing, a stored collapse ignored while the list
+  is the whole page, and the delegation poll handed over (INV-4)
+
+**The work surface is most of the screen, and it is measured.** The app exists
+to be read and typed into, so the share of the viewport given to the transcript's
+scroll viewport plus the composer's field is a number rather than an impression:
+at least **80%** at desktop (1440x900), laptop (1180x800) and tablet
+(834x1112), with the fleet column collapsed. `npm run audit:workspace` drives a
+real browser against `--mock` and fails under the bar.
+
+Measured rather than modelled, because modelling it got the answer wrong by 26
+points: a stylesheet-derived estimate said 74% where the running app was at 48%,
+knowing the padding it had changed and not the four stacked bands it had not.
+
+What the bar bought, and what it cost, both belong here. It bought: the fleet
+column down from a 430px track to a 288px preference that collapses away, the
+settings row folded behind its `⋯` at every width, the status facts moved into
+the header's own row on a desktop, the 46px the hover timestamps were renting
+handed back, and the filters following the list they filter. It cost nothing
+that says anything — every trim is whitespace, and the two things that looked
+like content are not: the folder path is elided with the whole of it on `title`,
+and the keyboard hint is visually hidden while staying in the accessibility tree
+as the composer's own `aria-describedby` description, which it was *not* below
+560px before this (a `display: none` had been quietly emptying that description
+on every phone).
+
+Two shapes are deliberately outside the bar. The **phone** measures ~71%, up
+from 64%: its chrome is the same absolute height as everywhere else against a
+fifth of the pixels, so clearing 80% there means relocating global controls
+rather than trimming space — a product decision, not a layout one. And the
+**Attach tab** is bounded differently: the capture is sized from the pane's own
+geometry (INV-1), so giving it more room is not the same as giving it more
+content. Collapsing the column does still help it, 42.8% to 54.1% at 1440x900.
 
 **And every shape meets the same accessibility floor.** A control that is on
 screen can be hit (24x24 at AA, 44x44 where the pointer is coarse) and has a

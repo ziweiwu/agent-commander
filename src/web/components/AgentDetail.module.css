@@ -43,10 +43,27 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/*
+ * The folder, elided rather than given the row.
+ *
+ * Measured at a 1440 viewport it was taking 621px of a 1406px header — 44% of
+ * the row for a path, which left 18px of slack and forced the status facts onto
+ * a band of their own. A path is read to recognise a directory, not to audit
+ * one, and the tail is the part that does the recognising, so it keeps a cap
+ * and hands the rest to `title`.
+ *
+ * `overflow-wrap: anywhere` is gone with the wrap: it existed so a long path
+ * could break across lines, which is the behaviour being removed here.
+ */
 .path {
   font: 12px ui-monospace, Menlo, monospace;
   color: var(--dim);
-  overflow-wrap: anywhere;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .pill {
   flex: none;
@@ -211,6 +228,24 @@
   }
 }
 
+/*
+ * The same facts, inside the header's row instead of under it.
+ *
+ * None of the band's own chrome comes with them: the header already draws the
+ * rule beneath itself, and a second border plus 12px of padding inside a row
+ * that is only 36px tall is what made this a band in the first place.
+ */
+.head .statusLine {
+  padding: 0;
+  border-bottom: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  /* One line, elided. Two lines here would grow the header by exactly the band
+     this change removes. */
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
 .pane {
   padding: 12px 14px;
   min-width: 0;
@@ -219,6 +254,44 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+
+/*
+ * The sheet's own padding, on the two shapes where the screen is smallest and
+ * the chrome proportionally largest.
+ *
+ * 12px was comfortable on a page that scrolled. The sheet does not: it is sized
+ * from the visual viewport, so every pixel here is taken off the conversation
+ * rather than off the end of a document. Measured on a 390x844 phone the pane's
+ * inset alone was 24px of 390 across and 24 of 844 down.
+ */
+@media (max-width: 900px) {
+  .pane {
+    padding: 8px;
+  }
+  /*
+   * The facts keep their words and give up their frame.
+   *
+   * Measured on a 834x1112 tablet the band was 816x32 — 2.8% of the screen for
+   * one 20px line of text inside 12px of padding and a rule. The obvious move
+   * was to fold it into the header the way the desktop does; measured, the
+   * header there has 16px of slack and the facts need 294, so the only way in
+   * was to squeeze the agent's name from 366px to about 6 characters. A name is
+   * how a reader knows which agent they are looking at — identity, not
+   * decoration (INV-11) — so the band stays and only its whitespace goes.
+   *
+   * The rule goes with the padding: the pane below has its own inset, so the
+   * separation still reads without a second line across the screen.
+   */
+  .statusLine {
+    padding-block: 3px;
+    border-bottom: 0;
+  }
+  /* 6px rather than 8, on a header that is a fixed row above a conversation
+     sized from the visual viewport. */
+  .sheet .head {
+    padding-block: 6px;
+  }
 }
 
 .blocked {
@@ -312,5 +385,35 @@
   .tab {
     min-height: 44px;
     padding: 8px 14px;
+  }
+}
+
+/*
+ * What the desktop spends above and below the conversation.
+ *
+ * Measured at 1440x900 with the fleet column collapsed, the transcript had 612
+ * of 900px and everything else was chrome: a 59px header, a 32px status band,
+ * 24px of pane padding and 32px of layout padding. The bands are the argument
+ * the app already makes about itself — a row that is the most expensive thing
+ * on screen relative to what it holds is worth reducing — and none of this
+ * removes a control or a word, it removes whitespace around them.
+ *
+ * Keyed on the desktop cut because that is the shape with a mouse, no
+ * on-screen keyboard stealing half the viewport, and the most pixels to lose
+ * proportionally. The phone keeps its comfortable padding: INV-17 permits
+ * dropping decoration on a small screen, not on the large one.
+ */
+@media (min-width: 901px) {
+  .head {
+    padding-block: 6px;
+  }
+  /* Tied to the header's padding: the tabs hang onto the rule below it, so this
+     offset has to be whatever that padding is or the underline floats. */
+  .tabs {
+    margin-bottom: -6px;
+  }
+  .pane {
+    padding-block: 4px;
+    padding-inline: 10px;
   }
 }

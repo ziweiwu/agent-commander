@@ -707,7 +707,11 @@ export function Chat({ agent }: { agent: Agent }) {
           </Button>
         </div>
         {online ? (
-          <div className={styles.hint} id={KEY_HINT_ID} data-testid="composer-hint">
+          <div
+            className={`${styles.hint} ${styles.keyHint}`}
+            id={KEY_HINT_ID}
+            data-testid="composer-hint"
+          >
             <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')} ·{' '}
             <kbd>Shift+Tab</kbd> {t('hintShiftTab')}
           </div>

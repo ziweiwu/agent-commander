@@ -243,3 +243,29 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * The hover timestamp, floated rather than given a column.
+ *
+ * It used to sit at `left: -46px`, in an inset `.list` reserved for it — 46px
+ * off every row of the transcript on a desktop, spent on something that is only
+ * ever visible under the pointer. The timestamp itself stays: a grouped message
+ * draws no header, so this is the only place its time appears (INV-11 — the
+ * anchor is information, the column was decoration).
+ *
+ * So on the desktop cut it overlays the message's own top-right corner, on the
+ * panel colour so it stays legible over text, and reserves nothing. Below 900px
+ * it is hidden outright, as it always was — there is no pointer to hover with.
+ */
+@media (min-width: 901px) {
+  .gutter {
+    left: auto;
+    right: 4px;
+    top: 2px;
+    width: auto;
+    padding: 0 4px;
+    border-radius: var(--radius-xs);
+    background: var(--panel-2);
+    pointer-events: none;
+  }
+}

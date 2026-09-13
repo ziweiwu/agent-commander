@@ -151,6 +151,41 @@ tree, or the invariant loses the case it was written for.
 **Done when:** one list, both tests read it, and deleting a control from the
 app fails a test rather than shrinking a list.
 
+### 8. The composer's growth cap is a desktop number applied to a phone
+
+**Filed 2026-09-13, from a user report: "chat box too big" on mobile.**
+Triaged, not fixed.
+
+The message box grows with what you type and stops at **180px**. That number is
+written twice and the two must agree: `Chat.module.css`'s `.input { max-height:
+180px }` and `Chat.tsx`'s `e.target.style.height = `${Math.min(
+e.target.scrollHeight, 180)}px`` in the composer's `onInput`.
+
+180px is a reasonable eighth of a desktop. Measured on a 390x844 phone it is
+21% of the viewport — and the viewport is not what the composer is competing
+with. With an on-screen keyboard up, iOS leaves roughly 400px of *visual*
+viewport, so a grown composer takes about **45% of everything the reader can
+see**, pushing the conversation it is a reply to off the screen. That is the
+exact failure INV-17's keyboard clause exists for: `--vvh` is the visible
+rectangle and the sheet, the full-screen overlay, the new-agent dialog and the
+toast all lay out from it. The composer's cap does not.
+
+**The shape of the fix:** cap against the visible rectangle rather than a
+constant — `max-height: min(180px, calc(var(--vvh, 100dvh) * 0.35))` — and stop
+repeating the number in JS by reading the computed `max-height` (or a shared
+token) instead of the literal `180`. Two places holding one number is how they
+drift, and here the JS one wins silently because it sets an inline style.
+
+**Watch for:** INV-17's own reason for the box growing at all — "see what landed
+before running it" — is about the *Attach* tab's paste line, and the same
+argument applies here: a cap low enough to hide a pasted three-line command
+trades one failure for another. The cap should shrink with the keyboard, not
+with the screen.
+
+**Done when:** on a 390x844 phone with the keyboard up, a composer full of text
+leaves the last message visible; `npm run audit:workspace` does not regress; and
+the number appears once.
+
 ## Not doing
 
 **TLA+ for the invariant set.** Evaluated and rejected. Of the 16, one (INV-2)
