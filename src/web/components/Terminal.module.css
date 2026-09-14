@@ -85,11 +85,24 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   padding: 10px;
-  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 13px/1.4 var(--font-mono);
 }
 .composeInput:focus {
-  outline: 2px solid color-mix(in srgb, var(--focus) 55%, transparent);
-  outline-offset: -1px;
+  /*
+   * The token, not a 55% mix of it, and inset by the full ring width.
+   *
+   * The mix measured 2.32-2.51:1 against the --panel it was drawn on, under
+   * WCAG 1.4.11's 3:1, in all 16 palettes — on the control this app is most
+   * often focused on. It was invisible to `audit:contrast`, which parses
+   * tokens.css and so cannot see a composite at all.
+   *
+   * At -1px a 2px ring straddles the border box, painting its outer half over
+   * the parent surface; at -2px it lies wholly inside, between --bg inward
+   * (5.00-5.60:1) and --panel outward (5.01-6.12:1). Byte-identical to the
+   * send-mode segment's rule, which already shipped it right.
+   */
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 .composeInput:disabled {
   opacity: 0.5;

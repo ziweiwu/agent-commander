@@ -93,7 +93,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1257 tests: 614 Rust (the server) + 643 vitest (the web app)
+npm test              # 1276 tests: 614 Rust (the server) + 662 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -101,6 +101,13 @@ npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phon
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
                       # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
+npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transcript
+                      # plus composer at desktop/laptop/tablet, measured in a real
+                      # browser against --mock. Not in `npm run audit`, because it
+                      # asserts a product target rather than a correctness property.
+                      # PORT/BASE move the server (4400 by default, and it refuses
+                      # 4317 outright), AGENT picks the fixture, BAR moves the
+                      # threshold — the same BASE/PORT the other audit scripts read
 npm run qa            # randomised exploration, deterministic per seed
 npm run verify:inv1   # attaching never resizes a real pane — server must be running
 ```
@@ -138,10 +145,28 @@ existing `scripts/` watch entry.
 
 `watch` entries are git pathspecs, not prefixes — git matches whole path
 components, so the manifests are spelled out individually. `scripts/` is on the
-list because `test/scheme.test.ts` re-runs `scripts/gen-themes.py` and fails if
-`tokens.css` no longer matches its output, and because `scripts/cargo.sh` is how
-every gate reaches the Rust toolchain. `rust/` is on it for the obvious reason:
-it is the server.
+list because three generated files are held to their generators by tests there,
+and because `scripts/cargo.sh` is how every gate reaches the Rust toolchain.
+`rust/` is on it for the obvious reason: it is the server.
+
+## Three things are generated, and each has a test that says so
+
+The pattern is the same every time: the generator carries the drawing and the
+reasoning, the output is committed, and a test re-runs the generator and fails
+a checkout where the two have drifted. Edit the generator, never the output.
+
+| Generator | Output | Held by |
+|---|---|---|
+| `scripts/gen-themes.py` | `src/web/styles/tokens.css` | `test/scheme.test.ts` |
+| `scripts/gen-ui-icons.py` | `src/web/lib/icon-paths.ts` | `test/icons.test.ts` |
+| `scripts/gen-icons.py` | `src/web/public/assets/icon-*.png` | `test/mac-app.test.ts` |
+
+**The last two are different scripts and the names are one word apart.**
+`gen-icons.py` draws the *application* icon — the PWA PNGs and the macOS
+`.iconset`, one picture of three lanes. `gen-ui-icons.py` draws the sixteen
+small control faces *inside* the app. They share a prefix and nothing else, and
+the collision has already cost one accidental overwrite; each file's docstring
+opens by saying which one it is.
 
 **Anything a gate shells out to must go through `scripts/cargo.sh`, never bare
 `cargo`.** `~/.cargo/bin` is put on PATH by a line in your shell profile, so it
@@ -443,6 +468,42 @@ commit.
   exactly the one a blocked-agent test wants. That is a real shape rather than a
   quirk: an agent asks for permission on its first tool call, before it has said
   anything. Navigate directly for those.
+
+- **A browser gate that opens a viewport without `hasTouch` measures a device
+  nobody is holding.** Every `pointer: coarse` rule is off while it runs, so a
+  44px touch floor that exists only behind that query is invisible to the audit
+  *and* to the person reading its clean output. `Chat.module.css` documents this
+  at `.sendModeOption`, which carries a width query and a pointer query for
+  exactly this reason — and it bit again anyway at `Message.module.css`'s
+  `.toggle`, which had only the pointer query and sat at 24px against WCAG
+  2.5.8's 24 and the 44 a finger wants. **A touch floor needs both queries**:
+  the width cut for the audit and for a phone, the pointer query for a
+  1194px landscape tablet that is too wide for the cut and still a screen
+  people tap. The same blindness ran the other way in `audit-workspace.mjs`,
+  which measured the tablet at 80.9% with a fine pointer and 79.5% with the
+  coarse one it actually has.
+
+- **Playwright's default click waits for the element to be *stable*, and beside
+  a live capture that wait can never end.** `page.click` requires two
+  consecutive animation frames with an identical bounding box before it acts.
+  The Attach tab repaints continuously, so on a loaded machine — measured here
+  at load average 14.7 — the pair never arrives, the click retries to its 30s
+  timeout, and the script dies **before printing its report**. That is the
+  dangerous part: `audit:a11y` failed twice in a row and the output contained
+  no findings at all, which reads exactly like a clean run to anyone skimming.
+  The three audit scripts now locate, wait for *visible*, and click with
+  `force`, which keeps every meaningful precondition and drops only the one
+  that cannot hold next to a capture. If an audit ever exits non-zero with no
+  `===== AUDIT =====` line, it did not run.
+
+- **A guard is not verified by watching it pass.** `test/icons.test.ts` sweeps
+  for icon buttons that lost their accessible name, and it shipped toothless:
+  it stripped JSX tags with `/<[^>]*>/`, which breaks on the `>` inside
+  `onClick={() => f()}`, so leftover code read as "this button has text" and
+  *every* such button looked labelled. Deleting a real `aria-label` did not
+  fail it. A new guard has to be proved the other way round — break the thing
+  it guards, watch it go red, put it back — and anything parsing JSX with a
+  regex needs a brace-aware scan rather than a character class.
 
 - **A `vi.fn(() => …)` cannot be `new`-ed.** Stubbing `globalThis.WebSocket`
   with an arrow function makes `new WebSocket(url)` throw "not a constructor"

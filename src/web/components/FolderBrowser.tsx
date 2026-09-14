@@ -5,6 +5,7 @@ import { useTranslate } from '../hooks/useTranslate.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './FolderBrowser.module.css'
+import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 
 export interface FolderBrowserProps {
   /** Where to open. Falls back to the server's root. */
@@ -52,7 +53,7 @@ export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
           disabled={!listing?.parent}
           onClick={() => void load(listing?.parent ?? undefined)}
         >
-          ↑ {t('browseUp')}
+          <Icon name="arrow-up" size={ICON_INLINE} /> {t('browseUp')}
         </Button>
         <span className={styles.path} title={listing?.path}>
           {listing ? shorten(listing.path, listing.root) : '…'}
@@ -92,7 +93,7 @@ export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
               data-testid="browse-entry"
               onClick={() => void load(entry.path)}
             >
-              <span className={styles.icon}>▸</span>
+              <span className={styles.icon}><Icon name="chevron-right" size={ICON_INLINE} /></span>
               {entry.name}
             </button>
           ))}

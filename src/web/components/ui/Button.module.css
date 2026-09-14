@@ -10,8 +10,17 @@
   font-size: var(--text-base);
   height: fit-content;
 }
+/*
+ * Hover is --text, not --focus.
+ *
+ * It was --focus at 1.29-1.35:1 against the --line-strong it replaces, which is
+ * a near-pure hue swap rather than a visible change — and --focus now also means
+ * focused, selected and primary. Splitting them keeps one colour to one meaning:
+ * --focus is focus-or-selection, --text is "the pointer is here" (11.00-11.10:1
+ * on --panel-2).
+ */
 .btn:hover:not(:disabled) {
-  border-color: var(--focus);
+  border-color: var(--text);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -23,8 +32,16 @@
   color: var(--danger);
 }
 
+/*
+ * The affirmative button's edge, at full strength.
+ *
+ * The 55% mix measured 2.15-2.36:1 against the --panel-2 behind it, with a
+ * 1.23-1.27:1 fill inside it — so the app's primary action had no boundary
+ * meeting 3:1 anywhere. The fill stays a mix, because it is a tint behind text
+ * rather than the thing that defines the control's extent.
+ */
 .primary {
-  border-color: color-mix(in srgb, var(--focus) 55%, transparent);
+  border-color: var(--focus);
   background: color-mix(in srgb, var(--focus) 16%, transparent);
 }
 
@@ -32,7 +49,7 @@
   padding: 6px 11px;
   min-height: 36px;
   font-size: var(--text-sm);
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
 }
 
 .icon {
@@ -64,7 +81,7 @@
   font-weight: 650;
 }
 .chip:hover {
-  border-color: var(--focus);
+  border-color: var(--text);
 }
 .chip:disabled {
   opacity: 0.45;

@@ -2,7 +2,6 @@ import type { Agent } from '../../shared/types.ts'
 import { tildePath, uptimeParts } from '../lib/format.ts'
 import { formatUptime } from '../lib/i18n.ts'
 import { useState } from 'react'
-import { useIsNarrow } from '../hooks/useMediaQuery.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { DelegateLine, REASON_KEY, STATUS_KEY, useStatusText } from './AgentCard.tsx'
@@ -20,6 +19,7 @@ import { LazyTerminal } from './LazyTerminal.tsx'
 
 import { Button } from './ui/Button.tsx'
 import styles from './AgentDetail.module.css'
+import { Icon } from './ui/Icon.tsx'
 
 export interface AgentDetailProps {
   agent: Agent
@@ -43,12 +43,23 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
   const shortStatus = useShortStatus()
   const fullscreen = useStore((s) => s.fullscreen)
   const setFullscreen = useStore((s) => s.setFullscreen)
-  const narrow = useIsNarrow()
-  // On a phone this row wrapped to three lines and took 111px of a 568px
-  // screen, so it collapses behind a disclosure there and stays inline on a
-  // desktop, where there is room for it.
+  /*
+   * The settings row folds at every width, not only on a phone.
+   *
+   * On a phone it wrapped to three lines and took 111px of a 568px screen,
+   * which is why it first collapsed there. The reasoning was right and the
+   * conclusion was too narrow: measured at 1440x900 the row is a 960x53 band
+   * holding one 103x36 button, so 857px of it is empty and it costs 3.9% of the
+   * screen — permanently, on the surface whose whole job is showing a
+   * conversation, for a control pressed about once per session.
+   *
+   * This is the same argument that turned the composer strip into a menu
+   * (INV-8): a row that is the most expensive thing on screen relative to what
+   * it holds is a menu nobody had written yet. INV-17 permits the fold because
+   * the `⋯` that opens it is itself on screen and named.
+   */
   const [controlsOpen, setControlsOpen] = useState(false)
-  const showControls = !narrow || controlsOpen
+  const showControls = controlsOpen
   const transcripts = hasTranscripts(agent.agentKind)
   // On a landscape phone the second answer option sits below this pane's fold
   // with nothing saying so; the fade is the something.
@@ -108,7 +119,31 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
               and dropping it gives the agent's name back its space. */}
           {sheet ? shortStatus(agent) : statusText(agent)}
         </span>
-        <span className={styles.path}>{subtitle}</span>
+        {/* Elided to a cap, so `title` is the only place the whole path is
+            still readable (see `.path` in the stylesheet). */}
+        <span className={styles.path} title={subtitle}>
+          {subtitle}
+        </span>
+
+        {/*
+          * On a desktop the facts sit inside the header's row, the way the tabs
+          * already do.
+          *
+          * They were a band of their own: 1406x32 at a 1440 viewport, 3.4% of
+          * the screen for one 294px run of facts on a row that was otherwise
+          * empty. The header had 18px of slack and could not take it — until
+          * `.path` stopped claiming 621px of that row for a folder name. With
+          * the path elided there is room for the facts beside it, so the band
+          * goes and the facts stay.
+          *
+          * Two placements rather than one, and the reason is `.sheet .head`:
+          * it is `flex-wrap: nowrap` on purpose, so a phone keeps the back
+          * link, the name and the actions on a single line. Wrapping the facts
+          * in beside them would squeeze that row rather than take a new one, so
+          * below 900px they stay under the header, which is where a narrow
+          * shape has the room anyway.
+          */}
+        {!sheet && <StatusLine agent={agent} />}
 
         {/*
           * The tabs share the header's row.
@@ -182,18 +217,16 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           * breakpoint between them (FR-CTL-12).
           */}
         <div className={styles.headActions}>
-          {narrow && (
-            <Button
-              variant="compact"
-              data-testid="controls-toggle"
-              aria-expanded={controlsOpen}
-              title={t('agentSettings')}
-              aria-label={t('agentSettings')}
-              onClick={() => setControlsOpen((v) => !v)}
-            >
-              ⋯
-            </Button>
-          )}
+          <Button
+            variant="compact"
+            data-testid="controls-toggle"
+            aria-expanded={controlsOpen}
+            title={t('agentSettings')}
+            aria-label={t('agentSettings')}
+            onClick={() => setControlsOpen((v) => !v)}
+          >
+            <Icon name="ellipsis" />
+          </Button>
           <Button
             variant="compact"
             data-testid="fullscreen-toggle"
@@ -202,7 +235,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           >
             {/* The word is dropped where the row is tightest, and the glyph is
                 never the accessible name: `title` carries it either way. */}
-            ⤢ <span className={styles.actionLabel}>{t('expand')}</span>
+            <Icon name="expand" /> <span className={styles.actionLabel}>{t('expand')}</span>
           </Button>
           {/* Keeps `.close`: the sheet hides this button, where `‹ Agents` is
               the way back and a second one would be two answers to one question. */}
@@ -210,11 +243,30 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
             {t('close')}
           </Button>
         </div>
+
+        {/*
+          * On a desktop the facts sit inside the header's row, the way the tabs
+          * already do.
+          *
+          * They were a band of their own: 1406x32 at a 1440 viewport, 3.4% of
+          * the screen for one 294px run of facts on a row that was otherwise
+          * empty. The header had 18px of slack and could not take it — until
+          * `.path` stopped claiming 621px of that row for a folder name (see
+          * `.path` in the stylesheet). With the path elided there is room for
+          * the facts beside it, so the band goes and the facts stay.
+          *
+          * Two placements rather than one, and the reason is `.sheet .head`:
+          * it is `flex-wrap: nowrap` on purpose, so that a phone keeps the back
+          * link, the name and the actions on a single line. Wrapping the facts
+          * in beside them would squeeze that row rather than take a new one, so
+          * below 900px they stay where they were — under the header, which is
+          * where a narrow shape has the room anyway.
+          */}
       </div>
 
       {showControls && <AgentControls agent={agent} />}
 
-      <StatusLine agent={agent} />
+      {sheet && <StatusLine agent={agent} />}
 
       <div className={styles.pane} ref={paneRef} data-overflow={paneEdge} data-testid="detail-pane">
         {agent.status === 'waiting' && (

@@ -43,10 +43,27 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/*
+ * The folder, elided rather than given the row.
+ *
+ * Measured at a 1440 viewport it was taking 621px of a 1406px header — 44% of
+ * the row for a path, which left 18px of slack and forced the status facts onto
+ * a band of their own. A path is read to recognise a directory, not to audit
+ * one, and the tail is the part that does the recognising, so it keeps a cap
+ * and hands the rest to `title`.
+ *
+ * `overflow-wrap: anywhere` is gone with the wrap: it existed so a long path
+ * could break across lines, which is the behaviour being removed here.
+ */
 .path {
-  font: 12px ui-monospace, Menlo, monospace;
+  font: 12px var(--font-mono);
   color: var(--dim);
-  overflow-wrap: anywhere;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .pill {
   flex: none;
@@ -211,6 +228,48 @@
   }
 }
 
+/*
+ * The same facts, inside the header's row instead of under it.
+ *
+ * None of the band's own chrome comes with them: the header already draws the
+ * rule beneath itself, and a second border plus 12px of padding inside a row
+ * that is only 36px tall is what made this a band in the first place.
+ */
+.head .statusLine {
+  padding: 0;
+  border-bottom: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  /* One line, elided. Two lines here would grow the header by exactly the band
+     this change removes. */
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/*
+ * The one-line guarantee, enforced one level further down.
+ *
+ * `flex-wrap: nowrap` above governs this element's own children and not its
+ * grandchildren, and its single child — the delegate line — is `flex-wrap: wrap`
+ * in `AgentCard.module.css`, which is correct on a card and wrong inside a row.
+ * Without this the line has two ways to grow: it can wrap internally as well as
+ * being wrapped by the header.
+ *
+ * This is what makes the header's children genuinely shrinkable, which is what
+ * the `nowrap` on `.head` below depends on. It is not on its own what keeps the
+ * header to one row; see that rule for the measurement.
+ *
+ * Targeted by test id rather than by class because the delegate line is
+ * declared in another CSS module, where a class selector written here would
+ * compile to a hash matching nothing. Scoped under `.head`, so the card itself
+ * goes on wrapping. `white-space` inherits, which holds the counts and the
+ * total together without reaching into that module for each of them.
+ */
+.head .statusLine :global([data-testid='agent-delegates']) {
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
 .pane {
   padding: 12px 14px;
   min-width: 0;
@@ -219,6 +278,44 @@
   flex-direction: column;
   min-height: 0;
   flex: 1;
+}
+
+/*
+ * The sheet's own padding, on the two shapes where the screen is smallest and
+ * the chrome proportionally largest.
+ *
+ * 12px was comfortable on a page that scrolled. The sheet does not: it is sized
+ * from the visual viewport, so every pixel here is taken off the conversation
+ * rather than off the end of a document. Measured on a 390x844 phone the pane's
+ * inset alone was 24px of 390 across and 24 of 844 down.
+ */
+@media (max-width: 900px) {
+  .pane {
+    padding: 8px;
+  }
+  /*
+   * The facts keep their words and give up their frame.
+   *
+   * Measured on a 834x1112 tablet the band was 816x32 — 2.8% of the screen for
+   * one 20px line of text inside 12px of padding and a rule. The obvious move
+   * was to fold it into the header the way the desktop does; measured, the
+   * header there has 16px of slack and the facts need 294, so the only way in
+   * was to squeeze the agent's name from 366px to about 6 characters. A name is
+   * how a reader knows which agent they are looking at — identity, not
+   * decoration (INV-11) — so the band stays and only its whitespace goes.
+   *
+   * The rule goes with the padding: the pane below has its own inset, so the
+   * separation still reads without a second line across the screen.
+   */
+  .statusLine {
+    padding-block: 3px;
+    border-bottom: 0;
+  }
+  /* 6px rather than 8, on a header that is a fixed row above a conversation
+     sized from the visual viewport. */
+  .sheet .head {
+    padding-block: 6px;
+  }
 }
 
 .blocked {
@@ -312,5 +409,57 @@
   .tab {
     min-height: 44px;
     padding: 8px 14px;
+  }
+}
+
+/*
+ * What the desktop spends above and below the conversation.
+ *
+ * Measured at 1440x900 with the fleet column collapsed, the transcript had 612
+ * of 900px and everything else was chrome: a 59px header, a 32px status band,
+ * 24px of pane padding and 32px of layout padding. The bands are the argument
+ * the app already makes about itself — a row that is the most expensive thing
+ * on screen relative to what it holds is worth reducing — and none of this
+ * removes a control or a word, it removes whitespace around them.
+ *
+ * Keyed on the desktop cut because that is the shape with a mouse, no
+ * on-screen keyboard stealing half the viewport, and the most pixels to lose
+ * proportionally. The phone keeps its comfortable padding: INV-17 permits
+ * dropping decoration on a small screen, not on the large one.
+ */
+@media (min-width: 901px) {
+  .head {
+    padding-block: 6px;
+    /*
+     * One row, by shrinking rather than by wrapping.
+     *
+     * `.head` is `flex-wrap: wrap`, and a wrapping flex container prefers to
+     * wrap over shrinking — so its children never gave up a pixel. Measured at
+     * 1024x768 the action buttons were pushed to a second row (y=132 against
+     * y=88 for everything else), the header stood at 93px instead of 49, and the
+     * work surface fell to 73.8% against a bar of 80. The whole 901-1071px band
+     * was like that: a window dragged to half of a wide display, or a 1024x768
+     * screen. No gate saw it, because `audit-workspace.mjs` sampled 1440, 1180,
+     * 834 and 390 and that band sits between two of them.
+     *
+     * With wrapping off, the deficit is distributed by `flex-shrink x basis`, so
+     * the status facts (basis ~294px, and clipped) give way first, the path
+     * (240px, ellipsised) next, and the agent's name (basis 6ch) last. That is
+     * the right order and it costs nothing to get: the name is the identity and
+     * it should be the last thing to go.
+     *
+     * Only above the desktop cut. Below it `.sheet .head` already says nowrap
+     * for its own reasons.
+     */
+    flex-wrap: nowrap;
+  }
+  /* Tied to the header's padding: the tabs hang onto the rule below it, so this
+     offset has to be whatever that padding is or the underline floats. */
+  .tabs {
+    margin-bottom: -6px;
+  }
+  .pane {
+    padding-block: 4px;
+    padding-inline: 10px;
   }
 }

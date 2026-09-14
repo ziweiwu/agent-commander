@@ -60,6 +60,12 @@ const CONTROLS = [
   'compact-agent',
   'clear-agent',
   'strip-toggle',
+  /*
+   * The settings row's own disclosure. It used to render only below 900px, so a
+   * desktop sweep never saw it; the row now folds at every width, because at
+   * 1440x900 it was a 960x53 band holding one 103x36 button.
+   */
+  'controls-toggle',
   'composer-input',
   'composer-send',
 ] as const
@@ -79,15 +85,18 @@ beforeEach(() => {
 })
 
 /**
- * Everything the composer folds away, revealed.
+ * Everything the screen folds away, revealed.
  *
  * INV-17 allows a control to sit behind a disclosure that is itself on screen
- * and labelled, and the composer's menu is one: so the sweep opens it, the
- * same way a reader would, rather than counting the screen with it shut.
+ * and labelled, and this screen has two — the composer's menu and the agent's
+ * settings row. So the sweep opens both, the same way a reader would, rather
+ * than counting the screen with them shut.
  */
 async function revealEverything(user: ReturnType<typeof userEvent.setup>): Promise<void> {
-  const menu = screen.queryByTestId('strip-toggle')
-  if (menu && menu.getAttribute('aria-expanded') === 'false') await user.click(menu)
+  for (const disclosure of ['controls-toggle', 'strip-toggle']) {
+    const button = screen.queryByTestId(disclosure)
+    if (button && button.getAttribute('aria-expanded') === 'false') await user.click(button)
+  }
 }
 
 /** The agent screen and whatever it has portalled out of itself. */

@@ -189,7 +189,10 @@ for (const { name, device } of PROFILES) {
     // if it is opened first.
     const earlier = await page.$('[data-testid="history-toggle"]')
     if (earlier) {
-      await earlier.click()
+      // `force`, for the reason audit-a11y.mjs gives: this button sits beside a
+      // continuously repainting capture, so waiting for it to hold still is
+      // waiting for something that never happens.
+      await earlier.click({ force: true })
       await page.waitForSelector('[data-testid="term-history"]', { timeout: 6000 }).catch(() => {})
       await page.waitForTimeout(HISTORY_SETTLE_MS)
       await page.screenshot({ path: `${OUT}/32-${name}-history.png`, fullPage: false })

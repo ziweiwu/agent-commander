@@ -4,6 +4,7 @@ import { useTranslate } from '../hooks/useTranslate.ts'
 import { useNotifyToggle } from '../hooks/useNotifyToggle.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './NotifyButton.module.css'
+import { Icon } from './ui/Icon.tsx'
 
 /**
  * The bell: whether this app may reach out of its tab when an agent needs you.
@@ -34,7 +35,7 @@ export function NotifyButton() {
       disabled={!supported}
       onClick={() => void toggle().then(announceRefusal)}
     >
-      <Bell state={notify ? 'on' : 'off'} />
+      <Icon name={notify ? 'bell' : 'bell-off'} />
     </Button>
   )
 
@@ -48,22 +49,6 @@ export function NotifyButton() {
 }
 
 /** A bell, struck through when off. `currentColor` so it follows the theme. */
-function Bell({ state }: { state: 'on' | 'off' }) {
-  const off = state === 'off'
-  return (
-    <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" focusable="false">
-      <path
-        d="M10 2.5a4.5 4.5 0 0 0-4.5 4.5v3.2L4 13v1h12v-1l-1.5-2.8V7A4.5 4.5 0 0 0 10 2.5Z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinejoin="round"
-      />
-      <path d="M8 16a2 2 0 0 0 4 0" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      {off && <path d="M3 17 17 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />}
-    </svg>
-  )
-}
 
 /**
  * The one unsolicited prompt in the app.

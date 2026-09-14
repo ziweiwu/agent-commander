@@ -35,9 +35,26 @@ async function visitStates(page) {
   await page.waitForTimeout(600)
   states.push('terminal')
 
-  // Earlier output is a surface of its own — a scroll box with a capture in
-  // it — and one nothing else here opens, so it would be judged by nobody.
-  await page.click(T('history-toggle'))
+  /*
+   * Earlier output is a surface of its own — a scroll box with a capture in
+   * it — and one nothing else here opens, so it would be judged by nobody.
+   *
+   * Located and waited for explicitly rather than clicked outright, because
+   * `page.click` also requires the element to be *stable*: two consecutive
+   * animation frames with an identical bounding box. This button sits inside
+   * the Attach tab, where the pane capture repaints continuously, so on a busy
+   * machine those two frames need never match — the click then retries until
+   * the 30s timeout and the whole audit dies without reporting a single
+   * finding, which reads exactly like a pass that never ran. Measured at load
+   * average 14.7 it failed twice in a row here.
+   *
+   * Presence, visibility and enabledness are all still required. Only the
+   * stability check is waived, and only because it is the one precondition
+   * that cannot hold next to a live capture.
+   */
+  const history = page.locator(T('history-toggle'))
+  await history.waitFor({ state: 'visible', timeout: 10_000 })
+  await history.click({ force: true })
   await page.waitForSelector(T('term-history'), { timeout: 6000 }).catch(() => {})
   await page.waitForTimeout(SETTLE_MS)
   states.push('terminal-history')

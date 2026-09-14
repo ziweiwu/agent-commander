@@ -35,7 +35,7 @@
   top: 6px;
   width: 42px;
   text-align: right;
-  font: 10.5px ui-monospace, Menlo, monospace;
+  font: 11px var(--font-mono);
   color: var(--faint);
   opacity: 0;
   transition: opacity 0.1s;
@@ -62,7 +62,7 @@
 }
 .time {
   color: var(--faint);
-  font: 11px ui-monospace, Menlo, monospace;
+  font: 11px var(--font-mono);
 }
 .state {
   color: var(--faint);
@@ -77,7 +77,7 @@
   white-space: pre-wrap;
 }
 .text code {
-  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 12px var(--font-mono);
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
@@ -116,7 +116,7 @@
   display: flex;
   gap: 8px;
   align-items: baseline;
-  font: 11.8px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 12px/1.5 var(--font-mono);
   color: var(--dim);
   padding: 1px 0 1px 10px;
   border-left: 2px solid var(--line);
@@ -153,7 +153,7 @@
   background: none;
   border: 0;
   color: var(--dim);
-  font: 11.8px ui-monospace, Menlo, monospace;
+  font: 12px var(--font-mono);
   padding: 2px 0 2px 10px;
   border-left: 2px solid var(--line);
   cursor: pointer;
@@ -161,6 +161,26 @@
 }
 .toggle:hover {
   color: var(--text);
+}
+/*
+ * The touch floor, keyed on width as well as on the pointer.
+ *
+ * `pointer: coarse` alone is the trap `Chat.module.css` already documents at
+ * `.sendModeOption`: the project's own UX audit resizes the viewport without
+ * claiming a touch device, so a pointer query never matches and the rule
+ * silently does nothing. This control measured 24px on the phone profile and
+ * was the audit's one standing finding for exactly that reason — a real
+ * WCAG 2.5.8 miss on a real phone, reported by a gate nobody could satisfy.
+ *
+ * Both queries, so the floor holds for a finger on a 1194px landscape tablet
+ * (too wide for the width cut) and for the audit's phone profile (no touch
+ * claimed). It costs the transcript nothing: this button scrolls with the
+ * conversation rather than sitting in the fixed chrome.
+ */
+@media (max-width: 560px) {
+  .toggle {
+    min-height: 44px;
+  }
 }
 @media (pointer: coarse) {
   .toggle {
@@ -242,4 +262,30 @@
 .noticeTime {
   flex: none;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The hover timestamp, floated rather than given a column.
+ *
+ * It used to sit at `left: -46px`, in an inset `.list` reserved for it — 46px
+ * off every row of the transcript on a desktop, spent on something that is only
+ * ever visible under the pointer. The timestamp itself stays: a grouped message
+ * draws no header, so this is the only place its time appears (INV-11 — the
+ * anchor is information, the column was decoration).
+ *
+ * So on the desktop cut it overlays the message's own top-right corner, on the
+ * panel colour so it stays legible over text, and reserves nothing. Below 900px
+ * it is hidden outright, as it always was — there is no pointer to hover with.
+ */
+@media (min-width: 901px) {
+  .gutter {
+    left: auto;
+    right: 4px;
+    top: 2px;
+    width: auto;
+    padding: 0 4px;
+    border-radius: var(--radius-xs);
+    background: var(--panel-2);
+    pointer-events: none;
+  }
 }

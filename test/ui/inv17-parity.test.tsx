@@ -56,6 +56,12 @@ const ACTIONS = [
   'model-select',
   'clear-agent',
   'compact-agent',
+  /*
+   * Close is on this list now that it folds at every width rather than only
+   * below 900px. The fold is the whole point of the change, so the thing worth
+   * asserting is that it cost no shape its ability to end a session.
+   */
+  'close-agent',
   // The composer, and everything in the strip above it.
   'composer-input',
   'composer-send',
@@ -134,23 +140,28 @@ describe('INV-17 every shape offers every action', () => {
   })
 
   /*
-   * And the other direction, which is now two different answers.
+   * And the other direction, which is now the same answer for both.
    *
-   * The detail row's `⋯` still exists only where the width takes the row
-   * away: folding it on a desktop would hide settings behind a click to buy
-   * back space that shape already has.
+   * The detail row's `⋯` used to exist only below 900px, on the stated grounds
+   * that folding it on a desktop would hide settings behind a click to buy back
+   * space that shape already has. That was measured wrong rather than argued
+   * wrong: at 1440x900 the row is a 960x53 band holding one 103x36 button, so
+   * the click buys back 3.9% of the screen and 857px of the band was empty.
    *
-   * The composer's menu is the opposite case and folds at every width. What
-   * it replaced was a permanent row that cost 50px of every screen and could
-   * not show its own contents — measured at 500px wide, 721px of controls
-   * inside a 450px sideways scroller. A row that is both the most expensive
-   * thing on the screen and unable to display what it holds is not a row that
-   * a desktop has room for; it is a menu nobody had written yet.
+   * So it folds at every width, for the reason the composer's menu already
+   * did. What that replaced was a permanent row that cost 50px of every screen
+   * and could not show its own contents — measured at 500px wide, 721px of
+   * controls inside a 450px sideways scroller. A row that is both the most
+   * expensive thing on the screen and unable to display what it holds is not a
+   * row that a desktop has room for; it is a menu nobody had written yet.
    */
-  it('folds the settings row away only where the width takes it', () => {
+  it('folds the settings row away at every width, including a desktop', () => {
     setViewport(DESKTOP)
     open()
-    expect(screen.queryByTestId('controls-toggle')).toBeNull()
+    const button = screen.getByTestId('controls-toggle')
+    // 4.1.2 again: the fold is only permitted because something named reaches it.
+    expect(button.getAttribute('aria-label')).toBeTruthy()
+    expect(button.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('folds the composer menu away at every width, including a desktop', () => {

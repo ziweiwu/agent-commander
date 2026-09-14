@@ -59,7 +59,7 @@
   font-weight: 600;
 }
 .input {
-  font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 14px/1.4 var(--font-mono);
   padding: 10px 12px;
   min-height: 42px;
   color: var(--text);
@@ -83,7 +83,7 @@
   gap: 6px;
 }
 .recentList button {
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
 

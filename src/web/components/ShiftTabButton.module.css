@@ -32,7 +32,7 @@
 /* The chord, drawn rather than spelt, because the accessible name already
    carries the sentence and the strip has no room for it twice. */
 .kbd {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-xs);
   color: var(--faint);
   flex: none;

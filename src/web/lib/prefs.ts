@@ -314,3 +314,72 @@ function syncThemeColor(): void {
 export function applyLang(lang: Lang): void {
   document.documentElement.lang = lang
 }
+
+/*
+ * How wide the fleet column is, and whether it is on screen at all.
+ *
+ * It used to be `minmax(340px, 430px)`, which resolves to its 430 maximum on
+ * any desktop and leaves ~415px of content once `scrollbar-gutter` has taken
+ * its share — 21.5% of a 1440x900 viewport spent on the list while reading one
+ * agent, measured against the mock fleet.
+ *
+ * 288 is not a taste: it is Claude Desktop's own `sidebarWidth` default, read
+ * out of its bundle, where it sits beside a `collapsed` boolean on a 1200x800
+ * default window. That is a 24% column against a 76% conversation, and it is
+ * the same shape of thing this column is, so it is the reference rather than a
+ * number picked to look right.
+ *
+ * Collapsing takes the column away rather than shrinking it to icons. An icon
+ * rail was built first and rejected: it keeps presence but loses the names the
+ * column exists for, and a 56px strip is a third layout to reason about. Gone
+ * is one state, honest, and it is what Claude Desktop's own collapse does.
+ *
+ * Expanded is the default because names are why anyone keeps a fleet column.
+ * The trade is stated rather than hidden: expanded measures ~74.4% work
+ * surface at 1440x900 against ~97% collapsed, so the 80% bar is something a
+ * reader opts out of deliberately, per browser, and it sticks.
+ */
+export type SidebarState = 'expanded' | 'collapsed'
+
+/** Claude Desktop's own default, and therefore this app's. */
+export const SIDEBAR_WIDTH_DEFAULT = 288
+/** Under this the names this column exists for ellipsise to nothing. */
+export const SIDEBAR_WIDTH_MIN = 200
+/**
+ * Today's 430px track less its scrollbar gutter. Widening can still reach
+ * exactly what the column already was, so nobody who liked it loses it.
+ */
+export const SIDEBAR_WIDTH_MAX = 420
+
+const SIDEBAR_KEY = 'agent-commander.sidebar'
+const SIDEBAR_WIDTH_KEY = 'agent-commander.sidebar-width'
+
+export function loadSidebar(): SidebarState {
+  return read(SIDEBAR_KEY) === 'collapsed' ? 'collapsed' : 'expanded'
+}
+
+export function saveSidebar(state: SidebarState): void {
+  write(SIDEBAR_KEY, state)
+}
+
+export function clampSidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return SIDEBAR_WIDTH_DEFAULT
+  return Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Math.round(width)))
+}
+
+/*
+ * A stored width is clamped on the way out as well as in. The bounds can move
+ * between releases, and a value written by an older one must not be honoured
+ * past them — nor must a hand-edited or half-written entry, which is why a
+ * non-number falls back to the default rather than to zero.
+ */
+export function loadSidebarWidth(): number {
+  const stored = read(SIDEBAR_WIDTH_KEY)
+  if (stored === null) return SIDEBAR_WIDTH_DEFAULT
+  const parsed = Number(stored)
+  return Number.isFinite(parsed) && parsed > 0 ? clampSidebarWidth(parsed) : SIDEBAR_WIDTH_DEFAULT
+}
+
+export function saveSidebarWidth(width: number): void {
+  write(SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)))
+}

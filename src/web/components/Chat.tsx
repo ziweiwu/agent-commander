@@ -15,6 +15,7 @@ import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button } from './ui/Button.tsx'
 import styles from './Chat.module.css'
+import { ICON_MARK, Icon } from './ui/Icon.tsx'
 
 /** Distance from the bottom within which the view keeps following new messages. */
 const PIN_SLACK = 60
@@ -668,7 +669,7 @@ export function Chat({ agent }: { agent: Agent }) {
                 aria-label={t('moreOptions')}
                 onClick={toggleMenu}
               >
-                ⋯
+                <Icon name="ellipsis" />
               </Button>
             </div>
           )}
@@ -688,8 +689,8 @@ export function Chat({ agent }: { agent: Agent }) {
                   is still the accessible name, so nothing is lost to a screen
                   reader. Spelling it out costs the message box 70px on a small
                   phone, and the box is what the row is for. */}
-              <span aria-hidden="true" className={styles.stopGlyph}>
-                ■
+              <span className={styles.stopGlyph}>
+                <Icon name="stop" size={ICON_MARK} />
               </span>
               <span className={styles.stopLabel}>{t('interrupt')}</span>
             </Button>
@@ -707,7 +708,11 @@ export function Chat({ agent }: { agent: Agent }) {
           </Button>
         </div>
         {online ? (
-          <div className={styles.hint} id={KEY_HINT_ID} data-testid="composer-hint">
+          <div
+            className={`${styles.hint} ${styles.keyHint}`}
+            id={KEY_HINT_ID}
+            data-testid="composer-hint"
+          >
             <kbd>Enter</kbd> {t('hintEnterSend')} · <kbd>Shift+Enter</kbd> {t('hintShiftEnter')} ·{' '}
             <kbd>Shift+Tab</kbd> {t('hintShiftTab')}
           </div>

@@ -29,6 +29,10 @@ export function resetStore(): void {
     fullscreen: false,
     newAgentOpen: false,
     fleet: { query: '', filter: 'all', sort: 'recent', dir: 'desc', terminals: false },
+    // Both persist per browser, so a test that collapses the column would
+    // otherwise hand the next one a fleet list that is not on screen.
+    sidebar: 'expanded',
+    sidebarWidth: 288,
     theme: 'system',
     scheme: 'graphite',
     lang: 'en',

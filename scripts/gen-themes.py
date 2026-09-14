@@ -325,6 +325,20 @@ NEED_BORDER = 3.4
 # Status colours carry meaning and are read at a glance, so they get more than
 # the bare text minimum.
 NEED_STATUS = 5.5
+# Except `waiting`, which is the one status the whole product is for: it means
+# an agent has stopped and needs a person. Everything else on the card is
+# information; this is a call to action, and it should not have to be told
+# apart from "working" by hue alone.
+#
+# Measured against the alternative before choosing this. Giving waiting more
+# *chroma* instead leaves luminance level and reads well in dark — but light
+# amber already sits at the sRGB gamut edge, so a 45% chroma demand returns
+# 0.096 against the 0.097 it already had: no change at all in light mode.
+# Luminance is the only axis with room on both. The cost is real and worth
+# stating: light-mode waiting loses chroma (0.097 -> 0.085 graphite) as it
+# darkens, so it is duller — and, against a light surface, more prominent, not
+# less. 6.21 -> 7.91:1 in dark, 6.76 -> 8.57:1 in light.
+NEED_STATUS_WAITING = 7.0
 # The focus ring is the one indicator that has to be findable rather than
 # merely present: it is what tells a keyboard user where they are.
 NEED_FOCUS = 5.0
@@ -388,7 +402,6 @@ class Scheme:
         bg, panel, panel2 = out["bg"], out["panel"], out["panel-2"]
         on_everything = Against([bg, panel, panel2], dark)
         on_cards = Against([panel, panel2], dark)
-        on_page = Against([bg, panel], dark)
 
         # Text ramp. Three steps, all of which owe 4.5:1 on all three surfaces —
         # so they are separated by chroma and by the small lightness room left
@@ -406,14 +419,23 @@ class Scheme:
         # Status colours are read as text on the panel and on the raised
         # surface, so both are in the requirement.
         for name in STATUS_TOKENS:
-            out[name] = solve_lightness(self.hues[name], c_accent, on_cards, NEED_STATUS)
+            need = NEED_STATUS_WAITING if name == "waiting" else NEED_STATUS
+            out[name] = solve_lightness(self.hues[name], c_accent, on_cards, need)
         # Idle is the neutral one: it means "nothing is happening", and a hue
         # here would say something.
         out["idle"] = out["faint"]
 
         # 3:1 is all a non-text indicator owes; NEED_FOCUS asks for more,
         # because this is the one indicator that has to be findable.
-        out["focus"] = solve_lightness(self.hues["busy"], c_accent, on_page, NEED_FOCUS)
+        #
+        # Against every surface, not just the page and the panel. It solved
+        # against `on_page` while text, dim, faint and line-strong all solved
+        # against `on_everything`, so the token this file calls "the one
+        # indicator that has to be findable" was the only one not asked to be
+        # findable on `panel-2` — which is where the chips, the control bar and
+        # the send-mode segment sit. It landed at 4.42-4.62:1 there against a
+        # stated demand of 5.0.
+        out["focus"] = solve_lightness(self.hues["busy"], c_accent, on_everything, NEED_FOCUS)
 
         out["shadow"] = DARK_SHADOW if dark else LIGHT_SHADOW
         return out
@@ -788,6 +810,15 @@ LIGHT_COMMENT = """/* The light palette, applied from two places: an explicit ch
    system preference when no choice has been made. */"""
 
 SCALES = """
+  /* Font stacks. Two, and every rule in the app picks one of them.
+     There were 28 literal copies across 15 files before this existed, which is
+     why nine different monospace sizes could drift in unnoticed: a stack
+     written out by hand is a stack nobody compares to anything. The boot shell
+     in `index.html` keeps its own copy on purpose, for the same reason it
+     hard-codes two colours — it paints before this file is loaded. */
+  --font-ui: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
   /* Type scale. Six steps; anything between them was drift. */
   --text-xs: 11px;
   --text-sm: 12px;
@@ -847,7 +878,9 @@ def _contrast_pairs(palette: dict[str, str]) -> list[tuple[float, str, float]]:
     for surface in SURFACES:
         pairs.append((contrast(palette["line-strong"], palette[surface]),
                       f"line-strong on {surface}", NEED_UI_AA))
-    for surface in ("bg", "panel"):
+    # SURFACES, for the reason the solver now uses `on_everything`: the raised
+    # surface was the one the focus ring was never checked against.
+    for surface in SURFACES:
         pairs.append((contrast(palette["focus"], palette[surface]),
                       f"focus on {surface}", NEED_UI_AA))
     banner = mix(palette["waiting"], palette["bg"], BANNER_TINT)

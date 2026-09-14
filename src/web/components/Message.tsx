@@ -3,6 +3,7 @@ import { parseInline, type ChatMessage, type ToolCall } from '../lib/chat.ts'
 import { clock } from '../lib/format.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import styles from './Message.module.css'
+import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 
 /**
  * How many tool calls show before the rest collapse behind a summary.
@@ -179,7 +180,10 @@ function Tools({ message }: { message: ChatMessage }) {
           aria-expanded={open}
           onClick={() => setOpen((v) => !v)}
         >
-          {open ? `▾ ${t('actionsFewer')}` : `▸ ${t('actionsMore', { n: hidden })}`}
+          <>
+          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={ICON_INLINE} />{' '}
+          {open ? t('actionsFewer') : t('actionsMore', { n: hidden })}
+        </>
         </button>
       )}
     </div>

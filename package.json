@@ -1,7 +1,7 @@
 {
   "name": "@ziweiwu/agent-commander",
   "version": "0.14.0",
-  "description": "See every Claude Code and Kiro CLI agent on your machine at a glance — status, folder, progress — and drop into any one of them from the browser.",
+  "description": "See every Claude Code and Kiro CLI agent on your machine at a glance \u2014 status, folder, progress \u2014 and drop into any one of them from the browser.",
   "license": "MIT",
   "author": "Ziwei Wu <ziweiwu@gmail.com>",
   "keywords": [
@@ -55,6 +55,7 @@
     "audit:a11y": "node scripts/audit-a11y.mjs",
     "audit:ux": "node scripts/audit-ux.mjs",
     "audit:mobile": "node scripts/audit-mobile.mjs",
+    "audit:workspace": "node scripts/audit-workspace.mjs",
     "qa": "./scripts/qa-sweep.sh",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",

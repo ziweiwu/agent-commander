@@ -33,7 +33,7 @@
   right: 10px;
   top: 50%;
   transform: translateY(-50%);
-  font: 11px ui-monospace, Menlo, monospace;
+  font: 11px var(--font-mono);
   color: var(--faint);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);

@@ -9,6 +9,22 @@ const add = (sev, area, msg) => findings.push({ sev, area, msg })
 // Stable hooks, not CSS class names: CSS Modules hashes classes at build time.
 const T = (id) => `[data-testid="${id}"]`
 
+/**
+ * Click something that shares a screen with the terminal capture.
+ *
+ * Present and visible are still demanded; *stable* is not. Playwright's default
+ * actionability waits for two consecutive animation frames with an identical
+ * bounding box, and beside a pane capture that repaints continuously that pair
+ * need never arrive — so the click retries to its timeout and the audit dies
+ * without reporting a finding, which reads exactly like a clean run. Measured
+ * here at load average 14.7, where `audit-a11y.mjs` failed this way twice.
+ */
+async function clickBesideLiveCapture(page, selector) {
+  const target = page.locator(selector)
+  await target.waitFor({ state: 'visible', timeout: 10_000 })
+  await target.click({ force: true })
+}
+
 const VIEWPORTS = [
   { name: 'desktop', width: 1440, height: 900 },
   { name: 'laptop', width: 1180, height: 800 },
@@ -151,15 +167,16 @@ for (const scheme of ['light', 'dark']) {
   await page.waitForTimeout(900)
   await page.screenshot({ path: `${OUT}/04-attach-${scheme}.png`, fullPage: true })
 
-  await page.click(T('fullscreen-toggle'))
+  // Everything from here shares the screen with the live capture.
+  await clickBesideLiveCapture(page, T('fullscreen-toggle'))
   await page.waitForTimeout(700)
   if (!(await page.$(T('fullscreen-view')))) add('high', 'fullscreen', 'expand did not open a full-page view')
   // Full screen must host either view, switchable without dropping out of it.
-  await page.click(T('fullscreen-tab-chat'))
+  await clickBesideLiveCapture(page, T('fullscreen-tab-chat'))
   await page.waitForTimeout(500)
   if (!(await page.$(T('fullscreen-view')))) add('high', 'fullscreen', 'switching to chat left full screen')
   if (!(await page.$(T('composer-input')))) add('high', 'fullscreen', 'chat did not render in full screen')
-  await page.click(T('fullscreen-tab-attach'))
+  await clickBesideLiveCapture(page, T('fullscreen-tab-attach'))
   await page.waitForTimeout(900)
   if (!(await page.$('.xterm-screen'))) add('high', 'fullscreen', 'terminal did not render after switching back')
   const full = await page.evaluate(() => {

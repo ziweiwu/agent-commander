@@ -225,6 +225,8 @@ const EN = {
     'first, discarding whatever it had in flight. It stays on for this agent ' +
     'until you switch it back. Continue?',
   sendModeLabel: 'While the agent is working, Send',
+  hideFleet: 'Hide the fleet list',
+  showFleet: 'Show the fleet list',
   moreOptions: 'More: replies, send options and the agent',
   menuAgentHeading: 'This agent',
   sendModeQueue: 'Queue',
@@ -622,6 +624,8 @@ const ZH: Record<Key, string> = {
     '中断模式：在该助手工作时发送消息，会先打断它并丢弃正在进行的工作。' +
     '此设置对该助手持续生效，直到你切换回来。是否继续？',
   sendModeLabel: '助手工作时，发送键会',
+  hideFleet: '隐藏助手列表',
+  showFleet: '显示助手列表',
   moreOptions: '更多：快捷回复、发送选项与助手设置',
   menuAgentHeading: '此助手',
   sendModeQueue: '排队',
