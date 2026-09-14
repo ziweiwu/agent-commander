@@ -469,6 +469,42 @@ commit.
   quirk: an agent asks for permission on its first tool call, before it has said
   anything. Navigate directly for those.
 
+- **A browser gate that opens a viewport without `hasTouch` measures a device
+  nobody is holding.** Every `pointer: coarse` rule is off while it runs, so a
+  44px touch floor that exists only behind that query is invisible to the audit
+  *and* to the person reading its clean output. `Chat.module.css` documents this
+  at `.sendModeOption`, which carries a width query and a pointer query for
+  exactly this reason — and it bit again anyway at `Message.module.css`'s
+  `.toggle`, which had only the pointer query and sat at 24px against WCAG
+  2.5.8's 24 and the 44 a finger wants. **A touch floor needs both queries**:
+  the width cut for the audit and for a phone, the pointer query for a
+  1194px landscape tablet that is too wide for the cut and still a screen
+  people tap. The same blindness ran the other way in `audit-workspace.mjs`,
+  which measured the tablet at 80.9% with a fine pointer and 79.5% with the
+  coarse one it actually has.
+
+- **Playwright's default click waits for the element to be *stable*, and beside
+  a live capture that wait can never end.** `page.click` requires two
+  consecutive animation frames with an identical bounding box before it acts.
+  The Attach tab repaints continuously, so on a loaded machine — measured here
+  at load average 14.7 — the pair never arrives, the click retries to its 30s
+  timeout, and the script dies **before printing its report**. That is the
+  dangerous part: `audit:a11y` failed twice in a row and the output contained
+  no findings at all, which reads exactly like a clean run to anyone skimming.
+  The three audit scripts now locate, wait for *visible*, and click with
+  `force`, which keeps every meaningful precondition and drops only the one
+  that cannot hold next to a capture. If an audit ever exits non-zero with no
+  `===== AUDIT =====` line, it did not run.
+
+- **A guard is not verified by watching it pass.** `test/icons.test.ts` sweeps
+  for icon buttons that lost their accessible name, and it shipped toothless:
+  it stripped JSX tags with `/<[^>]*>/`, which breaks on the `>` inside
+  `onClick={() => f()}`, so leftover code read as "this button has text" and
+  *every* such button looked labelled. Deleting a real `aria-label` did not
+  fail it. A new guard has to be proved the other way round — break the thing
+  it guards, watch it go red, put it back — and anything parsing JSX with a
+  regex needs a brace-aware scan rather than a character class.
+
 - **A `vi.fn(() => …)` cannot be `new`-ed.** Stubbing `globalThis.WebSocket`
   with an arrow function makes `new WebSocket(url)` throw "not a constructor"
   *before* the body runs, so the mock records zero calls while the code under

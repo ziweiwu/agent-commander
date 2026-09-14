@@ -162,6 +162,26 @@
 .toggle:hover {
   color: var(--text);
 }
+/*
+ * The touch floor, keyed on width as well as on the pointer.
+ *
+ * `pointer: coarse` alone is the trap `Chat.module.css` already documents at
+ * `.sendModeOption`: the project's own UX audit resizes the viewport without
+ * claiming a touch device, so a pointer query never matches and the rule
+ * silently does nothing. This control measured 24px on the phone profile and
+ * was the audit's one standing finding for exactly that reason — a real
+ * WCAG 2.5.8 miss on a real phone, reported by a gate nobody could satisfy.
+ *
+ * Both queries, so the floor holds for a finger on a 1194px landscape tablet
+ * (too wide for the width cut) and for the audit's phone profile (no touch
+ * claimed). It costs the transcript nothing: this button scrolls with the
+ * conversation rather than sitting in the fixed chrome.
+ */
+@media (max-width: 560px) {
+  .toggle {
+    min-height: 44px;
+  }
+}
 @media (pointer: coarse) {
   .toggle {
     min-height: 44px;
