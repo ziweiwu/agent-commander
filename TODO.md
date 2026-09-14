@@ -195,7 +195,33 @@ the number appears once.
 
 ### 9. Tune the palette against real theme gradients, not synthetic ramps
 
-**Filed 2026-09-13, requested.** Not started.
+**Filed 2026-09-13, requested. Done.** Five source palettes — Dracula,
+Monokai, Nord, Solarized, One Dark — were measured in OKLCH from canonical
+sources and reconciled against the generator.
+
+The headline is not the one this entry expected. **Most hues should not change**,
+and the measurement is what proves it rather than taste: the canonical values
+*fail* this file's own `MIN_SEPARATION` gate. Dracula's real yellow (112.8) puts
+waiting within 0.105 of accent against a 0.10 floor; Monokai's canonical yellow
+gives 0.088; Solarized's real green gives 0.097. The values already in the file
+are deliberate compromises, and they are now measured compromises. Only Nord
+moved — waiting to nord13's 84 and danger to nord11's 15 as measured, accent to
+140 rather than nord14's 131, because 131 sits 1% over the gate where rounding
+can flip it.
+
+What did change is chroma. A single constant per mode was applied to all four
+statuses, and no source palette is flat: the narrowest spread is 1.43x and the
+widest 1.94x. The rank order is identical in all five — danger loudest, waiting
+quietest — so one `CHROMA_SCALE` expresses it, with a Dracula override where its
+green outranks its red. All 16 palettes still report ok, `audit:contrast` is
+still 0 failing pairs, and no non-status token moved.
+
+One correction to this entry's own premise, kept because it relocates the bug:
+the constant was only flat in **dark** mode. In light mode the gamut walk
+already varied delivered chroma 0.084-0.150 unasked, because amber at L 0.41
+caps at 0.084.
+
+The original reasoning, kept because the constraint still holds:
 
 `gen-themes.py` derives every colour in OKLCH from the contrast its role
 requires: pick a hue, pick a chroma, then solve lightness against the surfaces.

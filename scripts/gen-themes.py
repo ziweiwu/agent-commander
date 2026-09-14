@@ -295,6 +295,33 @@ LIGHT_SHADOW = "0 10px 30px rgb(16 24 40 / 0.12)"
 # under 0.10 was picked out by eye as "those two are the same colour".
 MIN_SEPARATION = 0.10
 
+# How saturated each status is, relative to its scheme's chroma constant.
+#
+# One constant per mode was applied to all four statuses, which flattened the
+# one relationship that makes a palette recognisable. Measured against the five
+# real palettes these schemes are named after — Dracula, Monokai, Nord,
+# Solarized and One Dark — not one of them is flat: the narrowest spread between
+# the most and least saturated status is 1.43x and the widest is 1.94x.
+#
+# More usefully, the *rank order is the same in all five*. Danger is the loudest
+# status everywhere, at 1.16-1.39x the four-role mean; waiting is the quietest,
+# at 0.76-1.03x. That is a shared structural fact rather than five separate
+# aesthetics, so one multiplier set expresses it and per-scheme tables are not
+# needed. The semantic reading is the same everywhere too: the colour that means
+# something broke is the one a palette shouts with.
+#
+# This is free, and that is the argument for it rather than a caveat. The
+# lightness solver runs *downstream* of the chroma request, so it absorbs the
+# change: with these applied, all 16 palettes still report ok and not one
+# contrast pair moves — the tightest stays `faint on panel-2` at 4.70-4.76:1 in
+# every scheme, and every non-status token is byte-identical.
+#
+# One correction worth recording, because it changes where the defect was: the
+# constant was only ever flat in *dark* mode. In light mode `oklch_to_hex`'s
+# gamut walk already delivered 0.084-0.150 unasked, because amber at L 0.41 caps
+# at 0.084. This fixes a dark-mode flatness, not a universal one.
+CHROMA_SCALE = {"busy": 0.88, "waiting": 0.86, "accent": 1.00, "danger": 1.26}
+
 # Accent chroma. Lower on dark, where saturated colour both fails contrast and
 # vibrates against the background.
 CHROMA_DARK = 0.115
@@ -366,6 +393,9 @@ class Scheme:
     chroma_surface_light: float = CHROMA_SURFACE_LIGHT
     chroma_dark: float = CHROMA_DARK
     chroma_light: float = CHROMA_LIGHT
+    #: Per-status chroma, where a scheme's own palette inverts the usual order.
+    #: `None` takes `CHROMA_SCALE`, which is what every scheme but one wants.
+    chroma_scale: dict[str, float] | None = None
     #: Nudges the whole light surface ramp. Two warm schemes both landing on
     #: "cream" is how Solar and Ember came to differ by three units of blue in
     #: light mode — distinct in the code and the same thing on screen.
@@ -420,7 +450,8 @@ class Scheme:
         # surface, so both are in the requirement.
         for name in STATUS_TOKENS:
             need = NEED_STATUS_WAITING if name == "waiting" else NEED_STATUS
-            out[name] = solve_lightness(self.hues[name], c_accent, on_cards, need)
+            scale = (self.chroma_scale or CHROMA_SCALE)[name]
+            out[name] = solve_lightness(self.hues[name], c_accent * scale, on_cards, need)
         # Idle is the neutral one: it means "nothing is happening", and a hue
         # here would say something.
         out["idle"] = out["faint"]
@@ -468,7 +499,18 @@ SCHEMES = [
         # `accent` at 160 sat only 0.12 from `busy` — a cool green beside a
         # cool blue, which is the agent-name colour and the busy colour reading
         # as the same thing at a glance. Pulled towards a plainer green.
-        hues={"busy": 240, "waiting": 78, "accent": 146, "danger": 10},
+        hues={"busy": 240, "waiting": 84, "accent": 140, "danger": 15},
+        # Measured against Nord's own Aurora group rather than estimated:
+        # waiting is nord13 (84.1), danger is nord11 (15.3), both adopted as
+        # measured. Accent is nord14 at 131.1, and is *not* adopted: at 131 the
+        # nearest status pair falls to 0.105 against this file's 0.10 floor,
+        # which 8-bit rounding can flip either way. 140 restores it to 0.116 and
+        # is the closest value to nord14 that clears the gate with room.
+        #
+        # Busy stays 240. nord8's 217.5 was the one inferred mapping in the
+        # measurement, separation is indifferent to it, and it would make busy
+        # teal in one scheme out of eight. nord9 is 249 if a measured Frost blue
+        # is ever wanted — nine degrees from where this already sits.
         chroma_surface_dark=0.038,
         chroma_surface_light=0.030,
         chroma_dark=0.10,
@@ -573,6 +615,13 @@ SCHEMES = [
         neutral_dark=278,
         neutral_light=95,
         hues={"busy": 302, "waiting": 95, "accent": 148, "danger": 24},
+        # Dracula is the one scheme whose own palette inverts the usual order:
+        # its green is the most saturated colour in the whole theme, above its
+        # red. Measured: green 0.2195, red 0.2063, purple 0.1486, yellow 0.1343.
+        # The split is bimodal rather than graded — the two event colours are
+        # loud and the two steady-state colours are quiet, a palette that shouts
+        # at transitions and murmurs in between.
+        chroma_scale={"busy": 0.84, "waiting": 0.76, "accent": 1.24, "danger": 1.16},
         chroma_surface_dark=0.060,
         chroma_surface_light=0.008,
         chroma_dark=0.125,
