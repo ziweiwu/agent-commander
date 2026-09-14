@@ -238,6 +238,47 @@ test.describe('an on-screen keyboard covers the keys, not the app', () => {
     expect(await withinBand(page, 'composer-send', PANNED_BAND), 'send outside the pan').toBe(true)
   })
 
+  /*
+   * The composer may grow, but not into the conversation it is a reply to.
+   *
+   * Its cap was a flat 180px, written twice — once as `max-height` and once as
+   * a `Math.min` in the grow handler, where the inline style quietly won. 180
+   * is a reasonable eighth of a desktop and 21% of a 390x844 phone; with a
+   * keyboard up it is about 45% of everything the reader can actually see, so
+   * a pasted command pushed the message it answered off the screen. The cap is
+   * `min(180px, 35% of --vvh)` now, which is the same rule the sheet and the
+   * dialog above already follow.
+   */
+  test('a full composer still leaves the conversation on screen', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await raiseKeyboard(page, KEYBOARD_BAND)
+
+    const input = page.getByTestId('composer-input')
+    await input.fill(Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join('\n'))
+
+    const grown = await input.boundingBox()
+    expect(grown, 'composer has a box').not.toBeNull()
+    // A third of the visible band, not of the layout viewport it is sitting in.
+    expect(
+      (grown?.height ?? 0) / KEYBOARD_BAND.height,
+      'composer swallowed the visible area',
+    ).toBeLessThanOrEqual(0.4)
+    expect(await withinBand(page, 'composer-input', KEYBOARD_BAND), 'input under the keys').toBe(
+      true,
+    )
+
+    // And the thing it is a reply to is still there to read.
+    const last = page.getByTestId('message').last()
+    const message = await last.boundingBox()
+    expect(message, 'a message to stay visible').not.toBeNull()
+    const top = KEYBOARD_BAND.top
+    const bottom = top + KEYBOARD_BAND.height
+    expect(
+      (message?.y ?? 0) < bottom && (message?.y ?? 0) + (message?.height ?? 0) > top,
+      'the last message was pushed out of the visible band',
+    ).toBe(true)
+  })
+
   test('the new-agent dialog stays inside it too', async ({ page }) => {
     await openFleet(page)
     await page.getByTestId('new-agent-button').click()

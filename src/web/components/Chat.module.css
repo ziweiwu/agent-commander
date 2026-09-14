@@ -212,7 +212,23 @@
   resize: none;
   overflow-y: auto;
   min-height: 40px;
-  max-height: 180px;
+  /*
+   * The box grows with what you type, and stops at the smaller of 180px and a
+   * third of what the reader can actually see.
+   *
+   * 180 alone is a desktop number. Measured on a 390x844 phone it is 21% of the
+   * viewport — and the viewport is not what the composer competes with. With an
+   * on-screen keyboard up, iOS leaves roughly 400px of *visual* viewport, so a
+   * grown composer took about 45% of everything visible and pushed the message
+   * it was a reply to off the screen. `--vvh` is that visible rectangle, which
+   * the sheet, the full-screen overlay, the new-agent dialog and the toast all
+   * already lay out from (INV-17); this was the one surface still ignoring it.
+   *
+   * A third, not a half: the point of growing at all is to see what you pasted
+   * before sending it, and a cap low enough to hide a three-line command would
+   * trade one failure for another.
+   */
+  max-height: min(180px, calc(var(--vvh, 100dvh) * 0.35));
   background: var(--bg);
   color: var(--text);
   border: 1px solid var(--line-strong);

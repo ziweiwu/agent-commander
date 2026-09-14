@@ -592,8 +592,19 @@ export function Chat({ agent }: { agent: Agent }) {
             onChange={(e) => {
               draftRef.current = e.target.value
               setDraft(e.target.value)
+              /*
+               * Grow to fit, and let the stylesheet decide the ceiling.
+               *
+               * This used to clamp to a literal 180 that also appeared as
+               * `max-height` in the CSS — one number in two places, and the
+               * inline style wins, so the JS copy silently decided the cap and
+               * the CSS copy was decoration. The cap now depends on the visible
+               * viewport, which this handler has no business recomputing, so
+               * the height is set unclamped and `max-height` clips it.
+               * `overflow-y: auto` is what makes the excess reachable.
+               */
               e.target.style.height = 'auto'
-              e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`
+              e.target.style.height = `${e.target.scrollHeight}px`
             }}
             onKeyDown={(e) => {
               /*

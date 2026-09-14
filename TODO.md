@@ -153,8 +153,15 @@ app fails a test rather than shrinking a list.
 
 ### 8. The composer's growth cap is a desktop number applied to a phone
 
-**Filed 2026-09-13, from a user report: "chat box too big" on mobile.**
-Triaged, not fixed.
+**Filed 2026-09-13, from a user report: "chat box too big" on mobile. Done.**
+The cap is `min(180px, calc(var(--vvh, 100dvh) * 0.35))` and the `Math.min` is
+gone from the grow handler, so the number is stated once and the stylesheet owns
+it. Measured on a 390x844 phone with the visible rectangle at 400px: the
+composer went from 180px (45% of what a reader can see) to 140px (35%), with the
+last message still on screen. `e2e/responsive.spec.ts`'s keyboard group holds it,
+and was verified by reverting the cap and watching it go red.
+
+The original triage, kept because the reasoning is the useful part:
 
 The message box grows with what you type and stops at **180px**. That number is
 written twice and the two must agree: `Chat.module.css`'s `.input { max-height:
@@ -222,9 +229,13 @@ recognisably their namesakes side by side with the originals.
 
 ### 10. Redesign the icon set with a fan-out, then pick one
 
-**Filed 2026-09-13, requested.** The set landed in `486d1cf` is one designer's
-first pass — a 24x24 grid at 1.7 stroke, drawn to be coherent rather than to be
-the best available.
+**Filed 2026-09-13, requested. Done in `8f65488`.** Five complete sets were
+drawn — strict-geometric, humanist, heavy, solid, duotone — and rasterised
+together at a true 11px, which is where four of them came apart while looking
+fine at 16. The heavy set was the only one where all sixteen survived, and it
+also fixed a defect in the set it replaced: a gear whose spokes started outside
+its rim and rasterised as a sunburst. The brief that produced them, kept because
+it is reusable:
 
 **The work:** five independent designs of the same sixteen icons, each a full
 set of SVG path data on the declared grid so they can be rendered side by side
