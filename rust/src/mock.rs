@@ -761,6 +761,17 @@ async fn flip_the_blocked_fixture_forever(inner: Arc<SourceInner>) {
 }
 
 impl MockSource {
+    /// The fixture occupying a pane, under whatever id it is running now.
+    pub fn agent_in_pane(&self, pane_id: &str) -> Option<Agent> {
+        self.inner
+            .agents
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|a| a.pane_id.as_deref() == Some(pane_id))
+            .cloned()
+    }
+
     /// Give one fixture a new session id, as `/clear` really does.
     ///
     /// `/clear` replaces the session rather than editing it: Claude Code opens
@@ -1082,7 +1093,29 @@ impl LimitsApi for MockLimits {
 
 /* ----------------------------------------------------------------- panes -- */
 
-pub struct MockPanes;
+/// The fake tmux. It holds the fleet so a typed `/clear` can do to a fixture
+/// what the real one does to a session — see [`PaneApi::paste`] below; the
+/// unit tests, which only read panes, build it detached.
+#[derive(Default)]
+pub struct MockPanes {
+    source: Option<Arc<MockSource>>,
+}
+
+impl MockPanes {
+    pub fn over(source: Arc<MockSource>) -> Self {
+        Self { source: Some(source) }
+    }
+
+    /// Which session is in this pane *now*. `SESSION_BY_PANE` is the fixtures
+    /// as written, and stops being true for a pane whose session has rotated.
+    fn session_in(&self, pane_id: &str) -> Option<String> {
+        self.source
+            .as_ref()
+            .and_then(|source| source.agent_in_pane(pane_id))
+            .map(|agent| agent.session_id)
+            .or_else(|| session_by_pane(pane_id))
+    }
+}
 
 /// How many tool calls the fixture pane's history holds. Three lines each,
 /// so more than one page at the largest window and fewer than two: the first
@@ -1214,9 +1247,22 @@ impl PaneApi for MockPanes {
         if submit == Submit::No {
             return Ok(());
         }
-        let Some(session_id) = SESSION_BY_PANE.get(pane_id) else {
+        let Some(session_id) = self.session_in(pane_id) else {
             return Ok(());
         };
+        /*
+         * `/clear` typed into the message box goes to the pane as text, the
+         * same as any other message (INV-2) — nothing but the button goes
+         * through the control route. Claude Code answers it by replacing the
+         * session, so the fixture does too, or a browser that lost the agent
+         * after a typed clear would pass here and fail for real.
+         */
+        if text == "/clear" {
+            if let Some(source) = &self.source {
+                source.rotate(&session_id, &format!("mock-session-{}", now_ms()));
+            }
+            return Ok(());
+        }
         ECHOES
             .lock()
             .unwrap()
@@ -1434,7 +1480,7 @@ pub fn mock_deps(fleet: Fleet) -> (Deps, Arc<MockSource>) {
     let source = Arc::new(source);
     let deps = Deps {
         source: source.clone(),
-        panes: Arc::new(MockPanes),
+        panes: Arc::new(MockPanes::over(source.clone())),
         limits: Arc::new(MockLimits::new(transitions)),
         tail_for: Arc::new(|agent: &Agent| {
             Some(Box::new(MockTail::new(agent.session_id.clone())) as Box<dyn TailApi>)
@@ -1603,9 +1649,9 @@ mod tests {
 
     #[tokio::test]
     async fn the_exited_fixture_is_the_only_dead_pane() {
-        assert!(MockPanes.meta(DEAD_PANE).await.unwrap().dead);
+        assert!(MockPanes::default().meta(DEAD_PANE).await.unwrap().dead);
         for live in ["%76", "%77", "%82", "%83"] {
-            assert!(!MockPanes.meta(live).await.unwrap().dead, "{live}");
+            assert!(!MockPanes::default().meta(live).await.unwrap().dead, "{live}");
         }
     }
 
@@ -1829,7 +1875,7 @@ mod tests {
 
     #[tokio::test]
     async fn capture_uses_real_escape_bytes_and_pads_to_rows() {
-        let panes = MockPanes;
+        let panes = MockPanes::default();
         let lines = panes.capture("%76", PANE_ROWS).await.unwrap();
         assert_eq!(lines.len(), PANE_ROWS);
         assert!(lines[0].starts_with("\u{001b}[38;5;246m"));
@@ -1843,7 +1889,7 @@ mod tests {
 
     #[tokio::test]
     async fn meta_is_the_fixture_geometry() {
-        let meta = MockPanes.meta("%76").await.unwrap();
+        let meta = MockPanes::default().meta("%76").await.unwrap();
         assert_eq!(meta.cols, PANE_COLS);
         assert_eq!(meta.rows, PANE_ROWS);
         assert_eq!(meta.cursor_x, CURSOR_COL);
@@ -1875,7 +1921,7 @@ mod tests {
     async fn submitted_pastes_echo_to_every_reader() {
         let session = "mock-idle-kb";
         ECHOES.lock().unwrap().remove(session);
-        let panes = MockPanes;
+        let panes = MockPanes::default();
         // %72 belongs to mock-idle-kb.
         panes.paste("%72", "not submitted", Submit::No).await.unwrap();
         panes.paste("%72", "hello", Submit::Yes).await.unwrap();

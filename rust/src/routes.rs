@@ -2532,10 +2532,9 @@ mod mock_control {
              * (INV-8), so it is the one mock mode most needs to have.
              */
             if text == "/clear" {
-                let current = crate::mock::session_by_pane(_pane_id);
-                if let Some(agent) =
-                    current.and_then(|id| crate::sources::AgentSource::get(&*self.source, &id))
-                {
+                // By pane, and by the fleet as it is now: after one clear the
+                // pane holds a session the fixture table never named.
+                if let Some(agent) = self.source.agent_in_pane(_pane_id) {
                     let next = format!("mock-session-{}", now_ms());
                     self.sessions.lock().unwrap().insert(agent.pid, next.clone());
                     self.source.rotate(&agent.session_id, &next);

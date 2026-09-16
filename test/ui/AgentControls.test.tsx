@@ -24,11 +24,18 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   setAgentModel: vi.fn(),
 }))
 
+const navigate = vi.hoisted(() => vi.fn())
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => navigate,
+}))
+
 const idle = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1' })
 
 beforeEach(() => {
   resetStore()
   closeAgent.mockClear()
+  navigate.mockClear()
 })
 
 describe('FR-CTL-12 the row keeps only what the strip has no place for', () => {
@@ -57,6 +64,26 @@ describe('close', () => {
     await user.click(screen.getByTestId('close-agent'))
     await answer(user, 'accept')
     expect(closeAgent).toHaveBeenCalledOnce()
+  })
+
+  // The route no longer closes the panel the moment an id leaves the fleet —
+  // it waits in case the agent is coming back under a new one — so a close
+  // that the server has verified leaves by its own hand.
+  it('leaves the panel once the agent is closed', async () => {
+    const user = userEvent.setup()
+    renderApp(<AgentControls agent={idle()} />)
+    await user.click(screen.getByTestId('close-agent'))
+    await answer(user, 'accept')
+    expect(navigate).toHaveBeenCalledWith('/', { replace: true })
+  })
+
+  it('stays where it is when the close failed', async () => {
+    const user = userEvent.setup()
+    closeAgent.mockResolvedValueOnce({ ok: false, error: 'busy' } as never)
+    renderApp(<AgentControls agent={idle()} />)
+    await user.click(screen.getByTestId('close-agent'))
+    await answer(user, 'accept')
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   // `/exit` is typed into the prompt, so it waits for idle (INV-8).

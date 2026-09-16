@@ -1,9 +1,11 @@
 import { useEffect, useRef, type CSSProperties } from 'react'
+import type { Agent } from '../../shared/types.ts'
 import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import { countByGroup, inScope, isTerminal, type StatusFilter } from '../lib/filter.ts'
+import { successorOf } from '../lib/succession.ts'
 import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
 import { useVisualViewport } from '../hooks/useVisualViewport.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
@@ -328,6 +330,25 @@ function moveCardFocus(delta: number): void {
  */
 const EXPECT_MS = 8000
 
+/**
+ * How long an open agent whose id has just gone from the fleet is kept on
+ * screen, waiting for it to come back under a new one.
+ *
+ * Shorter than `EXPECT_MS`, and deliberately so. The registry lists a cleared
+ * session under its new id on the same scan that drops the old one, so the
+ * ordinary case needs no wait at all; two scans cover a file read mid-write.
+ * Every second of this is also a second the panel stays up on an agent that
+ * really has ended — closed, or exited on its own — showing what was last
+ * read, and the fleet is the honest place to be once the wait is over.
+ */
+const FOLLOW_MS = 4000
+
+/** The route for one agent, on the tab the reader is already on. */
+function agentPath(sessionId: string, tab: 'chat' | 'attach'): string {
+  const base = `/agent/${encodeURIComponent(sessionId)}`
+  return tab === 'attach' ? `${base}/term` : base
+}
+
 export function FleetRoute() {
   const navigate = useNavigate()
   const narrow = useIsNarrow()
@@ -344,6 +365,32 @@ export function FleetRoute() {
 
   const wantTab = location.pathname.endsWith('/term') ? 'attach' : 'chat'
   const agent = agents.find((a) => a.sessionId === sessionId)
+
+  /*
+   * The open agent as the fleet last listed it, and when it stopped. Written
+   * from an effect and read on the render where it has gone, because that
+   * render is the one deciding whether the panel stays up, and by then the
+   * fleet no longer says. Refs rather than state so that a frame which changes
+   * nothing here costs no second render.
+   */
+  const lastSeen = useRef<Agent | null>(null)
+  const vanishedAt = useRef<number | null>(null)
+  useEffect(() => {
+    if (agent) {
+      lastSeen.current = agent
+      vanishedAt.current = null
+    }
+  }, [agent])
+  /*
+   * Keep the panel up while the id under it is being followed — through the
+   * gap after a `/clear` until the registry lists the agent again, and after
+   * the button's clear, which already knows the new id (`expectSession`) and
+   * is waiting on the same scan. The bounce effect below bounds the wait.
+   */
+  const following =
+    lastSeen.current !== null &&
+    (lastSeen.current.sessionId === sessionId || (sessionId !== undefined && sessionId === expectSession))
+  const shown = agent ?? (following ? lastSeen.current : undefined)
 
   useEffect(() => {
     focusAgent(sessionId ?? null)
@@ -407,12 +454,46 @@ export function FleetRoute() {
     return () => window.clearTimeout(timer)
   }, [expectSession, agents, setExpectSession])
 
+  /*
+   * The same rule for an id that was here and is not any more. The button's
+   * clear is told the new id; a `/clear` typed into the message box or into
+   * the terminal is not, and neither is a clear the server could not verify.
+   * For those the agent is found again by its process (`successorOf`): the
+   * fleet lists it under the new id on the scan that finds the rewritten
+   * session file, and the route goes there, on the tab it was on. Until then
+   * the panel stays up on what was last read, for at most `FOLLOW_MS` — an
+   * agent that does not come back has ended. A frame that changes something
+   * else must not restart that clock, which is why the deadline is kept
+   * rather than the delay.
+   */
   useEffect(() => {
-    if (sessionId && sessionId === expectSession) return
-    if (sessionId && agents.length > 0 && !agent) navigate('/', { replace: true })
-  }, [sessionId, agent, agents, expectSession, navigate])
+    if (!sessionId || agent || agents.length === 0) return
+    if (sessionId === expectSession) return
+    const prior = lastSeen.current
+    if (!prior || prior.sessionId !== sessionId) {
+      navigate('/', { replace: true })
+      return
+    }
+    const heir = successorOf(prior, agents)
+    if (heir) {
+      navigate(agentPath(heir.sessionId, wantTab), { replace: true })
+      return
+    }
+    vanishedAt.current ??= Date.now()
+    const giveUp = () => {
+      lastSeen.current = null
+      navigate('/', { replace: true })
+    }
+    const left = vanishedAt.current + FOLLOW_MS - Date.now()
+    if (left <= 0) {
+      giveUp()
+      return
+    }
+    const timer = window.setTimeout(giveUp, left)
+    return () => window.clearTimeout(timer)
+  }, [sessionId, agent, agents, expectSession, wantTab, navigate])
 
-  const showDetail = Boolean(agent)
+  const showDetail = Boolean(shown)
   /*
    * Collapsing only means anything while an agent is open. With none, the list
    * *is* the page — taking it away would leave an empty screen and nothing to
@@ -450,14 +531,12 @@ export function FleetRoute() {
         * the poll over — one holder at a time, never two.
         */}
       {!showFleet && showDetail && <TreePoll />}
-      {agent && (
+      {shown && (
         <AgentDetail
-          agent={agent}
+          agent={shown}
           tab={tab}
           sheet={narrow}
-          onTab={(next) =>
-            navigate(next === 'attach' ? `/agent/${agent.sessionId}/term` : `/agent/${agent.sessionId}`)
-          }
+          onTab={(next) => navigate(agentPath(shown.sessionId, next))}
           onClose={() => navigate('/')}
         />
       )}

@@ -410,6 +410,19 @@ tell that apart from an agent that really has gone. Both expire — `expectSessi
 on a timer, because an expectation this app cannot keep must not leave the panel
 blank forever.
 
+`expectSession` only covers the clear the server was asked for. A `/clear`
+typed into the message box or the terminal is text, and the browser learns of
+it only from the old id going missing — so `FleetRoute` keeps the agent it last
+saw in a ref, and when the id under it vanishes it looks for the same process
+under a new id (`lib/succession.ts`) before treating it as ended, holding the
+panel up on the last frame for a bounded wait of its own (`FOLLOW_MS`). Close
+navigates away itself once the exit is verified, since the route's bounce is
+exactly what now waits. The registry meets it
+halfway: a rewritten `<pid>.json` on a pid it has already confirmed is listed
+under the new id on that scan rather than after the next reconcile
+(`registry::succeeds_a_confirmed_session`), which is what closes the gap in
+which the agent was under neither id.
+
 `reconcile()` (`chat.ts:143`) settles the optimistic echo by counting: a message
 is confirmed when its text has appeared once *more* than it had when it was sent.
 Matching on text alone reconciled a second "Continue" against one from an hour

@@ -163,13 +163,27 @@ test.describe('acting on a running agent', () => {
   test('INV-8 follows the agent to the session it is now running @once', async ({ page }) => {
     await openAgent(page, AGENT.clearable)
 
+    /*
+     * Typed first. `/clear` in the message box goes to the pane as text like
+     * any other message, so nothing tells the browser where the session went:
+     * it has to recognise the agent again by its process, and it has to do so
+     * without the panel closing in between.
+     */
+    await page.getByTestId('composer-input').fill('/clear')
+    await page.getByTestId('composer-send').click()
+    await expect(page).not.toHaveURL(new RegExp(AGENT.clearable))
+    await expect(page).toHaveURL(/\/agent\/mock-session-/)
+    await expect(page.getByTestId('agent-detail')).toBeVisible()
+    const afterTyping = page.url()
+
+    // Then the button, from the session it is now running.
     await openComposerMenu(page)
     await strip(page).getByTestId('clear-agent').click()
     await page.getByTestId('confirm-accept').click()
 
-    // A different id, and still on an agent rather than back at the fleet.
-    await expect(page).not.toHaveURL(new RegExp(AGENT.clearable))
-    await expect(page).toHaveURL(/\/agent\//)
+    // A different id again, and still on an agent rather than back at the fleet.
+    await expect(page).not.toHaveURL(afterTyping)
+    await expect(page).toHaveURL(/\/agent\/mock-session-/)
     await expect(page.getByTestId('agent-detail')).toBeVisible()
   })
 

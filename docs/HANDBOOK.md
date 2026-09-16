@@ -504,7 +504,9 @@ own when the window fills, shows up the same way and says it was automatic.
 because there is no undo — and it does something the other controls do not:
 `/clear` replaces the session rather than editing it, so the agent comes back
 under a new id and the dashboard follows it there. The conversation on screen
-goes with the old one.
+goes with the old one. Typing `/clear` into the message box, or into the
+terminal, does the same thing and is followed the same way: the panel stays
+open on the agent, now under its new session.
 
 **Close** sends `/exit` first and only forces a session that ignores it.
 

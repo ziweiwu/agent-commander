@@ -491,19 +491,25 @@ impl Inner {
     /// for.
     fn absorb(&self, found: Vec<Agent>) -> PassOutcome {
         let mut agents = self.agents.lock().unwrap();
-        let known = self.known.lock().unwrap();
+        let mut known = self.known.lock().unwrap();
         let mut asked = self.asked.lock().unwrap();
         let mut next: HashMap<String, Agent> = HashMap::with_capacity(found.len());
         let on_disk: HashSet<String> =
             found.iter().map(|agent| agent.session_id.clone()).collect();
         let mut met_an_unrecognised_id = false;
         for agent in found {
-            if is_unconfirmed(&agent, &known) {
+            let unconfirmed = is_unconfirmed(&agent, &known);
+            if unconfirmed && !succeeds_a_confirmed_session(&agent, &agents, &on_disk) {
                 // Not a ghost yet — just unconfirmed. Ask the authority now
                 // rather than at the next 30s reconcile; `asked` is what keeps
                 // that from becoming a loop.
                 met_an_unrecognised_id |= asked.insert(agent.session_id.clone());
                 continue;
+            }
+            if unconfirmed {
+                // `/clear` in flight: vouch for the new id ourselves until the
+                // CLI's next answer replaces this set — see the fn.
+                vouch_for(&mut known, &agent.session_id);
             }
             asked.remove(&agent.session_id);
             carry_enrichment_forward(&agents, &mut next, agent);
@@ -578,6 +584,41 @@ fn is_unconfirmed(agent: &Agent, known: &Option<HashSet<String>>) -> bool {
         return false;
     }
     known.as_ref().is_some_and(|confirmed| !confirmed.contains(&agent.session_id))
+}
+
+/// `/clear` rewrites `<pid>.json` with a fresh id, and the process that wrote it
+/// is one the CLI already vouched for under its previous id. Waiting for the
+/// next `claude agents --json` to confirm the new one left a gap of a scan plus
+/// a reconcile — one to three seconds — in which the agent was in the fleet
+/// under neither id, and a browser open on it had nowhere to be but the fleet.
+///
+/// Two things have to be true of the session it replaces. It must be under a
+/// *different* id: the same id on the same pid is the ghost the presence check
+/// exists for — a session file outliving its process, on a pid something else
+/// now holds — and it must keep being dropped once the CLI stops listing it.
+/// And it must be *gone from disk*: `/clear` rewrites one file, so the old id
+/// and the new never coexist there, whereas a second file claiming a live
+/// session's pid is precisely the shape of a ghost and gets the question. A
+/// placeholder is ours, not the CLI's, and vouches for nothing.
+fn succeeds_a_confirmed_session(
+    agent: &Agent,
+    current: &HashMap<String, Agent>,
+    on_disk: &HashSet<String>,
+) -> bool {
+    current.values().any(|prior| {
+        prior.pid == agent.pid
+            && prior.session_id != agent.session_id
+            && !on_disk.contains(&prior.session_id)
+            && !crate::pending::is_placeholder(prior)
+    })
+}
+
+/// Add an id to the CLI's last answer as if it had been in it. Nothing to add
+/// to when the CLI has never answered, and then nothing is filtered either.
+fn vouch_for(known: &mut Option<HashSet<String>>, session_id: &str) {
+    if let Some(confirmed) = known.as_mut() {
+        confirmed.insert(session_id.to_string());
+    }
 }
 
 /// Keep enrichment that the transcript tailer laid down: the session file has
@@ -1546,6 +1587,54 @@ mod tests {
         settle().await;
 
         assert_eq!(cli.calls.load(Ordering::SeqCst), asked_so_far + 2);
+    }
+
+    /// `/clear` rewrites the session file with a new id. The process is the one
+    /// the CLI already confirmed, so the agent is listed under the new id on
+    /// the very pass that finds it — not after a reconcile, and not with a gap
+    /// in which it is under neither.
+    #[tokio::test]
+    async fn inv8_a_cleared_session_is_listed_under_its_new_id_on_sight() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"before"}]"#), Duration::ZERO);
+        let src = presence_source(dir.path(), cli.clone());
+
+        write_session(dir.path(), "own-pid.json", live_session("before"));
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list()[0].session_id, "before");
+        let asked_so_far = cli.calls.load(Ordering::SeqCst);
+
+        // Same file, same pid, a fresh id: what Claude Code writes on `/clear`.
+        write_session(dir.path(), "own-pid.json", live_session("after"));
+        src.inner.refresh().await;
+
+        let ids: Vec<String> = src.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(ids, ["after"], "the new id waited for the CLI, or the old one lingered");
+        // And it stays listed on the next pass without the CLI having been
+        // asked in between.
+        src.inner.refresh().await;
+        settle().await;
+        assert_eq!(src.list()[0].session_id, "after");
+        assert_eq!(cli.calls.load(Ordering::SeqCst), asked_so_far);
+    }
+
+    /// The other half of the rule above: the *same* id under the same pid is
+    /// the ghost, and vouching for it would resurrect exactly what the presence
+    /// check drops.
+    #[tokio::test]
+    async fn inv8_succession_does_not_vouch_for_a_ghost_under_its_own_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let src = presence_source(dir.path(), cli.clone());
+
+        write_session(dir.path(), "own-pid.json", live_session("live-one"));
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 1);
+
+        // The CLI stops listing it; the file, and the pid, are still there.
+        *cli.out.lock().unwrap() = Some("[]".into());
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 0, "a ghost was vouched for");
     }
 
     /// With no presence answer yet there is nothing to be unrecognised

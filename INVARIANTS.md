@@ -852,6 +852,28 @@ remains the guard for everything that types.
   the route bails to the fleet, and the agent reappears further down the page as
   a stranger. From the user's side, the panel closed itself.
 
+  **The button is not the only way a `/clear` arrives, and the others report
+  nothing back.** Typed into the message box, or into the terminal itself, it
+  goes to the pane as text like any other message (INV-2), and the first the
+  browser hears of it is the old id missing from a fleet frame — which the
+  route used to read as "the agent ended while it was open" and answer by
+  bouncing to the fleet, every time. Two things now make that case follow too.
+  The registry lists the agent under its new id **on the pass that finds the
+  rewritten session file** (`succeeds_a_confirmed_session`): the process is one
+  the CLI already vouched for under the old id, so the new one is not held for
+  the next `claude agents --json`, which left a scan-plus-reconcile gap in
+  which the agent was under neither id. And the route recognises the agent
+  again by its process — same pid, and the same pane when both sides name one
+  (`successorOf`) — and goes there, on the tab it was on, keeping the panel up
+  on what was last read until it does. The wait is bounded (`FOLLOW_MS`, two
+  scans): an agent that never comes back has ended, and after that the
+  ordinary rule takes over. Which is why **Close** now leaves the panel by its
+  own hand once the server has verified the exit, rather than relying on the
+  route to notice the id gone — that noticing is what now waits. Only a *different* id on a pid whose old file is
+  gone counts as succession; the same id on the same pid is the reused-pid
+  ghost the presence check exists to drop, and a second file claiming a live
+  session's pid still gets the question.
+
 - **Compact** sends `/compact` and is deliberately **not verified**, because the
   number forbids it: a compaction writes a `compact_boundary` record when it
   finishes, and the one real sample reports `durationMs: 157676` — over two and
@@ -894,7 +916,12 @@ and compact carry no body at all, and `JSON.parse('')` throws, which surfaced as
 `test/ui/ChatControls.test.tsx` and `test/ui/AgentControls.test.tsx` cover the
 browser's half: the burst case, the button naming no mode whatever the agent
 last reported, the confirm before a clear, and following the session id
-afterwards.
+afterwards. `registry::inv8_a_cleared_session_is_listed_under_its_new_id_on_sight`
+and its ghost counterpart cover the registry's succession rule,
+`test/succession.test.ts` what counts as the same agent under a new id, and
+`test/ui/clear-follow.test.tsx` the route following it, holding through the
+gap, and giving up. `e2e/control.spec.ts` clears the same fixture twice, typed
+and then by the button, and stays on the agent both times.
 
 ## INV-9 — The folder browser cannot leave its root
 

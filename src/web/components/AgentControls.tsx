@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import type { Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { closeAgent } from '../store/transport.ts'
@@ -38,6 +39,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
   const [pending, setPending] = useState<'close' | null>(null)
   const [confirmingClose, setConfirmingClose] = useState(false)
 
+  const navigate = useNavigate()
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
@@ -48,8 +50,19 @@ export function AgentControls({ agent }: { agent: Agent }) {
     setPending('close')
     const result = await closeAgent()
     setPending(null)
-    if (!result.ok) showToast(t('controlFailed', { error: result.error }))
-    else showToast(t(result.detail === 'forced' ? 'closedForced' : 'closedGracefully', { name }))
+    if (!result.ok) {
+      showToast(t('controlFailed', { error: result.error }))
+      return
+    }
+    showToast(t(result.detail === 'forced' ? 'closedForced' : 'closedGracefully', { name }))
+    /*
+     * Leave by hand. The route used to close the panel on its own when the id
+     * dropped out of the fleet, and now it keeps an agent whose id has gone
+     * on screen for a moment in case it is coming back under a new one
+     * (`/clear`). A closed agent is not, and the server has just verified as
+     * much, so this is the one place that knows to go.
+     */
+    navigate('/', { replace: true })
   }
 
   return (
