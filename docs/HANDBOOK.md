@@ -845,9 +845,14 @@ npm version patch --no-git-tag-version   # or minor / major
 # then set the same version in rust/Cargo.toml and rebuild so Cargo.lock
 # follows — `test/version.test.ts` fails the release job when the two
 # manifests disagree, which is how v0.11.0 died on the runner
-git commit -am "0.11.1" && git tag v0.11.1
+git commit -am "0.11.1" && git tag -a v0.11.1 -m "0.11.1"
 git push --follow-tags
 ```
+
+The tag must be annotated (`-a`). `git push --follow-tags` pushes only
+annotated tags, so a bare `git tag v0.11.1` leaves the tag on your machine, the
+push looks like it worked, and no workflow runs — which is how v0.16.0 was
+released twice. `git push origin v0.11.1` is the recovery when that happens.
 
 The tag check is its own job and takes about fifteen seconds, because everything
 after it is expensive. Then the tag fans out: one job per target —
