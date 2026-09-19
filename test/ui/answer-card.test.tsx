@@ -125,9 +125,17 @@ describe('INV-16 the verified answer outranks the escape hatch', () => {
     expect(screen.queryByTestId('answer-keys-fallback')).toBeNull()
   })
 
-  it('keeps the keys primary for a multi-select, which a digit cannot finish', () => {
+  /*
+   * Amended. A multi-select used to drop to keys alone, so the keys were
+   * primary. Its labels are the transcript's own words — `AskUserQuestion`
+   * writes every option down, `multiSelect` included — so they are now
+   * buttons, and `Enter` in the key row is what commits. The keys therefore
+   * demote as they do beside any other labelled list.
+   */
+  it('demotes the keys for a multi-select, whose labels the transcript stated', () => {
     renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
-    expect(screen.getByRole('group', { name: /answer keys/i }).dataset.secondary).toBeUndefined()
+    expect(screen.getByRole('group', { name: /answer keys/i }).dataset.secondary).toBe('true')
+    expect(screen.getByTestId('answer-key-Enter')).toBeTruthy()
   })
 })
 
@@ -344,12 +352,37 @@ describe('INV-16 the card names only what the transcript named', () => {
     expect(screen.getByTestId('answer-question').textContent).toBe('Which?')
   })
 
-  /* One digit cannot finish a multi-select, so offering one would be a button
-     that looks like an answer and is not. */
-  it('offers keys rather than digits when the picker takes several answers', () => {
+  /*
+   * A multi-select ticks rather than commits, and the card says so before the
+   * buttons rather than leaving it to be discovered by pressing one. The live
+   * pane is what shows which rows are ticked — this card sends toggles and
+   * cannot know their state, so it must not imply that it does (INV-11).
+   */
+  it('labels the rows of a multi-select and says a press only ticks one', () => {
     renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
-    expect(screen.queryByTestId('answer-option')).toBeNull()
+    expect(screen.getAllByTestId('answer-option')).toHaveLength(2)
+    expect(screen.getByTestId('answer-multi').textContent).toMatch(/ticks a row/)
+    expect(screen.getByTestId('answer-peek')).toBeTruthy()
     expect(screen.getByTestId('answer-key-Space')).toBeTruthy()
+  })
+
+  /*
+   * INV-2's "exactly once" is about the press, not the card. A single-select
+   * digit commits, so one spends the card; a multi-select digit ticks a row,
+   * and latching after one would strand a user who needs two.
+   */
+  it('stays open across several ticks, and blocks a double-tap on one row', async () => {
+    const user = userEvent.setup()
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
+    const rows = screen.getAllByTestId('answer-option')
+    await user.click(rows[0]!)
+    await user.click(rows[1]!)
+    expect(answerPrompt).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(answerPrompt).mock.calls.map((c) => c[2])).toEqual([0, 1])
+    // The same row again, immediately: that unticks what was just ticked, and
+    // a double tap is ~100ms apart, which no same-batch check catches.
+    await user.click(rows[1]!)
+    expect(answerPrompt).toHaveBeenCalledTimes(2)
   })
 
   it('says how many questions still follow, so one answer is not read as the end', () => {
@@ -399,8 +432,57 @@ describe('INV-16 the card appears only when both halves agree', () => {
     expect(screen.queryByTestId('answer-card')).toBeNull()
   })
 
-  it('offers nothing when the transcript cannot say what is being asked', () => {
+  /*
+   * Amended. This used to assert no card at all, and the premise was that a
+   * prompt this app could not read was a prompt it could not help with. That
+   * was true of the *answer* and false of everything else: five of the seven
+   * things `waitingFor` can say — a trust prompt, a `/goal` proposal, a
+   * sandbox or worker request, a model picker — are dialogs Claude Code draws
+   * without writing a `tool_use` record, so the commonest reasons an agent
+   * stops all landed here, and the Chat tab offered no pane, no arrows, no
+   * Enter and no Esc for any of them.
+   *
+   * What must still be true is that it does not *invent* a question: no
+   * labelled option, and the card saying which state it is in.
+   */
+  it('shows the terminal and the keys when the transcript cannot say what is being asked', () => {
     show('waiting', null)
+    expect(screen.getByTestId('answer-card')).toBeTruthy()
+    expect(screen.queryAllByTestId('answer-option')).toEqual([])
+    expect(screen.getByTestId('answer-no-options').textContent).toMatch(/did not write down/)
+    expect(screen.getByTestId('answer-peek')).toBeTruthy()
+    expect(screen.getByTestId('answer-key-Enter')).toBeTruthy()
+    expect(screen.getByTestId('answer-key-Escape')).toBeTruthy()
+  })
+
+  /*
+   * The floor. With no pane there is nothing to capture and nothing to type
+   * into, so a card would be an invitation to a surface that does not exist.
+   */
+  it('offers nothing for an unreadable prompt on an agent with no pane', () => {
+    useStore.setState({ prompt: null })
+    renderApp(<Chat agent={agent({ sessionId: 'a', status: 'waiting', paneId: undefined })} />)
+    expect(screen.queryByTestId('answer-card')).toBeNull()
+  })
+
+  /*
+   * `starting up` is this app's own word for a session it spawned that has not
+   * registered yet (`pending.rs`), not a dialog. Drawing "could not read the
+   * question" over a CLI that is still booting would be claiming a block that
+   * nothing has reported (INV-11).
+   */
+  it('offers nothing for an agent that is merely starting up', () => {
+    useStore.setState({ prompt: null })
+    renderApp(
+      <Chat
+        agent={agent({
+          sessionId: 'a',
+          status: 'waiting',
+          waitingFor: 'starting up',
+          paneId: '%1',
+        })}
+      />,
+    )
     expect(screen.queryByTestId('answer-card')).toBeNull()
   })
 })
@@ -462,5 +544,80 @@ describe('a refused answer releases the card (INV-11)', () => {
     expect(first().disabled).toBe(false)
     await user.click(first())
     expect(answerPrompt).toHaveBeenCalledTimes(2)
+  })
+})
+
+/*
+ * The three things a live probe of Claude Code 2.1.277 established, none of
+ * which is written down anywhere: a digit toggles a multi-select row and the
+ * picker stays open; `Enter` toggles the *highlighted* row rather than
+ * submitting; and the dialog carries a second tab, reached with `→`, whose one
+ * row is `Submit answers`.
+ *
+ * The middle one is why a multi-select could be ticked from the Chat tab and
+ * never finished from it — the card said "press Enter when the terminal shows
+ * the set you want", and Enter ticks another box.
+ */
+describe('INV-16 a multi-select is finished the way the terminal finishes one', () => {
+  const multi: PendingPrompt = { ...QUESTION, multiSelect: true }
+
+  it('offers the key that reaches the Submit tab', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={multi} />)
+    expect(screen.getByTestId('answer-key-Right')).toBeTruthy()
+  })
+
+  it('does not offer it where Enter really does submit', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    expect(screen.queryByTestId('answer-key-Right')).toBeNull()
+  })
+
+  /*
+   * The copy is the fix. A reader who follows "press Enter" on this dialog
+   * ticks a row they did not choose, and nothing on screen says why.
+   */
+  it('says how to submit, and that Enter is not it', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={multi} />)
+    const note = screen.getByTestId('answer-multi').textContent ?? ''
+    expect(note).toMatch(/→/)
+    expect(note).toMatch(/Enter only ticks another row/i)
+  })
+})
+
+describe('INV-16 the card shows what the transcript wrote down', () => {
+  /*
+   * 255 of 255 questions in this machine's transcripts carry a `header`, and
+   * it was dropped for as long as this app has existed. It is the CLI's own
+   * tab title for the dialog, so it is the one heading both surfaces can share.
+   */
+  it('names the dialog with the CLI’s own title', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, header: 'Migration' }} />)
+    expect(screen.getByTestId('answer-header').textContent).toBe('Migration')
+  })
+
+  it('draws nothing where there is no title to draw', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    expect(screen.queryByTestId('answer-header')).toBeNull()
+  })
+
+  /*
+   * 163 of 782 options carry a `preview`, 159 of them multi-line. On a
+   * question like "how should it appear in the folders?" the preview is a
+   * folder tree — the thing the choice is about — and the description without
+   * it reads as an argument with the evidence removed.
+   */
+  it('draws an option’s worked example, keeping its lines', () => {
+    const withPreview: PendingPrompt = {
+      ...QUESTION,
+      options: [
+        { label: 'Backfill', description: 'Slower', preview: 't0 starts\nt1 caught up' },
+        { label: 'Swap', description: 'Faster' },
+      ],
+    }
+    renderApp(<AnswerCard agent={blocked()} prompt={withPreview} />)
+    const previews = screen.getAllByTestId('answer-preview')
+    // One option has one and one does not, which is what the corpus looks like.
+    expect(previews).toHaveLength(1)
+    expect(previews[0]?.tagName).toBe('PRE')
+    expect(previews[0]?.textContent).toBe('t0 starts\nt1 caught up')
   })
 })

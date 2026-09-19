@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
+import { emptyNotice } from '../lib/chat.ts'
 import { dayMark } from '../lib/format.ts'
 import { formatDay, translate } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
@@ -160,15 +161,31 @@ export function Chat({ agent }: { agent: Agent }) {
   }, [menuOpen])
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
-  const events = useStore((s) => s.events)
+  const timelineAt = useStore((s) => s.timelineAt)
+  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
   const prompt = useStore((s) => s.prompt)
   /*
-   * Both halves, deliberately. The transcript holds an open tool call whenever
-   * one is merely *running*, and the registry knows the agent is stopped but
-   * not what it is stopped on — so either alone would offer to answer a
-   * question that is not being asked (INV-16).
+   * INV-16, and the two halves it is about are inside the card rather than
+   * here. Offering to *answer* still needs both — the transcript holds an open
+   * tool call whenever one is merely running, and the registry knows the agent
+   * is stopped but not what stopped it — and the card draws labelled options
+   * only when `prompt` says so, with the server refusing a digit that does not
+   * agree with the pane.
+   *
+   * What this condition decides is narrower: whether the reader gets a
+   * surface at all. Five of the seven things `waitingFor` can say are dialogs
+   * Claude Code writes no `tool_use` record for, and requiring a prompt here
+   * sent every one of them to the Attach tab — no pane, no arrows, no Enter,
+   * no Esc in Chat, which on a phone means no answer. A pane is the floor: an
+   * agent with none has nothing to show and nothing to type into.
+   *
+   * `starting up` is excluded because this app minted it (`pending.rs`) and
+   * therefore knows it is not a dialog; drawing "could not read the question"
+   * over a CLI that is still booting would be inventing a block.
    */
-  const answering = agent.status === 'waiting' && prompt !== null
+  const answering =
+    agent.status === 'waiting' &&
+    (prompt !== null || (Boolean(agent.paneId) && agent.waitingFor !== 'starting up'))
   const showToast = useStore((s) => s.showToast)
 
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -430,8 +447,8 @@ export function Chat({ agent }: { agent: Agent }) {
         >
           <div className={styles.list} data-testid="chat-list">
             {messages.length === 0 ? (
-              <div className={styles.notice}>
-                {t(events.length === 0 && conn !== 'open' ? 'chatLoading' : 'chatEmpty')}
+              <div className={styles.notice} data-testid="chat-notice">
+                {t(emptyNotice({ timelineAt, timelineStalledAt }))}
               </div>
             ) : (
               <>

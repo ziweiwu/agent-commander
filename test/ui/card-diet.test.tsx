@@ -62,10 +62,25 @@ describe('FR-CARD-1 the face of the card is the group’s question', () => {
 
   it('lets a working card say whether it is still moving', () => {
     card({ sessionId: 'a', ...busyFacts }, { sessionId: 'a', children: [] })
-    expect(screen.getByTestId('agent-trail')).toBeTruthy()
     // "delegated nothing" is on the face of a working card: the question
     // there is whether anything under it moves, and "nothing" answers it.
     expect(screen.getByTestId('agent-delegates').dataset.claim).toBe('none')
+  })
+
+  /*
+   * The trail moved into the fold when the status rail took over the face.
+   *
+   * It answers a second question — not "which needs me" but "and how long has
+   * it been like that" — and the rail's whole argument is that the face should
+   * answer one. What must not change is the claim itself: the trail is still
+   * drawn only where both its numbers are real, and still absent entirely for
+   * an agent whose CLI writes no transcript (INV-11).
+   */
+  it('folds the trail, and still draws it for a working card that has one', () => {
+    card({ sessionId: 'a', ...busyFacts }, { sessionId: 'a', children: [] })
+    expect(screen.queryByTestId('agent-trail')).toBeNull()
+    fireEvent.click(screen.getByTestId('details-toggle'))
+    expect(screen.getByTestId('agent-trail')).toBeTruthy()
   })
 })
 

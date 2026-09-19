@@ -152,6 +152,31 @@ export interface AppState {
   lang: Lang
 
   events: TimelineEvent[]
+  /**
+   * When a `timeline` frame for the selected agent last arrived, or null when
+   * none has since this conversation was opened.
+   *
+   * INV-11 applied to the conversation, and it is `fleetAt`'s twin: `events`
+   * starts empty and an empty conversation is also empty, so the array cannot
+   * tell "not read yet" from "nothing was ever said". The chat used to
+   * discriminate on `conn`, which is the wrong question — the socket is open
+   * for the whole of the window in which the transcript is being found,
+   * backfilled and sent, and over Tailscale from a phone that window is
+   * seconds. It read "Nothing said yet" at an agent mid-sentence.
+   */
+  timelineAt: number | null
+  /**
+   * The server was asked for this conversation, repeatedly, and never sent it.
+   *
+   * Distinct from `timelineAt === null`, which is the ordinary state for the
+   * second or two after opening an agent. This is what is left when the
+   * re-asks in `transport.ts` have run out, and it exists so that the chat can
+   * stop saying "loading" about something that is not arriving (INV-11).
+   *
+   * A timestamp rather than a flag, so the view can say how long ago it gave
+   * up if it ever needs to — and so nothing downstream takes a boolean.
+   */
+  timelineStalledAt: number | null
   messages: ChatMessage[]
   pending: ChatMessage[]
   pendingSeq: number
@@ -340,6 +365,8 @@ export const useStore = create<AppState>()((set, get) => ({
   lang: loadLang(),
 
   events: [],
+  timelineAt: null,
+  timelineStalledAt: null,
   messages: [],
   pending: [],
   pendingSeq: 0,
@@ -488,6 +515,8 @@ export const useStore = create<AppState>()((set, get) => ({
     pendingTimers.clear()
     set({
       events: [],
+      timelineAt: null,
+      timelineStalledAt: null,
       messages: [],
       pending: [],
       frame: null,

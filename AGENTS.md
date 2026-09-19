@@ -21,9 +21,19 @@ this family still moving?") turned out to be answerable on the card itself, from
 the same delegation trees the forest was reading. So the trees moved onto the
 card: `AgentCard` rolls each agent's delegates into a line and opens them in
 `DelegationTree`, and the reasoning that has to survive that move is INV-13 and
-INV-15. The pure parts — what a card may claim about delegates, and the two
-lengths of its activity trail — live in `src/web/lib/delegation.ts` and
-`src/web/lib/trail.ts` so they can be tested without a DOM.
+INV-15. The pure parts — what a card may claim about delegates, the two lengths
+of its activity trail, and what its status rail may assert — live in
+`src/web/lib/delegation.ts`, `src/web/lib/trail.ts` and `src/web/lib/status.ts`
+so they can be tested without a DOM.
+
+The card's face is a **status rail** plus two lines: a fixed glyph gutter
+answering "which of these needs me" by position rather than by reading, then
+the name and the age, then a context line. `status.ts` holds the two channels
+the rail is built on and keeps them apart — what a session is *doing*, and
+whether this app can still *reach* it, which is where `attachBlockedReason`
+lives now. INV-11 carries the rules; the short version is that the hand is
+never drawn over an inferred status and the working arc turns without ever
+filling.
 
 ## Two languages, and which is which
 
@@ -93,7 +103,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1295 tests: 616 Rust (the server) + 679 vitest (the web app)
+npm test              # 1375 tests: 625 Rust (the server) + 750 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -163,7 +173,7 @@ a checkout where the two have drifted. Edit the generator, never the output.
 
 **The last two are different scripts and the names are one word apart.**
 `gen-icons.py` draws the *application* icon — the PWA PNGs and the macOS
-`.iconset`, one picture of three lanes. `gen-ui-icons.py` draws the sixteen
+`.iconset`, one picture of three lanes. `gen-ui-icons.py` draws the
 small control faces *inside* the app. They share a prefix and nothing else, and
 the collision has already cost one accidental overwrite; each file's docstring
 opens by saying which one it is.
@@ -204,6 +214,48 @@ agent that has delegated nothing, and a CLI that cannot say either way.
 Because the mock fleet runs the same server, routes and validation as the real
 one (`rust/src/sources.rs` is the seam), a failure seen in mock mode is the
 failure you would get for real.
+
+## Running it while you work on it
+
+Three servers, and only one of them is yours to restart casually.
+
+**4400 is the one to develop against.** `npm run mock` builds the bundle, builds
+the server and serves the fixture fleet. Every audit script targets it, and a
+failure seen there is the failure you would get for real, because mock mode
+swaps only `sources.rs`. Restarting it is `kill` on whatever holds the port,
+then run it again — there is nothing watching it.
+
+**4317 is production, and it is a launchd job.** `~/Library/LaunchAgents/
+com.ziweiwu.agent-commander.plist` owns it with `KeepAlive`, so a plain `kill`
+brings the *old* binary straight back and looks like your change did nothing.
+Restart it properly:
+
+```sh
+npm run build                                          # bundle, then the binary
+launchctl kickstart -k gui/$(id -u)/com.ziweiwu.agent-commander
+tail -2 ~/Library/Logs/agent-commander.log             # it prints the URL
+```
+
+The token survives that: `--token auto` reads `~/.claude/agent-commander/token`
+rather than minting a new one (`token_file.rs`), so a link saved on a phone
+keeps working across restarts, and `tailscale serve` needs no attention at all
+— it proxies the *port*, and the port does not move. Check it with
+`tailscale serve status` if something looks unreachable, but suspect the server
+before the proxy.
+
+**A rebuild without that restart is the trap.** `npm run build:web` rewrites
+`dist/web` under a server that has been up for days, so the page is new and the
+binary answering it is not. That pairing is ordinary here, which is why the
+client learns whether the server beats rather than assuming it (INV-4) — but
+anything needing a new route or a new wire field will simply not work until the
+binary is replaced, with nothing saying why.
+
+**One browser, shared.** The Chrome the DevTools MCP drives is a single
+instance. A subagent that opens a page takes the selected tab with it, so a
+screenshot taken while one is running can silently be of *its* page rather than
+yours — the file on disk is fine and the picture is of something else. Check
+`document.querySelector('h1')` before believing a render, or serialise: do not
+drive the browser while a browser-driving agent is out.
 
 ## The invariant contract
 
@@ -307,8 +359,12 @@ commit.
   as a sort key.
 - **A half-open socket kept polling for a browser that was gone.** A phone
   asleep behind Tailscale held a transcript tail and a share of a pane poller.
-  Fixed by the heartbeat; the general rule is that nothing polls what nobody is
-  watching.
+  Fixed by the heartbeat — then un-fixed by the port, which dropped it along
+  with `src/server/` while three documents went on describing it, and fixed
+  again in Rust as an application `ping`/`pong` raced against the socket read.
+  The general rule is that nothing polls what nobody is watching; the lesson
+  the second round added is that a property with no test carrying its number
+  does not survive a rewrite, however well it is written up.
 - **Widths break in the empty state, not the full one.** A 300-character search
   term echoed verbatim into "No agent matches …" forced the document to 2175px.
   The review agents found that one, plus an xterm use-after-dispose crash on
@@ -397,6 +453,49 @@ commit.
   anyone running the staged binary by hand. `--help` returns before anything is
   served, so the smoke test cannot prove this one — `build-mac-app.py` checks for
   `web/index.html` directly instead.
+
+- **`npm run e2e` reuses a running server, so a Rust change is invisible to
+  it.** `playwright.config.ts` sets `reuseExistingServer: !process.env.CI`. The
+  `webServer` command builds the bundle and the binary — but only when
+  Playwright actually starts one, and if something is already listening on 4599
+  it attaches to that instead and builds nothing. The *bundle* still updates,
+  because the server reads `dist/web` from disk on every request; the **binary
+  does not**, so every mock fixture, route and wire change is silently the old
+  one.
+
+  This wasted several bisect steps: a fixture was removed, the suite still
+  failed, and the DOM still contained the thing that had been deleted. The tell
+  is exactly that — a failure that mentions something no longer in the source.
+  Before trusting any e2e run that turns on server behaviour:
+
+  ```sh
+  lsof -nP -iTCP:4599 -sTCP:LISTEN -t | xargs -r kill
+  lsof -nP -iTCP:4598 -sTCP:LISTEN -t | xargs -r kill
+  ```
+
+  It is the same lesson as "a running server outlives the bundle it serves",
+  one layer up, and it is worse there because the harness looks like it owns
+  its own server.
+
+- **A 16px icon added to a topbar chip broke four terminal tests, and the
+  connection is four steps long.** The hand went on the "N need you" filter
+  chip; `attach.spec.ts` then failed every `term-wrap` click with "element is
+  not stable", for the full 30s, on desktop. The chain: the topbar is a
+  wrapping flex row, an SVG in a chip moves that row's height, `main` resizes,
+  and `PaneTerm` re-fits the terminal on its parent's resize — which changes
+  layout again. `term-wrap`'s box therefore never produced the two identical
+  animation frames Playwright's click stability check waits for.
+
+  Three things worth keeping from finding it. It reproduced at load average 6,
+  so "WebKit under load" was the wrong first guess and cost two runs. The
+  baseline is what settled it — `git stash -u`, rebuild, run the one spec: 9
+  passed in 13.7s against 2.2 minutes of timeouts, which is not a flake
+  signature. And the bisect had to go through *five* candidate groups (the
+  card, the server, transport, `Message`, and finally `App`) because the
+  failing surface and the changed file share nothing but a layout ancestor.
+  **A continuously repainting pane makes any layout change anywhere a
+  candidate**; the terminal is the most sensitive thing on the page and it is
+  never the thing you changed.
 
 - **`codesign` runs before the smoke test, not after.** The launched thing is a
   Mach-O now rather than a script, and on Apple silicon an *invalid* signature is

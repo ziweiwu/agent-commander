@@ -327,6 +327,19 @@ pub struct PromptOption {
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// The option's own worked example, where it has one.
+    ///
+    /// A multi-line string the CLI draws beside the choice — a folder tree, a
+    /// rendered changelog, an ASCII mock of the thing being decided. Measured
+    /// over this machine's transcripts: 163 of 782 options carry one, 159 of
+    /// them multi-line, up to 755 characters.
+    ///
+    /// It was dropped for as long as this app has existed, and dropping it is
+    /// worse than it sounds: on a question like "how should it appear in the
+    /// folders?" the preview *is* the answer, and the description without it
+    /// reads as an argument with the evidence taken out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 /// A question the agent is waiting on, read out of its own transcript.
@@ -352,6 +365,14 @@ pub struct PendingPrompt {
     /// The question, where the transcript states one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub question: Option<String>,
+    /// The CLI's own one-word title for this dialog, e.g. `Release path`.
+    ///
+    /// Every question carries one — 255 of 255 across this machine's
+    /// transcripts — and it is short by design, 2 to 16 characters. It is what
+    /// Claude Code puts on the dialog's tab, so it is the heading the terminal
+    /// and the card can share rather than each inventing their own.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub header: Option<String>,
     /// What the transcript named, or — with `options_drawn` — what Claude Code
     /// draws for this dialog. Absent means "not knowable here".
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
@@ -402,6 +423,7 @@ impl PendingPrompt {
             self.question.as_deref().unwrap_or(""),
             self.detail.as_deref().unwrap_or(""),
             &self.more_questions.map(|n| n.to_string()).unwrap_or_default(),
+            self.header.as_deref().unwrap_or(""),
             // A drawn list and a written one with the same labels are different
             // claims, and an answer given to one must not be accepted for the other.
             if self.options_drawn == Some(true) { "drawn" } else { "" },
@@ -413,6 +435,11 @@ impl PendingPrompt {
         for option in &self.options {
             hasher.update((option.label.len() as u64).to_le_bytes());
             hasher.update(option.label.as_bytes());
+            // The preview is something a reader reads before choosing, so two
+            // prompts that differ only there are different questions.
+            let preview = option.preview.as_deref().unwrap_or("");
+            hasher.update((preview.len() as u64).to_le_bytes());
+            hasher.update(preview.as_bytes());
         }
         let digest = hasher.finalize();
         base64::Engine::encode(&base64::engine::general_purpose::URL_SAFE_NO_PAD, digest)
@@ -541,6 +568,16 @@ pub enum ClientMessage {
         before: u32,
         lines: u32,
     },
+    /// The answer to a `ping`, and the only message that names no session.
+    ///
+    /// A WebSocket-protocol Ping is answered by the browser's transport
+    /// without JavaScript ever seeing it, which makes it useless to the half
+    /// of this that has to run in the page: the client cannot tell a quiet
+    /// connection from a dead one unless it is handed something it can
+    /// observe. So the beat is an application message in both directions
+    /// (INV-4).
+    #[serde(rename = "pong")]
+    Pong,
 }
 
 /* ---- server -> client ---- */
@@ -602,6 +639,15 @@ pub enum ServerMessage {
         #[cfg_attr(test, ts(optional))]
         kind: Option<ErrorKind>,
     },
+    /// Are you still there? Answered with a `pong` (INV-4).
+    ///
+    /// It carries nothing, and that is the point: its only job is to be a
+    /// message the page can observe arriving. A tab that has seen none for
+    /// longer than the beat knows its socket is dead even though the operating
+    /// system still calls it open — which is precisely what a phone that slept
+    /// behind Tailscale is holding.
+    #[serde(rename = "ping")]
+    Ping,
 }
 
 /// Structured error conditions a client may branch on.
@@ -907,9 +953,10 @@ mod tests {
         PendingPrompt {
             tool: "AskUserQuestion".into(),
             question: Some(text.into()),
+            header: None,
             options: vec![
-                PromptOption { label: "Yes".into(), description: None },
-                PromptOption { label: "No".into(), description: None },
+                PromptOption { label: "Yes".into(), description: None, preview: None },
+                PromptOption { label: "No".into(), description: None, preview: None },
             ],
             multi_select: None,
             more_questions: None,

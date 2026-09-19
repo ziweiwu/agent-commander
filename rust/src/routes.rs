@@ -54,6 +54,24 @@ use crate::types::{
 /// How often a focused tab's transcript is re-read.
 const TIMELINE_MS: u64 = 1000;
 
+/// How often a quiet socket is asked whether anyone is still on the end of it.
+///
+/// The browser answers with a `pong`, and the same message is what tells the
+/// *page* its connection is alive: a tab that has seen nothing for longer than
+/// a beat reconnects rather than sitting on a socket the OS still calls open.
+/// So the number is a floor on traffic in both directions, and 30s is chosen
+/// to be well under the idle timeout of anything likely to sit in the middle —
+/// `tailscale serve`, a phone's radio — while costing two small frames a
+/// minute per tab.
+const HEARTBEAT_MS: u64 = 30_000;
+
+/// How many beats may go unanswered before the socket is dropped.
+///
+/// Two rather than one: a single missed reply is a tab that was busy for a
+/// moment, and dropping it would cost a reconnect and a re-backfill of the
+/// conversation for no reason.
+const HEARTBEAT_MISSES: u8 = 2;
+
 /// How many reads in a row may fail before the terminal gives up.
 ///
 /// It used to be one. A pane read fails for two very different reasons — the
@@ -275,6 +293,13 @@ pub struct App {
     pub grants: Grants,
     /// How many browsers are connected. See [`Viewers`].
     pub viewers: Viewers,
+    /// How often a quiet socket is pinged. `HEARTBEAT_MS` outside tests.
+    ///
+    /// A field rather than the constant read directly, because the property
+    /// worth proving — a peer that stops answering is dropped — takes two
+    /// beats to observe, and a test that spends a minute of wall clock waiting
+    /// for them is one that gets marked `#[ignore]` within the month.
+    pub heartbeat: Duration,
 }
 
 /// How many browsers are connected, and what to do when that changes.
@@ -1535,7 +1560,40 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     let (off, off_limits) = subscribe_viewer(&viewer, &app);
     app.viewers.joined();
 
-    while let Some(Ok(frame)) = stream.next().await {
+    /*
+     * INV-4: nothing polls what nobody is watching — and the hard case is a
+     * watcher that never says goodbye. A closed tab sends a Close frame; a
+     * phone that slept behind Tailscale sends nothing at all, and the socket
+     * stays `Open` to both ends until the OS gives up on the TCP connection,
+     * which can be hours. For that whole time this viewer is counted, holds a
+     * transcript tail and a share of a pane poller.
+     *
+     * So the read is raced against a beat rather than awaited on its own: a
+     * bare `while let Some(frame) = stream.next()` can only wake when the peer
+     * speaks, which is exactly what a dead peer does not do.
+     *
+     * Any frame at all clears the strike, not only a pong. A tab sending
+     * keystrokes has proved it is there more convincingly than a reply to a
+     * ping, and charging it a round trip to say so again would be noise.
+     */
+    let mut unanswered = 0u8;
+    let mut beat = tokio::time::interval(app.heartbeat);
+    // `interval` fires immediately; the first beat belongs one period out.
+    beat.tick().await;
+    loop {
+        // Both arms are plain expressions: a `select!` arm that carries its own
+        // control flow buries the ordinary path — a frame arriving — under the
+        // exceptional one.
+        let polled = tokio::select! {
+            frame = stream.next() => Some(frame),
+            _ = beat.tick() => None,
+        };
+        if polled.is_none() && !beat_once(&viewer, &mut unanswered) {
+            break;
+        }
+        let Some(frame) = polled else { continue };
+        let Some(Ok(frame)) = frame else { break };
+        unanswered = 0;
         let raw = match incoming(frame) {
             Incoming::Payload(raw) => raw,
             Incoming::Ignored => continue,
@@ -1553,6 +1611,21 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     viewer.clear_timers();
     writer.abort();
     app.viewers.left();
+}
+
+/// Ask once whether anyone is still there, or say the socket is spent.
+///
+/// `false` means the peer has missed its allowance and the caller should stop
+/// reading it. Lifted out of the read loop because the loop is already two
+/// levels of nesting deep and a third makes the ordinary path — a frame
+/// arriving — the hardest thing in it to see.
+fn beat_once(viewer: &Arc<Viewer>, unanswered: &mut u8) -> bool {
+    if *unanswered >= HEARTBEAT_MISSES {
+        return false;
+    }
+    *unanswered += 1;
+    viewer.send(ServerMessage::Ping);
+    true
 }
 
 /// What a WebSocket frame turned out to be worth reading.
@@ -1623,6 +1696,13 @@ struct KeyRequest {
 }
 
 async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    // A pong asks for nothing, so it is answered before the gate rather than
+    // inside it. Running it through `grant_for_message` would make a server
+    // started with a narrow `--grant` reply to its own heartbeat with an
+    // error, once every beat, for the life of the connection.
+    if matches!(msg, ClientMessage::Pong) {
+        return;
+    }
     // The socket is checked per message rather than at the handshake: one
     // connection carries reads, answers and arbitrary keystrokes, so a grant
     // decided once at upgrade time could only be the widest of them.
@@ -1652,6 +1732,8 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
         ClientMessage::History { session_id, before, lines } => {
             on_history(&session_id, (before, lines), viewer, app).await;
         }
+        // Returned above, before the grant gate.
+        ClientMessage::Pong => {}
     }
 }
 
@@ -1669,14 +1751,19 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
         | ClientMessage::Key { session_id, .. }
         | ClientMessage::Answer { session_id, .. }
         | ClientMessage::History { session_id, .. } => Some(session_id),
+        ClientMessage::Pong => None,
     }
 }
 
 fn grant_for_message(message: &ClientMessage) -> Grant {
     match message {
-        ClientMessage::Focus { .. } | ClientMessage::Attach { .. } | ClientMessage::History { .. } => {
-            Grant::Read
-        }
+        ClientMessage::Focus { .. }
+        | ClientMessage::Attach { .. }
+        | ClientMessage::History { .. }
+        // Never reached — `handle` returns on a pong before asking. Named
+        // rather than left to a wildcard so that adding a message cannot
+        // acquire `Read` by omission.
+        | ClientMessage::Pong => Grant::Read,
         ClientMessage::Answer { .. } => Grant::Respond,
         ClientMessage::Paste { .. } | ClientMessage::Key { .. } => Grant::Drive,
     }
@@ -1695,10 +1782,26 @@ fn grant_for_message(message: &ClientMessage) -> Grant {
 /// the transcript named, and nothing it sends becomes an argv entry.
 async fn on_answer(answer: &Answer, viewer: &Arc<Viewer>, app: &Arc<App>) {
     let session_id = answer.session_id.as_str();
-    if !afford(viewer, session_id) {
+    /*
+     * Both of these used to leave without saying so, and the cost was the exact
+     * INV-11 failure the kind below was added to fix: nothing was typed, but
+     * the card had already latched, so it sat disabled reading "Answer sent"
+     * about an answer that never went. The card releases on `answer-refused`
+     * and on nothing else — deliberately, because an *untyped* error might
+     * follow a key that did reach tmux — so a silent return is indistinguishable
+     * from a successful answer from where the reader is sitting.
+     *
+     * Neither typed anything, so both are safe to release on: the budget
+     * refused the message before it was acted on, and an unknown session has no
+     * pane to have typed into.
+     */
+    if !afford_answer(viewer, session_id) {
         return;
     }
-    let Some(agent) = app.deps.source.get(session_id) else { return };
+    let Some(agent) = app.deps.source.get(session_id) else {
+        refuse_answer(viewer, session_id, UNKNOWN_SESSION);
+        return;
+    };
     let (pane_id, key) = match answer_keystroke(&agent, answer, app).await {
         Ok(found) => found,
         Err(why) => {
@@ -1707,17 +1810,31 @@ async fn on_answer(answer: &Answer, viewer: &Arc<Viewer>, app: &Arc<App>) {
             // The failure below is not kinded — a key that errored after it
             // reached tmux has an unknown outcome, and a second press could be
             // the second digit INV-2 forbids.
-            viewer.send(ServerMessage::Error {
-                session_id: Some(session_id.to_string()),
-                message: why.to_string(),
-                kind: Some(ErrorKind::AnswerRefused),
-            });
+            refuse_answer(viewer, session_id, why);
             return;
         }
     };
     if let Err(e) = app.deps.panes.key(&pane_id, &key).await {
         viewer.error(session_id, format!("could not answer: {e}"));
     }
+}
+
+/// What a viewer is told when it answers for a session this server cannot find.
+const UNKNOWN_SESSION: &str = "that agent is no longer listed — the answer was not sent";
+
+/// Decline an answer in a way the card can act on.
+///
+/// Every refusal carries `answer-refused` because the card releases its
+/// one-press latch on that kind alone. An untyped error will not do: the card
+/// cannot tell one that means "nothing was sent" from one that followed a key
+/// already in tmux, and releasing on the latter could produce the second digit
+/// INV-2 forbids.
+fn refuse_answer(viewer: &Arc<Viewer>, session_id: &str, why: impl Into<String>) {
+    viewer.send(ServerMessage::Error {
+        session_id: Some(session_id.to_string()),
+        message: why.into(),
+        kind: Some(ErrorKind::AnswerRefused),
+    });
 }
 
 /// The fields of a `ClientMessage::Answer`, together because they are checked
@@ -2036,6 +2153,25 @@ fn afford(viewer: &Viewer, session_id: &str) -> bool {
     if viewer.budget.should_warn() {
         viewer.error(session_id, TOO_MUCH_INPUT);
     }
+    false
+}
+
+/// The same budget, for the one message whose refusal a card is waiting on.
+///
+/// `afford` reports once per burst, which is right for a paste or a keystroke:
+/// they arrive as streams, and one error per refused frame turns a flood into
+/// a flood in both directions. An `answer` is neither — it is one press of one
+/// button, and the card latches itself synchronously when it is sent. A
+/// refusal it never hears about leaves that card disabled reading "Answer
+/// sent" about an answer that was never typed, which is the INV-11 failure
+/// `answer-refused` exists to end. So this one always says so, and the 1:1
+/// amplification the burst rule avoids is bounded here by there being no
+/// stream to amplify.
+fn afford_answer(viewer: &Arc<Viewer>, session_id: &str) -> bool {
+    if viewer.budget.take() {
+        return true;
+    }
+    refuse_answer(viewer, session_id, TOO_MUCH_INPUT);
     false
 }
 
@@ -2701,6 +2837,7 @@ async fn build_app(
         grants: opts.grants,
         tree: Some(tree_reader(opts)),
         viewers: Viewers::default(),
+        heartbeat: Duration::from_millis(HEARTBEAT_MS),
     })
 }
 
@@ -3346,9 +3483,10 @@ mod tests {
         PendingPrompt {
             tool: "AskUserQuestion".into(),
             question: Some("Which migration should run first?".into()),
+            header: None,
             options: vec![
-                PromptOption { label: "Backfill the index".into(), description: None },
-                PromptOption { label: "Swap the table".into(), description: None },
+                PromptOption { label: "Backfill the index".into(), description: None, preview: None },
+                PromptOption { label: "Swap the table".into(), description: None, preview: None },
             ],
             multi_select: None,
             options_drawn: None,
@@ -3486,6 +3624,7 @@ mod tests {
             grants: Grants::ALL,
             tree: None,
             viewers: Viewers::default(),
+            heartbeat: Duration::from_millis(HEARTBEAT_MS),
         })
     }
 
@@ -4359,6 +4498,72 @@ mod tests {
         assert_eq!(*seen.lock().unwrap(), vec![Watched::Started, Watched::Stopped]);
     }
 
+    /// A server whose beat is measured in milliseconds, so two of them can be
+    /// waited for inside a test.
+    async fn beating(every: Duration) -> Harness {
+        let parts = harness_parts(FakePanes::new());
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        Arc::get_mut(&mut app).expect("sole owner").heartbeat = every;
+        let served = app.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let HarnessParts { panes, source, control, web_root } = parts;
+        Harness { port, panes, source, control, web_root, app: served }
+    }
+
+    const FAST_BEAT: Duration = Duration::from_millis(60);
+
+    /// INV-4: the beat exists so that "who is watching" has an answer for a
+    /// peer that never says goodbye. A closed tab sends a Close frame; a phone
+    /// that slept behind Tailscale sends nothing, and without this the server
+    /// polls a transcript for it until the OS gives up on the socket.
+    #[tokio::test]
+    async fn inv4_a_quiet_socket_is_asked_whether_anyone_is_still_there() {
+        let h = beating(FAST_BEAT).await;
+        let mut client = open(h.port).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "ping")).await.is_some(), "the server beats");
+    }
+
+    /// The other half, and the one that matters: a peer that stops answering
+    /// is dropped rather than polled for indefinitely.
+    #[tokio::test]
+    async fn inv4_a_socket_that_stops_answering_is_dropped() {
+        let h = beating(FAST_BEAT).await;
+        // Held for the whole test and then neither read from nor written to:
+        // the socket stays open at the OS level while the peer behind it says
+        // nothing, which is the shape of a phone that slept behind Tailscale.
+        let mut asleep = open(h.port).await;
+        assert!(next_msg(&mut asleep, |m| is_type(m, "fleet")).await.is_some());
+        assert_eq!(h.app.viewers.count(), 1);
+
+        // Two unanswered beats, plus one to act on them.
+        tokio::time::sleep(FAST_BEAT * (u32::from(HEARTBEAT_MISSES) + 2)).await;
+        assert_eq!(h.app.viewers.count(), 0, "a peer that never answers is let go");
+        drop(asleep);
+    }
+
+    /// A tab that is answering is kept, however quiet the fleet is. The
+    /// drop rule must not cost a working phone its conversation every minute.
+    #[tokio::test]
+    async fn inv4_a_socket_that_answers_its_beat_is_kept() {
+        let h = beating(FAST_BEAT).await;
+        let mut client = open(h.port).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "fleet")).await.is_some());
+        // Long enough that an unanswered socket would have been dropped
+        // several times over, so passing means the answering kept it.
+        const BEATS_WATCHED: u32 = 8;
+        let until = tokio::time::Instant::now() + FAST_BEAT * BEATS_WATCHED;
+        while tokio::time::Instant::now() < until {
+            if next_msg(&mut client, |m| is_type(m, "ping")).await.is_some() {
+                send_json(&mut client, serde_json::json!({ "type": "pong" })).await;
+            }
+        }
+        assert_eq!(h.app.viewers.count(), 1, "answering keeps the socket");
+    }
+
     #[tokio::test]
     async fn sends_the_fleet_the_moment_the_socket_opens() {
         let h = plain(FakePanes::new()).await;
@@ -4740,6 +4945,34 @@ mod tests {
         })
         .await;
         assert!(err.is_some(), "refused, and said why");
+        assert_eq!(panes.writes(), 0);
+    }
+
+    /*
+     * INV-11: every way of declining an answer has to be one the card can act
+     * on. It releases its one-press latch on `answer-refused` and on nothing
+     * else — deliberately, since an untyped error might follow a key that
+     * already reached tmux — so a refusal that arrives without the kind, or
+     * does not arrive at all, leaves the card disabled reading "Answer sent"
+     * about an answer that was never typed.
+     *
+     * These two doors used to bypass it. Neither typed anything, so both are
+     * safe to release on.
+     */
+    #[tokio::test]
+    async fn inv11_an_answer_for_a_session_the_server_cannot_find_is_refused_in_words() {
+        let panes = FakePanes::new();
+        let parts = harness_parts(panes.clone());
+        let port = serve_with_tails(&parts, tails_reporting_a_prompt()).await;
+        let mut client = open(port).await;
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":"no-such-session","promptId":"x","choice":0}),
+        )
+        .await;
+        let err = next_msg(&mut client, |m| is_type(m, "error")).await.expect("said so");
+        assert_eq!(err["kind"], serde_json::json!("answer-refused"));
         assert_eq!(panes.writes(), 0);
     }
 

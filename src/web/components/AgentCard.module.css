@@ -12,12 +12,16 @@
   border-left: 3px solid var(--idle);
   background: var(--panel);
   border-radius: var(--radius-lg);
-  padding: 11px 13px;
+  padding: 10px 13px;
   cursor: pointer;
   color: inherit;
   font: inherit;
+  /* Rail, then everything else. A fixed gutter rather than a flex item, so the
+     glyphs line up down the fleet whatever the names do. */
   display: grid;
-  gap: 6px;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 9px;
   transition:
     border-color 0.12s,
     background 0.12s;
@@ -48,6 +52,64 @@
   min-width: 0;
 }
 
+/*
+ * The status rail.
+ *
+ * One fixed column down the fleet, so "which of these needs me" is answered by
+ * position before it is answered by reading. It takes the status colour, but
+ * the colour is never the channel — each state is a different shape, and the
+ * icon set's legend was drawn in greyscale to prove it.
+ */
+.rail {
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 2px;
+  color: var(--idle);
+}
+.rail[data-state='working'] {
+  color: var(--busy);
+}
+.rail[data-state='waiting'] {
+  color: var(--waiting);
+}
+.rail[data-state='gone'] {
+  color: var(--danger);
+}
+/*
+ * INV-11 in the rail, and the same device the status pill has always used: a
+ * state this app worked out is dashed, so it reads as weaker without needing a
+ * second colour — a new colour would assert a distinction the app cannot back
+ * up, which is the rule this exists to keep.
+ */
+.rail[data-inferred] svg * {
+  stroke-dasharray: 3.1 4.3;
+}
+
+/* The arc turns; it never fills. A ring that filled toward a whole would claim
+   how far along the work is, and nothing here can measure that (INV-11). */
+.spin {
+  display: flex;
+  animation: railspin 2.4s linear infinite;
+}
+@keyframes railspin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+.body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
 .name {
   font-weight: 600;
   font-size: var(--text-md);
@@ -57,54 +119,115 @@
   min-width: 0;
 }
 
-.pill {
+/*
+ * The age, right-aligned on the first line. Tabular so the column of them
+ * lines up down the fleet, which is the point of putting it there.
+ */
+.age {
   margin-left: auto;
   flex: none;
   font-size: var(--text-xs);
-  padding: 1px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--panel-2);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.age[data-since='state'] {
+  color: var(--waiting);
+}
+
+/*
+ * The status word, now leading the context line instead of sitting in the
+ * corner as a pill. The rail carries it at a glance; this carries it in words,
+ * for a screen reader and for anyone who has not learned the shapes yet.
+ */
+.status {
+  flex: none;
+  font-size: var(--text-sm);
   color: var(--dim);
-  border: 1px solid var(--line);
   white-space: nowrap;
 }
 /*
  * INV-11, made visible rather than only readable.
  *
- * A status this app worked out from pane activity is a weaker claim than one
- * the agent reported about itself, and `idle · quiet` said so in six characters
- * of the same weight — which is not something anyone reads while scanning. The
- * dashed edge carries it without a word, and without a second colour: a new
- * colour would assert a distinction the app cannot back up, which is the very
- * thing this rule exists to prevent.
+ * A status this app worked out is a weaker claim than one the agent reported
+ * about itself, and `idle · quiet` says so in six characters of the same
+ * weight — which is not something anyone reads while scanning.
+ *
+ * The dashed edge that used to carry this moved to the rail, where it is the
+ * same gesture at a size that survives a glance. Here it would be a dashed box
+ * drawn around two words, which is what it became the moment the pill lost its
+ * border: a rectangle with nothing inside it to enclose.
  */
-.pill[data-inferred='true'] {
-  border-style: dashed;
-  /* Measured at 1.85:1 against the pill when it inherited the status colour at
-     40% alpha — under 1.4.11's 3:1 and effectively invisible, which makes the
-     one visual cue for "this status was inferred" decorative. The text still
-     carries the meaning (`idle · quiet`); this makes the border carry it too. */
-  border-color: currentColor;
-  opacity: 0.9;
+.status[data-inferred='true'] {
+  font-style: italic;
 }
 
-.pill[data-status='busy'] {
+.status[data-status='busy'] {
   color: var(--busy);
-  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
 }
-.pill[data-status='waiting'] {
+.status[data-status='waiting'] {
   color: var(--waiting);
-  border-color: color-mix(in srgb, var(--waiting) 50%, transparent);
-  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+  font-weight: 600;
 }
 
-.meta {
+.line {
   display: flex;
   flex-wrap: wrap;
-  gap: 3px 9px;
+  align-items: baseline;
+  gap: 2px 7px;
   font-size: var(--text-sm);
   color: var(--dim);
   min-width: 0;
+}
+/*
+ * The separator trails its own bit rather than leading the next one.
+ *
+ * Both put a dot between every pair on one line; they differ only when the row
+ * wraps, which the widest card in the fleet always does. A leading dot then
+ * opens each continuation line and the context line reads as a bullet list. A
+ * trailing one ends the line above instead, where it reads as "continues".
+ *
+ * `:not(:last-child)` rather than a rule on the following sibling, so a bit
+ * that does not render cannot leave a dangling dot behind it.
+ */
+.line > *:not(:last-child)::after {
+  content: '·';
+  color: var(--faint);
+  margin-left: 7px;
+}
+/* The two marks that sit apart from the sentence, and end it. */
+.cta::after,
+.reach::after {
+  content: none !important;
+}
+/*
+ * The reach mark is pushed to the far right, so whatever precedes it is the
+ * visual end of the sentence and must not trail a separator into the gap.
+ * `:last-child` cannot see this — the dot belongs to the element before it.
+ */
+.line > *:has(+ .reach)::after {
+  content: none !important;
+}
+
+/*
+ * Reachability: whether this app can still drive that pane. A second channel,
+ * and deliberately the quietest thing on the row — it matters only when it is
+ * the answer to "why can I not do anything here", so it earns attention by
+ * going red and struck rather than by being loud while everything is fine.
+ */
+.reach {
+  margin-left: auto;
+  flex: none;
+  display: flex;
+  align-items: center;
+  color: var(--faint);
+}
+.reach[data-reach='gone'] {
+  color: var(--danger);
+}
+.reach::before {
+  content: none !important;
 }
 .folder {
   color: var(--text);

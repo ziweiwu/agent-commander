@@ -7,11 +7,11 @@
 **Not to be confused with `gen-icons.py`, which is a different thing entirely.**
 That one draws the *application* icon — the PWA PNGs and the macOS `.iconset`,
 one picture of three lanes, guarded by `test/mac-app.test.ts`. This one draws
-the sixteen small control faces *inside* the app. They share nothing but a
+the small control faces *inside* the app. They share nothing but a
 prefix, and the near-collision is worth naming here because it has already
 caused one accident.
 
-Why a generator for sixteen shapes, rather than a hand-kept map.
+Why a generator for these shapes, rather than a hand-kept map.
 
 The app drew its controls with Unicode glyphs: the settings ellipsis from Math
 Operators, the expand arrow from Miscellaneous Mathematical Symbols-B, the
@@ -39,9 +39,10 @@ disclosure rows use, and four of the five fell apart there while looking fine
 at 16. The geometric panel pair became one indistinguishable smudge; the
 humanist gear collapsed into a mesh and the whole set went faint; the solid set
 lost bell-off to a blob and its chevron read as a play button; the duotone stop
-read as a record button. This one is the only set where all sixteen survived,
-and a dashboard glanced at from across a room is a legibility problem before it
-is a refinement problem.
+read as a record button. This one is the only set where all sixteen icons that
+existed at the time survived, and a dashboard glanced at from across a room is
+a legibility problem before it is a refinement problem. Anything added since
+has been held to the same bar, one at a time — see `hand` below.
 
 What is deliberately *not* here: keycap legends. The terminal key bar, the
 answer card and the help sheet draw arrows and a shift symbol that depict
@@ -108,6 +109,58 @@ ICONS: dict[str, str] = {
     # differs rather than just the detail — readable at 11px in greyscale
     # (INV-13: never colour alone).
     "bell-off": '<path d="M6.2 15.4H17.8V10.6A5.8 5.8 0 0 0 6.2 10.6Z"/><path d="M3.6 20.4L20.4 3.6"/>',
+    # An agent with its hand up: the mark on every surface that says which
+    # agents are blocked on the reader (INV-11 guarantees the claim, since an
+    # inferred status may never be `waiting`).
+    #
+    # Two fingers and a thumb, not four and a thumb. This was drawn seven ways
+    # and rasterised at a true 12 and 16px before one was picked, the same way
+    # the set itself was: a hand is mostly parallel strokes, and on this grid
+    # adjacent fingers land about 1.6px apart at 12px, so the realistic ones
+    # filled in solid and read as a bag. The widest-palm version collided with
+    # `bell` outright at 12px — both became a dome with a foot. What survives
+    # the size is the asymmetry, so the thumb does the work and the fingers are
+    # cut to the two that still show a gap between them.
+    #
+    # It never carries the meaning alone: `Icon` is always `aria-hidden`, so
+    # every placement has the status text beside it, and the colour it inherits
+    # is `--waiting` rather than anything set here.
+    "hand": '<path d="M9.6 12.6V6.4a2.5 2.5 0 0 1 5 0v6M14.6 12.4V8a2.5 2.5 0 0 1 5 0v7.6a5.2 5.2 0 0 1-5.2 5.2h-1.6a5.2 5.2 0 0 1-5.2-5.2v-3a2 2 0 0 0-4 0"/>',
+    # The status rail: one glyph per session, in a fixed gutter down the fleet.
+    #
+    # They are a *set within the set* and are drawn to be told apart from each
+    # other first, at one size, in one column — which is a different problem
+    # from the control faces above, where each is read on its own. So they share
+    # one silhouette, a circle of r=7.6, and differ only in what happens to it:
+    # closed, swept, dashed, struck. A reader learns one shape and then reads
+    # four states off its treatment.
+    #
+    # `hand` is the fifth member and deliberately breaks the circle: it is the
+    # only state that asks the reader to get up, and it should not be something
+    # you have to look twice at to tell from an idle ring.
+    "ring": '<circle cx="12" cy="12" r="7.6"/>',
+    # Working. The track is the whole circle at low opacity, the arc is a
+    # quarter of it; the component spins the arc.
+    #
+    # Opacity, not colour — the one attribute in this file that is not pure
+    # geometry, and it earns that because the track has to sit *behind* the arc
+    # in the same ink. It still inherits `currentColor`, so the pair works in
+    # all sixteen palettes with no variants, which is the rule the no-colour
+    # ban actually exists to protect.
+    #
+    # The arc is a fixed quarter that rotates. It must never grow toward a
+    # whole: a ring that filled would assert how far along the work is, and
+    # this app cannot measure that (INV-11).
+    "arc": '<circle cx="12" cy="12" r="7.6" opacity="0.28"/><path d="M12 4.4A7.6 7.6 0 0 1 19.6 12"/>',
+    # The pane is gone, so nothing can be sent there. Struck rather than
+    # hollow, because "cannot be reached" is not a quieter kind of idle.
+    "ring-off": '<circle cx="12" cy="12" r="7.6"/><path d="M6.2 17.8L17.8 6.2"/>',
+    # Reachability, as a trailing mark: can this app still drive that pane.
+    # A second channel, never mixed into the state above it — the strike is the
+    # same gesture `ring-off` and `bell-off` use, so "off" reads the same way
+    # wherever it appears.
+    "screen": '<rect x="3.2" y="4.6" width="17.6" height="12.4" rx="2.4"/><path d="M9 20.4H15"/>',
+    "screen-off": '<rect x="3.2" y="4.6" width="17.6" height="12.4" rx="2.4"/><path d="M9 20.4H15"/><path d="M3.4 19.6L20.6 4.4"/>',
 }
 
 HEADER = """// Generated by scripts/gen-ui-icons.py -- do not edit.

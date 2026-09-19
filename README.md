@@ -14,15 +14,26 @@ a laptop or from a phone.
 ## What it does
 
 - **One list of every agent**, grouped **Needs you → Working → Idle**, with the
-  folder, branch, current activity and delegates on each card.
+  folder, branch, current activity and delegates on each card. A **status rail**
+  down the left says which is which in one column of shapes — a raised hand for
+  an agent waiting on you, a turning arc for one working, a ring for idle, a
+  struck ring for a session whose terminal has gone. Beside it, whether this
+  app can still *reach* that terminal is its own mark, because "what it is
+  doing" and "can I drive it" are different questions.
 - **Answer a blocked agent from the Chat tab.** The options are read from the
-  agent's own transcript, so every button is a choice the agent actually named.
+  agent's own transcript, so every button is a choice the agent actually named
+  — including the ones that take several answers, where each press ticks a row.
+  When an agent is waiting on something it did not write down — a trust prompt,
+  a model picker — the card says so plainly and hands you its live terminal and
+  the keys instead of pretending to know the question.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
   never resizes it: it is a capture, not a second terminal. **Earlier output**
   reads back through its scrollback a page at a time, including for a pane
   whose process has exited. Under it is a line to paste into, because a capture
-  is not something a phone can paste into — the paste is your OS's, so it keeps
-  its newlines, and what it sends is text rather than a submission.
+  is not something a phone can paste into — the paste is your OS's, so a script
+  keeps its newlines. Two verbs, so the choice is yours rather than a setting's:
+  **Send** puts it at the prompt so you can see what landed, and **Run** puts it
+  there and runs it.
 - **Plain terminals, not only agents.** **+ New agent** offers a **Terminal**
   as well: a tmux session running your own shell in a folder you pick. It gets
   an Attach tab and none of the controls that type Claude Code's slash commands
@@ -33,9 +44,11 @@ a laptop or from a phone.
 - **Steer a running session**: message it, switch model or permission mode,
   set a goal, compact or clear its context, or close it.
 - **Notifications** when an agent starts waiting on you, off by default.
-- **Works on a phone** over Tailscale. The on-screen keyboard takes the keys
-  and nothing else: the message box, the last message and any error stay above
-  it.
+- **Works on a phone** over Tailscale, and keeps working when the network does
+  not: a sleeping phone's socket is noticed and replaced rather than left
+  looking live, and the conversation says it is loading rather than claiming the
+  agent has said nothing. The on-screen keyboard takes the keys and nothing
+  else: the message box, the last message and any error stay above it.
 - **Eight colour schemes**, light and dark, every one audited for contrast, in
   English and 简体中文.
 
@@ -86,10 +99,12 @@ your phone from anything else.
 1. Open <http://127.0.0.1:4317>. Agents that need you are at the top.
 2. Tap a card. **Chat** shows the conversation, with an answer card when the
    agent is blocked. **Attach** shows the terminal.
-3. The **⋯** beside Send holds everything that is not typing: common replies,
+3. Tables and links in a reply are rendered as such — a link is tappable
+   wherever it appears, including in a tool call's argument.
+4. The **⋯** beside Send holds everything that is not typing: common replies,
    what Send does to a working agent, permission mode, model, goal, compact
    and clear. It is a menu so the conversation keeps the room.
-4. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
+5. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent — or a plain terminal — with **+ New agent**, and prune
 sessions you opened and never used with **Prune**. Terminals are kept out of

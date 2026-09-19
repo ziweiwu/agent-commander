@@ -9,7 +9,22 @@ import { displayName, isRenamed } from '../lib/naming.ts'
 import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { DelegationTree } from './DelegationTree.tsx'
+import { ICON_BUTTON, ICON_MARK, Icon } from './ui/Icon.tsx'
+import type { IconName } from './ui/Icon.tsx'
+import { ageIsTimeInState, railOf, reachOf, type RailState } from '../lib/status.ts'
 import styles from './AgentCard.module.css'
+
+/**
+ * One shape per rail state. `hand` is the only one that is not a ring, and
+ * deliberately so: it is the single state that asks the reader to get up, and
+ * it must not be something you look at twice to tell from an idle session.
+ */
+const RAIL_ICON: Record<RailState, IconName> = {
+  working: 'arc',
+  waiting: 'hand',
+  idle: 'ring',
+  gone: 'ring-off',
+}
 
 /** Server-side reasons that have a translation. */
 /**
@@ -150,6 +165,10 @@ export const AgentCard = memo(function AgentCard({
   const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
   const onFace = delegatesOnFace(agent, claim)
   const canAnswer = agent.status === 'waiting' && Boolean(agent.paneId)
+  const rail = railOf(agent)
+  const reach = reachOf(agent)
+  /** Whether the age on this card is time-in-state rather than time-since. */
+  const blockedFor = ageIsTimeInState(agent)
   /*
    * INV-11. What the agent's process is running, read from the process table:
    * a measurement rather than a report, so it is captioned as such wherever it
@@ -177,97 +196,141 @@ export const AgentCard = memo(function AgentCard({
         aria-current={selected}
         onClick={() => onSelect(agent.sessionId)}
       >
-        <div className={styles.top}>
-          <span className={styles.name} data-testid="agent-name" title={displayName(agent)}>
-            {displayName(agent)}
+        {/*
+         * The rail: one glyph, in a fixed gutter, carrying the whole state.
+         *
+         * It is the card's primary channel now, and the reason is scanning —
+         * the status word used to sit in the top-right corner, so eight cards
+         * were eight reads at eight different x positions. Down a column the
+         * fleet answers "which of these needs me" before the names are in
+         * focus, which is the only question this app exists for.
+         *
+         * Four shapes and never four colours (the set's own rule, stated at
+         * `bell-off`): a swept arc while working, the hand while waiting, a
+         * hollow ring when idle, a struck ring when the pane is gone —
+         * plus a dashed stroke for a state this app worked out rather than
+         * was told (INV-11), which is the same device the status pill has
+         * always used.
+         *
+         * Decorative by the `Icon` contract, so the meaning is carried by the
+         * status text on the row below; this is a second channel, never a
+         * replacement for the words.
+         */}
+        <span
+          className={styles.rail}
+          data-testid="agent-rail"
+          data-state={rail.state}
+          data-inferred={rail.inferred || undefined}
+          aria-hidden="true"
+        >
+          <span className={rail.state === 'working' ? styles.spin : undefined}>
+            <Icon name={RAIL_ICON[rail.state]} size={ICON_BUTTON} />
           </span>
-          {kindLabel && (
-            <span className={styles.kind} data-testid="agent-kind">
-              {kindLabel}
+        </span>
+
+        <div className={styles.body}>
+          <div className={styles.top}>
+            <span className={styles.name} data-testid="agent-name" title={displayName(agent)}>
+              {displayName(agent)}
             </span>
-          )}
-          <span
-            className={styles.pill}
-            data-testid="agent-status"
-            data-status={agent.status}
-            data-inferred={agent.statusInferred === true}
-            title={agent.statusInferred === true ? t('statusInferredTitle') : undefined}
-          >
-            {statusText(agent)}
-          </span>
+            {kindLabel && (
+              <span className={styles.kind} data-testid="agent-kind">
+                {kindLabel}
+              </span>
+            )}
+            {/*
+             * The age, and what it is the age *of*. For an agent that reported
+             * itself waiting this is how long it has been blocked, not when it
+             * last wrote — the same number and a different fact, and only one
+             * of them tells a reader whether to go and look. Said in the label
+             * rather than only in the number, because a screen reader gets no
+             * help from position.
+             */}
+            {rel && (
+              <span
+                className={styles.age}
+                data-testid="agent-age"
+                data-since={blockedFor ? 'state' : 'activity'}
+                title={blockedFor ? t('ageBlockedTitle') : undefined}
+              >
+                {rel}
+              </span>
+            )}
+          </div>
+
+          <div className={styles.line} data-testid="agent-meta">
+            <span
+              className={styles.status}
+              data-testid="agent-status"
+              data-status={agent.status}
+              data-inferred={agent.statusInferred === true}
+              title={agent.statusInferred === true ? t('statusInferredTitle') : undefined}
+            >
+              {statusText(agent)}
+            </span>
+
+            {agent.activity ? (
+              <span className={styles.activity} data-testid="agent-activity" title={agent.activity}>
+                {plainText(agent.activity)}
+              </span>
+            ) : agent.running ? (
+              <span
+                className={styles.activity}
+                data-testid="agent-activity"
+                data-running="true"
+                title={t('runningFromProcessTable')}
+              >
+                {runningLine}
+              </span>
+            ) : (
+              <span
+                className={`${styles.activity} ${styles.activityMuted}`}
+                data-testid="agent-activity"
+                title={transcripts ? t('noPromptsYet') : t('noTranscript')}
+              >
+                {transcripts ? t('noPromptsYet') : t('noTranscript')}
+              </span>
+            )}
+
+            <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
+              {tildePath(agent.cwd)}
+            </span>
+            {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
+
+            {onFace && <DelegateLine agent={agent} claim={claim} />}
+
+            {/*
+              * The waiting group's one verb. Not a second button — the card is
+              * the button, and opening it lands on the answer card — but the
+              * affordance says what the tap does, which "waiting · dialog open"
+              * alone does not.
+              */}
+            {canAnswer && (
+              <span className={styles.cta} data-testid="agent-answer-cta" aria-hidden="true">
+                {t('cardAnswer')}
+              </span>
+            )}
+
+            {/*
+              * Reachability, and it is a second channel rather than part of the
+              * state: an agent can be perfectly reachable and unknowable, or
+              * blocked on you and unreachable. The server's own reason rides on
+              * the title where it has one, which is where `attachBlockedReason`
+              * has wanted to live all along — it is not a status and never was.
+              */}
+            <span
+              className={styles.reach}
+              data-testid="agent-reach"
+              data-reach={reach.reach}
+              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
+            >
+              <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
+              <span className="sr-only">
+                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
+              </span>
+            </span>
+          </div>
         </div>
-
-        {agent.activity ? (
-          <div className={styles.activity} data-testid="agent-activity" title={agent.activity}>
-            {plainText(agent.activity)}
-          </div>
-        ) : agent.running ? (
-          <div
-            className={styles.activity}
-            data-testid="agent-activity"
-            data-running="true"
-            title={t('runningFromProcessTable')}
-          >
-            {runningLine}
-          </div>
-        ) : (
-          <div
-            className={`${styles.activity} ${styles.activityMuted}`}
-            data-testid="agent-activity"
-            title={transcripts ? t('noPromptsYet') : t('noTranscript')}
-          >
-            {transcripts ? t('noPromptsYet') : t('noTranscript')}
-          </div>
-        )}
-
-        <div className={styles.meta} data-testid="agent-meta">
-          <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
-            {tildePath(agent.cwd)}
-          </span>
-          {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
-          {rel && <span>{rel}</span>}
-          {!agent.paneId && <span className={styles.warn}>{t('notAttachable')}</span>}
-        </div>
-
-        {/* How long it was writing, then how long it has been silent — the same
-            two numbers the card already prints, as a shape. Absent entirely for an
-            agent whose CLI writes no transcript, because there is no last write to
-            measure from and a full-width silence would be an assertion. */}
-        {trail && (
-          <div
-            className={styles.trail}
-            data-testid="agent-trail"
-            role="img"
-            aria-label={t('trailLabel', { worked, silent: quietFor })}
-          >
-            <span className={styles.worked} style={{ flexGrow: trail.worked }} />
-            <span className={styles.silent} style={{ flexGrow: trail.silent }} />
-          </div>
-        )}
-
-        {onFace && <DelegateLine agent={agent} claim={claim} />}
-
-        {/*
-          * INV-15. Only with a duration to name: this is a question about how long
-          * a family has been silent, and without the number there is no question,
-          * only an insinuation.
-          */}
-        {stalled && quietFor !== '' && (
-          <p className={styles.stall} data-testid="stall-candidate" title={t('stallQuestionTitle')}>
-            {t('stallQuestion', { t: quietFor })}
-          </p>
-        )}
-
-        {/*
-          * The waiting group's one verb. Not a second button — the card is the
-          * button, and opening it lands on the answer card — but the affordance
-          * says what the tap does, which "waiting · dialog open" alone does not.
-          */}
-        {canAnswer && (
-          <span className={styles.cta} data-testid="agent-answer-cta" aria-hidden="true">
-            {t('cardAnswer')}
-          </span>
-        )}
       </button>
       {/*
         * Outside the card's own button, because a disclosure inside a button is
@@ -315,6 +378,39 @@ export const AgentCard = memo(function AgentCard({
               </div>
             )}
           </dl>
+
+          {/*
+           * The trail, and INV-15's question, moved off the face with the rail.
+           *
+           * Both are about *how long*, which is a second question — the face
+           * now answers "which needs me" in one glyph column and the fold
+           * answers "and how long has it been like that". Neither claim is
+           * weakened: the trail is still absent entirely for an agent whose CLI
+           * writes no transcript, and the stall question still refuses to be
+           * asked without a duration to name.
+           */}
+          {trail && (
+            <div
+              className={styles.trail}
+              data-testid="agent-trail"
+              role="img"
+              aria-label={t('trailLabel', { worked, silent: quietFor })}
+            >
+              <span className={styles.worked} style={{ flexGrow: trail.worked }} />
+              <span className={styles.silent} style={{ flexGrow: trail.silent }} />
+            </div>
+          )}
+
+          {stalled && quietFor !== '' && (
+            <p
+              className={styles.stall}
+              data-testid="stall-candidate"
+              title={t('stallQuestionTitle')}
+            >
+              {t('stallQuestion', { t: quietFor })}
+            </p>
+          )}
+
           {!onFace && <DelegateLine agent={agent} claim={claim} />}
           {claim.kind === 'some' && tree && <DelegationTree nodes={tree.children} />}
         </div>

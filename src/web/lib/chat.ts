@@ -391,3 +391,163 @@ export function plainText(text: string): string {
     .join('')
     .trim()
 }
+
+/**
+ * Which of the three things an empty conversation actually means.
+ *
+ * INV-11, and the reason it is a function rather than a ternary at the call
+ * site: an empty message list is produced by a conversation that has not
+ * arrived, one that cannot be got at, and one that is genuinely empty, and the
+ * app spent its life claiming the third whenever the socket was open. It was
+ * open for the whole of the window in which the server finds the transcript,
+ * backfills up to 256 KiB of it and sends it — seconds, from a phone over
+ * Tailscale — so the chat read "Nothing said yet" at agents mid-sentence.
+ * `conn` was the wrong question: what the reader is waiting for is a
+ * `timeline` frame, so that is what is asked about.
+ */
+export function emptyNotice(conversation: {
+  timelineAt: number | null
+  timelineStalledAt: number | null
+}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' {
+  if (conversation.timelineAt !== null) return 'chatEmpty'
+  return conversation.timelineStalledAt !== null ? 'chatUnreachable' : 'chatLoading'
+}
+
+/** How a table column is aligned, from its delimiter row. */
+export type Align = 'left' | 'center' | 'right'
+
+export interface TableBlock {
+  kind: 'table'
+  head: string[]
+  rows: string[][]
+  align: Align[]
+}
+
+export type Block = { kind: 'p'; text: string } | TableBlock
+
+/**
+ * A markdown table row split into cells, or nothing if it is not one.
+ *
+ * Leading and trailing pipes are optional in GitHub's dialect, so they are
+ * stripped before the split rather than required. An escaped `\|` is a literal
+ * pipe inside a cell and must not split it — agents write those in tables of
+ * shell commands often enough to matter.
+ */
+function cells(line: string): string[] | undefined {
+  const trimmed = line.trim()
+  if (!trimmed.includes('|')) return undefined
+  const inner = trimmed.replace(/^\|/, '').replace(/\|$/, '')
+  const out: string[] = []
+  let cell = ''
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]
+    if (ch === '\\' && inner[i + 1] === '|') {
+      cell += '|'
+      i += 1
+    } else if (ch === '|') {
+      out.push(cell.trim())
+      cell = ''
+    } else cell += ch
+  }
+  out.push(cell.trim())
+  return out
+}
+
+/**
+ * The alignments a delimiter row declares, or nothing if it is not one.
+ *
+ * Every cell must be a run of dashes with an optional colon at either end —
+ * that is what separates a real delimiter row from a line of prose that
+ * happens to contain pipes, and it is the only thing that promotes the line
+ * above it to a header.
+ */
+function delimiter(line: string): Align[] | undefined {
+  const parts = cells(line)
+  if (parts === undefined || parts.length === 0) return undefined
+  const out: Align[] = []
+  for (const part of parts) {
+    if (!/^:?-+:?$/.test(part)) return undefined
+    const left = part.startsWith(':')
+    const right = part.endsWith(':')
+    out.push(left && right ? 'center' : right ? 'right' : 'left')
+  }
+  return out
+}
+
+/**
+ * The table starting at `start`, and the index of its last line.
+ *
+ * The header and the delimiter must agree on how many columns there are.
+ * Without that check a line of prose with one pipe, followed by a line of
+ * dashes — a sentence above a horizontal rule, which is ordinary — parses as a
+ * two-column table with a rule for a body.
+ */
+function tableAt(
+  lines: string[],
+  start: number,
+): { block: TableBlock; end: number } | undefined {
+  const head = cells(lines[start] as string)
+  const align = start + 1 < lines.length ? delimiter(lines[start + 1] as string) : undefined
+  if (head === undefined || align === undefined || head.length !== align.length) return undefined
+
+  const rows: string[][] = []
+  let i = start + 2
+  for (; i < lines.length; i += 1) {
+    const row = cells(lines[i] as string)
+    if (row === undefined) break
+    // Short rows are padded and long ones are cut, so the grid stays
+    // rectangular: a ragged table is a rendering bug, not a claim.
+    rows.push(Array.from({ length: head.length }, (_, c) => row[c] ?? ''))
+  }
+  return { block: { kind: 'table', head, rows, align }, end: i - 1 }
+}
+
+/**
+ * Split a message into paragraphs and tables.
+ *
+ * This is the only block-level structure the chat parses, and that is a
+ * deliberate stopping point rather than the first step of a markdown renderer.
+ * Everything else an agent writes — lists, headings, fenced code — already
+ * reads correctly as text in a `pre-wrap` block, because its markers are
+ * punctuation a person would type anyway. A table is the one shape where that
+ * is false: the pipes are scaffolding for a grid, and without the grid they
+ * are noise laid over the data they were supposed to organise.
+ *
+ * The rule for what counts is GitHub's, and it is strict on purpose: a header
+ * line, then a delimiter row of dashes, then rows. A line of prose containing
+ * a pipe is not a table, and neither is a header with no delimiter under it —
+ * being wrong in that direction turns a sentence into a one-cell grid, which
+ * is worse than leaving it alone.
+ */
+export function parseBlocks(text: string): Block[] {
+  const lines = text.split('\n')
+  const blocks: Block[] = []
+  let prose: string[] = []
+
+  const flush = (): void => {
+    if (prose.length === 0) return
+    /*
+     * Blank lines at either end belong to the gap between blocks, not to the
+     * paragraph — the layout sets that spacing, and keeping them would add a
+     * second, uneven gap on top of it. Interior newlines are untouched: an
+     * agent's line breaks are meaningful, which is why the paragraph keeps
+     * `pre-wrap`.
+     */
+    const joined = prose.join('\n').replace(/^\n+/, '').replace(/\n+$/, '')
+    if (joined !== '') blocks.push({ kind: 'p', text: joined })
+    prose = []
+  }
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const table = tableAt(lines, i)
+    if (table === undefined) {
+      prose.push(lines[i] as string)
+      continue
+    }
+    flush()
+    blocks.push(table.block)
+    i = table.end
+  }
+  flush()
+  return blocks.length > 0 ? blocks : [{ kind: 'p', text }]
+}

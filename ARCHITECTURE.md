@@ -328,9 +328,12 @@ Deliberately small, and it has stayed that way: the delegation graph is the most
 recent addition to the app and it is a `GET`, not a seventh server message. The
 data is neither hot nor pushed, and only the forest wants it.
 
-One WebSocket per browser tab. Four messages up — `focus`, `attach`, `paste`,
-`key` (`types.ts:189`) — and six down — `fleet`, `limits`, `timeline`, `frame`,
-`paste-ack`, `error` (`types.ts:203`). There is no schema validation beyond the
+One WebSocket per browser tab. Seven messages up — `focus`, `attach`, `paste`,
+`key`, `answer`, `history`, `pong` — and eight down — `fleet`, `limits`,
+`timeline`, `frame`, `history`, `paste-ack`, `error`, `ping` (`types.rs`).
+The beat is the one pair that names no session: it is about the socket rather
+than about an agent, and `handle` answers it before the `--grant` gate for that
+reason. There is no schema validation beyond the
 discriminated union and a `JSON.parse` in a try/catch; a malformed frame must not
 kill the connection.
 
@@ -606,8 +609,22 @@ their absence would otherwise read as an oversight.
 - **The heartbeat.** A half-open socket — a phone asleep on the far side of
   Tailscale — left a `Viewer` tailing a transcript once a second and, if the
   terminal was open, holding a share of a pane poller, for a browser that was not
-  there. `HEARTBEAT_MS` (`routes.rs`) pings every socket and drops one that has
-  missed two rounds. `test/heartbeat.test.ts`.
+  there. `HEARTBEAT_MS` (`routes.rs`) beats every socket and drops one that has
+  missed `HEARTBEAT_MISSES` rounds.
+
+  **It was fixed, then lost in the port, and this list said otherwise for both
+  releases in between.** The Node implementation and `test/heartbeat.test.ts`
+  left with `src/server/`, and nothing carried them across: the read loop became
+  a bare `while let Some(frame) = stream.next()`, which can only wake when the
+  peer speaks — precisely what a dead peer does not do. `INVARIANTS.md` INV-4
+  went on citing a test group that did not exist. The beat is now raced against
+  the read in a `select!`, and it is an application `ping`/`pong` rather than a
+  protocol Ping, because the browser's transport answers one of those without
+  JavaScript seeing it and the page needs a beat it can observe: `readyState`
+  stays `OPEN` on a slept phone, so the client closes a socket that has carried
+  nothing for `SILENCE_MS` (`transport.ts`) rather than trusting it.
+  `routes::inv4_a_socket_that_stops_answering_is_dropped`,
+  `test/ui/heartbeat.test.tsx`.
 - **`Poller` (`poll.rs`).** INV-4's "re-arms after the work completes rather than
   on a fixed interval" was implemented properly in `registry.rs` and as
   `setInterval` plus a busy flag in three other places, which converts an overrun

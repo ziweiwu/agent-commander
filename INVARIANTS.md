@@ -419,9 +419,49 @@ were the reason for the rules, not the rules.
 - `poll::inv4_*` — INV-4's cadence rule itself: no overlap, never sooner
   than the last pass took, survives a throwing pass, and cannot be started twice
   into two chains
-- `routes::tests` (the heartbeat group) — a socket that answers is kept, one that has gone
-  silent is dropped within two rounds, and the drop stops that viewer's
-  transcript tail rather than merely closing the socket
+**The heartbeat, and a note on what this file claimed before it existed.** The
+clause above says a socket that has stopped answering is dropped, and until
+`inv4_a_socket_that_stops_answering_is_dropped` landed it was not true of the
+Rust server: this entry cited a test group that did not exist, and
+`ARCHITECTURE.md` cited a `HEARTBEAT_MS` and a heartbeat spec under `test/`
+that were the Node server's and left with it. The property was real and the
+port dropped it, and nothing failed — which is the failure mode this file is
+meant to prevent, so it is recorded rather than quietly corrected. (The dead
+spec is named in `ARCHITECTURE.md` §"Fixed since this list was written" and
+deliberately not spelled as a path here: the citation guard below resolves
+every `test/…` this file names, which is the check that would have caught the
+loss in the first place.)
+
+It is now an application message in both directions (`ping` / `pong`) rather
+than a WebSocket-protocol Ping, because the browser's transport answers one of
+those without JavaScript ever seeing it. The page needs a beat it can *observe*
+for the other half of the same problem: `readyState` on a phone that slept
+behind Tailscale still says `OPEN`, so nothing fires `close`, nothing
+reconnects, and the composer looks live while every write reaches nobody. The
+client drops a socket that has carried nothing for `SILENCE_MS`
+(`transport.ts`), which is two beats plus slack.
+
+**The client arms that only once it has heard a beat**, which is version skew
+rather than caution. `npm run build` rewrites `dist/web` under a server that
+has been up for days, so a page newer than the binary answering it is what a
+rebuild ordinarily produces here — `ARCHITECTURE.md` §"Where it is fragile"
+already names that pairing. A server from before this change sends no `ping`,
+and a watchdog that assumed one would drop a perfectly good socket every minute
+the fleet was quiet. One beat is proof the server speaks this protocol; it is
+re-learned per socket, because a reconnect may land on a server that was
+restarted in between.
+
+- `routes::inv4_a_quiet_socket_is_asked_whether_anyone_is_still_there`,
+  `inv4_a_socket_that_stops_answering_is_dropped`,
+  `inv4_a_socket_that_answers_its_beat_is_kept` — the server beats; a peer that
+  never answers stops being counted as a viewer within two rounds, which is
+  what stops its transcript tail and its share of a pane poller; one that
+  answers is kept however quiet the fleet is
+- `test/ui/heartbeat.test.tsx` — the browser's half: the pong; a socket that
+  has heard nothing for longer than the beat is closed by hand, because `close`
+  is the only thing that schedules a reconnect; a socket whose server never
+  beat is left alone however quiet it goes; a socket replaced while it was
+  dying does not take its successor down with it
 - `enrich::inv4_stops_tailing_while_no_browser_is_connected` — the enricher idles while no browser is connected, runs
   a pass the moment one arrives, and paces itself by the work rather than by a
   wall clock
@@ -992,6 +1032,55 @@ produced output lately. That is a far weaker claim wearing the same word, so it
 is marked `statusInferred` on the wire and reads `idle · quiet` on the card,
 never a bare `idle` beside a Claude one.
 
+**The status rail carries all of that as a shape, and the same rules bind it.**
+The card used to answer "which of these needs me" with a coloured word in its
+top-right corner, which is eight reads at eight different x positions for a
+fleet of eight. The rail is a fixed gutter down the left of every row: a swept
+arc while working, the raised hand while waiting, a hollow ring when idle, a
+struck ring when the pane is gone. Four shapes and never four colours — the
+icon set's own rule, and its legend was drawn in greyscale to prove it.
+
+Three things the rail may not do, all of them this invariant restated in a
+channel that is read faster and argued with less:
+
+- **The hand is never drawn over a guess.** An inferred status can never be
+  `waiting` — the server has no branch that returns one — and `railOf` refuses
+  it a second time, because this is the one place a future writer could hand
+  the rail a fabricated "needs you". A mark that is worth crossing the room for
+  stops being worth it the first time it is wrong.
+- **An inferred state is dashed**, the same device the status pill used before
+  the rail took it over, and not a second colour: a new colour would assert a
+  distinction this app cannot back up.
+- **The arc turns; it never fills.** A ring filling toward a whole would claim
+  how far along the work is, and nothing here measures that. It is motion, so
+  it says only "still moving", which is all the transcript supports.
+
+**Reachability is a second channel and never part of the state.** Whether this
+app can still drive a session's pane is a different fact with different
+evidence from what that session is doing: an agent can be perfectly reachable
+and unknowable (a CLI that reports nothing), or blocked on you and unreachable
+(its pane has exited). Collapsing them is what left `attachBlockedReason`
+homeless — it is not a status, and the trailing mark on the card is where it
+finally says so in the server's own words. The one place the channels meet is
+that `gone` outranks `waiting` in the rail: a question that can be answered
+from nowhere must not wear the mark that means "you can answer this", which is
+the same reasoning that already withholds the card's Answer verb.
+
+**And the age says what it is the age of.** For an agent that reported itself
+waiting the card reads it as how long it has been blocked, not when it last
+wrote. It is the same field and the same number — for an agent that stopped to
+ask, the last thing that happened *is* that it stopped — so nothing new is
+measured; what changes is only what the card calls it, and an agent with no
+recorded activity is given no such sentence at all.
+
+- `test/status.test.ts` — what the two channels may claim, without a DOM: the
+  hand refused to an inferred status, `gone` outranking `waiting`, delegation
+  as a modifier rather than a fifth shape, reach independent of state, and the
+  age refusing to read as time-in-state for a status this app worked out
+- `test/ui/status-rail.test.tsx` — the card drawing it, the rail staying
+  `aria-hidden` so the words beside it carry the meaning, and
+  `attachBlockedReason` reaching the reader rather than being invented
+
 **An inferred status may never be `waiting`.** An agent blocked on a permission
 prompt and an agent that has finished both sit there emitting nothing; no
 timestamp separates them. Guessing would put a fabricated "needs you" next to
@@ -1065,6 +1154,35 @@ can be looked at; the ordinary mock fleet always has fourteen agents.
   already open; the empty copy appears only after a frame that said zero
 - `e2e/loading.spec.ts` — the same against the real bundle with the socket
   intercepted so the frame never comes
+
+**And the conversation is the same rule, which it went without for longer.**
+The fleet gates its empty copy on `fleetAt`; the Chat tab gated its own on
+`conn`, which answers a different question. The socket is open for the whole of
+the window in which the server resolves the transcript, backfills up to 256 KiB
+and sends it — and `onOpen` sets `conn: 'open'` *before* it sends the `focus`
+that asks — so from a phone over Tailscale the chat asserted "Nothing said yet.
+Send this agent a message below…" at agents that were mid-sentence, on every
+reconnect. `timelineAt` is `fleetAt`'s twin and only a `timeline` frame writes
+it.
+
+Two things fed the same false claim and both are fixed at the source. The
+server sent `reset: true` with no events when it could not *find* a transcript
+— a frame meaning "replace what you are holding" in answer to "I do not know" —
+which blanked a good conversation. And a `focus` the server dropped in silence
+(a session id the registry does not know yet, which is what a reconnect into a
+restarted server looks like) was never asked again, because `focusAgent`
+early-returns when the selection has not changed; it is now re-asked a bounded
+number of times and then *said*, rather than left under a spinner for ever.
+
+- `transcript::inv11_a_transcript_that_cannot_be_found_is_not_an_empty_conversation`
+  and `an_empty_transcript_that_exists_is_reported_as_the_clients_first_read` —
+  the two halves: a missing file replaces nothing, an empty file that exists is
+  a conversation with nothing in it and must say so
+- `test/ui/chat-loading.test.tsx` — `emptyNotice` over the three states, and
+  the precedence that matters: a conversation already read stays "empty" rather
+  than becoming "unreachable" when a later re-read fails
+- `test/ui/heartbeat.test.tsx` (the focus group) — the re-ask stops on the
+  first frame, and gives up saying so rather than polling a dead end (INV-4)
 
 **A card's activity trail is measured or it is absent.** The two lengths a card
 draws — writing, then silent — come from `startedAt` and `lastActivityAt`, and
@@ -1435,6 +1553,17 @@ noticed.
 an insinuation rather than a question, so an agent with no readable last write
 gets nothing.
 
+**Amended: it is asked in the card's fold rather than on its face.** The status
+rail took over the face and answers one question — which of these needs me —
+in one column of shapes. This asks a second one, *and how long has it been like
+that*, which is what the reader goes looking for once the first is answered;
+the activity trail moved down with it for the same reason. Nothing about the
+claim changes, and the tests that hold it now open the disclosure first rather
+than being left to pass against a closed one. What the face keeps is the part
+that is not a question: `2 still moving, so this is not a stall` stays beside
+the delegate count, because that is an answer, and a reader scanning for
+trouble needs to see it without opening anything.
+
 **Absence of a tree is not a silent tree.** `unread` and `unknown` never
 qualify, for the same reason `none` does not: there is nothing to have gone
 quiet.
@@ -1507,6 +1636,28 @@ inside the rule rather than an exception to it:
   watcher only while the card is mounted (INV-4). A release that reorders its
   dialog makes a label wrong *visibly*, three rows below the button, rather
   than silently answering the wrong thing.
+- **The table drifts, and the pane check is what makes that visible rather
+  than dangerous — but it has to fire on the version people run.** Measured
+  against Claude Code 2.1.269 the permission dialog draws `3. No`, where the
+  table says `No, and tell Claude what to do differently`, and writes `don’t`
+  with a typographic apostrophe where the table has an ASCII one. The match was
+  `text.starts_with(label)`, so **only option 1 was answerable, on every
+  permission prompt**, and the only thing that said so was a refusal toast. The
+  comparison now folds typographic punctuation and accepts a prefix in either
+  direction, so a row the CLI shortened is still that row. What that gives up
+  is named precisely in `drawn_row_matches`: an approval can still never be
+  typed as a refusal, because "Yes…" and "No…" prefix neither one another; what
+  is no longer separable by label alone is approve-once from approve-always,
+  which the one-way check could not separate either. The row is also now found
+  by reading *up from the bottom* — an agent's own numbered prose sits in the
+  same capture, and the dialog is always the most recent thing drawn.
+
+  The real lesson is upstream of the fix: this is a hand-kept table of another
+  program's UI strings, checked against that program's output. It will drift
+  again. `TODO.md` §12 is the version that cannot — read the rows off the pane
+  and label the buttons from them, so the terminal is the source rather than
+  the thing being second-guessed.
+
 - **The pane is read before the digit is sent — and this, not the table, is
   the guarantee.** Measured against Claude Code 2.1.261, the permission dialog
   is drawn with *two* rows as often as three (the "don't ask again" row is
@@ -1517,12 +1668,15 @@ inside the rule rather than an exception to it:
   `drawn_row_matches` looks for that number with that label as its prefix;
   when it is not there the answer is refused, in words, and nothing is typed.
   The keys and the capture remain, which is how that dialog is then answered.
-- **Both halves are held server-side.** The card shows only when the status is
-  `waiting` *and* the transcript names an open call; the server now refuses an
-  answer for any status but `waiting` as well, because an open call outlives
-  the moment the agent is let go at the terminal, its fingerprint does not
-  change, and a card one broadcast behind — or any socket peer — could
-  otherwise type a digit into an agent that is working.
+- **Both halves are held server-side.** A labelled option is offered only when
+  the status is `waiting` *and* the transcript names an open call; the server
+  refuses an answer for any status but `waiting` as well, because an open call
+  outlives the moment the agent is let go at the terminal, its fingerprint does
+  not change, and a card one broadcast behind — or any socket peer — could
+  otherwise type a digit into an agent that is working. The server's half is
+  the one that matters: the card being drawn for a waiting agent with no open
+  call (the amendment below) changes nothing here, because such a card has no
+  option to press and sends no answer.
 - **A refusal is typed, so the card can let go.** Every reason the server
   declines an answer — the pane not drawing that row, the agent not waiting,
   the question having moved on — arrives as an `error` of kind
@@ -1538,6 +1692,17 @@ inside the rule rather than an exception to it:
   returns nothing for it and the card falls back to what was written and the
   keys.
 
+**The card shows the two fields the transcript writes and this app used to
+drop.** `header` is the CLI's own one-word title for the dialog — its tab
+label — and every question carries one, 255 of 255 across this machine's
+transcripts; it is the heading both surfaces can share rather than each
+inventing one. `preview` is an option's worked example, a folder tree or a
+rendered changelog, on 163 of 782 options and multi-line in 159 of them. On the
+questions that carry one the preview *is* the thing being chosen between, and a
+description without it reads as an argument with the evidence taken out. Both
+now travel on the wire and both are covered by the prompt's fingerprint, since
+they are things a reader reads before choosing.
+
 `waitingFor` cannot stand in for any of this. It is a closed set — `dialog
 open`, `permission prompt`, `input needed`, `sandbox request`, `goal proposal`,
 `worker request` — and permission prompts, plan approvals and question pickers
@@ -1550,19 +1715,108 @@ does not fail loudly — it answers a different question than the one the user
 read. `1`–`9` are on `ALLOWED_KEYS` for this and nothing else; `0` names no
 option and a two-digit string is not a key.
 
-**Both halves must agree before anything is offered.** An open call means a tool
-is unfinished, which during ordinary work is nearly always true — a tool that is
-merely *running* looks exactly like one waiting to be allowed. The registry
-knows the session is stopped but not what stopped it. So the card appears only
-when the status is `waiting` **and** the transcript names an open call, and a
-delegate's question is excluded outright: it is asked of the delegate, and
-answering it into this agent's prompt would type into the wrong session.
+**Both halves must agree before an answer is offered.** An open call means a
+tool is unfinished, which during ordinary work is nearly always true — a tool
+that is merely *running* looks exactly like one waiting to be allowed. The
+registry knows the session is stopped but not what stopped it. So a *labelled
+option* is offered only when the status is `waiting` **and** the transcript
+names an open call, and a delegate's question is excluded outright: it is asked
+of the delegate, and answering it into this agent's prompt would type into the
+wrong session.
 
-**One press, and the card closes.** This is INV-2's "exactly once" with a
-sharper edge than usual: a second digit is not a duplicate answer, because
-`AskUserQuestion` asks its questions one at a time — it would answer the *next*
-question, which the user has not read. The guard is a ref, cleared
-synchronously, for the reason the composer's is.
+**Amended: that rule governs the answer, not the surface.** It used to govern
+both — no open call, no card at all — and the cost was hidden by how it was
+described. `waitingFor` has seven values and only two are ordinarily backed by
+a `tool_use` record; a trust prompt, a `/goal` proposal, a sandbox or worker
+request, a model picker and a compaction confirmation are dialogs Claude Code
+draws without writing anything down. For every one of those the Chat tab
+offered no pane, no arrows, no Enter and no Esc, and the answer was "open the
+terminal" — on a phone, which is the case this app exists for. A card that is
+withheld for the commonest reason an agent stops is not much of a card, which
+is the same argument that put the drawn choices on the two thinner shapes.
+
+So a waiting agent **with a pane** now always gets the card, and what changes
+is what is in it. With no prompt there is no labelled option, no digit and no
+claim about the question: the card says the agent is waiting on something it
+did not write down, and offers the two things the Attach tab has — a read-only
+capture (INV-1) and the keys already on `ALLOWED_KEYS` (INV-2, INV-6 for
+`Escape`). Nothing new reaches an agent that could not be sent from Attach; it
+is sent from where the reader is instead. `starting up` is excluded because
+this app minted that status itself (`pending.rs`) and therefore knows it is not
+a dialog, and a pane is the floor: with none there is nothing to show and
+nothing to type into.
+
+**How a multi-select is actually driven, measured rather than assumed.** None
+of this is documented, and the docs agent sent to find it came back saying so;
+it was established by driving a real picker in a tmux pane against Claude Code
+**2.1.277** and capturing the pane between keystrokes:
+
+```text
+←  ☒ Colours  ✔ Submit  →          the dialog has two tabs
+
+❯ 1. [✔] Red                       a digit toggles the row it numbers,
+  2. [ ] Green                     and the picker stays open
+  3. [✔] Blue
+  4. [ ] Yellow
+  5. [ ] Type something            rows the transcript never mentions
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+```
+
+Three findings, in the order they matter:
+
+- **`Enter` toggles the highlighted row. It does not submit.** Pressing it on
+  the picker above unticked `Red`. The card used to say "press Enter when the
+  terminal shows the set you want", which ticks a row the reader did not
+  choose — so a multi-select could be ticked from the Chat tab and never
+  finished from it. Submitting is `→` to the `✔ Submit` tab, then Enter there;
+  `Right` is already on `ALLOWED_KEYS`, so the card offers it and says what it
+  is for.
+- **A digit toggles, repeatedly, without submitting.** `1`, `3` and `4` pressed
+  in turn left three rows ticked and the picker open, and the answer that
+  eventually arrived named all of them. So the card's one-digit-per-press model
+  is right, and its refusal to latch on a multi-select is right.
+- **The picker draws rows the transcript does not name** — `Type something` and
+  `Chat about this`, numbered after the stated options. The card offers only
+  `1..N`, which is what keeps a press aimed at an option the transcript
+  actually wrote down.
+
+A fourth thing, recorded because it is unexplained rather than because it is
+understood: in the first run of this probe a digit press submitted the dialog
+with one row ticked instead of ticking a second. It did not reproduce across
+four subsequent presses in a second run, and nothing was changed in between.
+Treat a multi-select answer as verified by the pane rather than by this note.
+
+**Amended: a multi-select is labelled, and a press ticks rather than commits.**
+`AskUserQuestion` writes every option down before the dialog is drawn,
+`multiSelect` included — so the labels were always the transcript's own words,
+and the card discarded them anyway and said the question was "chosen in the
+terminal". They are buttons now. What the invariant has to carry is the
+difference in what a press *means*: a single-select digit commits, so the card
+spends itself on one (a second would answer the *next* question); a
+multi-select digit toggles a row and commits nothing, so the card stays open,
+`Enter` is what submits, and the live pane below is the only thing that says
+which rows are ticked — this card sends toggles and cannot know their state, so
+it must not imply that it does. One row refuses a second press of *itself*
+within `REPEAT_MS`, because a double tap there unticks what the user just
+ticked and no same-batch check is slow enough to see it.
+
+- `test/ui/answer-card.test.tsx` (the multi-select group) — the Submit key is
+  offered for a multi-select and withheld where Enter really does submit, and
+  the copy says both how to submit and that Enter is not it
+- `test/ui/answer-card.test.tsx` — the card with no prompt shows the capture
+  and the keys and labels nothing; none for an agent with no pane, and none for
+  one merely starting up; a multi-select labels its rows, says a press only
+  ticks one, stays open across several, and blocks a double tap on one row
+
+**One press, and the card closes — where a press commits.** This is INV-2's
+"exactly once" with a sharper edge than usual: a second digit is not a
+duplicate answer, because `AskUserQuestion` asks its questions one at a time —
+it would answer the *next* question, which the user has not read. The guard is
+a ref, cleared synchronously, for the reason the composer's is. The exception
+is the one case where a press does not commit: see the multi-select amendment
+below, where the same reasoning produces the opposite rule.
 
 - `transcript::prompt_tests` — the options an `AskUserQuestion` states are read
   back exactly and are not marked as drawn; `ExitPlanMode` yields its plan and
@@ -1580,6 +1834,11 @@ synchronously, for the reason the composer's is.
   that is there still answers
 - `routes::inv16_an_answer_for_an_agent_that_is_not_waiting_is_refused` — an
   open call on a busy agent is not an answerable question
+- `transcript::inv16_matches_the_dialog_claude_code_2_1_269_draws`,
+  `inv16_an_approval_is_never_matched_to_a_refusal` and
+  `inv16_a_numbered_line_in_the_agents_own_output_is_not_a_dialog_row` — the
+  real dialog, copied off a live pane; the property the looser match keeps; and
+  the dialog winning over the agent's own numbered prose
 - `transcript::inv16_a_drawn_choice_is_matched_against_the_pane_by_number_and_label`
   and `inv16_drawn_choices_cover_dialogs_and_never_a_delegation_call` — the
   pane check through highlight marks and colour codes, the two-row dialog, a
@@ -1590,7 +1849,8 @@ synchronously, for the reason the composer's is.
   answer sent as its number, one answer from a double click, the drawn choices
   for a plan and a permission request captioned and edged as drawn with the
   pane beside them, no caveat and no pane for a stated question, the pane
-  wherever only keys are offered, keys instead of digits for a multi-select,
+  wherever only keys are offered, a multi-select labelled and captioned as
+  ticking rather than committing,
   the raw keys demoted below a labelled answer and primary where nothing was
   labelled, the card refusing offline without claiming an answer, a frame the
   socket dropped never latching the card, a typed refusal for this agent
@@ -1606,6 +1866,25 @@ synchronously, for the reason the composer's is.
   permission, show what was written, offer the drawn choices marked as drawn
   from the same table the server uses, and draw the live pane under them; the
   same spec drives the fixture whose pane has exited onto the dead-pane notice
+
+**The terminal has two verbs, and they are two controls rather than a mode.**
+The paste line stages text at the prompt without running it, which is what
+lets a reader see what actually landed before it executes — on a phone, typing
+into somebody's live shell, that is the whole point of the field existing.
+`Run` is the other verb: the same `paste` with `submit`, which the server
+stages through a file and appends the newline to itself, so a multi-line
+script arrives as one write rather than as a race between its lines and its
+Enter. Both are explicit presses, so INV-2 is untouched; what is refused is a
+*setting* that makes one press mean different things on different days, on the
+one control in this app that runs a command in a live shell.
+
+Verified against a real `bash` pane rather than only a fixture: `Run` executed
+a one-liner and a three-line `for` loop as a block, and `Send` left its text at
+the prompt with the file it would have written absent from disk.
+
+- `test/ui/term-paste.test.tsx` — Run runs and Send stages, a multi-line script
+  keeps its newlines, a double press runs once (INV-2), and neither verb is
+  offered once the pane has exited
 
 ## INV-17 — Every shape is the whole app
 
@@ -1834,6 +2113,17 @@ text it read out of a file or fetched from the web. Rendering it as React
 elements rather than HTML has always kept markup from executing; an `href` is
 the one attribute that carries a scheme, and that is where a rendering of
 untrusted text can still run something.
+
+**One place, and it has grown two more callers rather than two more paths.** A
+link now appears in three surfaces of a conversation — the prose, a tool call's
+argument, and a table cell — and all three render through `parseInline`. The
+two that were added are the point of saying so: a `WebFetch` argument is
+usually *nothing but* a URL, which made the one line in a conversation that is
+entirely a link the one place you could not follow it; and a table cell is
+where a second, convenient little linkifier would most obviously have been
+written. There is no second gate to keep in step, which is the property worth
+protecting here — `test/ui/message-links.test.tsx` drives a `javascript:` URL
+through a table cell for exactly that reason.
 
 So what may become an `href` is decided in one place, `parseInline`, and by two
 independent checks that both have to pass: the pattern admits only `http://`

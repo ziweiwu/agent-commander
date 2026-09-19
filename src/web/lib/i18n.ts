@@ -60,6 +60,8 @@ const EN = {
   waitingStarting: 'starting up',
   /* cards */
   notAttachable: 'not attachable',
+  reachable: 'terminal reachable',
+  ageBlockedTitle: 'How long this agent has been waiting on you, not when it last wrote.',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
   statusFromPane: 'quiet',
   /* delegates — INV-13 and INV-15 in the words themselves */
@@ -151,13 +153,20 @@ const EN = {
   answerTitle: 'Answer without leaving the conversation',
   answerOption: 'Answer {label}',
   answerSending: 'sending…',
+  termComposeRun: 'Run ⏎',
+  termComposeSendTitle: 'Put this at the prompt without running it, so you can see what landed.',
+  termComposeRunTitle: 'Put this at the prompt and run it (Cmd/Ctrl+Enter).',
   answerSent: 'Answer sent. {name} is picking it up.',
+  answerToggled: 'Ticked in {name}’s terminal. Nothing is submitted until you press → then Enter.',
+  answerToggle: 'Tick {label}',
   answerNotSent: 'Not sent: the connection to {name} dropped. Nothing was queued — answer again once it is back.',
   answerMore: 'Answering this one does not finish the set: {count} still follow.',
   answerMultiSelect:
-    'This one takes more than one answer, so it is chosen in the terminal — the keys below move and toggle.',
+    'This one takes more than one answer. Each choice below ticks a row in the terminal and sends nothing on its own. When the set is right, press → to reach the Submit tab and Enter there — on this dialog Enter only ticks another row.',
   answerNoOptions:
     'The agent asked a question, but its choices could not be read from the transcript, so they cannot be labelled here. The keys below move and confirm.',
+  answerUnread:
+    'This agent is waiting on something it did not write down, so there is nothing here to label. Its terminal is below, live — read the dialog there and answer it with the keys.',
   answerKeysLabel: 'Answer keys',
   answerKeysFallback: 'Or use the terminal keys if this does not match what the terminal shows.',
   answerDrawn:
@@ -180,6 +189,8 @@ const EN = {
   working: 'working…',
   chatLoading: 'Loading the conversation…',
   chatEmpty: 'Nothing said yet. Send this agent a message below and it will appear here.',
+  chatUnreachable:
+    'The conversation could not be loaded. The agent may have ended, or the server may have restarted since this page was opened.',
   messagePlaceholder: 'Message {name}',
   /* quick prompts — the label IS the text sent, so what you see is what the
      agent receives, in whichever language the interface is set to */
@@ -486,6 +497,8 @@ const ZH: Record<Key, string> = {
   waitingWorker: '有工作请求待处理',
   waitingStarting: '正在启动',
   notAttachable: '无法接入',
+  reachable: '终端可连接',
+  ageBlockedTitle: '这是该 agent 等待你的时长，而不是它最后一次写入的时间。',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
   statusFromPane: '窗格静默',
   delegatesNone: '未委派任何子代理',
@@ -560,11 +573,17 @@ const ZH: Record<Key, string> = {
   answerTitle: '无需离开对话即可回复',
   answerOption: '选择{label}',
   answerSending: '发送中…',
+  termComposeRun: '运行 ⏎',
+  termComposeSendTitle: '只把内容送到提示符，不执行，方便你先看清落下的是什么。',
+  termComposeRunTitle: '送到提示符并执行（Cmd/Ctrl+Enter）。',
   answerSent: '已发送回复，{name} 正在处理。',
+  answerToggled: '已在 {name} 的终端里勾选。按 → 再按 Enter 之前不会提交任何内容。',
+  answerToggle: '勾选 {label}',
   answerNotSent: '未发送：与 {name} 的连接已断开。系统不会排队重发——恢复连接后请再回答一次。',
   answerMore: '回答这一个还不算结束，后面还有 {count} 个问题。',
   answerMultiSelect: '这个问题可多选，需要在终端中选择——下方按键用于移动和切换。',
   answerNoOptions: '该 agent 提出了一个问题，但无法从记录中读出它的选项，因此无法在此列出。下方按键用于移动和确认。',
+  answerUnread: '该 agent 正在等待一个它没有写进记录的对话框，因此这里无法列出选项。下方是它的实时终端画面——请在那里阅读对话框，并用下方按键作答。',
   answerKeysLabel: '回复按键',
   answerKeysFallback: '如果与终端显示的不一致，可改用终端按键。',
   answerDrawn:
@@ -584,6 +603,7 @@ const ZH: Record<Key, string> = {
   working: '处理中…',
   chatLoading: '正在加载对话…',
   chatEmpty: '还没有任何对话。在下方给它发一条消息，就会显示在这里。',
+  chatUnreachable: '无法加载对话。该会话可能已结束，或服务器在此页面打开后重启过。',
   messagePlaceholder: '发消息给 {name}',
   quickPromptsLabel: '常用回复',
   quickPromptSend: '发送\u201c{text}\u201d',

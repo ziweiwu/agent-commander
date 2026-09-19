@@ -47,6 +47,18 @@ export const ICON_PATHS = {
     '<path d="M6.2 15.4H17.8V10.6A5.8 5.8 0 0 0 6.2 10.6Z"/><path d="M10.3 19.4H13.7"/>',
   'bell-off':
     '<path d="M6.2 15.4H17.8V10.6A5.8 5.8 0 0 0 6.2 10.6Z"/><path d="M3.6 20.4L20.4 3.6"/>',
+  'hand':
+    '<path d="M9.6 12.6V6.4a2.5 2.5 0 0 1 5 0v6M14.6 12.4V8a2.5 2.5 0 0 1 5 0v7.6a5.2 5.2 0 0 1-5.2 5.2h-1.6a5.2 5.2 0 0 1-5.2-5.2v-3a2 2 0 0 0-4 0"/>',
+  'ring':
+    '<circle cx="12" cy="12" r="7.6"/>',
+  'arc':
+    '<circle cx="12" cy="12" r="7.6" opacity="0.28"/><path d="M12 4.4A7.6 7.6 0 0 1 19.6 12"/>',
+  'ring-off':
+    '<circle cx="12" cy="12" r="7.6"/><path d="M6.2 17.8L17.8 6.2"/>',
+  'screen':
+    '<rect x="3.2" y="4.6" width="17.6" height="12.4" rx="2.4"/><path d="M9 20.4H15"/>',
+  'screen-off':
+    '<rect x="3.2" y="4.6" width="17.6" height="12.4" rx="2.4"/><path d="M9 20.4H15"/><path d="M3.4 19.6L20.6 4.4"/>',
 } as const
 
 export type IconName = keyof typeof ICON_PATHS

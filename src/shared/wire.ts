@@ -80,7 +80,7 @@ unknown?: boolean, };
 
 export type ChangedRow = { row: number, text: string, };
 
-export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, };
+export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong" };
 
 /**
  * `{ ok: true, detail? } | { ok: false, error }`
@@ -175,6 +175,15 @@ tool: string,
  */
 question?: string, 
 /**
+ * The CLI's own one-word title for this dialog, e.g. `Release path`.
+ *
+ * Every question carries one — 255 of 255 across this machine's
+ * transcripts — and it is short by design, 2 to 16 characters. It is what
+ * Claude Code puts on the dialog's tab, so it is the heading the terminal
+ * and the card can share rather than each inventing their own.
+ */
+header?: string, 
+/**
  * What the transcript named, or — with `options_drawn` — what Claude Code
  * draws for this dialog. Absent means "not knowable here".
  */
@@ -212,7 +221,21 @@ id?: string, };
 /**
  * One choice in a prompt the agent is blocked on.
  */
-export type PromptOption = { label: string, description?: string, };
+export type PromptOption = { label: string, description?: string, 
+/**
+ * The option's own worked example, where it has one.
+ *
+ * A multi-line string the CLI draws beside the choice — a folder tree, a
+ * rendered changelog, an ASCII mock of the thing being decided. Measured
+ * over this machine's transcripts: 163 of 782 options carry one, 159 of
+ * them multi-line, up to 755 characters.
+ *
+ * It was dropped for as long as this app has existed, and dropping it is
+ * worse than it sounds: on a question like "how should it appear in the
+ * folders?" the preview *is* the answer, and the description without it
+ * reads as an argument with the evidence taken out.
+ */
+preview?: string, };
 
 /**
  * Account-level subscription usage, bridged out of Claude Code's statusLine.
@@ -267,7 +290,7 @@ prompt?: PendingPrompt, } | { "type": "frame", frame: Frame, } | { "type": "hist
  * pane-exit case is the one state a viewer must react to
  * structurally, because INV-1 means there is no pty to report it.
  */
-kind?: ErrorKind, };
+kind?: ErrorKind, } | { "type": "ping" };
 
 /**
  * One delegate in an agent's tree, and everything below it.

@@ -220,6 +220,20 @@ describe('INV-13 the tree leads with what is moving', () => {
   })
 })
 
+/*
+ * The stall question and the trail moved into the fold when the status rail
+ * took over the face of the card. Both answer a second question — not "which
+ * of these needs me" but "and how long has it been like that" — and the rail's
+ * whole argument is that the face should answer one.
+ *
+ * Neither claim is weakened by the move, which is what these still pin: the
+ * question is still refused without a duration to name (INV-15), and the trail
+ * is still absent wherever both its numbers are not real (INV-11). So the fold
+ * is opened before each, rather than the negative cases being left to pass
+ * vacuously against a closed disclosure.
+ */
+const open = () => fireEvent.click(screen.getByTestId('details-toggle'))
+
 describe('INV-15 a silent family is asked about, not pronounced on', () => {
   const quietFamily = tree([node({ agentId: 'x' }), node({ agentId: 'y' })])
 
@@ -228,6 +242,7 @@ describe('INV-15 a silent family is asked about, not pronounced on', () => {
       { sessionId: 'a', status: 'busy', delegating: true, lastActivityAt: Date.now() - 600_000 },
       quietFamily,
     )
+    open()
     expect(screen.getByTestId('stall-candidate').textContent).toMatch(/still working\?/)
   })
 
@@ -236,18 +251,21 @@ describe('INV-15 a silent family is asked about, not pronounced on', () => {
       { sessionId: 'a', status: 'busy', delegating: true, lastActivityAt: Date.now() - 600_000 },
       tree([node({ agentId: 'x' }), node({ agentId: 'y', state: 'active', stateInferred: true })]),
     )
+    open()
     expect(screen.queryByTestId('stall-candidate')).toBeNull()
     expect(screen.getByTestId('delegates-moving').textContent).toMatch(/not a stall/i)
   })
 
   it('never asks about an agent that is working itself', () => {
     card({ sessionId: 'a', status: 'busy', lastActivityAt: Date.now() - 600_000 }, quietFamily)
+    open()
     expect(screen.queryByTestId('stall-candidate')).toBeNull()
   })
 
   // Without a duration there is no question, only an insinuation.
   it('stays silent when it cannot say how long the silence has been', () => {
     card({ sessionId: 'a', status: 'busy', delegating: true }, quietFamily)
+    open()
     expect(screen.queryByTestId('stall-candidate')).toBeNull()
   })
 })
@@ -255,11 +273,13 @@ describe('INV-15 a silent family is asked about, not pronounced on', () => {
 describe('INV-11 the trail is drawn only where it was measured', () => {
   it('draws the split, and names both lengths in words', () => {
     card({ sessionId: 'a', status: 'busy', lastActivityAt: Date.now() - 60_000 })
+    open()
     expect(screen.getByTestId('agent-trail').getAttribute('aria-label')).toMatch(/silent/i)
   })
 
   it('draws nothing for an agent with no last write to measure from', () => {
     card({ sessionId: 'a', status: 'busy' })
+    open()
     expect(screen.queryByTestId('agent-trail')).toBeNull()
   })
 
@@ -267,6 +287,7 @@ describe('INV-11 the trail is drawn only where it was measured', () => {
   // shape carrying no new information is noise on the card everybody reads.
   it('draws nothing on a card that is not working', () => {
     card({ sessionId: 'a', status: 'idle', lastActivityAt: Date.now() - 60_000 })
+    open()
     expect(screen.queryByTestId('agent-trail')).toBeNull()
   })
 
@@ -277,6 +298,7 @@ describe('INV-11 the trail is drawn only where it was measured', () => {
    */
   it('draws nothing for an agent whose CLI writes no transcript', () => {
     card({ sessionId: 'a', agentKind: 'kiro', lastActivityAt: Date.now() - 60_000 })
+    open()
     expect(screen.queryByTestId('agent-trail')).toBeNull()
   })
 })

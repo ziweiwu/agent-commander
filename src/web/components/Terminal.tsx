@@ -9,6 +9,7 @@ import {
   sendConfirmedKey,
   sendKey,
   sendShiftTab,
+  runText,
   sendText,
   setAttached,
 } from '../store/transport.ts'
@@ -425,15 +426,43 @@ export function Terminal({ agent, onExit }: TerminalProps) {
     historyOpen: history !== null,
   })
 
-  const submitDraft = (): void => {
+  /**
+   * Hand the box's contents over, and say whether to run them.
+   *
+   * `draftRef` is cleared *before* the write and is the synchronous truth, for
+   * the reason the message composer's is: two presses in one React batch —
+   * key repeat, a double tap on a phone — would each read the same uncleared
+   * `draft` and each send it. `term-paste.spec.ts` holds that line.
+   */
+  /**
+   * Empty the box and hand back what was in it, or nothing.
+   *
+   * `draftRef` is cleared *before* either verb writes, and is the synchronous
+   * truth, for the reason the message composer's is: two presses in one React
+   * batch — key repeat, a double tap on a phone — would each read the same
+   * uncleared `draft` and each send it. `term-paste.spec.ts` holds that line.
+   */
+  const takeDraft = (): string => {
     const text = draftRef.current
-    if (text.length === 0) return
+    if (text.length === 0) return ''
     draftRef.current = ''
     setDraft('')
     // The inline height `onChange` wrote outlives the text it was measured
     // for, so an emptied box would keep the depth of the paste it just sent.
     if (boxRef.current) boxRef.current.style.height = ''
-    typed(text)
+    return text
+  }
+
+  /** Put it at the prompt, where it can be read before it runs. */
+  const submitDraft = (): void => {
+    const text = takeDraft()
+    if (text !== '') typed(text)
+  }
+
+  /** Put it at the prompt and run it. */
+  const runDraft = (): void => {
+    const text = takeDraft()
+    if (text !== '') runText(text)
   }
 
   if (!agent.paneId) {
@@ -614,6 +643,16 @@ export function Terminal({ agent, onExit }: TerminalProps) {
            * ships a Chinese translation, so those are its users.
            */
           if (e.nativeEvent.isComposing) return
+          /*
+           * Cmd/Ctrl+Enter runs it. The modifier is the convention everywhere
+           * a field can both stage and commit, and it keeps plain Enter doing
+           * the safer of the two — which is the one a reader gets by accident.
+           */
+          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+            e.preventDefault()
+            runDraft()
+            return
+          }
           if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
             e.preventDefault()
             submitDraft()
@@ -638,8 +677,25 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         type="submit"
         data-testid="term-compose-send"
         disabled={exited || draft.length === 0}
+        title={t('termComposeSendTitle')}
       >
         {t('termComposeSend')}
+      </Button>
+      {/*
+        * The second verb, and it is a separate button rather than a mode on
+        * the first. A mode makes the same press mean different things on
+        * different days, which is the wrong shape for the one control in this
+        * app that runs a command in somebody's live shell.
+        */}
+      <Button
+        variant="compact"
+        type="button"
+        data-testid="term-compose-run"
+        disabled={exited || draft.length === 0}
+        title={t('termComposeRunTitle')}
+        onClick={runDraft}
+      >
+        {t('termComposeRun')}
       </Button>
     </form>
   )

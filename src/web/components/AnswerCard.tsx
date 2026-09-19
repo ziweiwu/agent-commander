@@ -16,6 +16,42 @@ import styles from './AnswerCard.module.css'
 const KEYS = ['Up', 'Down', 'Space', 'Enter'] as const
 
 /**
+ * The keys a multi-select needs, which are not the ones a single question does.
+ *
+ * Measured against Claude Code 2.1.277 by driving a real picker in a tmux pane,
+ * because nothing writes this down: a digit toggles the row it numbers and the
+ * picker stays open; **`Enter` toggles the *highlighted* row rather than
+ * submitting**; and the dialog carries a second tab, reached with `→`, whose
+ * one row is `Submit answers`.
+ *
+ * That last fact is why this list exists. The card used to tell the reader to
+ * "press Enter when the terminal shows the set you want", which ticks another
+ * box instead — so a multi-select could be ticked from the Chat tab and never
+ * finished from it.
+ */
+const MULTI_KEYS = ['Up', 'Down', 'Space', 'Enter', 'Right'] as const
+
+/**
+ * How long one row of a multi-select ignores a second press of itself.
+ *
+ * The synchronous `sendingRef` catches two events in one React batch and
+ * nothing slower; a double-tap on a phone is about 100ms apart, which is the
+ * gap the quick-prompt guard elsewhere in this app was written for. On a
+ * toggle the cost of missing it is specific: the second press unticks what the
+ * first ticked, and the card cannot see that it has, because what is selected
+ * lives in the terminal (INV-2 — nothing is sent that the user did not ask
+ * for, and a tap they did not intend is exactly that).
+ *
+ * A *different* row is never blocked: choosing several is the whole point.
+ */
+const REPEAT_MS = 600
+
+/** Whether this press is the same row again, too soon to be deliberate. */
+function repeatOf(last: { choice: number; at: number } | null, choice: number): boolean {
+  return last !== null && last.choice === choice && Date.now() - last.at < REPEAT_MS
+}
+
+/**
  * Answer the question an agent is blocked on, from the conversation.
  *
  * The alternative was the Attach tab, which is a faithful capture of somebody
@@ -39,8 +75,25 @@ const KEYS = ['Up', 'Down', 'Space', 'Enter'] as const
  * started. And the card disables itself synchronously on the first press,
  * because a second digit would not be a duplicate — it would answer the *next*
  * question in the set.
+ *
+ * **A null `prompt` is a state this card handles rather than a reason not to
+ * draw it.** Only two of the seven things `waitingFor` can say are backed by a
+ * `tool_use` record; a trust prompt, a `/goal` proposal, a sandbox or worker
+ * request, a model picker and a compaction confirmation are dialogs Claude
+ * Code draws without writing anything down. The card used to be withheld
+ * entirely for those, which meant the Chat tab offered no pane, no arrows, no
+ * Enter and no Esc — for the most common reason an agent stops, the answer was
+ * "open the terminal", on a phone.
+ *
+ * Nothing about the guarantee moves. An *answer* — a digit bound to a prompt
+ * id — still needs the transcript and the status to agree, and the server
+ * still refuses one that does not; what is offered here with no prompt is the
+ * Attach tab's own two capabilities, a read-only capture and the keys already
+ * on `ALLOWED_KEYS`, brought to where the reader is. The card says plainly
+ * that it could not read the question rather than inventing one, which is the
+ * line INV-11 draws and INV-16 was already drawing for the two thinner shapes.
  */
-export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPrompt }) {
+export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPrompt | null }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
   /*
@@ -60,16 +113,19 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
    * this one.
    */
   const sendingRef = useRef(false)
+  /** The last multi-select row pressed, for the double-tap guard above. */
+  const lastPressRef = useRef<{ choice: number; at: number } | null>(null)
   const [sent, setSent] = useState(false)
 
   // A new question is a new decision. Anything else would leave the card dead
   // after the first answer of a multi-question set.
   useEffect(() => {
     sendingRef.current = false
+    lastPressRef.current = null
     setSent(false)
     // Keyed on the server's own id: it changes with any field a reader would
     // have read, which content-keying only approximated.
-  }, [prompt.id, prompt.question, prompt.tool, prompt.detail])
+  }, [prompt?.id, prompt?.question, prompt?.tool, prompt?.detail])
 
   /*
    * A refusal releases the latch. The server declines to type when the pane is
@@ -87,20 +143,37 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
     setSent(false)
   }, [refused, agent.sessionId])
 
-  const options = prompt.options ?? []
-  // One digit cannot finish a multi-select, so it must not be offered as if it
-  // could. The keys below do that job instead.
-  const answerable = options.length > 0 && prompt.multiSelect !== true
-  const drawn = prompt.optionsDrawn === true
-  const disabled = sent || !agent.paneId || !online
+  const options = prompt?.options ?? []
   /*
-   * The live pane is shown wherever the buttons are not the transcript's own
-   * words: under a drawn list, so the labels can be checked against what the
-   * terminal actually numbers, and wherever only keys are offered, so ↑ ↓ and
-   * Enter can be aimed at a highlight the user can see. A question the
-   * transcript stated in full needs no second opinion.
+   * A picker that takes several answers. The distinction runs through
+   * everything below, and it is one distinction rather than two states: the
+   * *labels* are the transcript's own words either way — `AskUserQuestion`
+   * writes every option down before the dialog is drawn, `multiSelect`
+   * included — so there was never a reason to withhold them. What differs is
+   * what a press *means*.
+   *
+   * A single-select digit commits, so the card latches after one: a second
+   * press would not repeat the answer, it would answer the *next* question in
+   * the set. A multi-select digit toggles a row and commits nothing, so
+   * latching after one would strand the user needing a second choice — which
+   * is what this card did, by discarding the labels and saying "chosen in the
+   * terminal". `Enter` below is what commits, and the live pane under it is
+   * what shows which rows are ticked (INV-16).
    */
-  const peek = agent.paneId !== undefined && (drawn || !answerable)
+  const multi = prompt?.multiSelect === true
+  const answerable = options.length > 0
+  const drawn = prompt?.optionsDrawn === true
+  const disabled = !agent.paneId || !online || (sent && !multi)
+  /*
+   * The live pane is shown wherever the buttons are not the whole story: under
+   * a drawn list, so the labels can be checked against what the terminal
+   * actually numbers; wherever only keys are offered, so ↑ ↓ and Enter can be
+   * aimed at a highlight the user can see; and under a multi-select, where it
+   * is the only thing that says which rows are ticked so far — this card sends
+   * toggles and cannot know their state. A single question the transcript
+   * stated in full needs no second opinion.
+   */
+  const peek = agent.paneId !== undefined && (drawn || multi || !answerable)
 
   /*
    * Sends the *choice*, not the keystroke. The server holds the prompt's id and
@@ -110,6 +183,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
    */
   const press = (choice: number): void => {
     if (sendingRef.current || disabled) return
+    if (multi && repeatOf(lastPressRef.current, choice)) return
     sendingRef.current = true
     /*
      * The latch is spent only by a frame that was written. `send` drops one
@@ -117,13 +191,25 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
      * caught up; a card that latched anyway said "Answer sent" about nothing
      * and stayed dead for this question through the reconnect (INV-11).
      */
+    if (prompt === null) return
     if (!answerPrompt(agent.sessionId, prompt.id ?? '', choice)) {
       sendingRef.current = false
       showToast(t('answerNotSent', { name: shortName(agent) }))
       return
     }
     setSent(true)
-    showToast(t('answerSent', { name: shortName(agent) }))
+    showToast(t(multi ? 'answerToggled' : 'answerSent', { name: shortName(agent) }))
+    /*
+     * A toggle does not spend the card, so the synchronous guard is released
+     * for the next row — but not instantly, or the same-batch check it exists
+     * to be would be gone with it. `REPEAT_MS` below is what covers the case
+     * the ref cannot: a double-tap on *one* row, which is ~100ms apart and
+     * would silently untick what the user just ticked.
+     */
+    if (multi) {
+      lastPressRef.current = { choice, at: Date.now() }
+      sendingRef.current = false
+    }
   }
 
   /* A picker key moves or confirms; it does not commit an answer by itself, so
@@ -135,13 +221,26 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
 
   return (
     <div className={styles.card} data-testid="answer-card">
-      {prompt.question !== undefined && (
+      {/*
+        * The CLI's own one-word title for this dialog, which every real
+        * question carries and which the terminal puts on the dialog's tab. It
+        * is the heading the two surfaces can share rather than each inventing
+        * one, and on a phone it is what tells you which decision this is
+        * before the question itself has been read.
+        */}
+      {prompt?.header !== undefined && (
+        <p className={styles.header} data-testid="answer-header">
+          {prompt.header}
+        </p>
+      )}
+
+      {prompt?.question !== undefined && (
         <p className={styles.question} data-testid="answer-question">
           {prompt.question}
         </p>
       )}
 
-      {prompt.detail !== undefined && (
+      {prompt?.detail !== undefined && (
         <>
           <p className={styles.label}>
             {t(prompt.tool === 'ExitPlanMode' ? 'answerPlan' : 'answerAbout')}
@@ -158,6 +257,17 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </p>
       )}
 
+      {/*
+        * What a press does here is not what it does anywhere else in this card,
+        * so it is said before the buttons rather than discovered by pressing
+        * one: each ticks a row and nothing is submitted until Enter.
+        */}
+      {answerable && multi && (
+        <p className={styles.drawnNote} id="answer-multi-note" data-testid="answer-multi">
+          {t('answerMultiSelect')}
+        </p>
+      )}
+
       {answerable ? (
         <div className={styles.options} data-testid="answer-options" data-drawn={drawn || undefined}>
           {options.map((option, index) => (
@@ -167,8 +277,10 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
               data-testid="answer-option"
               disabled={disabled}
               title={option.description ?? option.label}
-              aria-label={t('answerOption', { label: option.label })}
-              aria-describedby={drawn ? 'answer-drawn-note' : undefined}
+              aria-label={t(multi ? 'answerToggle' : 'answerOption', { label: option.label })}
+              aria-describedby={
+                drawn ? 'answer-drawn-note' : multi ? 'answer-multi-note' : undefined
+              }
               /*
                * The number is what is sent, and showing it is not decoration:
                * it is the same key the terminal is offering, so the two
@@ -183,6 +295,20 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
               {option.description !== undefined && (
                 <span className={styles.description}>{option.description}</span>
               )}
+              {/*
+                * The option's worked example — a folder tree, a rendered
+                * changelog, an ASCII mock of the thing being decided. Dropped
+                * by this app until now, and on the questions that carry one it
+                * is frequently what the choice is actually about: the
+                * description alone reads as an argument with the evidence
+                * taken out. Pre-formatted, because every one of them is laid
+                * out in columns or lines that mean something.
+                */}
+              {option.preview !== undefined && (
+                <pre className={styles.preview} data-testid="answer-preview">
+                  {option.preview}
+                </pre>
+              )}
             </Button>
           ))}
         </div>
@@ -193,11 +319,17 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
          * state, and it tells the user why the terminal is the answer.
          */
         <p className={styles.note} data-testid="answer-no-options">
-          {t(prompt.multiSelect === true ? 'answerMultiSelect' : 'answerNoOptions')}
+          {t(
+            prompt === null
+              ? 'answerUnread'
+              : prompt.multiSelect === true
+                ? 'answerMultiSelect'
+                : 'answerNoOptions',
+          )}
         </p>
       )}
 
-      {prompt.moreQuestions !== undefined && prompt.moreQuestions > 0 && (
+      {prompt?.moreQuestions !== undefined && prompt.moreQuestions > 0 && (
         <p className={styles.note} data-testid="answer-more">
           {t('answerMore', { count: prompt.moreQuestions })}
         </p>
@@ -230,7 +362,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         aria-label={t('answerKeysLabel')}
         data-secondary={answerable ? 'true' : undefined}
       >
-        {KEYS.map((key) => (
+        {(multi ? MULTI_KEYS : KEYS).map((key) => (
           <Button
             key={key}
             variant="compact"
@@ -238,7 +370,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
             disabled={!agent.paneId || !online}
             onClick={() => nudge(key)}
           >
-            {key === 'Up' ? '↑' : key === 'Down' ? '↓' : key}
+            {key === 'Up' ? '↑' : key === 'Down' ? '↓' : key === 'Right' ? '→' : key}
           </Button>
         ))}
         {/* INV-6: `Escape` can destroy work in flight, so it asks first — the

@@ -1367,6 +1367,7 @@ impl MockTail {
         PendingPrompt {
             tool: "ExitPlanMode".into(),
             question: None,
+            header: None,
             options: drawn_choices("ExitPlanMode"),
             multi_select: None,
             more_questions: None,
@@ -1384,6 +1385,7 @@ impl MockTail {
         PendingPrompt {
             tool: "Bash".into(),
             question: None,
+            header: None,
             options: drawn_choices("Bash"),
             multi_select: None,
             more_questions: None,
@@ -1397,14 +1399,28 @@ impl MockTail {
         PendingPrompt {
             tool: "AskUserQuestion".into(),
             question: Some("Which migration should run first?".into()),
+            // Every real question carries one, and it is the dialog's own tab
+            // title in the terminal.
+            header: Some("Migration".into()),
             options: vec![
                 PromptOption {
                     label: "Backfill the index (Recommended)".into(),
                     description: Some("Slower, but nothing is read before it is written.".into()),
+                    // One option with a worked example and one without, because
+                    // that mix is what the real corpus looks like — 163 of 782
+                    // options carry a preview — and the card has to read well
+                    // either way.
+                    preview: Some(
+                        "t0  backfill starts, reads still hit the old table\n\
+                         t1  caught up, both tables agree\n\
+                         t2  swap, no window where a read can miss"
+                            .into(),
+                    ),
                 },
                 PromptOption {
                     label: "Swap the table".into(),
                     description: Some("Faster, with a window where reads miss.".into()),
+                    preview: None,
                 },
             ],
             multi_select: None,

@@ -282,6 +282,141 @@ the help sheet depict physical keys and are not part of this set.
 **Done when:** five sets rendered together, one recommended with its reasoning,
 and the generator carrying whichever won.
 
+### 11. A multi-select fixture in the mock fleet
+
+**Filed 2026-09-18, alongside the change that made multi-select answerable.**
+`AnswerCard` now labels the rows of a `multiSelect` `AskUserQuestion` and sends
+a digit per press — it used to discard the labels and send the user to the
+terminal — but `rust/src/mock.rs` has no `multi_select` fixture anywhere in it,
+so the path has unit coverage (`test/ui/answer-card.test.tsx`) and no e2e
+coverage at all. It was verified by hand against `--mock` with
+`question_with_options()` temporarily flipped, which is exactly the check a
+fixture would make repeatable.
+
+**Why it was not done with the change:** the mock fleet is read by 399
+Playwright tests and by `rust/tests/golden/agents.json`. A fifteenth agent moves
+the fleet counts several specs assert and forces a golden rewrite, which
+`AGENTS.md` says is a reviewed act rather than a side effect — too much churn to
+carry in on the back of a card change.
+
+**The shape of the fix:** a fourth blocked fixture beside `mock-plan`,
+`mock-permission` and `mock-waiting` — its own pid and pane constants, an arm in
+`MockTail::blocked_on`, a `MockPanes` frame drawing a picker with two rows
+ticked (so the "which rows are ticked" claim has something to be checked
+against), an entry in `e2e/helpers.ts`'s `AGENT` map, and the counts in
+`e2e/fleet.spec.ts` and friends moved in the same commit. Regenerate the goldens
+with `GOLDEN_WRITE=1 cargo test recorded` and read the diff.
+
+**Watch for:** the fixture's pane must actually draw the numbered rows, or it
+proves less than it looks — the value of the plan and permission fixtures is
+that their frames draw the dialog their labels claim, which is what makes the
+pane check in `answer_keystroke` a real gate rather than a formality.
+
+**Done when:** `npm run e2e` drives a multi-select from the Chat tab, ticking
+two rows and committing with Enter, and reverting the "stays open across
+several ticks" behaviour fails it.
+
+### 12. Read the drawn choices off the pane instead of keeping a table of them
+
+**Filed 2026-09-18, after the table drifted in the field.** `drawn_choices`
+(`transcript.rs`) holds Claude Code's own dialog wording for the two shapes that
+write no options down — a plan approval and a tool permission. It was verified
+against 2.1.260/2.1.261. Against **2.1.269** two of the three permission rows no
+longer matched: row 3 is now just `No` where the table says `No, and tell Claude
+what to do differently`, and row 2 writes `don’t` with U+2019 where the table
+has an ASCII apostrophe. `drawn_row_matches` was a one-way `starts_with`, so
+**only option 1 was answerable, on every permission prompt**, with nothing but a
+refusal toast to say why.
+
+That is patched — punctuation is folded, the prefix goes both ways, and the row
+is found from the bottom of the pane — and the patch does not remove the cause.
+This is a hand-kept copy of another program's interface strings, and the only
+thing holding it honest is a check against that same program's output.
+
+**The change:** when a prompt is `options_drawn`, have the server read the
+numbered rows out of the pane it is already capturing and use *those* as the
+options, falling back to the table only when it cannot read any. The card's
+caption becomes "read from the terminal" rather than "how Claude Code draws
+this dialog", which is a stronger claim honestly made — and `drawn_row_matches`
+then compares the pane against labels that came from the pane, so it cannot
+drift at all.
+
+**Call sites as they stand:** `transcript::drawn_choices` builds the list;
+`transcript::pending_prompt` attaches it; `routes::pump_timeline` broadcasts the
+prompt and is where a capture would go; `routes::answer_keystroke` re-reads the
+pane and is already doing exactly this capture on the answer path;
+`transcript::numbered_row` already parses a row. `mock.rs` reads `drawn_choices`
+so the fixture cannot show a list the server would not — it would need the same
+treatment or an explicit fixture pane.
+
+**Watch for:** the fingerprint covers option labels (`types.rs`), so labels that
+come from a live capture make the prompt id move whenever the pane text moves —
+a wrapped or repainted row must not retire the card under the reader's finger.
+Normalise before fingerprinting, or fingerprint on the transcript-derived parts
+only. And INV-4: the capture is free while the card's pane peek is mounted and
+is not free otherwise, so it belongs where a frame is already being read.
+
+**Done when:** the card labels a permission prompt with the rows the terminal is
+drawing, on a CLI whose wording no test anticipated, and `drawn_choices` is
+reachable only as a fallback.
+
+### 13. The four edge cases a transcript survey found and this pass did not close
+
+**Filed 2026-09-18**, from a survey of every `tool_use` in `~/.claude/projects`
+— 714 files, 229,909 records, 47,919 tool calls. Counts are from that corpus,
+so they are how often each actually happens to this user rather than a guess.
+The two biggest gaps it found are fixed (`header`, `preview`); these four are
+not.
+
+**a. A multi-question set latches the card after the first answer — 72 of 157
+`AskUserQuestion` calls (45.9%).** All the questions in a set share one
+`tool_use`, so `PendingPrompt::fingerprint` is byte-identical for question 2 as
+for question 1, `prompt_changed` never fires, and `AnswerCard`'s reset effect —
+keyed on `prompt?.id/question/tool/detail` — never runs. After one press the
+card sits disabled saying "1 more question" with no way to answer it. **This is
+the single widest gap left**, and it is not fixable from the transcript alone:
+nothing on disk records *which* question the terminal is currently showing. The
+pane does — the dialog draws a tab per question — so the fix has the shape
+INV-16 already uses for drawn choices: read the pane, match it against
+`questions[i].question`, and offer that one. `fill_from_questions` would carry
+every question rather than only the first, and the fingerprint would take the
+matched index.
+
+**b. `multiSelect` is read off `questions[0]` only — 4 calls.** Falls out of
+(a): a set whose *second* question is the multi-select is mislabelled and
+mis-latched by a card reading the first question's flag.
+
+**c. 4,948 of 47,919 tool calls (10.3%) give `summarize_tool` nothing to say**,
+so a permission card for them shows the bare tool name. The miss is structural
+rather than per-tool: the `WebFetch | WebSearch` arm already reads `url` and
+`query`, but it is keyed on the tool *name*, so an MCP tool whose input is
+literally `{url: …}` falls to the generic arm and comes back empty. Worst
+offenders: `mcp__chrome-devtools__evaluate_script` 1,259, `navigate_page` 553,
+`ToolSearch` 435. The fix is to make the generic arm try `url`, `query`,
+`function`, `key`, `text` before giving up.
+
+**d. A multi-line `Bash` command is shown as its first line.** 32,636 `Bash`
+calls, 14,028 of them multi-line (43%), median 243 characters and up to 49,509;
+3,988 carry no `description`, so `summarize_tool` falls back to
+`first_line(command)`. A heredoc or an `&&` chain is approved on its first line
+with the rest unseen. Worse, `dangerouslyDisableSandbox` is set on 174 calls
+and never surfaced at all — a sandbox-escape prompt is a materially different
+decision and the card cannot say it is one.
+
+**Also found and deliberately not acted on:** `drawn_choices` offers the
+permission triple for ~15 tool names that never raise a dialog (`ToolSearch`,
+`StructuredOutput`, `SendMessage`, the `Task*` family — about 2,000 calls),
+which is the same over-claim the `Task` exclusion exists to prevent; and
+`ExitPlanMode` carries the whole plan inline as `detail` (median 11.3 KB, max
+26.7 KB) while `planFilePath`, present on 30 of 30, goes unused.
+
+**Watch for:** (a) is the only one that needs a new source of truth. The other
+three are string handling and an exclusion list, and none of them changes what
+may be *sent* — only what the reader is told before sending it.
+
+**Done when:** a two-question `AskUserQuestion` can be answered to the end from
+the Chat tab, and the fixture that proves it is in `mock.rs`.
+
 ## Not doing
 
 **TLA+ for the invariant set.** Evaluated and rejected. Of the 16, one (INV-2)

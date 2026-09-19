@@ -27,6 +27,66 @@ let retry = 500
 let announced = new Set<string>()
 
 /**
+ * How long this tab will sit in silence before deciding its socket is dead.
+ *
+ * The server beats every 30s (`HEARTBEAT_MS` in `routes.rs`), so anything past
+ * two beats plus slack is not a quiet fleet, it is a connection that is gone.
+ * `readyState` is no help: a phone that slept behind Tailscale wakes holding a
+ * socket both ends still call OPEN, so nothing fires `close`, nothing
+ * reconnects, the header reads "live" and `send()` returns true for writes
+ * that reach nobody. That is the state this number exists to end.
+ */
+const SILENCE_MS = 75_000
+/** Checked on this cadence; the granularity of the number above. */
+const WATCHDOG_MS = 15_000
+/** Epoch ms of the last frame of any kind, or 0 before the first. */
+let lastHeard = 0
+let watchdogTimer: number | undefined
+/**
+ * Whether this socket's server has ever beaten, which is what arms the
+ * watchdog at all.
+ *
+ * Silence only means "gone" if something was due. A server older than this
+ * bundle sends no `ping`, and that pairing is not exotic here — `npm run build`
+ * rewrites `dist/web` under a server that has been up for days, so a page
+ * newer than the binary answering it is what a rebuild ordinarily produces
+ * (`AGENTS.md` names this as a thing that has already bitten). Assuming the
+ * beat would have made every such tab drop a perfectly good socket and
+ * reconnect once a minute for as long as the fleet was quiet.
+ *
+ * Learned rather than declared, so it needs no version check: one beat is
+ * proof the server speaks this protocol, and after that its silence means
+ * something. Re-learned per socket rather than remembered for the life of the
+ * page, because a reconnect may land on a server that was restarted in
+ * between — which, on this machine, is how a new binary usually arrives.
+ */
+let serverBeats = false
+
+/**
+ * How long a `focus` may go unanswered before it is asked again.
+ *
+ * `focus` is the only thing that subscribes this tab to a conversation, and
+ * the server has several ways to drop one in silence — chiefly a session id
+ * the registry does not know *yet*, which is what a reconnect into a restarted
+ * server, or into the couple of seconds after a `/clear`, actually looks like.
+ * `focusAgent` cannot cover it: it early-returns when the selection has not
+ * changed, so nothing on this side would ever ask twice.
+ *
+ * A re-ask is a read subscription, not input, so INV-2 is untouched: no
+ * keystroke, paste or answer is ever replayed on reconnect.
+ */
+const REFOCUS_MS = 3_000
+/**
+ * How many times, before the conversation is reported as unreachable rather
+ * than re-asked forever. Bounded because some agents legitimately never
+ * answer — a CLI that keeps no transcript is refused by `on_focus` outright —
+ * and polling a dead end is the cost INV-4 exists to refuse.
+ */
+const REFOCUS_TRIES = 5
+let refocusTimer: number | undefined
+let refocusLeft = 0
+
+/**
  * Write one frame, and say whether it was written.
  *
  * `true` only when the socket was open and took the bytes. Nothing is queued
@@ -55,6 +115,8 @@ export function focusAgent(sessionId: string | null): void {
   // the attachment on a focus change, and so must this side.
   state.resetConversation()
   send({ type: 'focus', sessionId })
+  if (sessionId) expectTimeline()
+  else stopRefocus()
 }
 
 /**
@@ -280,6 +342,30 @@ export function sendText(text: string): void {
   pump()
 }
 
+/**
+ * Put text at the agent's prompt *and* run it, as one press.
+ *
+ * The terminal's paste line deliberately does not run what it sends — the
+ * whole point of a field on a phone is that you see what actually landed
+ * before it executes, and `term-paste.spec.ts` asserts that in its title. This
+ * is the other verb rather than a change to that one: two affordances, each
+ * saying what it does, instead of one whose meaning depends on a setting.
+ *
+ * It is the same `submit` the message composer has always used, so nothing new
+ * reaches the agent: the server stages the text through a file and appends the
+ * newline itself (INV-2), which is what keeps a multi-line script one write
+ * rather than a race between its lines and its Enter.
+ *
+ * `flushText` first, for the reason it is called before every other write: a
+ * run that overtook characters typed before it would execute the wrong line.
+ */
+export function runText(text: string): void {
+  const { selected } = useStore.getState()
+  if (!selected || text.length === 0) return
+  flushText()
+  send({ type: 'paste', sessionId: selected, text, submit: true })
+}
+
 export async function loadEnv(): Promise<void> {
   try {
     const env = (await (await fetch('/api/env')).json()) as ServerEnv
@@ -495,7 +581,11 @@ function handle(msg: ServerMessage): void {
     }
     case 'timeline': {
       if (msg.sessionId !== state.selected) return
+      // The conversation has been answered for; stop waiting on it.
+      stopRefocus()
       useStore.setState({
+        timelineAt: Date.now(),
+        timelineStalledAt: null,
         events: msg.reset ? msg.events : [...state.events, ...msg.events],
         // Absent means nothing is open. Carried on every timeline frame rather
         // than only when it appears, so answering a question clears the card
@@ -524,6 +614,15 @@ function handle(msg: ServerMessage): void {
     }
     case 'paste-ack': {
       acknowledge(msg.seq)
+      return
+    }
+    case 'ping': {
+      // Answered so the server can tell this tab from one that has gone.
+      // Arriving at all is the other half, and it does two things: it proves
+      // the connection to this side, and it is what arms the watchdog — see
+      // `serverBeats`.
+      serverBeats = true
+      send({ type: 'pong' })
       return
     }
     case 'error':
@@ -559,6 +658,73 @@ function announceBlocked(agents: Agent[]): void {
   if (region) region.textContent = `${fresh.length}: ${fresh.map((a) => a.name).join(', ')}`
 }
 
+/**
+ * Ask again for a conversation the server never sent, or give up saying so.
+ *
+ * Armed whenever this tab starts waiting on a `focus`, and disarmed by the
+ * first `timeline` frame — so on a healthy connection it costs one timer that
+ * is cleared before it ever fires.
+ */
+function armRefocus(): void {
+  window.clearTimeout(refocusTimer)
+  if (!useStore.getState().selected) return
+  refocusTimer = window.setTimeout(() => {
+    const { selected, timelineAt, conn, attached } = useStore.getState()
+    if (!selected || timelineAt !== null || conn !== 'open') return
+    /*
+     * Never while the terminal is attached, and this is a correctness rule
+     * rather than a politeness one: `on_focus` clears the viewer's timers,
+     * sets `attached = false` and resets the pane, so a re-ask *detaches the
+     * terminal somebody is watching*. The client still believes it is
+     * attached, so nothing re-attaches it either.
+     *
+     * Costing nothing is the other half: an attached tab is receiving frames
+     * several times a second, which is proof the focus landed. A conversation
+     * that has not arrived on top of that is a transcript this server cannot
+     * read, and asking again cannot fix it — `tail_once_it_exists` is what
+     * waits for that, server-side, without touching the pane.
+     */
+    if (attached) return
+    if (refocusLeft <= 0) {
+      // INV-11: the chat has been claiming it is loading, and it is not. Say
+      // which it is rather than leaving a spinner that means nothing.
+      useStore.setState({ timelineStalledAt: Date.now() })
+      return
+    }
+    refocusLeft -= 1
+    send({ type: 'focus', sessionId: selected })
+    armRefocus()
+  }, REFOCUS_MS)
+}
+
+/** Start waiting for a conversation, from this moment. */
+export function expectTimeline(): void {
+  refocusLeft = REFOCUS_TRIES
+  useStore.setState({ timelineStalledAt: null })
+  armRefocus()
+}
+
+function stopRefocus(): void {
+  window.clearTimeout(refocusTimer)
+  refocusTimer = undefined
+}
+
+/**
+ * Drop a socket that has stopped carrying anything.
+ *
+ * Closing it by hand is what makes this work: the existing `close` listener is
+ * the only thing that schedules a reconnect, and a half-open socket will never
+ * fire one on its own.
+ */
+function startWatchdog(): void {
+  window.clearInterval(watchdogTimer)
+  watchdogTimer = window.setInterval(() => {
+    if (!serverBeats || socket?.readyState !== WebSocket.OPEN) return
+    if (lastHeard === 0 || Date.now() - lastHeard < SILENCE_MS) return
+    socket.close()
+  }, WATCHDOG_MS)
+}
+
 /** Wait, then try again. The one place the backoff is advanced. */
 function retryLater(): void {
   window.setTimeout(connect, retry)
@@ -588,11 +754,15 @@ function openSocket(): WebSocket | null {
 /** Re-establish what the page was looking at before the socket dropped. */
 function onOpen(): void {
   retry = 500
+  lastHeard = Date.now()
   useStore.setState({ conn: 'open' })
   const { selected, attached } = useStore.getState()
   if (selected) {
     send({ type: 'focus', sessionId: selected })
     if (attached) send({ type: 'attach', sessionId: selected, on: true })
+    // The conversation on screen is a memory until the server answers, and
+    // the answer can go missing. Wait for it explicitly rather than assuming.
+    expectTimeline()
   }
 }
 
@@ -604,10 +774,15 @@ export function connect(): void {
     return
   }
   socket = ws
+  serverBeats = false
+  startWatchdog()
 
   ws.addEventListener('open', onOpen)
 
   ws.addEventListener('message', (event) => {
+    // Any frame at all proves the connection, so the clock is read here
+    // rather than only on a ping.
+    lastHeard = Date.now()
     try {
       handle(JSON.parse(String(event.data)) as ServerMessage)
     } catch {
@@ -616,7 +791,19 @@ export function connect(): void {
   })
 
   ws.addEventListener('close', () => {
+    /*
+     * Only the live socket's own close may tear down the module's state.
+     * Every listener here closes over nothing, so a late `close` from a
+     * socket that has already been replaced — which is exactly what the
+     * watchdog produces, since it closes one while a reconnect may already be
+     * in flight — would null out its successor. `send()` would then refuse
+     * for the life of the page under a header reading "reconnecting…" about a
+     * reconnect nothing was attempting: the failure `connect-retry` exists
+     * for, reached by a new door.
+     */
+    if (socket !== ws) return
     socket = null
+    stopRefocus()
     // The ack for anything outstanding is never coming. Release the gate so
     // typing works again on reconnect; the unsent buffer is dropped rather
     // than replayed, because replaying input into a live agent is INV-2's one

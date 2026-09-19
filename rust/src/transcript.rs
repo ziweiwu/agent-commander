@@ -414,6 +414,7 @@ pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
     let mut prompt = PendingPrompt {
         tool: name.to_string(),
         question: None,
+        header: None,
         options: Vec::new(),
         multi_select: None,
         more_questions: None,
@@ -473,6 +474,9 @@ pub fn drawn_choices(tool: &str) -> Vec<PromptOption> {
     let choice = |label: &str, description: &str| PromptOption {
         label: label.to_string(),
         description: Some(description.to_string()),
+        // A drawn choice has no worked example: the CLI composes these rows at
+        // the terminal and writes nothing down, so there is nothing to read.
+        preview: None,
     };
     if SUBAGENT_TOOLS.contains(&tool) {
         return Vec::new();
@@ -494,19 +498,90 @@ pub fn drawn_choices(tool: &str) -> Vec<PromptOption> {
 /// Whether the pane is drawing `label` as choice number `choice + 1`.
 ///
 /// The check that makes a drawn choice sendable. Claude Code's pickers number
-/// their rows from 1 and mark the highlighted one with `❯`; the row is found
-/// by its number and its text must begin with the label the card showed — a
-/// prefix, because the CLI appends what varies ("… for `npm test` commands in
-/// ~/x", "(esc)"). A pane that draws two rows where the table said three fails
-/// this for the row that is not there; one that draws the rows in another
-/// order fails it for the label that moved. Either way nothing is typed.
+/// their rows from 1 and mark the highlighted one with `❯`; the row is found by
+/// its number, and its text and the label the card showed must agree.
+///
+/// **"Agree" is a prefix in either direction, and that is the whole of what
+/// this was got wrong.** It used to be `text.starts_with(label)` only, on the
+/// stated grounds that the CLI only ever *appends* what varies ("… for `npm
+/// test` commands in ~/x", "(esc)"). Measured against Claude Code 2.1.269 that
+/// premise is false in both directions at once:
+///
+/// ```text
+///  ❯ 1. Yes
+///    2. Yes, and don’t ask again for: chmod +x *
+///    3. No
+/// ```
+///
+/// Row 3 is now *shorter* than the table's "No, and tell Claude what to do
+/// differently", so the one-way prefix failed; and row 2 writes `don’t` with a
+/// typographic apostrophe where the table has an ASCII one, so it failed on a
+/// single byte. Only option 1 was answerable, on every permission prompt, and
+/// nothing said why except a refusal toast. The safety property held perfectly
+/// — nothing wrong was typed — but a check this brittle refuses the true case
+/// far more often than the false one, which is its own kind of broken.
+///
+/// **What is still guaranteed, stated exactly.** An approval can never be typed
+/// as a refusal or the reverse: "Yes…" and "No…" are prefixes of neither, so a
+/// reordered or renumbered dialog still fails. What a two-way prefix gives up
+/// is finer than that — with rows 1 and 2 both beginning "Yes", the number
+/// alone separates approve-once from approve-always, so a CLI that swapped
+/// *those two* would be answered wrongly within the approvals. That was already
+/// true of the one-way check (label "Yes" has always matched any row starting
+/// "Yes"), it is a choice the user made either way, and it is the price of the
+/// check firing at all on the version people are running.
+///
+/// The durable fix is to stop holding a table of someone else's UI strings and
+/// read the rows off the pane instead — `TODO.md` §12.
 pub fn drawn_row_matches(lines: &[String], choice: usize, label: &str) -> bool {
     let wanted = choice + 1;
-    lines.iter().any(|line| {
-        let plain = strip_ansi(line);
-        let Some((number, text)) = numbered_row(&plain) else { return false };
-        number == wanted && text.starts_with(label.trim())
-    })
+    let want = normalise_choice(label);
+    if want.is_empty() {
+        return false;
+    }
+    /*
+     * Bottom-up, and the first row carrying that number wins — it is not
+     * "any row on the pane that agrees".
+     *
+     * An agent's own output is full of numbered lists. The live pane this was
+     * fixed against had `1. Cloudflare blocks it on sight…` and `2. It has no
+     * session…` sixty lines above the dialog, from the agent's last message.
+     * Scanning the whole pane for *a* row that matches means prose can stand in
+     * for the dialog — harmless while the comparison was one-way and strict,
+     * and not harmless now that it is two-way, because a short enough prose row
+     * can be a prefix of a label. The dialog is always the most recent thing
+     * drawn, so reading up from the bottom and stopping at the first row with
+     * that number is both the tighter rule and the correct one.
+     */
+    lines
+        .iter()
+        .rev()
+        .filter_map(|line| numbered_row(&strip_ansi(line)).map(|(n, t)| (n, t.to_string())))
+        .find(|(number, _)| *number == wanted)
+        .is_some_and(|(_, text)| {
+            let drawn = normalise_choice(&text);
+            !drawn.is_empty() && (drawn.starts_with(&want) || want.starts_with(&drawn))
+        })
+}
+
+/// A choice label reduced to what two renderings of it can be compared on.
+///
+/// Typographic punctuation is folded to ASCII — the CLI writes `don’t` and
+/// every table written by hand says `don't`, which is a one-byte difference
+/// that silently refused every "don't ask again" there has ever been — and runs
+/// of whitespace are collapsed, because a captured pane is padded and wrapped.
+fn normalise_choice(text: &str) -> String {
+    let folded: String = text
+        .chars()
+        .map(|c| match c {
+            '\u{2018}' | '\u{2019}' | '\u{02BC}' => '\'',
+            '\u{201C}' | '\u{201D}' => '"',
+            '\u{2013}' | '\u{2014}' => '-',
+            '\u{00A0}' => ' ',
+            other => other,
+        })
+        .collect();
+    folded.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// `"  ❯ 2. Yes, and …"` → `(2, "Yes, and …")`, or nothing for any other row.
@@ -540,6 +615,8 @@ fn fill_from_questions(prompt: &mut PendingPrompt, input: Option<&Value>) {
     let Some(questions) = questions else { return };
     let Some(first) = questions.first() else { return };
     prompt.question = text_field(first, "question").map(str::to_string);
+    // The CLI's own title for the dialog, which every question carries.
+    prompt.header = text_field(first, "header").map(str::to_string);
     prompt.multi_select =
         first.get("multiSelect").and_then(Value::as_bool).filter(|on| *on).map(|_| true);
     if questions.len() > 1 {
@@ -560,6 +637,10 @@ fn options_of(question: &Value) -> Vec<PromptOption> {
             Some(PromptOption {
                 label: label.to_string(),
                 description: text_field(option, "description").map(str::to_string),
+                // The worked example, where the option has one. Multi-line far
+                // more often than not, and frequently the thing the choice is
+                // actually about — see `PromptOption::preview`.
+                preview: text_field(option, "preview").map(str::to_string),
             })
         })
         .collect()
@@ -1012,12 +1093,6 @@ pub struct TranscriptTail {
     counter: u64,
     total_tokens: i64,
     total_subagents: i64,
-    /// Whether a full backfill has been handed over yet.
-    ///
-    /// `first` tells the client to replace what it has rather than append, so it
-    /// must not be raised again by a transcript that has merely gone missing —
-    /// that would blank a conversation the user is reading, once per poll.
-    backfilled: bool,
     /// Tool calls written but not yet answered, oldest first.
     ///
     /// Kept here rather than per batch because the read is incremental (INV-4):
@@ -1042,7 +1117,6 @@ impl TranscriptTail {
             counter: 0,
             total_tokens: 0,
             total_subagents: 0,
-            backfilled: false,
             open_calls: Vec::new(),
             reported_prompt: None,
         }
@@ -1112,8 +1186,21 @@ impl TranscriptTail {
     /// Read whatever is new. The first call backfills only the tail of the file
     /// so that opening a long-running agent stays cheap.
     pub async fn read_next(&mut self) -> TailRead {
+        /*
+         * A transcript this app cannot find is not an empty conversation, and
+         * saying `first` here claimed it was. `first` means "replace what you
+         * are holding", so one of these frames on a viewer that had just
+         * reconnected wiped a conversation that was perfectly good and left
+         * the chat reading "Nothing said yet" about an agent mid-sentence.
+         *
+         * Nothing is lost by staying quiet: `first` is raised by
+         * `seek_to_start` whenever the offset is still 0, so the read that
+         * eventually resolves the path is still the client's first, and
+         * `tail_once_it_exists` in `routes.rs` is what waits for a transcript
+         * that has not been written yet.
+         */
         let Some(path) = self.resolve_path().await else {
-            return self.nothing_yet();
+            return Self::nothing_read();
         };
         let Some(size) = self.size_of(&path).await else {
             return Self::nothing_read();
@@ -1123,7 +1210,6 @@ impl TranscriptTail {
         // Checked even when the transcript has not grown by a byte: that
         // silence is exactly what a delegated run looks like from here.
         if size == self.offset {
-            self.backfilled |= first;
             let (prompt, prompt_changed) = self.report_prompt();
             return TailRead {
                 events: Vec::new(),
@@ -1153,21 +1239,8 @@ impl TranscriptTail {
             parse_lines(&lines, &mut seq)
         };
         self.apply_batch(&mut result).await;
-        self.backfilled |= first;
         let (prompt, prompt_changed) = self.report_prompt();
         TailRead { events: result.events, patch: result.patch, first, prompt, prompt_changed }
-    }
-
-    /// Nothing to read yet, and the client has never been sent a backfill
-    /// either, so the next successful read is still its first.
-    fn nothing_yet(&self) -> TailRead {
-        TailRead {
-            events: Vec::new(),
-            patch: AgentPatch::default(),
-            first: !self.backfilled,
-            prompt: None,
-            prompt_changed: false,
-        }
     }
 
     /// Nothing was read, and this is not a replacement of what the client holds.
@@ -2397,6 +2470,37 @@ mod tests {
         assert!(read_goal_in("nobody", root.path()).await.is_none());
     }
 
+    /// INV-11: "I cannot find this agent's transcript" and "this agent has
+    /// said nothing" are different claims, and only one of them may blank the
+    /// conversation a reader is looking at.
+    ///
+    /// `first` is what tells the browser to replace what it holds. Raising it
+    /// on a read that found no file wiped a good conversation and left the
+    /// chat reading "Nothing said yet" — most visibly right after a reconnect,
+    /// which is when a phone re-opens the socket and the registry may not have
+    /// caught up yet.
+    #[tokio::test]
+    async fn inv11_a_transcript_that_cannot_be_found_is_not_an_empty_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let mut tail = TranscriptTail::new("nobody", root.path());
+        for _ in 0..3 {
+            let read = tail.read_next().await;
+            assert!(read.events.is_empty());
+            assert!(!read.first, "a missing transcript must not claim to replace one");
+        }
+    }
+
+    /// The other side of it: a transcript that is there and empty *is* an
+    /// empty conversation, and has to say so or the chat waits forever.
+    #[tokio::test]
+    async fn an_empty_transcript_that_exists_is_reported_as_the_clients_first_read() {
+        let (root, _file) = projects();
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let read = tail.read_next().await;
+        assert!(read.events.is_empty());
+        assert!(read.first, "an empty file is a conversation with nothing in it");
+    }
+
     /* ---- the decoder, directly ---- */
 
     #[test]
@@ -2568,6 +2672,74 @@ mod prompt_tests {
         let picker = vec!["❯ 1. Postgres".to_string(), "  2. SQLite".to_string(), "  3. Skip".to_string()];
         assert!(!drawn_row_matches(&picker, 2, "No, and tell Claude what to do differently"));
         assert!(!drawn_row_matches(&["❯ ".to_string()], 0, "Yes"));
+    }
+
+    /// The dialog Claude Code 2.1.269 actually draws, copied off a live pane.
+    ///
+    /// Both drifts that made this feature unusable are here: row 3 is shorter
+    /// than the label the card shows, and row 2 spells `don’t` with U+2019.
+    /// Under the one-way prefix this replaced, only option 1 matched — on every
+    /// permission prompt, on the version people are running.
+    #[test]
+    fn inv16_matches_the_dialog_claude_code_2_1_269_draws() {
+        let real = vec![
+            " \u{1b}[36m❯\u{1b}[39m 1. Yes".to_string(),
+            "   2. Yes, and don\u{2019}t ask again for: chmod +x *".to_string(),
+            "   3. No".to_string(),
+        ];
+        assert!(drawn_row_matches(&real, 0, "Yes"));
+        assert!(
+            drawn_row_matches(&real, 1, "Yes, and don't ask again"),
+            "a typographic apostrophe is the same word"
+        );
+        assert!(
+            drawn_row_matches(&real, 2, "No, and tell Claude what to do differently"),
+            "a row the CLI shortened is still that row"
+        );
+    }
+
+    /// The dialog is read from the bottom, so the agent's own numbered prose
+    /// cannot stand in for it.
+    ///
+    /// Both of these lines are verbatim from the pane the fix above was
+    /// measured on: the agent had written a numbered list in its last message,
+    /// sixty lines above the dialog it then blocked on.
+    #[test]
+    fn inv16_a_numbered_line_in_the_agents_own_output_is_not_a_dialog_row() {
+        let pane = vec![
+            "  1. Cloudflare blocks it on sight. I confirmed this earlier:".to_string(),
+            "  2. It has no session. Headless runs a blank profile.".to_string(),
+            String::new(),
+            " ❯ 1. Yes".to_string(),
+            "   2. Yes, and don\u{2019}t ask again for: chmod +x *".to_string(),
+            "   3. No".to_string(),
+        ];
+        // The dialog below wins over the prose above, for every row.
+        assert!(drawn_row_matches(&pane, 0, "Yes"));
+        assert!(drawn_row_matches(&pane, 1, "Yes, and don't ask again"));
+        assert!(drawn_row_matches(&pane, 2, "No, and tell Claude what to do differently"));
+
+        // And with no dialog on screen at all, prose numbered 1 and 2 answers
+        // nothing — which is what stops a digit being sent at a picker that is
+        // not there.
+        let prose_only = vec![pane[0].clone(), pane[1].clone()];
+        assert!(!drawn_row_matches(&prose_only, 0, "Yes"));
+        assert!(!drawn_row_matches(&prose_only, 1, "Yes, and don't ask again"));
+    }
+
+    /// What the two-way prefix must still refuse: an approval typed as a
+    /// refusal, or the reverse. That is the property INV-16 exists for, and it
+    /// survives because "Yes…" and "No…" prefix neither one another.
+    #[test]
+    fn inv16_an_approval_is_never_matched_to_a_refusal() {
+        let swapped = vec![" ❯ 1. No".to_string(), "   2. Yes".to_string()];
+        assert!(!drawn_row_matches(&swapped, 0, "Yes"), "row 1 is a refusal now");
+        assert!(
+            !drawn_row_matches(&swapped, 1, "No, and tell Claude what to do differently"),
+            "row 2 is an approval now"
+        );
+        // And an empty label can never match a row, however the pane reads.
+        assert!(!drawn_row_matches(&swapped, 0, "   "));
     }
 
     #[test]

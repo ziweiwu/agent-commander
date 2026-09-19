@@ -28,8 +28,10 @@ import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
 const sendText = vi.hoisted(() => vi.fn())
+const runText = vi.hoisted(() => vi.fn())
 vi.mock('../../src/web/store/transport.ts', () => ({
   sendText,
+  runText,
   sendKey: vi.fn(),
   sendConfirmedKey: vi.fn(),
   sendShiftTab: vi.fn(),
@@ -43,10 +45,12 @@ const open = (over = {}) =>
 
 const input = () => screen.getByTestId('term-compose-input') as HTMLTextAreaElement
 const send = () => screen.getByTestId('term-compose-send') as HTMLButtonElement
+const run = () => screen.getByTestId('term-compose-run') as HTMLButtonElement
 
 beforeEach(() => {
   resetStore()
   sendText.mockClear()
+  runText.mockClear()
 })
 
 describe('the terminal takes text without a keyboard shortcut', () => {
@@ -186,5 +190,75 @@ describe('the terminal takes text without a keyboard shortcut', () => {
     const source = readFileSync('src/web/components/Terminal.tsx', 'utf8')
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '')
     expect(code).not.toMatch(/navigator\.clipboard/)
+  })
+})
+
+
+/*
+ * The second verb. The paste line deliberately stages rather than runs, which
+ * is what lets a reader see what landed before it executes — and is why this
+ * is a separate button rather than a mode on the first. A mode makes the same
+ * press mean different things on different days, which is the wrong shape for
+ * the one control in this app that runs a command in somebody's live shell.
+ *
+ * Verified against a real bash pane as well as here: `Run` executed a
+ * one-liner and a three-line `for` loop as a block, and `Send` left its text
+ * sitting at the prompt with the file it would have written absent from disk.
+ */
+describe('running what was pasted, as a second and explicit verb', () => {
+  /*
+   * `resetStore` does not clear `exited`, and a test above leaves a pane in it
+   * — which disables the box, so `user.type` types into nothing and every
+   * assertion here fails for a reason that has nothing to do with running.
+   */
+  beforeEach(() => useStore.setState({ exited: [] }))
+
+  it('runs on Run, and stages on Send', async () => {
+    const user = userEvent.setup()
+    open()
+
+    await user.type(input(), 'npm run build')
+    await user.click(run())
+    await waitFor(() => expect(runText).toHaveBeenCalledWith('npm run build'))
+    expect(sendText).not.toHaveBeenCalled()
+  })
+
+  /*
+   * A script is the payload this exists for, and it must reach the shell as
+   * one write with its newlines intact — the server stages it through a file
+   * and appends the submit itself, so the lines cannot race their own Enter.
+   */
+  it('keeps a multi-line script whole', async () => {
+    const user = userEvent.setup()
+    open()
+
+    const script = 'for i in 1 2 3; do\n  echo $i\ndone'
+    await user.click(input())
+    await user.paste(script)
+    await user.click(run())
+
+    await waitFor(() => expect(runText).toHaveBeenCalledWith(script))
+  })
+
+  /*
+   * INV-2's "exactly once", on the control with the sharpest consequence:
+   * `draftRef` is cleared synchronously, so two presses in one React batch
+   * cannot each read the same uncleared draft and each run it.
+   */
+  it('runs once from a double press', async () => {
+    const user = userEvent.setup()
+    open()
+
+    await user.type(input(), 'rm -rf dist')
+    await user.dblClick(run())
+
+    await waitFor(() => expect(runText).toHaveBeenCalledTimes(1))
+  })
+
+  it('offers neither verb once the pane has exited', () => {
+    useStore.setState({ exited: ['a'] })
+    open()
+    expect(send().disabled).toBe(true)
+    expect(run().disabled).toBe(true)
   })
 })

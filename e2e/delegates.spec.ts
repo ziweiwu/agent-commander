@@ -131,10 +131,20 @@ test.describe('delegates on the card', () => {
 })
 
 test.describe('a family that has gone quiet', () => {
+  /*
+   * In the fold since the status rail took over the face. The face answers
+   * "which of these needs me" in one column of shapes; this asks a second
+   * question — and how long has it been like that — which is what a reader
+   * goes looking for once the first is answered (INV-15, amended).
+   */
   test('INV-15 asks about it rather than declaring it stalled', async ({ page }) => {
     await openFleet(page)
 
-    const question = card(page, AGENT.quietFamily).getByTestId('stall-candidate')
+    // `entry`, not `card`: the disclosure is a sibling of the card button,
+    // because a button inside a button is not one.
+    const row = entry(page, AGENT.quietFamily)
+    await row.getByTestId('details-toggle').click()
+    const question = row.getByTestId('stall-candidate')
     await expect(question).toBeVisible()
     await expect(question).toContainText('still working?')
     await expect(question).not.toContainText(/stalled|dead|failed/i)
@@ -148,8 +158,10 @@ test.describe('a family that has gone quiet', () => {
   test('INV-15 says the opposite while a delegate is still moving', async ({ page }) => {
     await openFleet(page)
 
-    const row = card(page, AGENT.movingFamily)
+    const row = entry(page, AGENT.movingFamily)
+    // "still moving" is an answer, not a question, so it stays on the face.
     await expect(row.getByTestId('delegates-moving')).toContainText(/not a stall/i)
+    await row.getByTestId('details-toggle').click()
     await expect(row.getByTestId('stall-candidate')).toHaveCount(0)
   })
 })

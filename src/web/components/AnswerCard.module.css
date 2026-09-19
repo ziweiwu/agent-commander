@@ -66,7 +66,11 @@
 /* The key that is actually sent, so this card and the terminal cannot disagree
    about which option is which. */
 .digit {
-  grid-row: 1 / span 2;
+  /* Every row there is, not two: an option may carry a preview, and a fixed
+     span leaves the extra row to auto-placement — which drops it into this
+     column and stretches the badge into a bar the width of the example. */
+  grid-row: 1 / -1;
+  align-self: start;
   min-width: 20px;
   padding: 1px 6px;
   border-radius: var(--radius-xs);
@@ -145,6 +149,42 @@
     gap: 8px;
   }
   .detail {
+    max-height: 120px;
+  }
+}
+
+/*
+ * The dialog's own title, from the CLI. Small and quiet: it names the decision
+ * rather than making it, and the question below is what gets read.
+ */
+.header {
+  margin: 0;
+  font-size: var(--text-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/*
+ * An option's worked example. Pre-formatted and scrollable in its own box:
+ * these are trees and tables whose columns carry the meaning, and the widest
+ * of them is wider than a phone — the page may never scroll sideways (INV-17).
+ */
+.preview {
+  grid-column: 2;
+  margin: 6px 0 0;
+  padding: 6px 8px;
+  max-height: 160px;
+  overflow: auto;
+  font: 11px/1.45 var(--font-mono);
+  color: var(--dim);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  white-space: pre;
+}
+@media (max-width: 560px) {
+  .preview {
     max-height: 120px;
   }
 }

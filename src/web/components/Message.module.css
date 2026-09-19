@@ -74,6 +74,32 @@
   font-size: var(--text-base);
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+/*
+ * Stacking is for *blocks*, and only a message that has more than one gets it.
+ *
+ * `display: grid` on the text box itself makes every child a grid item — and
+ * the children of a one-paragraph message are the inline spans, so a sentence
+ * containing a link became one row per span, stacked vertically. The common
+ * message has one block and is laid out exactly as it was before tables
+ * existed.
+ */
+.blocks {
+  display: grid;
+  gap: 8px;
+}
+
+/*
+ * The paragraph, not the block, keeps `pre-wrap`.
+ *
+ * An agent's prose carries its own line breaks and they are meaningful — a
+ * numbered list is only a list because of them. Moving the property down one
+ * level is what lets a table sit between two paragraphs without the blank
+ * lines around it becoming vertical space of their own.
+ */
+.para {
+  margin: 0;
   white-space: pre-wrap;
 }
 .text code {
@@ -288,4 +314,41 @@
     background: var(--panel-2);
     pointer-events: none;
   }
+}
+
+/*
+ * A table is the one thing in a conversation whose width is its content's
+ * rather than its column's, so it scrolls inside its own box. INV-17: the page
+ * never scrolls sideways, whatever an agent puts in it.
+ */
+.tableWrap {
+  overflow-x: auto;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.table {
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+  /* Not 100%: a narrow table should stay narrow rather than stretching its
+     cells over dead space, and a wide one is what the scroll box is for. */
+  min-width: 100%;
+}
+.table th,
+.table td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  /* The cell wraps only where it must; the box scrolls before the words do. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  vertical-align: top;
+}
+.table th {
+  font-weight: 650;
+  color: var(--text);
+  background: var(--panel-2);
+  white-space: nowrap;
+}
+.table tbody tr:last-child td {
+  border-bottom: 0;
 }

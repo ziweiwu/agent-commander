@@ -79,8 +79,13 @@
   padding: 0 7px;
   letter-spacing: 0;
 }
+/* The heading carries the hand as well as the colour: colour alone is the
+ * one channel a reader may not have (INV-13's rule, applied here). */
 .waitingTitle {
   color: var(--waiting);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .groupList {

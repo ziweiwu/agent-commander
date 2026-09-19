@@ -11,6 +11,7 @@ import { relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
 import { AgentCard } from './AgentCard.tsx'
 import { Button } from './ui/Button.tsx'
+import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 import { SearchBar } from './SearchBar.tsx'
 import { SortControl } from './SortControl.tsx'
 import styles from './FleetList.module.css'
@@ -192,6 +193,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                   className={group.key === 'waiting' ? styles.waitingTitle : undefined}
                   data-testid="group-title"
                 >
+                  {group.key === 'waiting' && <Icon name="hand" size={ICON_INLINE} />}
                   {t(GROUP_KEY[group.key] as Key)}
                 </span>
                 <span className={styles.groupCount}>{group.agents.length}</span>

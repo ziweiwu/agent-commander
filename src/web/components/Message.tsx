@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { parseInline, type ChatMessage, type ToolCall } from '../lib/chat.ts'
+import { parseBlocks, parseInline, type ChatMessage, type Span, type ToolCall } from '../lib/chat.ts'
 import { clock } from '../lib/format.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import styles from './Message.module.css'
@@ -115,10 +115,10 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
  * when it is being used from a phone — is not handed to whatever the agent
  * linked to.
  */
-function RichText({ text }: { text: string }) {
+function Inline({ text }: { text: string }) {
   return (
-    <div className={styles.text} data-testid="message-text">
-      {parseInline(text).map((span, i) =>
+    <>
+      {parseInline(text).map((span: Span, i: number) =>
         span.kind === 'link' ? (
           <a
             key={i}
@@ -143,6 +143,83 @@ function RichText({ text }: { text: string }) {
           <span key={i}>{span.text}</span>
         ),
       )}
+    </>
+  )
+}
+
+/**
+ * A markdown table, as a real one.
+ *
+ * Every cell runs through the same inline parser the prose does, so a link in
+ * a table is held to INV-18 exactly as a link in a sentence is — there is one
+ * gate, and this is not a second path around it.
+ *
+ * The scroll box is INV-17, not decoration: a table is the one thing in a
+ * conversation whose width is set by its content rather than by the column it
+ * sits in, and a four-column table of file paths is wider than a phone. The
+ * page may never scroll sideways, so the table does instead.
+ */
+function Table({ block }: { block: Extract<ReturnType<typeof parseBlocks>[number], { kind: 'table' }> }) {
+  return (
+    <div className={styles.tableWrap} data-testid="message-table">
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            {block.head.map((cell, i) => (
+              <th key={i} style={{ textAlign: block.align[i] ?? 'left' }}>
+                <Inline text={cell} />
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, r) => (
+            <tr key={r}>
+              {row.map((cell, c) => (
+                <td key={c} style={{ textAlign: block.align[c] ?? 'left' }}>
+                  <Inline text={cell} />
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function RichText({ text }: { text: string }) {
+  const blocks = parseBlocks(text)
+  /*
+   * The overwhelmingly common message is one paragraph, and it is rendered
+   * exactly as it was before tables existed: one `pre-wrap` box, no wrapper,
+   * no gap.
+   *
+   * That is not a micro-optimisation, it is a height guarantee. Wrapping every
+   * message in a grid gave each one a gap it did not have before, every
+   * message in the conversation grew, and with an on-screen keyboard up the
+   * message being replied to was pushed out of the visible band — which is the
+   * thing INV-17's keyboard clause exists to prevent, reintroduced by a
+   * container added for a feature most messages never use.
+   */
+  if (blocks.length === 1 && blocks[0]?.kind === 'p') {
+    return (
+      <div className={`${styles.text} ${styles.para}`} data-testid="message-text">
+        <Inline text={blocks[0].text} />
+      </div>
+    )
+  }
+  return (
+    <div className={`${styles.text} ${styles.blocks}`} data-testid="message-text">
+      {blocks.map((block, i) =>
+        block.kind === 'table' ? (
+          <Table key={i} block={block} />
+        ) : (
+          <p key={i} className={styles.para}>
+            <Inline text={block.text} />
+          </p>
+        ),
+      )}
     </div>
   )
 }
@@ -165,7 +242,17 @@ function Tools({ message }: { message: ChatMessage }) {
       title={call.text ? `${call.tool}: ${call.text}` : call.tool}
     >
       <span className={styles.toolName}>{call.tool}</span>
-      {call.text && <span className={styles.toolArg}>{call.text}</span>}
+      {/*
+        * Through the inline parser, so a `WebFetch` argument — which is
+        * usually nothing but a URL — is a link here as it would be in a
+        * sentence. Same gate, same INV-18: `parseInline` is the only thing
+        * that ever produces an href, and this is not a way around it.
+        */}
+      {call.text && (
+        <span className={styles.toolArg}>
+          <Inline text={call.text} />
+        </span>
+      )}
     </div>
   )
 
