@@ -167,6 +167,25 @@ describe('INV-4 a focus that was never answered', () => {
     expect(useStore.getState().timelineAt).not.toBeNull()
   })
 
+  /*
+   * The case the re-ask exists for, and the one it could not reach: a
+   * reconnect is not a selection change, so `resetConversation` never runs and
+   * `timelineAt` still held a timestamp from before the drop — the first tick
+   * then bailed on its own guard and the conversation stopped updating for the
+   * life of the page with nothing saying so.
+   */
+  it('asks again after a reconnect, when the conversation was already loaded', () => {
+    useStore.setState({ selected: 'a1', timelineAt: Date.now() })
+    connect()
+    const ws = FakeSocket.last!
+    ws.fire('open')
+    expect(useStore.getState().timelineAt).toBeNull()
+    expect(ws.messages().filter((m) => m.type === 'focus').length).toBe(1)
+
+    vi.advanceTimersByTime(3_500)
+    expect(ws.messages().filter((m) => m.type === 'focus').length).toBe(2)
+  })
+
   it('gives up saying so, rather than asking for ever (INV-4, INV-11)', () => {
     useStore.setState({ selected: 'a1' })
     connect()

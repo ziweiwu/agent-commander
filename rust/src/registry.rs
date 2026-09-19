@@ -668,14 +668,30 @@ fn overlay(prev: &mut Agent, next: Agent) {
     if next.version.is_some() {
         prev.version = next.version;
     }
+    /*
+     * These two are the one pair here that is mutually exclusive, so they are
+     * merged as a pair rather than each on the general "absent means
+     * unchanged" rule. `read_session_file` sets exactly one of them — a pane,
+     * or the reason there is not one — and the general rule cannot express
+     * that: an agent first seen before its pane existed keeps the reason for
+     * ever, and afterwards carries both a pane id *and* a sentence saying it
+     * has none.
+     *
+     * That was survivable while only `pane_id` was read. It stopped being so
+     * when the card's status rail started drawing `attach_blocked_reason` as
+     * an unreachable mark: a freshly spawned agent, which is precisely the one
+     * that registers before its pane is known, wore a struck ring for the rest
+     * of its life while being perfectly attachable.
+     */
     if next.pane_id.is_some() {
         prev.pane_id = next.pane_id;
+        prev.attach_blocked_reason = None;
+    } else if next.attach_blocked_reason.is_some() {
+        prev.attach_blocked_reason = next.attach_blocked_reason;
+        prev.pane_id = None;
     }
     if next.tmux_session.is_some() {
         prev.tmux_session = next.tmux_session;
-    }
-    if next.attach_blocked_reason.is_some() {
-        prev.attach_blocked_reason = next.attach_blocked_reason;
     }
     if next.derived_name.is_some() {
         prev.derived_name = next.derived_name;
@@ -879,6 +895,35 @@ impl AgentSource for LiveSource {
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    /// A pane and a reason there is no pane are mutually exclusive, and stay
+    /// that way across a merge.
+    ///
+    /// `overlay`'s general rule is "absent means unchanged, not cleared",
+    /// which is right for every other optional field and wrong for this pair:
+    /// `read_session_file` sets exactly one of them. An agent first seen
+    /// before its pane existed — a freshly spawned one, which is the common
+    /// case — otherwise keeps the reason for ever and ends up carrying a pane
+    /// id *and* a sentence saying it has none. The card's status rail draws
+    /// that sentence as an unreachable mark, so it wore a struck ring while
+    /// being perfectly attachable.
+    #[test]
+    fn a_pane_clears_the_reason_there_was_none_and_the_reverse() {
+        let blocked = Agent {
+            attach_blocked_reason: Some("session is not running inside tmux".into()),
+            ..Default::default()
+        };
+
+        let mut gained = blocked.clone();
+        overlay(&mut gained, Agent { pane_id: Some("%7".into()), ..Default::default() });
+        assert_eq!(gained.pane_id.as_deref(), Some("%7"));
+        assert_eq!(gained.attach_blocked_reason, None, "a pane means it is attachable");
+
+        let mut lost = Agent { pane_id: Some("%7".into()), ..Default::default() };
+        overlay(&mut lost, blocked);
+        assert_eq!(lost.attach_blocked_reason.as_deref(), Some("session is not running inside tmux"));
+        assert_eq!(lost.pane_id, None, "a reason means there is no pane to keep");
+    }
 
     /* ---- the clock these tests run on -------------------------------------
        Spelled out rather than left inline: several tests below turn on one span

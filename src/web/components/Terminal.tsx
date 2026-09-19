@@ -461,6 +461,10 @@ export function Terminal({ agent, onExit }: TerminalProps) {
 
   /** Put it at the prompt and run it. */
   const runDraft = (): void => {
+    // The same refusal `typed` makes for the staging verb. Nothing reaches a
+    // pane whose process has gone, and the riskier of the two verbs must not
+    // be the one relying on a `disabled` attribute for that.
+    if (exited) return
     const text = takeDraft()
     if (text !== '') runText(text)
   }

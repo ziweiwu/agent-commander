@@ -80,7 +80,14 @@ describe('the Chat tab', () => {
     expect(screen.getByTestId('chat-notice').textContent).toMatch(/Nothing said yet/)
   })
 
-  it('says the conversation could not be loaded once the re-asks have run out', () => {
+  /*
+   * It may not say the agent has ended. `tail_once_it_exists` waits for a
+   * transcript a freshly started agent has not written yet, so no frame
+   * arrives for an agent that is plainly alive — and asserting it "may have
+   * ended" about one that is sitting there working is the over-claim INV-11
+   * exists to prevent, arrived at from the other direction.
+   */
+  it('says nothing has arrived yet, without claiming the agent has ended', () => {
     useStore.setState({
       conn: 'open',
       selected: 'a',
@@ -88,6 +95,9 @@ describe('the Chat tab', () => {
       timelineStalledAt: 1,
     })
     renderApp(<Chat agent={idle()} />)
-    expect(screen.getByTestId('chat-notice').textContent).toMatch(/could not be loaded/)
+    const notice = screen.getByTestId('chat-notice').textContent ?? ''
+    expect(notice).toMatch(/Nothing has arrived/)
+    expect(notice).toMatch(/only just started/)
+    expect(notice).not.toMatch(/may have ended/)
   })
 })

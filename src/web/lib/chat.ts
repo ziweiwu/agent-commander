@@ -551,3 +551,35 @@ export function parseBlocks(text: string): Block[] {
   flush()
   return blocks.length > 0 ? blocks : [{ kind: 'p', text }]
 }
+
+
+/**
+ * Only the URLs, leaving every other character exactly as it arrived.
+ *
+ * A tool call's argument is not prose: it is a glob, a command, a path. Run
+ * through `parseInline` it is silently rewritten, because markdown's emphasis
+ * markers are ordinary characters in a shell — measured against the real
+ * function, `**\/*.ts` renders as `*\/.ts`, `rm -rf build/* dist/*` loses both
+ * stars, and `` `date` `` loses its backticks. The row then shows a command
+ * that is not the command that ran, while the `title` beside it still carries
+ * the truth. That is the INV-11 failure wearing a rendering bug's clothes.
+ *
+ * Linkifying was the only thing the tool row ever wanted — a `WebFetch`
+ * argument is usually nothing but a URL — so this does that and nothing else.
+ * The one gate is unchanged: `linkHref` still decides what may become an
+ * `href`, so INV-18 holds here exactly as it does in prose.
+ */
+export function parseLinks(text: string): Span[] {
+  const spans: Span[] = []
+  const pattern = /https?:\/\/[^\s<>"'`]+/g
+  let last = 0
+  for (let m = pattern.exec(text); m !== null; m = pattern.exec(text)) {
+    const url = withoutTrailingPunctuation(m[0])
+    if (m.index > last) spans.push({ kind: 'text', text: text.slice(last, m.index) })
+    spans.push(link(url, url, url))
+    last = m.index + url.length
+    pattern.lastIndex = last
+  }
+  if (last < text.length) spans.push({ kind: 'text', text: text.slice(last) })
+  return spans.length > 0 ? spans : [{ kind: 'text', text }]
+}

@@ -8,10 +8,11 @@ import { trailOf } from '../lib/trail.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
 import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
+import { useStore } from '../store/store.ts'
 import { DelegationTree } from './DelegationTree.tsx'
 import { ICON_BUTTON, ICON_MARK, Icon } from './ui/Icon.tsx'
 import type { IconName } from './ui/Icon.tsx'
-import { ageIsTimeInState, railOf, reachOf, type RailState } from '../lib/status.ts'
+import { ageFrom, ageIsTimeInState, railOf, reachOf, type RailState } from '../lib/status.ts'
 import styles from './AgentCard.module.css'
 
 /**
@@ -137,7 +138,14 @@ export const AgentCard = memo(function AgentCard({
   const [showDetails, setShowDetails] = useState(false)
   const claim = useMemo(() => claimOf(tree), [tree])
   const stalled = isStallCandidate(agent, claim)
-  const rel = formatRelative(lang, relative(agent.lastActivityAt))
+  /*
+   * Through `ageFrom`, so the rule it documents is the rule that runs: an
+   * agent with no recorded activity gets no age rather than one counted from
+   * when it started, because how long it has been blocked is then not
+   * something this app knows (INV-11).
+   */
+  const since = ageFrom(agent)
+  const rel = since === null ? '' : formatRelative(lang, relative(since))
   const tok = tokens(agent.tokens)
   // Only for agents that are not the default: with a fleet of nine Claude
   // sessions there is nothing to disambiguate, and a badge on every card is a
@@ -165,8 +173,15 @@ export const AgentCard = memo(function AgentCard({
   const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
   const onFace = delegatesOnFace(agent, claim)
   const canAnswer = agent.status === 'waiting' && Boolean(agent.paneId)
-  const rail = railOf(agent)
-  const reach = reachOf(agent)
+  /*
+   * The sessions the server has told us have lost their pane. The card has to
+   * know: a pane id says a reference exists, not that anything is behind it,
+   * and a card claiming "terminal reachable" beside its own `exited` is the
+   * over-claim INV-11 exists to prevent.
+   */
+  const exited = useStore((s) => s.exited)
+  const rail = railOf(agent, exited)
+  const reach = reachOf(agent, exited)
   /** Whether the age on this card is time-in-state rather than time-since. */
   const blockedFor = ageIsTimeInState(agent)
   /*
@@ -194,6 +209,17 @@ export const AgentCard = memo(function AgentCard({
         data-transcripts={transcripts}
         data-attached="true"
         aria-current={selected}
+        /*
+         * Named deliberately rather than by whatever its text concatenates to.
+         *
+         * The context line separates its parts with a `::after` middot, and
+         * generated content is in the accessibility tree — so the card
+         * announced as "waiting · dialog open· Bash: rm -rf dist· ~/Projects/
+         * lego-deals· terminal reachable", dots and all, with the reach mark's
+         * own words on the end. Every one of those facts is worth having and
+         * none of them is worth hearing in that order before the name.
+         */
+        aria-label={`${displayName(agent)} — ${statusText(agent)} — ${tildePath(agent.cwd)}`}
         onClick={() => onSelect(agent.sessionId)}
       >
         {/*

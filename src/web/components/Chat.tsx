@@ -198,6 +198,20 @@ export function Chat({ agent }: { agent: Agent }) {
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
 
   const attachable = Boolean(agent.paneId)
+  /*
+   * The same fact the Attach tab degrades on, which this surface never learned.
+   *
+   * The Attach tab replaces itself with a notice and disables its own box when
+   * the server says a pane has exited; the composer here was gated only on
+   * having a pane id and a socket, so it accepted messages for an agent whose
+   * terminal had gone and drew them as sent. INV-5 wants the terminal and the
+   * conversation to degrade *separately*, not for one of them to not degrade.
+   *
+   * Read from the store rather than through `usePaneExited`, which lives in
+   * `Terminal.tsx` — that module is code-split behind `LazyTerminal`, and
+   * importing a hook out of it would pull xterm into the main bundle.
+   */
+  const paneExited = useStore((s) => s.exited.includes(agent.sessionId))
   const busy = agent.status === 'busy'
   /*
    * INV-11, on the one screen where the user acts rather than reads.
@@ -214,6 +228,8 @@ export function Chat({ agent }: { agent: Agent }) {
    * in the header chip at the other end of the screen.
    */
   const online = conn === 'open'
+  /** Whether a message typed here could actually arrive. */
+  const sendable = online && !paneExited
   // The interface language is only the fallback, for a chat with nothing in it.
   const promptLang = useMemo(() => conversationLang(messages, lang), [messages, lang])
 
@@ -354,7 +370,16 @@ export function Chat({ agent }: { agent: Agent }) {
    */
   useEffect(() => {
     if (coarse) return
-    const option = answering ? answerRef.current?.querySelector<HTMLElement>('button') : null
+    /*
+     * Only where the card actually offers an answer. `answering` now covers a
+     * waiting agent whose dialog this app could not read, and that card's
+     * first button is the pane's or the `↑` key — so opening one moved
+     * keyboard focus off the composer and onto a control that types into a
+     * live agent. Five of the seven `waitingFor` reasons reach that state.
+     */
+    const option = answering
+      ? answerRef.current?.querySelector<HTMLElement>('[data-testid="answer-option"]')
+      : null
     if (!option) {
       inputRef.current?.focus()
       return
@@ -388,7 +413,7 @@ export function Chat({ agent }: { agent: Agent }) {
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault()
     const text = draftRef.current
-    if (text.trim().length === 0 || !attachable) return
+    if (text.trim().length === 0 || !attachable || paneExited) return
     /*
      * Refused *before* the draft is cleared, and never held to send later.
      * Both halves matter. Queuing it would be INV-2's one prohibition; clearing
@@ -602,7 +627,7 @@ export function Chat({ agent }: { agent: Agent }) {
              * change exists to keep; what is refused is the send, not the
              * writing. The description says why the send is refused.
              */
-            aria-describedby={online ? KEY_HINT_ID : OFFLINE_HINT_ID}
+            aria-describedby={sendable ? KEY_HINT_ID : OFFLINE_HINT_ID}
             placeholder={
               attachable ? t('messagePlaceholder', { name: shortName(agent) }) : t('messageDisabled')
             }
@@ -727,7 +752,7 @@ export function Chat({ agent }: { agent: Agent }) {
             type="submit"
             className={styles.send}
             data-testid="composer-send"
-            disabled={!attachable || !online || draft.trim().length === 0}
+            disabled={!attachable || !sendable || draft.trim().length === 0}
             aria-describedby={online ? undefined : OFFLINE_HINT_ID}
           >
             {/* The button says what it will do, which is what makes asking once
@@ -735,7 +760,7 @@ export function Chat({ agent }: { agent: Agent }) {
             {sendMode === 'interrupt' && busy ? t('interruptAndSend') : t('send')}
           </Button>
         </div>
-        {online ? (
+        {sendable ? (
           <div
             className={`${styles.hint} ${styles.keyHint}`}
             id={KEY_HINT_ID}
@@ -758,7 +783,9 @@ export function Chat({ agent }: { agent: Agent }) {
             data-testid="composer-offline"
             role="status"
           >
-            {t(conn === 'closed' ? 'connReconnecting' : 'connConnecting')}
+            {paneExited
+              ? t('messageDisabled')
+              : t(conn === 'closed' ? 'connReconnecting' : 'connConnecting')}
           </div>
         )}
       </form>

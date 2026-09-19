@@ -190,7 +190,7 @@ const EN = {
   chatLoading: 'Loading the conversation…',
   chatEmpty: 'Nothing said yet. Send this agent a message below and it will appear here.',
   chatUnreachable:
-    'The conversation could not be loaded. The agent may have ended, or the server may have restarted since this page was opened.',
+    'Nothing has arrived for this conversation yet. An agent that has only just started has not written anything down — otherwise the server may have restarted since this page was opened.',
   messagePlaceholder: 'Message {name}',
   /* quick prompts — the label IS the text sent, so what you see is what the
      agent receives, in whichever language the interface is set to */
@@ -581,7 +581,7 @@ const ZH: Record<Key, string> = {
   answerToggle: '勾选 {label}',
   answerNotSent: '未发送：与 {name} 的连接已断开。系统不会排队重发——恢复连接后请再回答一次。',
   answerMore: '回答这一个还不算结束，后面还有 {count} 个问题。',
-  answerMultiSelect: '这个问题可多选，需要在终端中选择——下方按键用于移动和切换。',
+  answerMultiSelect: '该问题可以多选。下方每个选项只会在终端里勾选一行，本身不会提交。选好之后，按 → 切到 Submit 标签，再按 Enter 提交——在这个对话框里，Enter 只会再勾选一行。',
   answerNoOptions: '该 agent 提出了一个问题，但无法从记录中读出它的选项，因此无法在此列出。下方按键用于移动和确认。',
   answerUnread: '该 agent 正在等待一个它没有写进记录的对话框，因此这里无法列出选项。下方是它的实时终端画面——请在那里阅读对话框，并用下方按键作答。',
   answerKeysLabel: '回复按键',
@@ -603,7 +603,7 @@ const ZH: Record<Key, string> = {
   working: '处理中…',
   chatLoading: '正在加载对话…',
   chatEmpty: '还没有任何对话。在下方给它发一条消息，就会显示在这里。',
-  chatUnreachable: '无法加载对话。该会话可能已结束，或服务器在此页面打开后重启过。',
+  chatUnreachable: '暂时没有收到这个对话的内容。刚启动的 agent 还没有写下任何东西——否则可能是服务器在此页面打开后重启过。',
   messagePlaceholder: '发消息给 {name}',
   quickPromptsLabel: '常用回复',
   quickPromptSend: '发送\u201c{text}\u201d',

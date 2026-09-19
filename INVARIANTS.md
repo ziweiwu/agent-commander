@@ -1055,6 +1055,33 @@ channel that is read faster and argued with less:
   how far along the work is, and nothing here measures that. It is motion, so
   it says only "still moving", which is all the transcript supports.
 
+**A pane that has exited is not reachable, and the card says so.** A `pane_id`
+means a pane *reference* exists, not that anything is behind it to receive a
+keystroke — the registry sets that field from whether the session file's tmux
+reference parses and never revisits it. The server already reports the exit as
+`kind: 'pane-exited'` and the store already remembers which sessions it applied
+to; only the Attach tab consulted it, so a card went on claiming "terminal
+reachable" beside its own line reading `idle · exited`. `reachOf` is told the
+same list, and an exit outranks a question: a dialog on a pane that has gone
+cannot be answered from here or from the terminal, so the hand is not drawn
+over it.
+
+**And the conversation degrades with the terminal, separately.** INV-5 asks the
+two to degrade *independently*, which is not the same as one of them not
+degrading at all: the Attach tab replaced itself with a notice and disabled its
+box for a dead pane while the composer, gated only on a pane id and an open
+socket, went on accepting messages and drawing them as sent. It refuses now and
+says why, keeping every character of the draft — the same bargain the offline
+case already made.
+
+- `test/status.test.ts` — an exit makes a session unreachable, does not leak to
+  another session's id, and outranks a waiting status
+- `test/ui/chat-offline.test.tsx` — the composer refuses for a pane that has
+  gone, keeps the draft, and still sends for one that has not
+- `mock::paste` refuses the dead fixture, so `--mock` can show the degraded
+  path at all: it used to echo the message back and confirm it, which made the
+  fixture's *success* the thing that was wrong
+
 **Reachability is a second channel and never part of the state.** Whether this
 app can still drive a session's pane is a different fact with different
 evidence from what that session is doing: an agent can be perfectly reachable

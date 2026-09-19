@@ -75,7 +75,8 @@ describe('the rail says what the session is doing', () => {
   it('lets an unreachable session outrank even a waiting one', () => {
     expect(railOf(agent({ status: 'waiting', paneId: undefined })).state).toBe('gone')
     expect(
-      railOf(agent({ status: 'waiting', attachBlockedReason: 'pane exited' })).state,
+      railOf(agent({ status: 'waiting', paneId: undefined, attachBlockedReason: 'pane exited' }))
+        .state,
     ).toBe('gone')
   })
 })
@@ -86,10 +87,23 @@ describe('reachability is its own channel', () => {
   })
 
   it('reports the server’s own reason when it has one', () => {
-    expect(reachOf(agent({ attachBlockedReason: 'pane exited' }))).toEqual({
+    expect(reachOf(agent({ paneId: undefined, attachBlockedReason: 'pane exited' }))).toEqual({
       reach: 'gone',
       reason: 'pane exited',
     })
+  })
+
+  /*
+   * The pair is mutually exclusive on the wire and `overlay` keeps it that way
+   * — but it did not always, and an agent first seen before its pane existed
+   * used to carry both for ever. The pane id is the concrete fact and the
+   * reason only explains its absence, so the pane wins: a rail reading
+   * "unreachable" beside a live Answer button is worse than either alone.
+   */
+  it('lets a pane win over a stale reason there was none', () => {
+    const both = agent({ paneId: '%1', attachBlockedReason: 'session is not running inside tmux' })
+    expect(reachOf(both)).toEqual({ reach: 'reachable' })
+    expect(railOf({ ...both, status: 'waiting' }).state).toBe('waiting')
   })
 
   it('is gone without a reason when there was never a pane', () => {
@@ -129,5 +143,42 @@ describe('the age says how long, and of what', () => {
   it('has nothing to count from when nothing has been recorded', () => {
     expect(ageFrom(agent({ status: 'waiting' }))).toBeNull()
     expect(ageFrom(agent({ status: 'waiting', lastActivityAt: 5_000 }))).toBe(5_000)
+  })
+})
+
+/*
+ * A pane id says a *reference* exists, not that anything is behind it.
+ *
+ * The registry sets that field from whether the session file's tmux reference
+ * parses and never revisits it, so an agent whose pane has since exited keeps
+ * it. Only the Attach tab consulted the server's `pane-exited` report, so the
+ * card went on showing "terminal reachable" beside its own line reading
+ * `idle · exited` — INV-11 defines reachability as whether this app can still
+ * send anything there, and for a dead pane that is false.
+ */
+describe('a pane that has exited is not reachable', () => {
+  const gone = agent({ sessionId: 'dead', status: 'idle', paneId: '%9' })
+
+  it('is reachable while nothing has said otherwise', () => {
+    expect(reachOf(gone, []).reach).toBe('reachable')
+  })
+
+  it('is gone once the server has reported the exit', () => {
+    expect(reachOf(gone, ['dead']).reach).toBe('gone')
+    expect(railOf(gone, ['dead']).state).toBe('gone')
+  })
+
+  it('does not confuse it with another session that exited', () => {
+    expect(reachOf(gone, ['someone-else']).reach).toBe('reachable')
+  })
+
+  /*
+   * And it outranks even a question: a dialog on a pane that has gone cannot
+   * be answered from here or from the terminal, so the hand — the one mark
+   * worth crossing the room for — must not be drawn over it.
+   */
+  it('outranks a waiting status, as an unreachable session always does', () => {
+    const waiting = agent({ sessionId: 'dead', status: 'waiting', paneId: '%9' })
+    expect(railOf(waiting, ['dead']).state).toBe('gone')
   })
 })

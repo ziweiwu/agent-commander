@@ -1242,6 +1242,20 @@ impl PaneApi for MockPanes {
     }
 
     async fn paste(&self, pane_id: &str, text: &str, submit: Submit) -> anyhow::Result<()> {
+        /*
+         * A pane whose process has exited takes nothing, and the fixture has to
+         * say so or it is lying about the one thing it exists to show.
+         *
+         * It used to echo any submitted paste back for the dead fixture too, so
+         * a message sent there was confirmed a few hundred milliseconds later
+         * exactly as a live agent's would be — which meant `--mock` could not
+         * reproduce the degraded path at all, against AGENTS.md's claim that a
+         * failure seen in mock mode is the failure you would get for real. The
+         * mock's *success* was the part that was wrong.
+         */
+        if pane_id == DEAD_PANE {
+            anyhow::bail!("pane {pane_id} has exited");
+        }
         // Only a submitted message becomes a transcript entry; loose keystrokes
         // sent by the terminal view do not.
         if submit == Submit::No {

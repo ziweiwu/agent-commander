@@ -58,9 +58,9 @@ export interface Rail {
  * second lock on the same door, because this is the one place a future writer
  * could hand the rail a fabricated hand.
  */
-export function railOf(agent: Agent): Rail {
+export function railOf(agent: Agent, exited: readonly string[] = []): Rail {
   const inferred = agent.statusInferred === true
-  if (agent.paneId === undefined || agent.attachBlockedReason !== undefined) {
+  if (reachOf(agent, exited).reach === 'gone') {
     return { state: 'gone', inferred, delegated: false }
   }
   if (agent.status === 'waiting' && !inferred) {
@@ -90,12 +90,43 @@ export interface Reachability {
  * "you cannot drive this from here", which is one thing to a reader and two
  * things to the wire.
  */
-export function reachOf(agent: Agent): Reachability {
+export function reachOf(agent: Agent, exited: readonly string[] = []): Reachability {
+  /*
+   * A pane whose process has exited is not reachable, and the app has known
+   * that all along — the server sends `kind: 'pane-exited'` and the store
+   * remembers which sessions it applied to. Only the Attach tab consulted it.
+   *
+   * A `pane_id` says a pane *reference* exists, not that anything is behind it
+   * to receive a keystroke, and the registry never revisits the field: it is
+   * set from whether the session file's tmux reference parses. So an agent
+   * whose pane has gone kept "terminal reachable" on its card for ever, beside
+   * its own line reading `idle · exited`. INV-11 defines reachability as
+   * whether this app can still send anything there, and for a dead pane that
+   * is simply false.
+   *
+   * The list is passed in rather than read here so this stays a pure function
+   * of what it is told, like the rest of the module.
+   */
+  if (exited.includes(agent.sessionId)) {
+    return { reach: 'gone', reason: agent.attachBlockedReason }
+  }
+  /*
+   * The pane id decides, and the reason only explains its absence. They are
+   * mutually exclusive on the wire — `read_session_file` sets one or the other
+   * — and `overlay` now keeps them that way across a merge, which it did not
+   * always: an agent first seen before its pane existed kept the reason for
+   * ever and ended up carrying both.
+   *
+   * Reading them in this order means the card cannot contradict itself even if
+   * a server ever sends both, and it is the same fact the Answer verb and the
+   * answer card's own `disabled` already key on. A rail saying "unreachable"
+   * beside a live Answer button is worse than either alone.
+   */
+  if (agent.paneId !== undefined) return { reach: 'reachable' }
   if (agent.attachBlockedReason !== undefined) {
     return { reach: 'gone', reason: agent.attachBlockedReason }
   }
-  if (agent.paneId === undefined) return { reach: 'gone' }
-  return { reach: 'reachable' }
+  return { reach: 'gone' }
 }
 
 /**

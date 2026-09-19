@@ -1,5 +1,12 @@
 import { memo, useState } from 'react'
-import { parseBlocks, parseInline, type ChatMessage, type Span, type ToolCall } from '../lib/chat.ts'
+import {
+  parseBlocks,
+  parseInline,
+  parseLinks,
+  type ChatMessage,
+  type Span,
+  type ToolCall,
+} from '../lib/chat.ts'
 import { clock } from '../lib/format.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import styles from './Message.module.css'
@@ -115,10 +122,10 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
  * when it is being used from a phone — is not handed to whatever the agent
  * linked to.
  */
-function Inline({ text }: { text: string }) {
+function Spans({ spans }: { spans: Span[] }) {
   return (
     <>
-      {parseInline(text).map((span: Span, i: number) =>
+      {spans.map((span: Span, i: number) =>
         span.kind === 'link' ? (
           <a
             key={i}
@@ -145,6 +152,11 @@ function Inline({ text }: { text: string }) {
       )}
     </>
   )
+}
+
+/** Prose: the full inline subset — links, code, emphasis. */
+function Inline({ text }: { text: string }) {
+  return <Spans spans={parseInline(text)} />
 }
 
 /**
@@ -250,7 +262,7 @@ function Tools({ message }: { message: ChatMessage }) {
         */}
       {call.text && (
         <span className={styles.toolArg}>
-          <Inline text={call.text} />
+          <Spans spans={parseLinks(call.text)} />
         </span>
       )}
     </div>

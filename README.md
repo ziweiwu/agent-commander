@@ -116,6 +116,10 @@ the fleet at rest; the **terminals** chip in the header admits them.
   attached; your `tmux` layout is untouched.
 - **Nothing reaches an agent without a click.** No retries, no replays, and
   every destructive key asks first.
+- **It stops offering when it cannot deliver.** A session whose terminal has
+  gone is marked as unreachable on its card, and both the message box and the
+  terminal's own line refuse rather than accepting something that would go
+  nowhere.
 - **Loopback by default.** Binding anything else requires a token, and the
   server answers only same-origin requests, so a page in another tab cannot
   drive your agents.

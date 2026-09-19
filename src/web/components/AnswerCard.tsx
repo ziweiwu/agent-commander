@@ -183,6 +183,11 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
    */
   const press = (choice: number): void => {
     if (sendingRef.current || disabled) return
+    // Above the latch, not below it. Unreachable today — an option button only
+    // renders when the prompt named options — but this file's whole argument
+    // is that a latch left set is the failure being designed against, and a
+    // guard on the wrong side of one is how that happens.
+    if (prompt === null) return
     if (multi && repeatOf(lastPressRef.current, choice)) return
     sendingRef.current = true
     /*
@@ -191,7 +196,6 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
      * caught up; a card that latched anyway said "Answer sent" about nothing
      * and stayed dead for this question through the reconnect (INV-11).
      */
-    if (prompt === null) return
     if (!answerPrompt(agent.sessionId, prompt.id ?? '', choice)) {
       sendingRef.current = false
       showToast(t('answerNotSent', { name: shortName(agent) }))

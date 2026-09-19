@@ -103,7 +103,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1375 tests: 625 Rust (the server) + 750 vitest (the web app)
+npm test              # 1391 tests: 626 Rust (the server) + 765 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -118,7 +118,10 @@ npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transc
                       # PORT/BASE move the server (4400 by default, and it refuses
                       # 4317 outright), AGENT picks the fixture, BAR moves the
                       # threshold — the same BASE/PORT the other audit scripts read
-npm run qa            # randomised exploration, deterministic per seed
+npm run qa            # randomised exploration, deterministic per seed. It does
+                      # NOT start its own server: put a `--mock` one on 4500
+                      # first, or all twelve seeds fail with a connection
+                      # refused that reads as twelve findings
 npm run verify:inv1   # attaching never resizes a real pane — server must be running
 ```
 

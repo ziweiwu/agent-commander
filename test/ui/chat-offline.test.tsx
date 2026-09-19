@@ -112,3 +112,41 @@ describe('INV-2 the composer refuses rather than pretending, with the socket dow
     expect(sendMessage).toHaveBeenCalledTimes(1)
   })
 })
+
+/*
+ * The conversation degrades when the pane does, which it never used to.
+ *
+ * The Attach tab replaces itself with a notice and disables its own box when
+ * the server reports a pane has exited. The composer here was gated only on
+ * having a pane id and an open socket, so it accepted messages for an agent
+ * whose terminal had gone and drew them as sent — INV-5 wants the terminal and
+ * the conversation to degrade *separately*, not for one of them not to
+ * degrade at all.
+ */
+describe('the composer with the pane gone', () => {
+  const dead = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1' })
+
+  it('refuses the message and says why, keeping every character', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ conn: 'open', exited: ['a'] })
+    renderApp(<Chat agent={dead()} />)
+
+    const box = screen.getByTestId('composer-input')
+    await user.type(box, 'hello dead pane')
+    await user.keyboard('{Enter}')
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect((box as HTMLTextAreaElement).value).toBe('hello dead pane')
+    expect(screen.getByTestId('composer-offline').textContent).toMatch(/cannot be delivered/i)
+  })
+
+  it('sends normally for an agent whose pane is still there', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ conn: 'open', exited: [] })
+    renderApp(<Chat agent={dead()} />)
+
+    await user.type(screen.getByTestId('composer-input'), 'hello live pane')
+    await user.keyboard('{Enter}')
+    expect(sendMessage).toHaveBeenCalledWith('hello live pane')
+  })
+})

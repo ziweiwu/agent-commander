@@ -124,3 +124,43 @@ describe('tables in a message', () => {
     expect(screen.getByTestId('message-text').textContent).toBe('run ps | grep node')
   })
 })
+
+/*
+ * A tool argument is not prose.
+ *
+ * It is a glob, a command, a path — and markdown's emphasis markers are
+ * ordinary characters in a shell. Running one through the prose parser
+ * rewrote it silently: `**\/*.ts` rendered as `*\/.ts`, `rm -rf build/* dist/*`
+ * lost both stars, and backticks were eaten. The row then showed a command
+ * that was not the command that ran, while the `title` beside it still
+ * carried the truth — which is the INV-11 over-claim wearing a rendering
+ * bug's clothes.
+ */
+describe('a tool argument reaches the row unrewritten', () => {
+  const withTool = (text: string): ChatMessage => ({
+    id: 'm1',
+    role: 'agent',
+    at: 0,
+    text: '',
+    tools: [{ id: 't1', tool: 'Bash', text, subagent: false }],
+    grouped: false,
+  })
+
+  it.each([
+    ['**/*.ts'],
+    ['rm -rf build/* dist/*'],
+    ['`date`'],
+    ['foo.*bar.*baz'],
+    ['grep -r _init_ src/'],
+  ])('keeps %j exactly', (arg) => {
+    render(<Message message={withTool(arg)} />)
+    expect(screen.getByTestId('tool-call').textContent).toContain(arg)
+  })
+
+  it('still linkifies a URL, which is the only thing the row wanted', () => {
+    render(<Message message={withTool('https://example.test/feed.xml')} />)
+    expect(screen.getByTestId('message-link').getAttribute('href')).toBe(
+      'https://example.test/feed.xml',
+    )
+  })
+})

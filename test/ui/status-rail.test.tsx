@@ -102,7 +102,7 @@ describe('reachability is its own channel', () => {
    * reach it". The reach mark is where it goes.
    */
   it('carries the server’s reason rather than inventing one', () => {
-    card({ sessionId: 'a', status: 'idle', paneId: '%1', attachBlockedReason: 'pane exited' })
+    card({ sessionId: 'a', status: 'idle', paneId: undefined, attachBlockedReason: 'pane exited' })
     const mark = screen.getByTestId('agent-reach')
     expect(mark.dataset.reach).toBe('gone')
     expect(mark.getAttribute('title')).toBe('pane exited')
@@ -136,5 +136,34 @@ describe('the age says how long, and of what', () => {
   it('reads as time since for anything else', () => {
     card({ sessionId: 'a', status: 'busy', paneId: '%1', lastActivityAt: Date.now() - 60_000 })
     expect(screen.getByTestId('agent-age').dataset.since).toBe('activity')
+  })
+})
+
+/*
+ * The card is a button, and its name is what a screen reader hears before
+ * anything else on the row.
+ *
+ * It used to be whatever its text concatenated to. The context line separates
+ * its parts with a `::after` middot and generated content is in the
+ * accessibility tree, so the name arrived as "waiting · dialog open· Bash: rm
+ * -rf dist· ~/Projects/lego-deals· terminal reachable" — every fact worth
+ * having, in an order nobody would choose, with the separators read out.
+ */
+describe('what the card calls itself', () => {
+  it('names itself by agent, state and place, and not by its own punctuation', () => {
+    card({
+      sessionId: 'a',
+      name: 'rebuild-dist',
+      status: 'waiting',
+      waitingFor: 'dialog open',
+      cwd: '/Users/demo/Projects/lego-deals',
+      paneId: '%1',
+    })
+    const label = screen.getByTestId('agent-card').getAttribute('aria-label') ?? ''
+    expect(label).toContain('rebuild-dist')
+    expect(label).toContain('~/Projects/lego-deals')
+    expect(label).toMatch(/waiting/)
+    // The reach mark's own words belong to the mark, not to the card's name.
+    expect(label).not.toMatch(/terminal reachable/)
   })
 })

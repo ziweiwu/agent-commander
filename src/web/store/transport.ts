@@ -361,7 +361,11 @@ export function sendText(text: string): void {
  */
 export function runText(text: string): void {
   const { selected } = useStore.getState()
-  if (!selected || text.length === 0) return
+  // `trim`, like `sendMessage`: a draft of spaces would otherwise run a
+  // whitespace paste and a newline in a live shell, which is a command nobody
+  // typed. The button's `disabled` masks it today; this is the one control
+  // here that executes, so it carries the guard itself.
+  if (!selected || text.trim().length === 0) return
   flushText()
   send({ type: 'paste', sessionId: selected, text, submit: true })
 }
@@ -700,7 +704,23 @@ function armRefocus(): void {
 /** Start waiting for a conversation, from this moment. */
 export function expectTimeline(): void {
   refocusLeft = REFOCUS_TRIES
-  useStore.setState({ timelineStalledAt: null })
+  /*
+   * `timelineAt` is cleared here, not only by `resetConversation`.
+   *
+   * Without that the whole re-ask was dead on the path it was written for.
+   * `resetConversation` runs from `focusAgent` on a *selection change*, and a
+   * reconnect is not one — so `onOpen` armed the retry while `timelineAt`
+   * still held a timestamp from before the drop, and the first tick bailed on
+   * its own `timelineAt !== null` guard. The case it could never reach is
+   * exactly the one `REFOCUS_MS` names: a reconnect into a restarted server,
+   * whose registry has not rescanned, so `on_focus` returns without spawning
+   * a pump and no frame ever arrives. The conversation then stopped updating
+   * for the life of the page with nothing saying so.
+   *
+   * Clearing it is also simply true: after a reconnect this tab has not been
+   * told anything about the conversation yet.
+   */
+  useStore.setState({ timelineAt: null, timelineStalledAt: null })
   armRefocus()
 }
 
