@@ -187,16 +187,15 @@
       "children": []
     },
     {
-      "sessionId": "tmux:kiro-1787832510",
-      "children": [],
-      "unknown": true
-    },
-    {
       "sessionId": "mock-plan",
       "children": []
     },
     {
       "sessionId": "mock-permission",
+      "children": []
+    },
+    {
+      "sessionId": "mock-set",
       "children": []
     },
     {

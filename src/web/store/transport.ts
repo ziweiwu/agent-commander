@@ -19,7 +19,7 @@ import type {
 } from '../../shared/types.ts'
 import { translate } from '../lib/i18n.ts'
 import { notifyBlocked, shouldNudge } from '../lib/notify.ts'
-import { loadNudgeDismissed } from '../lib/prefs.ts'
+import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
 import { useStore } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -41,6 +41,8 @@ const SILENCE_MS = 75_000
 const WATCHDOG_MS = 15_000
 /** Epoch ms of the last frame of any kind, or 0 before the first. */
 let lastHeard = 0
+/** How many frames this page has ever received; the probe compares counts. */
+let frames = 0
 let watchdogTimer: number | undefined
 /**
  * Whether this socket's server has ever beaten, which is what arms the
@@ -61,6 +63,23 @@ let watchdogTimer: number | undefined
  * between — which, on this machine, is how a new binary usually arrives.
  */
 let serverBeats = false
+
+/**
+ * How long a probe sent on returning to the page waits for its answer.
+ *
+ * The watchdog above is the right tool for a tab nobody is looking at and the
+ * wrong one for a phone that has just been picked up: its next check is up to
+ * fifteen seconds away and only fires after seventy-five of silence, and the
+ * first thing a returning user does is answer an agent. The page's own return
+ * is the event, so a socket that looks open is asked once — a `ping` the
+ * server answers with `pong` — and dropped if nothing comes back in this long.
+ * One request on one event (INV-4), and nothing that reaches an agent (INV-2).
+ */
+const RETURN_PROBE_MS = 4_000
+let probeTimer: number | undefined
+/** The pending backoff, so a return can cancel it and connect now. */
+let retryTimer: number | undefined
+let listening = false
 
 /**
  * How long a `focus` may go unanswered before it is asked again.
@@ -563,7 +582,10 @@ function handle(msg: ServerMessage): void {
   const state = useStore.getState()
   switch (msg.type) {
     case 'fleet': {
-      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt: Date.now() })
+      const fleetAt = Date.now()
+      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt })
+      // For the next cold start; the shape of the fleet and nothing said in it.
+      saveFleetSnapshot(msg.agents, fleetAt)
       // A status change decides whether an echo may be counting down: a message
       // queued behind a live turn is waiting, not late.
       useStore.getState().syncDelivery()
@@ -620,13 +642,17 @@ function handle(msg: ServerMessage): void {
       acknowledge(msg.seq)
       return
     }
+    case 'pong':
+      // The answer to this tab's own probe. Arriving is the whole of it: the
+      // message listener already read the clock.
+      break
     case 'ping': {
       // Answered so the server can tell this tab from one that has gone.
       // Arriving at all is the other half, and it does two things: it proves
       // the connection to this side, and it is what arms the watchdog — see
       // `serverBeats`.
       serverBeats = true
-      send({ type: 'pong' })
+      send({ type: 'pong', visible: onScreen() })
       return
     }
     case 'error':
@@ -747,8 +773,91 @@ function startWatchdog(): void {
 
 /** Wait, then try again. The one place the backoff is advanced. */
 function retryLater(): void {
-  window.setTimeout(connect, retry)
+  window.clearTimeout(retryTimer)
+  retryTimer = window.setTimeout(connect, retry)
   retry = Math.min(retry * 2, 10_000)
+}
+
+/**
+ * Whether the server answers HTTP at all, as distinct from whether the socket
+ * is up. Asked while the socket is down, because that is when the two read the
+ * same from the chip and mean different things on a phone: "reconnecting…"
+ * over a tunnel that is not there promises what nothing here can do. The
+ * cheapest route the server has, under the same cookie and the same deadline
+ * as the socket probe.
+ */
+function probeServer(): void {
+  const abort = new AbortController()
+  const deadline = window.setTimeout(() => abort.abort(), RETURN_PROBE_MS)
+  fetch('/api/env', { signal: abort.signal, credentials: 'same-origin' })
+    .then((res) => useStore.setState({ reach: res.ok ? 'reachable' : 'unreachable' }))
+    .catch(() => useStore.setState({ reach: 'unreachable' }))
+    .finally(() => window.clearTimeout(deadline))
+}
+
+/**
+ * The page came back — the phone woke, the tab was switched to — so decide
+ * the socket's fate now rather than on the next timer.
+ *
+ * Three cases, none of them a guess. No socket: a backoff is being waited
+ * out, so connect this instant and start it from the bottom. A socket that
+ * has been silent past the beat: it is dead by the watchdog's own rule, so
+ * close it now instead of at the watchdog's next tick. A socket that merely
+ * looks open: ask it, and let the answer — or its absence — decide.
+ */
+function onReturn(): void {
+  if (document.visibilityState !== 'visible') return
+  if (socket === null) {
+    window.clearTimeout(retryTimer)
+    retry = 500
+    probeServer()
+    connect()
+    return
+  }
+  if (socket.readyState !== WebSocket.OPEN) return
+  if (serverBeats && lastHeard > 0 && Date.now() - lastHeard >= SILENCE_MS) {
+    socket.close()
+    return
+  }
+  probeSocket(socket)
+}
+
+/** One `ping`, one deadline; any frame at all is the answer. */
+function probeSocket(target: WebSocket): void {
+  window.clearTimeout(probeTimer)
+  const before = frames
+  target.send(JSON.stringify({ type: 'ping' }))
+  probeTimer = window.setTimeout(() => {
+    // Counted rather than clocked: a frame that landed in the same
+    // millisecond as the ask is still an answer.
+    if (socket === target && frames === before) target.close()
+  }, RETURN_PROBE_MS)
+}
+
+/** Whether this tab is on screen, for the server's push channel (INV-14). */
+function onScreen(): boolean {
+  return typeof document !== 'undefined' && document.visibilityState === 'visible'
+}
+
+/**
+ * Tell the server whether this tab is on screen, on every change. A visible
+ * tab is already the notification, so while one is the server pushes nothing
+ * off the machine; the moment the last one hides, a transition is news again.
+ * Rides the heartbeat's own message, so an older server reads it as a pong.
+ */
+function tellPresence(): void {
+  if (socket?.readyState !== WebSocket.OPEN) return
+  send({ type: 'pong', visible: onScreen() })
+}
+
+/** Register the page's lifecycle as a reason to look at the socket, once. */
+function listenForReturn(): void {
+  if (listening || typeof document === 'undefined') return
+  listening = true
+  document.addEventListener('visibilitychange', onReturn)
+  document.addEventListener('visibilitychange', tellPresence)
+  window.addEventListener('pageshow', onReturn)
+  window.addEventListener('online', onReturn)
 }
 
 /**
@@ -775,7 +884,8 @@ function openSocket(): WebSocket | null {
 function onOpen(): void {
   retry = 500
   lastHeard = Date.now()
-  useStore.setState({ conn: 'open' })
+  useStore.setState({ conn: 'open', reach: 'reachable' })
+  tellPresence()
   const { selected, attached } = useStore.getState()
   if (selected) {
     send({ type: 'focus', sessionId: selected })
@@ -787,6 +897,7 @@ function onOpen(): void {
 }
 
 export function connect(): void {
+  listenForReturn()
   const ws = openSocket()
   if (!ws) {
     useStore.setState({ conn: 'closed' })
@@ -803,6 +914,7 @@ export function connect(): void {
     // Any frame at all proves the connection, so the clock is read here
     // rather than only on a ping.
     lastHeard = Date.now()
+    frames += 1
     try {
       handle(JSON.parse(String(event.data)) as ServerMessage)
     } catch {
@@ -836,6 +948,8 @@ export function connect(): void {
     // saying nothing (INV-11). The lines already held are kept — they are what
     // the pane said, and that has not stopped being true.
     useStore.setState({ conn: 'closed', historyPending: false })
+    // Say which kind of down this is, for the caption (INV-11).
+    if (document.visibilityState === 'visible') probeServer()
     retryLater()
   })
 

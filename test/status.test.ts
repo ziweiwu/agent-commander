@@ -112,13 +112,13 @@ describe('reachability is its own channel', () => {
 
   /*
    * The two channels are independent, and this is the case that proves it: a
-   * Kiro session is perfectly reachable and its state is still unknowable.
+   * terminal is perfectly reachable and its state is still unknowable.
    * Collapsing them would have to call this one or the other.
    */
   it('is independent of what the session is doing', () => {
-    const kiro = agent({ status: 'idle', statusInferred: true })
-    expect(reachOf(kiro).reach).toBe('reachable')
-    expect(railOf(kiro).inferred).toBe(true)
+    const shell = agent({ status: 'idle', statusInferred: true })
+    expect(reachOf(shell).reach).toBe('reachable')
+    expect(railOf(shell).inferred).toBe(true)
   })
 })
 

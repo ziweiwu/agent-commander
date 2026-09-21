@@ -860,9 +860,9 @@ mod tests {
     #[tokio::test]
     async fn inv13_reports_unknown_not_empty_for_a_cli_with_no_transcript() {
         let _guard = isolated();
-        let kiro = Agent { agent_kind: "kiro".into(), ..agent() };
+        let shell = Agent { agent_kind: crate::agent_kinds::TERMINAL_KIND.into(), ..agent() };
 
-        let tree = read_tree_at(&kiro, None, NOW).await;
+        let tree = read_tree_at(&shell, None, NOW).await;
 
         assert!(tree.children.is_empty());
         assert_eq!(tree.unknown, Some(true));
@@ -873,11 +873,11 @@ mod tests {
     #[tokio::test]
     async fn inv4_no_transcript_lookup_for_a_cli_with_no_transcripts() {
         let _guard = isolated();
-        let kiro = Agent { agent_kind: "kiro".into(), ..agent() };
+        let shell = Agent { agent_kind: crate::agent_kinds::TERMINAL_KIND.into(), ..agent() };
 
         // A root that does not exist: reaching the filesystem at all would be
         // the scan this refuses to do, and the answer is the same either way.
-        let tree = read_tree_in(&kiro, Path::new("/nonexistent-projects-root"), NOW).await;
+        let tree = read_tree_in(&shell, Path::new("/nonexistent-projects-root"), NOW).await;
 
         assert_eq!(tree.unknown, Some(true));
         assert!(tree.children.is_empty());

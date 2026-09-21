@@ -23,6 +23,13 @@ export const AGENT = {
   plan: 'mock-plan',
   /** Blocked on a tool permission: the command to read, no options to name. */
   permission: 'mock-permission',
+  /**
+   * Blocked on a two-question set whose pane moves with the keys sent to it.
+   * Reserved for `question-set.spec.ts` for the reason `clearable` is: the
+   * picker is shared state on the one mock server, and a second spec pressing
+   * its digits would find the set half-answered.
+   */
+  set: 'mock-set',
   /** Its pane has exited: the Attach tab must say so rather than keep drawing. */
   gone: 'mock-gone',
   /**
@@ -37,8 +44,6 @@ export const AGENT = {
   quietFamily: 'mock-quiet-family',
   /** Delegated, with a delegate still moving — the same shape, opposite answer. */
   movingFamily: 'mock-busy-2',
-  /** A CLI that writes no subagent records, so its tree is `unknown`. */
-  noSidecars: 'tmux:kiro-1787832510',
   /** A plain shell this app opened: out of the fleet until the chip admits it. */
   terminal: 'tmux:term-1787832900',
 } as const

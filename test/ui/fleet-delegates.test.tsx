@@ -297,7 +297,7 @@ describe('INV-11 the trail is drawn only where it was measured', () => {
    * way to draw a weaker claim, only the same shape.
    */
   it('draws nothing for an agent whose CLI writes no transcript', () => {
-    card({ sessionId: 'a', agentKind: 'kiro', lastActivityAt: Date.now() - 60_000 })
+    card({ sessionId: 'a', agentKind: 'terminal', lastActivityAt: Date.now() - 60_000 })
     open()
     expect(screen.queryByTestId('agent-trail')).toBeNull()
   })

@@ -37,7 +37,11 @@ class FakeSocket {
     sockets.push(this)
   }
   send(raw: string): void {
-    sent.push(JSON.parse(raw) as ClientMessage)
+    {
+      const parsed = JSON.parse(raw) as ClientMessage
+      // The heartbeat's presence pong is plumbing, not what this test watches.
+      if ((parsed as { type: string }).type !== 'pong') sent.push(parsed)
+    }
   }
   addEventListener(type: string, fn: (e: unknown) => void): void {
     const list = this.listeners.get(type) ?? []

@@ -1,21 +1,20 @@
-//! Agents discovered from tmux alone, for CLIs that report nothing about
-//! themselves.
-//!
-//! Port of `src/server/tmux-agents.ts`.
+//! Sessions discovered from tmux alone: the plain terminals this app opens.
 //!
 //! Claude Code writes a session file saying what it is, where it is, and
 //! whether it is blocked; `registry` reads it and this app never has to guess.
-//! Kiro writes `~/.kiro/sessions/cli/<uuid>.json`, but that file carries no
-//! tmux reference and no status — so it can neither be attached to nor sorted
-//! from. tmux is the only place that has both, and it costs one query for the
-//! machine.
+//! A terminal writes nothing, so tmux is the only place that knows it exists,
+//! and it costs one query for the machine. What a pane is *doing* can only be
+//! inferred here, from whether it has produced output lately, and that weaker
+//! claim is marked as such all the way to the card (INV-11).
+//!
+//! This module once also recognised a foreign CLI by its session name or its
+//! process name. That is gone with the kind: an unmarked pane is never an
+//! agent now, however it is named.
 //!
 //! Everything here is a pure function of a [`PaneFacts`] snapshot, so the rules
 //! can be tested without a tmux server.
 
-use crate::agent_kinds::{
-    is_shell_command, spec_of, tmux_discoverable, AgentKindSpec, TERMINAL_KIND,
-};
+use crate::agent_kinds::{is_shell_command, spec_of, AgentKindSpec, TERMINAL_KIND};
 use crate::pane::PaneFacts;
 use crate::types::{Agent, AgentStatus};
 
@@ -32,7 +31,7 @@ pub const BUSY_MS: i64 = 8_000;
 /// one.
 const EPOCH_DIGITS: usize = 9;
 
-/// `kiro-1787832510` -> 1787832510000. The launcher's convention, not a
+/// `term-1787832510` -> 1787832510000. The launcher's convention, not a
 /// contract.
 ///
 /// The TS side spells this as `/-(\d{9,})$/`. Taking everything after the last
@@ -57,23 +56,14 @@ pub fn started_at_of(session: &str) -> i64 {
 
 /// Which CLI, if any, this pane is running.
 ///
-/// Either test alone is too narrow. The session prefix is the user's own
-/// launcher convention and misses an agent started by hand; the process name
-/// misses one launched through a wrapper, and is not a contract either — Claude
-/// Code rewrites its process title to its version number, so a name allow-list
-/// would not even recognise the CLI this app was built for. Matching on either,
-/// then rejecting shells, keeps both doors open without letting a plain
-/// terminal through.
+/// The kind a pane belongs to: a terminal this app marked, or nothing.
+///
+/// A terminal is known by what this app wrote on it rather than by anything
+/// the pane says about itself, and nothing else is recognised from a pane at
+/// all — a session named like an agent and a process named like one are both
+/// somebody else's business.
 pub fn kind_of(row: &PaneFacts) -> Option<&'static AgentKindSpec> {
-    // Asked first, because a terminal is known by what this app wrote on it
-    // rather than by anything the pane says about itself.
-    if is_our_terminal(row) {
-        return spec_of(TERMINAL_KIND);
-    }
-    tmux_discoverable().find(|k| {
-        k.process_names.contains(&row.command.as_str())
-            || k.session_prefix.is_some_and(|p| p.matches(&row.session))
-    })
+    is_our_terminal(row).then(|| spec_of(TERMINAL_KIND)).flatten()
 }
 
 /// True when this pane holds a live agent rather than what one left behind.
@@ -198,56 +188,46 @@ mod tests {
 
     const NOW: i64 = 1_787_832_700_000;
 
+    /// A terminal this app opened: a shell at a prompt, wearing the marker.
     fn pane() -> PaneFacts {
         PaneFacts {
             pane_id: "%302".into(),
-            session: "kiro-1787832510".into(),
+            session: "term-1787832510".into(),
             pid: 84_638,
-            command: "kiro-cli".into(),
+            command: "zsh".into(),
             activity_at: NOW / 1_000,
             window_panes: 1,
             dead: false,
             cwd: "/Users/ziweiwu/Projects/folio".into(),
-            marker: String::new(),
+            marker: crate::pane::MARKER_TERMINAL.into(),
         }
     }
 
-    /* ------------------------------------------- recognising an agent */
-
-    #[test]
-    fn matches_the_real_kiro_session_on_this_machine() {
-        assert_eq!(kind_of(&pane()).map(|k| k.id), Some("kiro"));
+    /// The same pane with nobody's mark on it.
+    fn unmarked(command: &str) -> PaneFacts {
+        PaneFacts { command: command.into(), marker: String::new(), ..pane() }
     }
 
-    /// The process name is not a contract: Claude Code rewrites its own process
-    /// title to its version number, so a name allow-list alone would not even
-    /// recognise the CLI this app was built for.
-    #[test]
-    fn matches_on_the_session_name_when_the_command_is_unrecognised() {
-        let row = PaneFacts { command: "node".into(), ..pane() };
-        assert_eq!(kind_of(&row).map(|k| k.id), Some("kiro"));
-    }
+    /* ------------------------------------------- recognising a session */
 
+    /// Nothing is recognised from a pane by name or process any more: a
+    /// session called `kiro-1787832510` running `kiro-cli` is somebody else's.
     #[test]
-    fn matches_on_the_command_when_the_session_was_named_by_hand() {
-        let row = PaneFacts { session: "work".into(), ..pane() };
-        assert_eq!(kind_of(&row).map(|k| k.id), Some("kiro"));
-    }
-
-    #[test]
-    fn ignores_a_session_merely_named_like_one() {
-        let row = PaneFacts { session: "kiro-notes".into(), command: "vim".into(), ..pane() };
+    fn an_unmarked_pane_is_not_an_agent_however_it_is_named() {
+        let row = PaneFacts { session: "kiro-1787832510".into(), ..unmarked("kiro-cli") };
         assert!(kind_of(&row).is_none());
+        assert!(kind_of(&unmarked("node")).is_none());
+        assert!(agents_from_panes(&[row], NOW).is_empty());
     }
 
     #[test]
     fn reads_the_launcher_epoch_out_of_the_session_name() {
-        assert_eq!(started_at_of("kiro-1787832510"), 1_787_832_510_000);
+        assert_eq!(started_at_of("term-1787832510"), 1_787_832_510_000);
         assert_eq!(started_at_of("work"), 0);
         // Too few digits to be an epoch — someone's own name for a session.
         assert_eq!(started_at_of("agent-42"), 0);
         // The stamp has to end the name.
-        assert_eq!(started_at_of("kiro-1787832510-old"), 0);
+        assert_eq!(started_at_of("term-1787832510-old"), 0);
     }
 
     /* ---------------------------------------------- husks are not agents */
@@ -255,8 +235,7 @@ mod tests {
     #[test]
     fn drops_a_session_whose_agent_exited_leaving_a_shell() {
         for command in ["zsh", "-zsh", "bash", "fish", "sh"] {
-            let row = PaneFacts { command: command.into(), ..pane() };
-            assert!(!is_live_agent(&row), "{command} should not count as an agent");
+            assert!(!is_live_agent(&unmarked(command)), "{command} should not count as an agent");
         }
     }
 
@@ -265,32 +244,25 @@ mod tests {
         assert!(!is_live_agent(&PaneFacts { dead: true, ..pane() }));
     }
 
+    /// A process that is not a shell is alive, whoever's it is; whether it is
+    /// *listed* is `kind_of`'s question, answered above.
     #[test]
     fn keeps_a_live_one() {
-        assert!(is_live_agent(&pane()));
+        assert!(is_live_agent(&unmarked("node")));
     }
 
-    /// The exact shape of the five stale sessions on this machine.
+    /// The exact shape of the stale sessions on this machine, beside one
+    /// terminal of this app's own.
     #[test]
     fn excludes_resurrected_gemini_and_opencode_husks_from_the_fleet() {
         let rows = vec![
-            PaneFacts {
-                session: "gemini-1780008794".into(),
-                pane_id: "%66".into(),
-                command: "zsh".into(),
-                ..pane()
-            },
-            PaneFacts {
-                session: "opencode-1785617312".into(),
-                pane_id: "%70".into(),
-                command: "zsh".into(),
-                ..pane()
-            },
+            PaneFacts { session: "gemini-1780008794".into(), pane_id: "%66".into(), ..unmarked("zsh") },
+            PaneFacts { session: "opencode-1785617312".into(), pane_id: "%70".into(), ..unmarked("zsh") },
             pane(),
         ];
         let ids: Vec<_> =
             agents_from_panes(&rows, NOW).into_iter().map(|a| a.session_id).collect();
-        assert_eq!(ids, vec!["tmux:kiro-1787832510"]);
+        assert_eq!(ids, vec!["tmux:term-1787832510"]);
     }
 
     /* ------------------------------------- a terminal this app opened */
@@ -319,7 +291,7 @@ mod tests {
     #[test]
     fn still_drops_an_unmarked_shell_beside_a_marked_one() {
         let rows = vec![
-            PaneFacts { session: "gemini-1780008794".into(), command: "zsh".into(), ..pane() },
+            PaneFacts { session: "gemini-1780008794".into(), ..unmarked("zsh") },
             terminal(),
         ];
         let ids: Vec<_> =
@@ -395,11 +367,11 @@ mod tests {
         let a = &agents[0];
         // Namespaced: tmux reuses `%N`, and a bare uuid could collide with
         // Claude.
-        assert_eq!(a.session_id, "tmux:kiro-1787832510");
-        assert_eq!(a.agent_kind, "kiro");
+        assert_eq!(a.session_id, "tmux:term-1787832510");
+        assert_eq!(a.agent_kind, TERMINAL_KIND);
         assert_eq!(a.pid, 84_638);
         assert_eq!(a.pane_id.as_deref(), Some("%302"));
-        assert_eq!(a.tmux_session.as_deref(), Some("kiro-1787832510"));
+        assert_eq!(a.tmux_session.as_deref(), Some("term-1787832510"));
         assert_eq!(a.cwd, "/Users/ziweiwu/Projects/folio");
         assert_eq!(a.folder, "folio");
         assert_eq!(a.name, "folio");
@@ -439,7 +411,7 @@ mod tests {
     fn a_pane_at_the_filesystem_root_is_named_from_its_session() {
         let rows = vec![PaneFacts { cwd: "/".into(), ..pane() }];
         let a = &agents_from_panes(&rows, NOW)[0];
-        assert_eq!(a.name, "kiro-1787832510");
+        assert_eq!(a.name, "term-1787832510");
         assert_eq!(a.folder, "/");
     }
 

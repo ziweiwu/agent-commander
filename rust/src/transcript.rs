@@ -19,11 +19,27 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::sources::{AgentPatch, TailApi, TailRead};
 use crate::types::{
-    now_ms, Agent, GoalState, NoticeKind, PendingPrompt, PromptOption, TimelineEvent, TimelineKind,
+    now_ms, Agent, GoalState, NoticeKind, PendingPrompt, PromptOption, TimelineEvent, TimelineKind, Question,
 };
 
-/// On first read, only this much history is loaded.
+/// On first read, at least this much of the transcript is loaded...
 const BACKFILL_BYTES: u64 = 256 * 1024;
+
+/// ...and enough beyond it to carry this many of the messages the chat draws.
+///
+/// A window of bytes opens a long session on whatever its last quarter-megabyte
+/// happens to hold, and what a working agent writes last is mostly tool output.
+/// Measured over the 156 transcripts on this machine longer than the window,
+/// the median opened on 9 messages of a median 30, and the largest on 2 of its
+/// 390 — so switching to that agent read as its conversation having gone.
+/// Five hundred is more than all but three of those transcripts hold, so in
+/// practice a focus opens on the whole conversation; the text of the last 500
+/// is under half a megabyte on the wire even for the largest.
+const BACKFILL_MESSAGES: usize = 500;
+
+/// How far back a first read will look for them, however few it finds (INV-4).
+/// Read once and parsed once per focus; the largest transcript here is 48 MiB.
+const BACKFILL_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Bytes of the transcript tail scanned when reading current session state.
 const STATE_TAIL_BYTES: u64 = 128 * 1024;
@@ -388,10 +404,24 @@ pub fn summarize_tool(name: &str, input: Option<&Value>) -> String {
         }
         "WebFetch" | "WebSearch" => text_of("url").or_else(|| text_of("query")).unwrap_or_default(),
         _ => {
+            /*
+             * The `WebFetch | WebSearch` arm above reads `url` and `query` by
+             * tool *name*, so an MCP tool whose input is literally `{url: …}`
+             * fell through to here and came back empty. Measured over this
+             * machine's transcripts: 5,224 of 50,244 calls (10.4%) had
+             * nothing to say, led by `mcp__chrome-devtools__evaluate_script`
+             * (`function`), `navigate_page` (`url`) and `ToolSearch`
+             * (`query`). The keys are tried by how much they say.
+             */
             let described = text_of("description")
                 .or_else(|| text_of("file_path"))
                 .or_else(|| text_of("pattern"))
-                .or_else(|| text_of("command"));
+                .or_else(|| text_of("command"))
+                .or_else(|| text_of("url"))
+                .or_else(|| text_of("query"))
+                .or_else(|| text_of("function"))
+                .or_else(|| text_of("key"))
+                .or_else(|| text_of("text"));
             described.map(|text| first_line(&text)).unwrap_or_default()
         }
     }
@@ -411,17 +441,7 @@ pub fn summarize_tool(name: &str, input: Option<&Value>) -> String {
 /// so — and an answer to one is sent only after `drawn_row_matches` has read
 /// the pane and found that row under that number (INV-16).
 pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
-    let mut prompt = PendingPrompt {
-        tool: name.to_string(),
-        question: None,
-        header: None,
-        options: Vec::new(),
-        multi_select: None,
-        more_questions: None,
-        options_drawn: None,
-        detail: None,
-        id: String::new(),
-    };
+    let mut prompt = PendingPrompt { tool: name.to_string(), ..Default::default() };
     match name {
         "AskUserQuestion" => fill_from_questions(&mut prompt, input),
         "ExitPlanMode" => {
@@ -429,20 +449,40 @@ pub fn pending_prompt(name: &str, input: Option<&Value>) -> PendingPrompt {
             prompt.options = drawn_choices(name);
             prompt.options_drawn = Some(true);
         }
-        _ => {
-            // What it would do, in the words the tool itself used.
-            let summary = summarize_tool(name, input);
-            if !summary.is_empty() {
-                prompt.detail = Some(summary);
-            }
-            let drawn = drawn_choices(name);
-            if !drawn.is_empty() {
-                prompt.options = drawn;
-                prompt.options_drawn = Some(true);
-            }
-        }
+        _ => fill_from_permission(&mut prompt, name, input),
     }
     prompt
+}
+
+/// What a tool waiting on permission would do, said in full.
+///
+/// `detail` is the thing that would run and `summary` is the agent's account
+/// of it, kept apart because one is a fact and the other a claim. For `Bash`
+/// the command travels whole rather than as its first line: 42.6% of the Bash
+/// calls on this machine are several lines long and about half open with a
+/// `cd`, so a first-line card was approving a directory change with the rest
+/// unseen. Whether it asks to leave the sandbox is a different decision again,
+/// and is marked as one.
+fn fill_from_permission(prompt: &mut PendingPrompt, name: &str, input: Option<&Value>) {
+    if name == "Bash" {
+        prompt.summary = text_field_of(input, "description").map(str::to_string);
+        prompt.detail = text_field_of(input, "command").map(str::to_string);
+        prompt.sandbox_off = input
+            .and_then(|value| value.get("dangerouslyDisableSandbox"))
+            .and_then(Value::as_bool)
+            .filter(|on| *on);
+    } else {
+        // What it would do, in the words the tool itself used.
+        let summary = summarize_tool(name, input);
+        if !summary.is_empty() {
+            prompt.detail = Some(summary);
+        }
+    }
+    let drawn = drawn_choices(name);
+    if !drawn.is_empty() {
+        prompt.options = drawn;
+        prompt.options_drawn = Some(true);
+    }
 }
 
 /// The numbered choices Claude Code usually draws for a dialog it never writes
@@ -559,9 +599,148 @@ pub fn drawn_row_matches(lines: &[String], choice: usize, label: &str) -> bool {
         .filter_map(|line| numbered_row(&strip_ansi(line)).map(|(n, t)| (n, t.to_string())))
         .find(|(number, _)| *number == wanted)
         .is_some_and(|(_, text)| {
-            let drawn = normalise_choice(&text);
+            let drawn = normalise_choice(&row_label(&text));
             !drawn.is_empty() && (drawn.starts_with(&want) || want.starts_with(&drawn))
         })
+}
+
+/// A drawn row's text reduced to its label.
+///
+/// The tick box a multi-select draws (`[ ]`, `[✔]`) and the `(esc)` hint the
+/// CLI appends to a refusal are how a row is drawn, not what it says, and a
+/// label the transcript wrote never carries either.
+fn row_label(text: &str) -> String {
+    let mut label = text.trim();
+    for mark in ["[ ]", "[✔]", "[x]", "[X]", "☐", "☒"] {
+        if let Some(rest) = label.strip_prefix(mark) {
+            label = rest.trim_start();
+        }
+    }
+    label.strip_suffix("(esc)").unwrap_or(label).trim().to_string()
+}
+
+/// The numbered rows of the dialog at the bottom of the pane, in order.
+///
+/// Read up from the bottom to the nearest row numbered 1 — the dialog is the
+/// most recent thing drawn and an agent's own prose above it is full of
+/// numbered lists, which is `drawn_row_matches`'s reasoning too. Anything that
+/// is not one run of rows counted from 1 is not a dialog and yields nothing.
+pub fn dialog_rows(text: &[String]) -> Vec<PromptOption> {
+    let mut rows: Vec<(usize, String)> = Vec::new();
+    for line in text.iter().rev() {
+        let Some((number, label)) = numbered_row(line) else { continue };
+        rows.push((number, row_label(label)));
+        if number == 1 {
+            break;
+        }
+    }
+    rows.reverse();
+    rows.into_iter()
+        .enumerate()
+        .take_while(|(index, (number, _))| *number == index + 1)
+        .map(|(_, (_, label))| PromptOption { label, ..Default::default() })
+        .collect()
+}
+
+/// Whether this prompt needs the pane read before it can be shown or answered.
+///
+/// Two shapes cannot be finished from the transcript alone: a set of questions,
+/// where nothing on disk says which one the picker is showing, and a dialog
+/// whose rows the CLI composes at the terminal.
+pub fn needs_pane(prompt: &PendingPrompt) -> bool {
+    prompt.questions.len() > 1 || prompt.options_drawn == Some(true)
+}
+
+/// The prompt as the pane is showing it (INV-16, "what the pane confirms").
+///
+/// Measured against Claude Code 2.1.278 by driving a two-question picker in a
+/// tmux pane: the dialog draws one tab per question (`☐ Colour  ☐ Sizes
+/// ✔ Submit`), the current question's own text under the bar, and its rows
+/// numbered from 1; a digit on a single-select answers it and moves to the
+/// next tab; after the last it draws a review page — `Ready to submit your
+/// answers?` over `1. Submit answers` / `2. Cancel` — and Enter there is what
+/// finishes the call. So the question found nearest the bottom of the pane is
+/// the one being asked, the review page is recognised by its row, and its rows
+/// are read like any drawn dialog's.
+///
+/// A drawn dialog's rows replace the table in `drawn_choices` wherever the
+/// pane draws at least two, marked `options_read`: the table is a guess about
+/// the CLI's wording that has drifted once already (TODO §12), and labels
+/// read off the terminal cannot drift from it. A pane drawing neither leaves
+/// the prompt exactly as the transcript had it.
+pub fn resolve_on_pane(prompt: &PendingPrompt, lines: &[String]) -> PendingPrompt {
+    let text: Vec<String> = lines.iter().map(|line| strip_ansi(line)).collect();
+    let mut shown = prompt.clone();
+    if prompt.questions.len() > 1 {
+        let rows = dialog_rows(&text);
+        if rows.iter().any(|row| is_submit_row(&row.label)) {
+            show_review(&mut shown, &text, rows);
+        } else if let Some(index) = current_question(&prompt.questions, &text) {
+            show_question(&mut shown, index);
+        }
+    }
+    if shown.options_drawn == Some(true) {
+        let rows = dialog_rows(&text);
+        if rows.len() >= 2 {
+            shown.options = rows;
+            shown.options_read = Some(true);
+        }
+    }
+    shown
+}
+
+fn is_submit_row(label: &str) -> bool {
+    normalise_choice(label).eq_ignore_ascii_case("submit answers")
+}
+
+/// Which question's text the pane is drawing — the one nearest the bottom,
+/// because the user's own prompt further up may quote a question verbatim.
+fn current_question(questions: &[Question], text: &[String]) -> Option<usize> {
+    let pane = normalise_choice(&text.join(" "));
+    questions
+        .iter()
+        .enumerate()
+        .filter_map(|(index, question)| {
+            let needle = normalise_choice(question.question.as_deref()?);
+            if needle.is_empty() {
+                return None;
+            }
+            pane.rfind(&needle).map(|at| (at, index))
+        })
+        .max_by_key(|(at, _)| *at)
+        .map(|(_, index)| index)
+}
+
+/// The picker's review page: every question answered, one row to submit.
+///
+/// Shown as what it is — a dialog the CLI drew, read off the pane like a plan
+/// approval's — rather than as a question of the set: its rows are `Submit
+/// answers` and `Cancel`, the line over them is read rather than invented, and
+/// the header is the tab the picker names it by. It is not question N+1, so
+/// it carries no place in the set.
+fn show_review(prompt: &mut PendingPrompt, text: &[String], rows: Vec<PromptOption>) {
+    prompt.question = line_above_rows(text);
+    prompt.header = Some(REVIEW_TAB.to_string());
+    prompt.multi_select = None;
+    prompt.options = rows;
+    prompt.options_drawn = Some(true);
+    prompt.options_read = Some(true);
+    prompt.question_index = None;
+    prompt.more_questions = None;
+}
+
+/// What the picker's last tab is called.
+const REVIEW_TAB: &str = "Submit";
+
+/// The nearest non-empty line above the dialog's first row.
+fn line_above_rows(text: &[String]) -> Option<String> {
+    let first_row = text.iter().rposition(|line| numbered_row(line).is_some_and(|(n, _)| n == 1))?;
+    text[..first_row]
+        .iter()
+        .rev()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty())
+        .map(str::to_string)
 }
 
 /// A choice label reduced to what two renderings of it can be compared on.
@@ -605,24 +784,47 @@ pub fn strip_ansi(text: &str) -> String {
     re.replace_all(text, "").into_owned()
 }
 
-/// The first question of an `AskUserQuestion` set, as the card will show it.
+/// Every question of an `AskUserQuestion` set, with the first on the wire.
 ///
-/// The picker asks them one at a time, so the first is the one on screen.
-/// Saying how many follow is honest about what one answer finishes; pretending
-/// they are all answerable at once is not.
+/// The picker asks them one at a time, so the first is the one on screen when
+/// the call is written. The rest are kept so `resolve_on_pane` can put a later
+/// one on the wire once the pane says the picker has moved on — which is what
+/// lets a set be answered to the end from the card rather than latching after
+/// one press (TODO §13a). Reading `multiSelect` off each question rather than
+/// the first is the same change (§13b).
 fn fill_from_questions(prompt: &mut PendingPrompt, input: Option<&Value>) {
     let questions = input.and_then(|v| v.get("questions")).and_then(Value::as_array);
     let Some(questions) = questions else { return };
-    let Some(first) = questions.first() else { return };
-    prompt.question = text_field(first, "question").map(str::to_string);
-    // The CLI's own title for the dialog, which every question carries.
-    prompt.header = text_field(first, "header").map(str::to_string);
-    prompt.multi_select =
-        first.get("multiSelect").and_then(Value::as_bool).filter(|on| *on).map(|_| true);
-    if questions.len() > 1 {
-        prompt.more_questions = Some(questions.len() - 1);
+    prompt.questions = questions.iter().map(question_of).collect();
+    show_question(prompt, 0);
+}
+
+fn question_of(value: &Value) -> Question {
+    Question {
+        question: text_field(value, "question").map(str::to_string),
+        // The CLI's own title for the dialog's tab, which every question carries.
+        header: text_field(value, "header").map(str::to_string),
+        multi_select: value.get("multiSelect").and_then(Value::as_bool).unwrap_or(false),
+        options: options_of(value),
     }
-    prompt.options = options_of(first);
+}
+
+/// Put question `index` of the set on the wire fields.
+///
+/// `more_questions` counts what still follows, and `question_index` says where
+/// in the set this is, only for a set: a lone question is not "1 of 1".
+fn show_question(prompt: &mut PendingPrompt, index: usize) {
+    let total = prompt.questions.len();
+    let Some(question) = prompt.questions.get(index) else { return };
+    prompt.question = question.question.clone();
+    prompt.header = question.header.clone();
+    prompt.multi_select = question.multi_select.then_some(true);
+    prompt.options = question.options.clone();
+    prompt.options_read = None;
+    if total > 1 {
+        prompt.question_index = Some(index);
+        prompt.more_questions = Some(total - 1 - index);
+    }
 }
 
 /// Every option with a label. One without cannot be drawn, so it is not offered.
@@ -757,6 +959,11 @@ impl Batch<'_> {
         // same way permission mode does.
         if let Some(goal) = goal_from_record(rec) {
             self.out.patch.goal = Some(Some(goal));
+        }
+        // Last write wins, like the title, but only prompts that named
+        // something ever write: see `describe.rs`.
+        if let Some(description) = crate::describe::description_from(rec) {
+            self.out.patch.description = Some(description);
         }
         if is_compaction(rec, kind) {
             self.push_compaction(rec);
@@ -992,6 +1199,32 @@ pub fn parse_lines(lines: &[&str], seq: &mut dyn FnMut() -> String) -> ParseResu
     batch.finish()
 }
 
+/// The complete records in `buf`, last first, each with the byte it starts at.
+///
+/// Whatever follows the last newline is a record still being written, and is
+/// left out the same way `read_next` holds a torn line back.
+fn records_from_the_end(buf: &[u8]) -> impl Iterator<Item = (usize, &[u8])> + '_ {
+    let mut end = buf.iter().rposition(|b| *b == b'\n');
+    std::iter::from_fn(move || {
+        let stop = end?;
+        let start = buf[..stop].iter().rposition(|b| *b == b'\n').map_or(0, |i| i + 1);
+        end = start.checked_sub(1);
+        Some((start, &buf[start..stop]))
+    })
+}
+
+/// Whether one record is something the chat draws as a message — what a reader
+/// means by "the conversation", as against the tool calls and results around
+/// it. Read by the timeline's own parser, so the two cannot disagree on it.
+fn is_message(record: &[u8]) -> bool {
+    let Ok(line) = std::str::from_utf8(record) else { return false };
+    let mut unnumbered = || String::new();
+    parse_lines(&[line], &mut unnumbered)
+        .events
+        .iter()
+        .any(|event| matches!(event.kind, TimelineKind::User | TimelineKind::Assistant))
+}
+
 /// The one-line "what is it doing" string shown on a fleet card.
 ///
 /// The 80 is counted in `char`s where the TS counts UTF-16 code units. They
@@ -1184,7 +1417,8 @@ impl TranscriptTail {
     }
 
     /// Read whatever is new. The first call backfills only the tail of the file
-    /// so that opening a long-running agent stays cheap.
+    /// — enough of it to carry a conversation — so that opening a long-running
+    /// agent stays cheap.
     pub async fn read_next(&mut self) -> TailRead {
         /*
          * A transcript this app cannot find is not an empty conversation, and
@@ -1207,6 +1441,9 @@ impl TranscriptTail {
         };
 
         let first = self.seek_to_start(size);
+        if first && self.offset == 0 && size > BACKFILL_BYTES {
+            self.offset = self.backfill_start(&path, size).await;
+        }
         // Checked even when the transcript has not grown by a byte: that
         // silence is exactly what a delegated run looks like from here.
         if size == self.offset {
@@ -1279,20 +1516,16 @@ impl TranscriptTail {
         }
     }
 
-    /// Point the offset at where this read should start, and say whether what
-    /// comes back replaces the client's copy rather than appending to it.
+    /// Say whether what comes back replaces the client's copy rather than
+    /// appending to it, and start over when it must.
     ///
-    /// A first read of a long file starts near its end: opening a long-running
-    /// agent must not cost a re-parse of its whole history (INV-4). A file
-    /// smaller than the offset was truncated or replaced, and starting over is
-    /// the only way not to emit garbage — but it is a replacement, not a
-    /// continuation, and without saying so the client appends the whole file to
-    /// the copy it already has.
+    /// A file smaller than the offset was truncated or replaced, and starting
+    /// over is the only way not to emit garbage — but it is a replacement, not
+    /// a continuation, and without saying so the client appends the whole file
+    /// to the copy it already has. Where a first read of a long file starts is
+    /// `backfill_start`'s question.
     fn seek_to_start(&mut self, size: u64) -> bool {
         let mut first = self.offset == 0;
-        if first && size > BACKFILL_BYTES {
-            self.offset = size - BACKFILL_BYTES;
-        }
         if size < self.offset {
             self.offset = 0;
             self.partial.clear();
@@ -1303,6 +1536,39 @@ impl TranscriptTail {
             first = true;
         }
         first
+    }
+
+    /// Where a first read of a long transcript starts.
+    ///
+    /// Far enough back to carry `BACKFILL_MESSAGES` messages, and never less
+    /// than `BACKFILL_BYTES`. Opening a long-running agent must not cost a
+    /// re-parse of its whole history (INV-4), so the look-back is bounded
+    /// twice: one read of at most `BACKFILL_SCAN_BYTES`, parsed from its end
+    /// only as far as the count takes.
+    ///
+    /// The offset returned sits on the newline that ends the record before the
+    /// chosen one, so that the caller's torn-first-line rule — the right one for
+    /// a window that starts at an arbitrary byte — drops an empty string here
+    /// rather than the message this reached back for.
+    async fn backfill_start(&self, path: &Path, size: u64) -> u64 {
+        let floor = size - BACKFILL_BYTES;
+        let scan_from = size.saturating_sub(BACKFILL_SCAN_BYTES);
+        let mut buf = vec![0u8; (size - scan_from) as usize];
+        let Ok(read) = self.read_at(path, scan_from, &mut buf).await else { return floor };
+        buf.truncate(read);
+        let mut counted = 0;
+        for (start, record) in records_from_the_end(&buf) {
+            // The window opened mid-file, so its first record is torn.
+            if start == 0 && scan_from > 0 {
+                break;
+            }
+            counted += usize::from(is_message(record));
+            if counted == BACKFILL_MESSAGES {
+                let newline_before = (scan_from + start as u64).saturating_sub(1);
+                return newline_before.min(floor);
+            }
+        }
+        scan_from
     }
 
     /// Everything between the offset and `size`, with the offset advanced by
@@ -1778,6 +2044,35 @@ mod tests {
         })
         .to_string();
         assert_eq!(parse(&[&line]).patch.git_branch, None);
+    }
+
+    /// The title is written once and the description keeps moving, which is the
+    /// whole reason the second one exists. A run of acknowledgements leaves it
+    /// on the last prompt that named something rather than dragging it down to
+    /// "ok" (`describe.rs`).
+    #[test]
+    fn inv11_the_description_follows_the_work_while_the_title_stays_put() {
+        let typed = |text: &str| {
+            json!({
+                "type": "user", "origin": { "kind": "human" }, "timestamp": "2026-08-14T00:00:00Z",
+                "message": { "content": text },
+            })
+            .to_string()
+        };
+        let lines = [
+            json!({ "type": "ai-title", "aiTitle": "Under the Witch download" }).to_string(),
+            typed("download the album art for the whole library"),
+            typed("now rewrite the registry discovery loop in rust"),
+            typed("ok"),
+            typed("done"),
+        ];
+        let refs: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let out = parse(&refs);
+        assert_eq!(out.patch.ai_title.as_deref(), Some("Under the Witch download"));
+        assert_eq!(
+            out.patch.description.as_deref(),
+            Some("now rewrite the registry discovery loop in rust")
+        );
     }
 
     #[test]
@@ -2270,6 +2565,80 @@ mod tests {
         assert_eq!(more.events.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["next"]);
     }
 
+    /// One tool result, as Claude Code writes them: a user record whose array
+    /// content the chat draws nothing for, about `bytes` long.
+    fn tool_output(bytes: usize) -> String {
+        format!(
+            "{}\n",
+            json!({
+                "type": "user",
+                "timestamp": "2026-08-14T00:57:52.725Z",
+                "message": {
+                    "content": [{ "type": "tool_result", "tool_use_id": "t1", "content": "z".repeat(bytes) }]
+                },
+            })
+        )
+    }
+
+    /*
+     * The last quarter-megabyte of a working agent's transcript is mostly tool
+     * output, and a window of bytes opened on that: measured on this machine,
+     * the largest transcript opened on 2 of its 390 messages, and switching to
+     * the agent read as its conversation having gone. So the first read
+     * reaches back past the output for the messages themselves.
+     */
+    #[tokio::test]
+    async fn a_first_read_reaches_back_past_tool_output_for_the_conversation() {
+        const MESSAGES: usize = BACKFILL_MESSAGES + 20;
+        let (root, file) = projects();
+        let mut all = String::new();
+        for i in 0..MESSAGES {
+            all.push_str(&said(&format!("m{i}")));
+        }
+        // Then more output than the byte window holds, and nothing said since.
+        all.push_str(&tool_output(2 * BACKFILL_BYTES as usize));
+        fs::write(&file, &all).unwrap();
+
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let out = tail.read_next().await;
+        assert!(out.first);
+        // Exactly the last BACKFILL_MESSAGES, the earliest of them whole.
+        let expected: Vec<String> =
+            (MESSAGES - BACKFILL_MESSAGES..MESSAGES).map(|i| format!("m{i}")).collect();
+        assert_eq!(out.events.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), expected);
+
+        // And the tail continues from there, incrementally.
+        append(&file, said("next").as_bytes());
+        let more = tail.read_next().await;
+        assert!(!more.first);
+        assert_eq!(more.events.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["next"]);
+    }
+
+    /*
+     * INV-4: the reach-back is one bounded read, not a search. A conversation
+     * buried deeper than it goes stays there, and the first read still answers
+     * with what the window holds.
+     */
+    #[tokio::test]
+    async fn inv4_the_reach_back_for_a_conversation_is_a_bounded_read() {
+        let (root, file) = projects();
+        let mut all = said("buried");
+        all.push_str(&tool_output(BACKFILL_SCAN_BYTES as usize));
+        fs::write(&file, &all).unwrap();
+
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let out = tail.read_next().await;
+        assert!(out.first);
+        assert!(out.events.is_empty(), "read past the bound: {:?}", out.events);
+    }
+
+    #[test]
+    fn walks_complete_records_from_the_end_and_leaves_a_torn_last_one() {
+        let buf = b"one\ntwo\nthr";
+        let got: Vec<(usize, &[u8])> = records_from_the_end(buf).collect();
+        assert_eq!(got, vec![(4, &b"two"[..]), (0, &b"one"[..])]);
+    }
+
     #[tokio::test]
     async fn a_short_first_read_keeps_its_whole_first_line() {
         let (root, file) = projects();
@@ -2602,7 +2971,11 @@ mod prompt_tests {
             "Bash",
             Some(&json!({ "command": "rm -rf build", "description": "Clear the build tree" })),
         );
-        assert_eq!(prompt.detail.as_deref(), Some("Clear the build tree"));
+        // The command is the fact and the description is the agent's claim;
+        // the card gets both, apart (TODO §13d).
+        assert_eq!(prompt.detail.as_deref(), Some("rm -rf build"));
+        assert_eq!(prompt.summary.as_deref(), Some("Clear the build tree"));
+        assert_eq!(prompt.sandbox_off, None);
         assert_eq!(prompt.question, None);
         assert_eq!(prompt.options, drawn_choices("Bash"));
         assert_eq!(prompt.options_drawn, Some(true));
@@ -2811,7 +3184,7 @@ mod prompt_tests {
         let first = call("t1", "Bash", json!({ "description": "older" }));
         let second = call("t2", "Bash", json!({ "description": "newer" }));
         let tail = tail_with(&[&first, &second]);
-        assert_eq!(tail.pending_prompt().and_then(|p| p.detail.as_deref()), Some("newer"));
+        assert_eq!(tail.pending_prompt().and_then(|p| p.summary.as_deref()), Some("newer"));
     }
 
     /// A subagent's question is asked of the subagent, and answering it into
@@ -2838,5 +3211,185 @@ mod prompt_tests {
         let b = call("t2", "Bash", json!({ "description": "two" }));
         let tail = tail_with(&[&a, &b, &answer_for("t1"), &answer_for("t2")]);
         assert!(tail.pending_prompt().is_none());
+    }
+
+    /// The frames below are transcribed from a two-question picker driven in a
+    /// tmux pane against Claude Code 2.1.278 — the measurement `resolve_on_pane`
+    /// rests on.
+    fn set_input() -> Value {
+        json!({ "questions": [
+            { "header": "Colour", "question": "Which colour do you want?",
+              "options": [{ "label": "Red" }, { "label": "Green" }, { "label": "Blue" }] },
+            { "header": "Sizes", "question": "Which sizes should we stock?", "multiSelect": true,
+              "options": [{ "label": "Small" }, { "label": "Medium" }, { "label": "Large" }] },
+        ]})
+    }
+
+    fn pane(lines: &[&str]) -> Vec<String> {
+        lines.iter().map(|l| l.to_string()).collect()
+    }
+
+    const SIZES_PAGE: &[&str] = &[
+        "←  ☒ Colour  ☐ Sizes  ✔ Submit  →",
+        "Which sizes should we stock?",
+        " \u{1b}[36m❯\u{1b}[39m 1. [✔] Small",
+        "  Small",
+        "   2. [ ] Medium",
+        "   3. [✔] Large",
+        "   4. [ ] Type something",
+        "   5. Chat about this",
+        "Enter to select · Tab/Arrow keys to navigate · Esc to cancel",
+    ];
+
+    const REVIEW_PAGE: &[&str] = &[
+        "←  ☒ Colour  ☒ Sizes  ✔ Submit  →",
+        "Review your answers",
+        " ● Which colour do you want?",
+        "   → Red",
+        " ● Which sizes should we stock?",
+        "   → Small, Large",
+        "Ready to submit your answers?",
+        "❯ 1. Submit answers",
+        "  2. Cancel",
+    ];
+
+    /// TODO §13a and §13b: every question travels, and each one's own
+    /// `multiSelect` — the card used to read the flag off the first alone.
+    #[test]
+    fn inv16_carries_every_question_of_a_set_with_the_first_on_the_wire() {
+        let prompt = pending_prompt("AskUserQuestion", Some(&set_input()));
+        assert_eq!(prompt.questions.len(), 2);
+        assert_eq!(prompt.question.as_deref(), Some("Which colour do you want?"));
+        assert_eq!(prompt.question_index, Some(0));
+        assert_eq!(prompt.more_questions, Some(1));
+        assert_eq!(prompt.multi_select, None, "the first question is a single choice");
+        assert!(prompt.questions[1].multi_select, "the second one's flag is its own");
+        assert!(needs_pane(&prompt), "which question is on screen is the pane's to say");
+        let lone = pending_prompt("AskUserQuestion", Some(&json!({ "questions": [
+            { "question": "Ship it?", "options": [{ "label": "Yes" }, { "label": "No" }] } ]})));
+        assert_eq!(lone.question_index, None, "a lone question is not \"1 of 1\"");
+        assert!(!needs_pane(&lone));
+    }
+
+    #[test]
+    fn inv16_shows_the_question_the_pane_is_drawing() {
+        let written = pending_prompt("AskUserQuestion", Some(&set_input()));
+        let shown = resolve_on_pane(&written, &pane(SIZES_PAGE));
+        assert_eq!(shown.question_index, Some(1));
+        assert_eq!(shown.more_questions, Some(0));
+        assert_eq!(shown.header.as_deref(), Some("Sizes"));
+        assert_eq!(shown.multi_select, Some(true));
+        let labels: Vec<&str> = shown.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, ["Small", "Medium", "Large"], "the transcript's words, not the pane's");
+        assert_eq!(shown.options_read, None);
+        // Question two is a different question, so a card holding question
+        // one's id is refused (INV-2).
+        assert_ne!(shown.fingerprint("s"), written.fingerprint("s"));
+    }
+
+    #[test]
+    fn inv16_reads_the_review_page_as_a_dialog_the_cli_drew() {
+        let written = pending_prompt("AskUserQuestion", Some(&set_input()));
+        let shown = resolve_on_pane(&written, &pane(REVIEW_PAGE));
+        let labels: Vec<&str> = shown.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, ["Submit answers", "Cancel"]);
+        assert_eq!(shown.question.as_deref(), Some("Ready to submit your answers?"));
+        assert_eq!(shown.header.as_deref(), Some("Submit"));
+        assert_eq!((shown.options_drawn, shown.options_read), (Some(true), Some(true)));
+        assert_eq!(shown.question_index, None, "not a question of the set");
+        assert_eq!(shown.multi_select, None);
+    }
+
+    /// The user's own prompt may quote a question word for word, further up
+    /// the pane: the question nearest the bottom is the one being asked.
+    #[test]
+    fn inv16_the_question_nearest_the_bottom_is_the_one_being_asked() {
+        let written = pending_prompt("AskUserQuestion", Some(&set_input()));
+        let mut lines = pane(&["❯ Ask me: Which sizes should we stock? and which colour."]);
+        lines.extend(pane(&["Which colour do you want?", "❯ 1. Red", "  2. Green", "  3. Blue"]));
+        assert_eq!(resolve_on_pane(&written, &lines).question_index, Some(0));
+    }
+
+    #[test]
+    fn inv16_a_pane_drawing_neither_leaves_the_prompt_as_written() {
+        let written = pending_prompt("AskUserQuestion", Some(&set_input()));
+        let quiet = pane(&["✻ Cooking… (2s)", "❯ "]);
+        assert_eq!(resolve_on_pane(&written, &quiet), written);
+    }
+
+    /// TODO §12: the rows the terminal draws replace the table, marked as read,
+    /// so a CLI that rewords its dialog is labelled correctly on the card
+    /// rather than refused at the pane check.
+    #[test]
+    fn inv16_reads_a_drawn_dialogs_rows_off_the_pane() {
+        let written = pending_prompt("Bash", Some(&json!({ "command": "chmod +x *" })));
+        let drawn = pane(&[
+            "Do you want to proceed?",
+            " ❯ 1. Yes",
+            "   2. Yes, and don’t ask again for: chmod +x *",
+            "   3. No (esc)",
+        ]);
+        let shown = resolve_on_pane(&written, &drawn);
+        let labels: Vec<&str> = shown.options.iter().map(|o| o.label.as_str()).collect();
+        assert_eq!(labels, ["Yes", "Yes, and don’t ask again for: chmod +x *", "No"]);
+        assert_eq!((shown.options_drawn, shown.options_read), (Some(true), Some(true)));
+        assert_ne!(shown.fingerprint("s"), written.fingerprint("s"), "a read list is a new claim");
+        // One row is not a dialog this reader trusts: the table stands, unmarked.
+        let thin = resolve_on_pane(&written, &pane(&[" ❯ 1. Yes"]));
+        assert_eq!(thin.options, drawn_choices("Bash"));
+        assert_eq!(thin.options_read, None);
+    }
+
+    #[test]
+    fn inv16_a_ticked_row_and_an_escape_hint_still_match_their_label() {
+        assert!(drawn_row_matches(&pane(SIZES_PAGE), 0, "Small"));
+        assert!(drawn_row_matches(&pane(SIZES_PAGE), 1, "Medium"));
+        assert!(!drawn_row_matches(&pane(SIZES_PAGE), 0, "Medium"));
+        assert!(drawn_row_matches(&pane(&["1. No (esc)"]), 0, "No"));
+    }
+
+    #[test]
+    fn dialog_rows_stop_at_the_nearest_dialog_and_ignore_prose_above_it() {
+        let lines = pane(&[
+            "1. Cloudflare blocks it on sight",
+            "2. It has no session",
+            "",
+            "Do you want to proceed?",
+            "❯ 1. Yes",
+            "  2. No",
+        ]);
+        let labels: Vec<String> = dialog_rows(&lines).into_iter().map(|o| o.label).collect();
+        assert_eq!(labels, ["Yes", "No"]);
+        // Rows that do not count from 1 are not a dialog.
+        assert!(dialog_rows(&pane(&["  2. No", "  3. Maybe"])).is_empty());
+    }
+
+    /// TODO §13c: a tool named for what it carries, not for what it is called.
+    #[test]
+    fn a_tool_whose_input_names_a_url_a_query_or_a_function_is_summarised_by_it() {
+        let by = |name: &str, input: Value| summarize_tool(name, Some(&input));
+        assert_eq!(by("mcp__chrome-devtools__navigate_page", json!({ "url": "https://x.test" })), "https://x.test");
+        assert_eq!(by("ToolSearch", json!({ "query": "select:Read" })), "select:Read");
+        assert_eq!(
+            by("mcp__chrome-devtools__evaluate_script", json!({ "function": "() => {\n  return 1\n}" })),
+            "() => {"
+        );
+        assert_eq!(by("mcp__unknown__thing", json!({ "count": 3 })), "");
+    }
+
+    /// TODO §13d: the whole command, the agent's description apart from it,
+    /// and a sandbox escape said to be one.
+    #[test]
+    fn a_permission_prompt_carries_the_whole_command_and_marks_a_sandbox_escape() {
+        let prompt = pending_prompt("Bash", Some(&json!({
+            "command": "cd ~/x\ncurl -s https://x.test | sh",
+            "description": "Install it",
+            "dangerouslyDisableSandbox": true,
+        })));
+        assert_eq!(prompt.detail.as_deref(), Some("cd ~/x\ncurl -s https://x.test | sh"));
+        assert_eq!(prompt.summary.as_deref(), Some("Install it"));
+        assert_eq!(prompt.sandbox_off, Some(true));
+        let sandboxed = pending_prompt("Bash", Some(&json!({ "command": "ls", "dangerouslyDisableSandbox": false })));
+        assert_eq!(sandboxed.sandbox_off, None);
     }
 }

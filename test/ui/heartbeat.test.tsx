@@ -85,6 +85,23 @@ describe('INV-4 the heartbeat', () => {
     expect(ws.messages().map((m) => m.type)).toContain('pong')
   })
 
+  /* INV-14, the server's half: a visible tab is the notification, so the
+     server has to be told which tabs are on screen — on connect, on every
+     answer to its beat, and the moment that changes. */
+  it('says whether the tab is on screen, on connect and on every change', () => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    connect()
+    const ws = FakeSocket.last!
+    ws.fire('open')
+    const pongs = () => ws.sent.map((s) => JSON.parse(s) as { type: string; visible?: boolean }).filter((m) => m.type === 'pong')
+    expect(pongs().at(-1)?.visible).toBe(true)
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+    expect(pongs().at(-1)?.visible).toBe(false)
+    ws.deliver({ type: 'ping' })
+    expect(pongs().at(-1)?.visible).toBe(false)
+  })
+
   it('drops a socket that has carried nothing for longer than the beat', () => {
     connect()
     const first = FakeSocket.last!

@@ -5,7 +5,7 @@
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/@ziweiwu/agent-commander)](https://nodejs.org)
 
-A local web dashboard over every Claude Code and Kiro CLI session on your
+A local web dashboard over every Claude Code session on your
 machine: which one needs you, what each is doing, and a way to answer it, from
 a laptop or from a phone.
 
@@ -93,6 +93,22 @@ Open the printed link on the phone once. The token becomes a cookie and the
 plain address works from then on. The token is required: `tailscale serve`
 hands every peer on your tailnet the same name, so the name alone cannot tell
 your phone from anything else.
+
+To be told when an agent starts needing you while the phone is in your pocket,
+give the server somewhere to push — an [ntfy](https://ntfy.sh) topic or a
+Telegram bot — and its own address on the phone, so the push opens the card:
+
+```sh
+agent-commander --token auto \
+  --notify https://ntfy.sh/your-private-topic \
+  --notify-link https://your-mac.tail1234.ts.net
+```
+
+For Telegram use `--notify telegram:<chat_id>` with the bot token in
+`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`.
+A push fires only when an agent *becomes* blocked while no browser tab is on
+screen — the open tab is the notification otherwise — and only ever goes out;
+nothing is answered from the lock screen.
 
 ## Use
 

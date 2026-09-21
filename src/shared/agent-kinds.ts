@@ -1,32 +1,22 @@
 /**
- * Which agent CLI a session belongs to, and what this app may do to it.
+ * Which kind of session this is, and what this app may do to it.
  *
  * Shared rather than server-only for the same reason `MODEL_ALIASES` is: the
  * browser decides which controls to offer and the server decides which to
  * honour, and a second copy of the table is how those two stop agreeing.
+ * `rust/src/agent_kinds.rs` is the other half; the two are kept by hand.
  *
- * Every capability here is a statement about a *foreign program's* interface.
- * `slashCommands` is the load-bearing one: everything in `control.ts` works by
- * typing Claude Code's own slash commands into a live pane, so offering it for
- * another CLI does not degrade — it types `/model opus` into somebody's prompt.
+ * Two kinds: Claude Code, and the plain terminals this app opens. Every
+ * capability here is a statement about a *program's* interface. `slashCommands`
+ * is the load-bearing one: everything in the controls works by typing Claude
+ * Code's own slash commands into a live pane, so offering it to a shell does
+ * not degrade — it types `/model opus` into somebody's prompt.
  */
 
 export interface AgentKindSpec {
   id: string
   /** Shown on the card when this is not the default kind. */
   label: string
-  /**
-   * Anchored match for the tmux session name, where a CLI is launched by a
-   * wrapper that names sessions `<id>-<epoch>`. Digits required, so a session
-   * someone named `kiro-notes` by hand is not mistaken for an agent.
-   */
-  sessionPrefix?: RegExp
-  /**
-   * What tmux reports as the pane's foreground command. tmux resolves this
-   * through child processes, so it is the running agent rather than the shell
-   * or wrapper that started it.
-   */
-  processNames?: readonly string[]
   /** Whether this app can read a conversation for it — gates the Chat tab. */
   transcripts: boolean
   /** Whether Claude Code's slash commands may be typed into its pane. */
@@ -45,7 +35,7 @@ export const CLAUDE_KIND = 'claude'
  * at creation, which nothing else on the machine sets.
  *
  * It reads no transcript and answers no slash command, so every Claude-only
- * control falls away from it by the same table that governs Kiro.
+ * control falls away from it by the same table that governs Claude Code.
  */
 export const TERMINAL_KIND = 'terminal'
 
@@ -55,14 +45,6 @@ export const TERMINAL_KIND = 'terminal'
  */
 export const AGENT_KINDS: readonly AgentKindSpec[] = [
   { id: CLAUDE_KIND, label: 'Claude Code', transcripts: true, slashCommands: true },
-  {
-    id: 'kiro',
-    label: 'Kiro',
-    sessionPrefix: /^kiro-\d+$/,
-    processNames: ['kiro-cli', 'kiro-cli-chat'],
-    transcripts: false,
-    slashCommands: false,
-  },
   { id: TERMINAL_KIND, label: 'Terminal', transcripts: false, slashCommands: false },
 ]
 
@@ -94,10 +76,6 @@ export function specOf(kind: string): AgentKindSpec | undefined {
   return AGENT_KINDS.find((k) => k.id === kind)
 }
 
-/** Kinds this app finds by looking at tmux — everything except Claude. */
-export function tmuxDiscoverable(): AgentKindSpec[] {
-  return AGENT_KINDS.filter((k) => k.sessionPrefix || k.processNames)
-}
 
 /** True when the app may type Claude Code's slash commands into this agent. */
 export function allowsSlashCommands(kind: string): boolean {

@@ -282,7 +282,12 @@ the help sheet depict physical keys and are not part of this set.
 **Done when:** five sets rendered together, one recommended with its reasoning,
 and the generator carrying whichever won.
 
-### 11. A multi-select fixture in the mock fleet
+### 11. A multi-select fixture in the mock fleet — done
+
+**Done in `feat/research-top-six`** as `mock-set`, a two-question fixture whose
+second question is the multi-select, with a pane that moves under the keys the
+answer path sends; `e2e/question-set.spec.ts` walks it to the end. Kept below
+as filed.
 
 **Filed 2026-09-18, alongside the change that made multi-select answerable.**
 `AnswerCard` now labels the rows of a `multiSelect` `AskUserQuestion` and sends
@@ -316,7 +321,11 @@ pane check in `answer_keystroke` a real gate rather than a formality.
 two rows and committing with Enter, and reverting the "stays open across
 several ticks" behaviour fails it.
 
-### 12. Read the drawn choices off the pane instead of keeping a table of them
+### 12. Read the drawn choices off the pane instead of keeping a table of them — done
+
+**Done in `feat/research-top-six`**: `transcript::resolve_on_pane` reads the
+numbered rows wherever the pane draws two or more and marks them
+`options_read`; the table is the fallback. Kept below as filed.
 
 **Filed 2026-09-18, after the table drifted in the field.** `drawn_choices`
 (`transcript.rs`) holds Claude Code's own dialog wording for the two shapes that
@@ -360,7 +369,13 @@ is not free otherwise, so it belongs where a frame is already being read.
 drawing, on a CLI whose wording no test anticipated, and `drawn_choices` is
 reachable only as a fallback.
 
-### 13. The four edge cases a transcript survey found and this pass did not close
+### 13. The four edge cases a transcript survey found and this pass did not close — done
+
+**Done in `feat/research-top-six`**: (a) the set is walked off the pane, with
+(b) each question's own `multiSelect`; (c) `summarize_tool` reads `url`,
+`query`, `function`, `key`, `text`; (d) the whole command, the description
+apart from it, and `sandbox_off`. INV-16 records the measurement. Kept below
+as filed.
 
 **Filed 2026-09-18**, from a survey of every `tool_use` in `~/.claude/projects`
 — 714 files, 229,909 records, 47,919 tool calls. Counts are from that corpus,

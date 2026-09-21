@@ -337,6 +337,15 @@ where they can drift without making this file wrong.
   keeps no transcript will never have. It misses, caches nothing, and left
   unguarded would do it again for every such agent every five seconds forever —
   the most expensive loop in the app, spent on a certainty.
+- **A first read of a transcript is one bounded read, and it carries the
+  conversation.** A live transcript is megabytes, most of it tool output, so
+  opening one starts near its end rather than re-parsing its history. But a
+  window of bytes opened on whatever the last quarter-megabyte held — measured
+  here, the largest transcript on 2 of its 390 messages — and switching to that
+  agent read as its conversation having gone. So the window is sized by what
+  the chat draws: back to the last 500 messages, never less than 256 KiB, and
+  never further than 64 MiB however few it finds. What lies deeper stays on
+  disk; the cost of a focus is bounded by the constants, not by the file.
 - **Fleet status is one tmux query for the whole machine**, never one per agent,
   and never from pane content. `window_activity` is a clock tmux already keeps,
   so busy-versus-idle costs nothing and needs no sampling: the verdict is a
@@ -468,6 +477,11 @@ restarted in between.
 - `routes::inv4_a_focus_on_a_cli_with_no_transcripts_probes_once` — the
   retry above is only for a CLI that keeps transcripts; for one that does not,
   the probe is a directory scan that cannot succeed, and it runs once
+- `transcript::inv4_the_reach_back_for_a_conversation_is_a_bounded_read` — a
+  conversation buried deeper than the scan goes stays there, and the first read
+  still answers with what the window holds; its neighbour
+  `a_first_read_reaches_back_past_tool_output_for_the_conversation` is the other
+  half, exactly the last five hundred messages with the earliest of them whole
 - `registry::inv4_asks_once_for_a_ghost_not_once_per_scan` — an unconfirmed session is asked about at
   once rather than at the next 30s reconcile, and a ghost is asked about once
   rather than once per scan
@@ -478,6 +492,32 @@ restarted in between.
   carries the one just served; an unchanged answer does not blank a card's
   delegates; a changed one advances the tag; and unmounting the list stops the
   poll
+
+**And the other direction, for a phone that has just been picked up.** The
+watchdog is the right tool for a tab nobody is looking at and the wrong one for
+a returning user: its next check is up to fifteen seconds away and only fires
+after seventy-five of silence, and the first thing a returning user does is
+answer an agent. iOS closes a backgrounded web app's socket without telling
+the page and stops its timers, so the page's own return is the event. On
+`visibilitychange`, `pageshow` and `online` the client decides the socket's
+fate now: no socket means a backoff is being waited out, so it connects at once
+from the bottom of the ladder; a socket silent past the beat is dead by the
+watchdog's own rule and is closed now; one that merely looks open is asked —
+a client `ping` the server answers with `pong`, before the grant gate like its
+mirror — and dropped if no frame at all arrives in `RETURN_PROBE_MS`. One
+request on one event, nothing on a timer, and nothing that reaches an agent
+(INV-2). While the socket is down a `GET /api/env` under the same deadline
+says whether the *server* can be reached, so the chip can tell "reconnecting"
+from "the tunnel is not there" (INV-11).
+
+- `routes::inv4_a_returning_tab_can_ask_whether_its_socket_is_alive` — the
+  server answers a client ping at once
+- `test/ui/return.test.tsx` — the backoff is cancelled and the connect is now;
+  a socket that slept past the beat closes without the watchdog's tick (the
+  clock moved and no timer fired, which is what a suspended page looks like);
+  a socket that looks open is asked and dropped on silence or kept on any
+  frame; a hidden page does nothing; the reach probe tells the two kinds of
+  down apart
 
 **Two reads that are new, and how each is held to the rules above.**
 
@@ -697,7 +737,7 @@ the one thing that separates a terminal it opened from a husk it did not — and
 it is read back per pane on the same sweep that reads everything else, at no
 extra round trip.
 
-A terminal is a `TERMINAL_KIND` session in the same capability table Kiro uses,
+A terminal is a `TERMINAL_KIND` session in the same capability table Claude uses,
 so every Claude-only control falls away from it by a rule already written and
 already tested: no transcript to read, so no Chat tab and no timeline tail; and
 `slashCommands: false`, so `/goal`, `/model`, `/clear`, `/compact` and the
@@ -1019,6 +1059,14 @@ made on resolved paths, and even asking the question is wrapped in a catch.
   `rust/src/limits.rs` name the same file, and that a copy of the bridge run
   from a path containing a space still writes the cache
 
+**Amended: the bridge writes a second thing, under the same rules.** Beside
+the account-level `rate-limits.json` it writes one file per session,
+`sessions/<session_id>.json`, with the context-window percentage and the cost
+the frame carried — only when it carried one, via the same temp-and-rename,
+and never for a `session_id` that is not a plain file name (INV-9): the id is
+a field from a program this app does not control. `test/bridge.test.ts`
+carries INV-10's number now, which it had gone without since the Rust port.
+
 ## INV-11 — The dashboard never asserts more than it knows
 
 Every figure on screen is either something the app currently knows, or is
@@ -1151,6 +1199,39 @@ what it is.
   marked without being hidden; the caption is announced rather than only drawn;
   and an empty fleet, which asserts nothing, gets no caveat
 
+**A figure with a real denominator may be a percentage; the rest stay
+sizes.** `tokens` is still output only from a capped tail and still says so.
+Beside it the card now carries what Claude Code itself reports to its
+statusLine, bridged to one file per session (`usage.rs`, INV-10):
+`context_window.used_percentage` over `context_window_size`, and
+`cost.total_cost_usd` — the CLI's own list-price estimate, which it resets on
+`/clear`. Both fold under the card with when they were read and whose figure
+they are; the percentage reaches the face only past `CONTEXT_WARN_PCT`, where
+"about to compact" is something a fleet-wide glance wants, and as words rather
+than a colour. This is not the transcript-size percentage INV-13 refuses:
+that one has no total, this one is the CLI's own fraction of its own window.
+
+**The last fleet is a memory, and is painted as one.** A phone whose page iOS
+evicted spends the tunnel's reconnect on a spinner over a fleet it knew ten
+minutes ago. The shape of the last fleet — sessions, states, folders, ages;
+never a line an agent said, for INV-3's reason — is kept in browser storage
+and painted at once on a cold start under the stale caption FleetList already
+draws for a socket that dropped, with the time it was true. An empty fleet is
+forgotten rather than kept: the confirmed-empty screen is a claim the server
+made once, not one the browser may repeat from memory.
+
+- `usage::tests`, `enrich::the_bridges_context_and_cost_reach_the_card_it_wrote_them_for`
+  — a reading needs a time and a figure; the file is `stat`-ed and reread only
+  when it moved; junk and a vanished file keep the last good value until the
+  session is gone; the figure reaches the card it was written for and no other
+- `test/bridge.test.ts` — the bridge writes only what the frame carries, under
+  the session id, and refuses an id that is not a file name
+- `test/ui/card-usage.test.tsx` — the fold carries the denominator and the
+  time; the face carries the mark only past the threshold; a cost under a cent
+  is not a zero
+- `test/ui/fleet-snapshot.test.tsx` — what is remembered, what is not, and
+  that an empty fleet is forgotten
+
 ### Two more places the same rule bit
 
 **A composer with the socket down used to accept the message.** `send()` returns
@@ -1185,7 +1266,7 @@ can be looked at; the ordinary mock fleet always has fourteen agents.
 **And the conversation is the same rule, which it went without for longer.**
 The fleet gates its empty copy on `fleetAt`; the Chat tab gated its own on
 `conn`, which answers a different question. The socket is open for the whole of
-the window in which the server resolves the transcript, backfills up to 256 KiB
+the window in which the server resolves the transcript, backfills its tail
 and sends it — and `onOpen` sets `conn: 'open'` *before* it sends the `focus`
 that asks — so from a phone over Tailscale the chat asserted "Nothing said yet.
 Send this agent a message below…" at agents that were mid-sentence, on every
@@ -1241,7 +1322,7 @@ broken silently the day anyone reworded the string, in an app that ships a
 second language.
 
 **What a busy agent is running is measured, and said to be.** A Claude agent's
-transcript names the tool it called; a Kiro agent's says nothing, because there
+transcript names the tool it called; a terminal's says nothing, because there
 is none, and its card read "keeps no transcript" for as long as it worked. The
 process table knows either way: the tool a busy agent is inside is a child of
 its process, and `ps` reports when that child started. That is a fact — the
@@ -1269,7 +1350,7 @@ false one about the agent's work, which is this invariant's own failure mode.
 the five. For a tmux-discovered agent the root *is* the pane's shell, so
 everything under it qualifies, which is right: what its pane is running is the
 only account of that agent's work there is. A shell is never itself the answer,
-and neither is the agent's own program, or a Kiro sitting in its pane's shell
+and neither is the agent's own program, or a CLI sitting in its pane's shell
 would be reported as running itself. Among what is left the newest wins,
 because a tool call started after whatever else the agent has open.
 
@@ -1297,6 +1378,60 @@ machine.
   a card with no transcript and is captioned; a Claude card keeps its
   transcript on the face and folds the process; the trail stays absent; the
   process is searchable
+
+**A session's subject is quoted, never written.** A card's name goes stale the
+moment the work moves on: `ai-title` is Claude Code's own one-line title, and
+measured across 236 transcripts on this machine it holds exactly **one distinct
+value per session** — the CLI names a session once, from its opening prompt,
+and never renames it. So a card said "Under the Witch download" about a session
+that had spent the last hour on a registry loop.
+
+The description beside it is that hour, and the rule that keeps it inside this
+invariant is that **no part of it is composed**. It is one prompt, quoted: the
+most recent thing a person typed that named something, clipped to a line. No
+model is called, nothing is summarised, and no sentence appears on a card that
+somebody did not write — which is why it may sit beside a title without
+inheriting the title's staleness or claiming to be a better reading of the work
+than the user's own words.
+
+Two filters do all of it, and both refuse rather than guess:
+
+- **Only a person's prompt is eligible.** Claude Code writes several kinds of
+  record as `type: "user"` that no person typed — an SDK call, a system
+  notification, a peer's message, a compaction summary, a tool result. Content
+  cannot tell them apart, and guessing from content is what first put a skill's
+  preamble and a paste of terminal output on a card as though they were intent.
+  `origin.kind == "human"` says it exactly, and `promptSource` of `typed` or
+  `queued` says it for the records written before that field existed.
+- **A prompt that named nothing leaves the last one standing.** "ok", "yes",
+  "do it", "continue" are most of what gets typed at a working agent, and every
+  one of them is a true last prompt and a useless subject. They are refused, so
+  the description stays on the last prompt that had one — which is why this is
+  last-write-wins over *qualifying* prompts rather than over prompts.
+
+An agent whose CLI writes no transcript has no description, and gets none: a
+terminal's card carries its title and nothing beside it, which is the same
+absence-of-evidence rule the Prune button was removed for.
+
+- `describe::inv11_only_a_person_describes_a_session` — an SDK prompt, a system
+  notification, a compaction summary, a tool result and an assistant record are
+  each refused, whatever they say
+- `describe::tests` — the acknowledgements and the preference openers that
+  describe nothing; a follow-up held to a higher bar than a fresh request; a
+  path reduced to its last segment and a prompt that is only a link refused; a
+  CJK prompt counted by character rather than by space; the first sentence kept
+  and clipped to a line
+- `transcript::inv11_the_description_follows_the_work_while_the_title_stays_put`
+  — the title stays where the CLI left it while the description moves to the
+  work, and a trailing run of "ok" and "done" does not take it back
+- `test/ui/card-description.test.tsx` — the subject drawn word for word, no
+  line at all where the server described none, the line withheld where it
+  would only repeat the name above it, and a subject carrying markup drawn as
+  the text it is
+- `sources::tests` — the three functions that carry a patch each name every
+  field of it, which is what the description shipped without: it was produced,
+  written and compared, and dropped in the merge between, so no card carried
+  one and nothing failed
 
 ## INV-12 — Input to a live agent is bounded
 
@@ -1496,6 +1631,21 @@ arrived; `test/ui/sidebar.test.tsx` asserts the poll survives the collapse,
 because a stalled graph would make the card claim `none` where it should say
 `unread` — two different sentences (INV-13).
 
+**A kind's flags are claims about another program, and the one foreign kind
+was removed rather than kept half-right.** Kiro CLI was listed from tmux — by
+session name or process name — as a degraded card with no conversation, on a
+flag saying it kept no transcript; that was true when written and false for
+the whole of Kiro CLI's 2.x line before anybody looked. The choice was between
+a reader for what Kiro writes, with a `waiting` this app could never claim
+(INV-11), and one CLI fewer. The fleet is Claude Code and this app's own
+terminals now; `tmux_agents::kind_of` recognises a pane only by the marker this
+app wrote, and nothing is recognised by name.
+
+- `agent_kinds::capabilities_deny_by_default_for_unknown_kinds` — a kind not
+  in the table, `kiro` included, gets nothing
+- `tmux_agents::an_unmarked_pane_is_not_an_agent_however_it_is_named` — a
+  session named like an agent and running one is somebody else's business
+
 ## INV-14 — A notification is a transition, not a state
 
 The tab title and the aria-live region describe standing state and may say
@@ -1549,6 +1699,37 @@ banner.
   off with the reason; a browser without the API gets a disabled bell that
   says so; the settings menu no longer holds it; the banner turns it on or
   remembers a refusal
+
+**Amended: the same tracker runs on the server, for a phone that is not
+looking.** The browser's notification fires only when the page is running, and
+on the device this app exists for it usually is not: iOS closes a backgrounded
+web app's socket and evicts the page, and a phone in a pocket cannot watch a
+transition. Measured on this machine, 21% of an agent's questions waited more
+than ten minutes and the night-time tail ran past seven hours. So with
+`--notify` the server watches the fleet for the same transition and hands it
+to a channel that reaches a phone on its own — an ntfy topic or a Telegram bot
+(`push.rs`), one outbound HTTPS request per transition and no port opened
+(INV-3) — carrying the agent's name, what it is waiting for, and with
+`--notify-link` a link to the card, so the answer still goes through the card
+and its pane check (INV-2, INV-16): nothing is answered from a lock screen.
+
+The four rules above bind it word for word. The first fleet the server sees is
+backlog; a standing block never re-fires; unblocked-then-blocked is news; and
+**a visible tab is the notification** — the client says on every heartbeat and
+on every `visibilitychange` whether it is on screen, and while any browser is,
+the transition is consumed and nothing is pushed, the way Claude Code's own
+Remote Control holds its pushes while you are at the terminal. An inferred
+status never fires, checked here a second time. A push that fails is logged
+and not retried: the next transition sends its own.
+
+- `push::tests` — the first frame is backlog; a watched transition fires once,
+  and again only after it clears; a visible tab consumes it; an inferred
+  status never fires; a push without an address carries no link; the channel
+  spec is parsed and refused in words; an ntfy push is one outbound POST with
+  the documented headers, against a local server
+- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`
+- `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
+  connect, on every beat, and the moment that changes
 
 ## INV-15 — A silent family is a question, never a verdict
 
@@ -1893,6 +2074,81 @@ below, where the same reasoning produces the opposite rule.
   permission, show what was written, offer the drawn choices marked as drawn
   from the same table the server uses, and draw the live pane under them; the
   same spec drives the fixture whose pane has exited onto the dead-pane notice
+
+**Amended: a set is walked to the end, and the pane says which question is
+up.** All the questions of one `AskUserQuestion` share one `tool_use`, so
+`fingerprint` was byte-identical for question two and the card latched after
+the first press reading "1 more question" — for 74 of 163 calls on this
+machine (45.4%), every one of them sent to the Attach tab. The transcript
+cannot fix it: the set is answered as *one* `tool_result` (0 of 163 ids carry
+more than one), so nothing on disk says which question the picker is showing.
+The pane does. Measured against Claude Code 2.1.278 by driving a two-question
+picker in a tmux pane:
+
+```text
+←  ☐ Colour  ☐ Sizes  ✔ Submit  →        one tab per question, then Submit
+Which colour do you want?                the current question's text
+❯ 1. Red
+     Red
+  2. Green
+  ...
+```
+
+A digit on a single-select answers it *and* moves to the next tab; a
+multi-select's rows draw `[ ]`/`[✔]` and a digit toggles; after the last
+question the picker draws a review page — `Ready to submit your answers?` over
+`1. Submit answers` / `2. Cancel` — and Enter there is what closes the call.
+So `pending_prompt` now carries every question of the set (`questions`, server
+side only) and `resolve_on_pane` picks the one whose text the pane draws
+nearest the bottom — nearest, because the user's own prompt further up may
+quote a question word for word — putting it on the wire with `question_index`
+and the remaining count. The review page is recognised by its `Submit answers`
+row and shown as what it is: a dialog the CLI drew, its rows read off the pane.
+Both the timeline pump and the answer path read the pane for this, the pump
+borrowing the peek's own read where a tab is watching (INV-4), the answer path
+making its own before anything is typed. A set's option is relative to
+whichever question is up, so the digit goes only where the pane numbers that
+label (`drawn_row_matches`, which now reads through a tick box); and question
+two is a different question from question one, so a card still holding the
+first id is refused with nothing typed (INV-2).
+
+**Amended: a drawn dialog's rows are read off the pane (TODO §12).** Wherever
+the pane draws two or more numbered rows under a plan or permission prompt,
+those rows *are* the options, marked `options_read` and captioned as read from
+the terminal; the table in `drawn_choices` is reached only when the pane draws
+fewer. A CLI that rewords its dialog is now labelled correctly rather than
+refused at the pane check — the fix for the 2.1.269 drift, made structural.
+The labels are normalised before they enter the fingerprint, so a repaint does
+not move the id; a genuinely different dialog does, and is refused.
+
+**Amended: a permission prompt says what would run (TODO §13c, §13d).** For
+`Bash` the card carries the command whole (`detail`) and the agent's own
+description apart from it (`summary`) — 42.6% of Bash calls here are several
+lines and about half open with a `cd`, so a first-line card was approving a
+directory change — and says when the call asks to leave the sandbox
+(`sandbox_off`, 178 calls that went unmarked). `summarize_tool` also reads
+`url`, `query`, `function`, `key` and `text`, which is what 10.4% of tool calls
+carried while the generic arm looked only for a description or a path.
+
+- `transcript::prompt_tests` (the set group) — every question travels with its
+  own `multiSelect`; the pane picks the question; the review page reads as a
+  drawn dialog; the nearest question wins over a quoted one; a pane drawing
+  neither leaves the prompt as written; a drawn dialog's rows replace the
+  table and a one-row pane does not; a ticked row and an `(esc)` hint still
+  match; prose above a dialog is not its rows; the MCP summaries; the whole
+  command and the sandbox mark
+- `routes::inv16_a_sets_second_question_is_shown_and_answered_off_the_pane`,
+  `routes::inv16_a_drawn_dialogs_rows_are_read_off_the_pane_and_answered_by_number`
+  — the pane's question is what the card is sent, the digit answers the row
+  the pane numbers, and a stale first-question id is refused with nothing typed
+- `mock::the_set_fixture_walks_like_the_picker_it_was_copied_from` — the
+  `mock-set` fixture's pane moves under the keys as the real one did (§11)
+- `test/ui/answer-card.test.tsx` (the set and permission groups) — where in the
+  set the reader is, the card opening again for the next question with that
+  question's own flag, the review page's read caption, the whole command with
+  its description and sandbox note
+- `e2e/question-set.spec.ts` — a two-question set answered to the end from the
+  Chat tab against the mock server, ticks, `→` and `Submit answers` included
 
 **The terminal has two verbs, and they are two controls rather than a mode.**
 The paste line stages text at the prompt without running it, which is what

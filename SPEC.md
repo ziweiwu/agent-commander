@@ -128,9 +128,9 @@ app; every field is read from something else's record.
 Every capability here is a statement about a *foreign program's* interface, so
 the default for an unrecognised kind is deny.
 
-| | Claude Code | Kiro | Unknown kind |
+| | Claude Code | Terminal | Unknown kind |
 |---|---|---|---|
-| Discovered via | its own session file | tmux name or process | — |
+| Discovered via | its own session file | the marker this app set on its tmux session | — |
 | Chat tab | yes | **no** | no |
 | Attach tab | yes | yes | yes, with a pane |
 | Token counts, delegation | yes | no | no |
@@ -144,10 +144,10 @@ the default for an unrecognised kind is deny.
   them for any kind whose spec says otherwise; the browser hiding the control is
   a convenience, not the boundary. **(INV-7)**
   *`agent_kinds::capabilities_deny_by_default_for_unknown_kinds`,
-  `test/ui/kiro-surfaces.test.tsx`.*
+  `test/ui/terminal-surfaces.test.tsx`.*
 - **FR-KIND-2** — A capability a kind lacks MUST be hidden with its reason
   stated on the card, not rendered empty. An empty Chat tab reads as a bug; "no
-  conversation this app can read" reads as a fact. *`test/ui/kiro-surfaces.test.tsx`.*
+  conversation this app can read" reads as a fact. *`test/ui/terminal-surfaces.test.tsx`.*
 - **FR-KIND-3** — A tmux session whose pane is sitting at a shell prompt MUST
   NOT be listed as an agent. tmux-resurrect restores session names long after
   the process inside them died, and a husk listed as a live agent is worse than
@@ -248,6 +248,19 @@ the default for an unrecognised kind is deny.
   MUST be cleared when the agent goes idle or the process ends. The wire MUST
   carry a start time, never a duration. **(INV-4, INV-11)**
   *`test/ui/running-process.test.tsx`, `enrich::tests`, `procs::tests`.*
+- **FR-CARD-7** — A card MAY carry one line saying what its session is working
+  on now. That line MUST be a quotation: the most recent prompt a person typed
+  that named something, clipped to one line, with nothing generated,
+  summarised or paraphrased. Eligibility MUST be read from the record
+  (`origin.kind`, or `promptSource`) rather than guessed from its content, so
+  an SDK call, a hook notification, a compaction summary and a tool result are
+  never mistaken for intent. A prompt that named nothing ("ok", "go ahead")
+  MUST leave the previous line standing rather than replacing it. An agent
+  whose CLI keeps no transcript MUST carry no such line. The line MUST NOT be
+  drawn where it would repeat the card's own name. **(INV-11)**
+  *`describe::inv11_only_a_person_describes_a_session`,
+  `transcript::inv11_the_description_follows_the_work_while_the_title_stays_put`,
+  `test/ui/card-description.test.tsx`.*
 
 ### 3.3 Delegates
 
@@ -1011,7 +1024,7 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6 |

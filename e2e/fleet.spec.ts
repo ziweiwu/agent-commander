@@ -47,7 +47,7 @@ test.describe('the fleet', () => {
   /*
    * A shell keeps no transcript and answers no slash command, so the agent
    * screen for one is the Attach tab alone. That falls out of the same
-   * capability table Kiro uses; this is what pins that it reaches the screen.
+   * capability table Claude uses; this is what pins that it reaches the screen.
    */
   test('opens a terminal on its terminal, with no conversation to offer', async ({ page }) => {
     await openFleet(page)
@@ -80,15 +80,6 @@ test.describe('the fleet', () => {
 
     await waitingChip.click()
     await expect(card(page, AGENT.busy)).toBeVisible()
-  })
-
-  test('INV-11 a CLI with no transcript still says what it is running', async ({ page }) => {
-    await openFleet(page)
-    // The Kiro fixture has no transcript to describe its work, so the process
-    // under its pane is the only activity line it can honestly carry.
-    const line = card(page, AGENT.noSidecars).getByTestId('agent-activity')
-    await expect(line).toHaveText(/running npm test/)
-    await expect(line).toHaveAttribute('data-running', 'true')
   })
 
   test('searches by name and folder', async ({ page }) => {

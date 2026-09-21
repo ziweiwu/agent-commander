@@ -110,7 +110,7 @@ describe('reachability is its own channel', () => {
   })
 
   /*
-   * The two channels are independent, and a Kiro session proves it: perfectly
+   * The two channels are independent, and a terminal proves it: perfectly
    * reachable, and its state still unknowable. A single scale would have to
    * call this one or the other.
    */

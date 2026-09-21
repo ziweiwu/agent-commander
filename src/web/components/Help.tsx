@@ -125,12 +125,6 @@ export function Help({ onClose }: { onClose: () => void }) {
         </dl>
       </section>
 
-      <section data-testid="help-kinds">
-        <h3>{t('helpSectionKinds')}</h3>
-        <p>{t('helpKindsIntro')}</p>
-        <p>{t('helpKindsStatus')}</p>
-      </section>
-
       <section data-testid="help-tailscale">
         <h3>{t('helpSectionPhone')}</h3>
         <p>{t('helpPhoneIntro')}</p>
@@ -166,6 +160,14 @@ export function Help({ onClose }: { onClose: () => void }) {
             <CodeRow text={`https://${host}/`} display={`https://${shownHost}/`} />
             <p className={styles.note}>{t('helpPhoneStep3Note')}</p>
             <p className={styles.note}>{t('helpAddToHome')}</p>
+          </li>
+          <li>
+            {t('helpPhoneNotify')}
+            <CodeRow
+              text={`npm run serve -- --token auto --notify https://ntfy.sh/<topic> --notify-link https://${host}`}
+              display={`npm run serve -- --token auto --notify https://ntfy.sh/<topic> --notify-link https://${shownHost}`}
+            />
+            <p className={styles.note}>{t('helpPhoneNotifyNote')}</p>
           </li>
           <li>
             {t('helpPhoneStep4')}

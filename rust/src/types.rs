@@ -83,6 +83,14 @@ pub struct Agent {
     pub derived_name: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission_mode: Option<String>,
+    /// What the session is working on now, in the user's own words.
+    ///
+    /// `ai_title` above is written once, from the opening exchange, and never
+    /// revisited, so a long session keeps a name it outgrew. This is the most
+    /// recent prompt that named anything, and it moves as the work moves. Read
+    /// from the transcript, never generated (`describe.rs`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,6 +105,32 @@ pub struct Agent {
     /// browser does the arithmetic.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub running: Option<RunningProcess>,
+    /// How full the session's context window is, and what it has cost, as
+    /// Claude Code itself reports them to its statusLine — bridged to a file
+    /// per session and read back here. The one figure on a card with a real
+    /// denominator: `tokens` above is output only, from a capped tail, and was
+    /// once shown as spend (INV-11). Absent until the bridge has written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<SessionUsage>,
+}
+
+/// One session's context-window usage and cost, from Claude Code's statusLine.
+///
+/// `context_pct` is input tokens over `context_size`, as the CLI computes it;
+/// `cost_usd` is the CLI's own estimate at list price, which it resets on
+/// `/clear`. `at` is when the bridge wrote it, so the card can say how old a
+/// reading is rather than present it as now.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_size: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+    pub at: i64,
 }
 
 /// One process under a busy agent — see `procs.rs` for how it is chosen.
@@ -321,7 +355,7 @@ pub struct TimelineEvent {
 
 /// One choice in a prompt the agent is blocked on.
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PromptOption {
     pub label: String,
@@ -357,7 +391,7 @@ pub struct PromptOption {
 /// interface can say they are a claim about the CLI — and the server reads the
 /// pane before typing an answer to one, refusing if that row is not there.
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingPrompt {
     /// The tool that raised it — `AskUserQuestion`, `ExitPlanMode`, or another.
@@ -388,12 +422,49 @@ pub struct PendingPrompt {
     /// capture of the pane that can contradict them (INV-16).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub options_drawn: Option<bool>,
-    /// How many questions this one call asks, when it asks more than one.
+    /// How many questions of this call still follow the one on screen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub more_questions: Option<usize>,
+    /// Which question of a multi-question set this is, counted from zero.
+    ///
+    /// Only set for a set. The transcript writes every question of an
+    /// `AskUserQuestion` call at once and nothing on disk says which one the
+    /// picker is showing; the pane does, and this is what it said. Past the
+    /// last question it is the count itself: the picker's review page, whose
+    /// rows are read off the pane like any drawn dialog's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question_index: Option<usize>,
+    /// True when `options` were read off the pane rather than taken from the
+    /// table of what Claude Code usually draws — a stronger claim than
+    /// `options_drawn` alone, and still not the transcript's (INV-16).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub options_read: Option<bool>,
+    /// The agent's own one-line account of what the tool would do.
+    ///
+    /// For `Bash` this is the `description` field — the agent's claim, kept
+    /// apart from `detail`, which is the command itself. Measured on this
+    /// machine, 42.6% of Bash calls are several lines long and about half
+    /// open with a `cd`, so a card showing only the first line was approving
+    /// a directory change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    /// True when the call asks to run outside the sandbox
+    /// (`dangerouslyDisableSandbox`). A materially different decision, and
+    /// one the card could not say it was: 178 such calls on this machine went
+    /// unmarked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sandbox_off: Option<bool>,
     /// Reference text: the plan under review, or the command being asked about.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// Every question of an `AskUserQuestion` set, in the order asked.
+    ///
+    /// Server-side only. The wire carries the one question on screen; this is
+    /// what lets the server pick a different one once the pane says the picker
+    /// has moved on, without re-reading the transcript.
+    #[serde(skip)]
+    #[cfg_attr(test, ts(skip))]
+    pub questions: Vec<Question>,
     /// Identity of *this* question, for binding an answer to it (INV-2).
     ///
     /// Derived from the content rather than stored anywhere: the transcript
@@ -403,6 +474,15 @@ pub struct PendingPrompt {
     #[serde(skip_serializing_if = "String::is_empty", default)]
     #[cfg_attr(test, ts(as = "Option<String>", optional))]
     pub id: String,
+}
+
+/// One question of an `AskUserQuestion` set, as the transcript wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Question {
+    pub question: Option<String>,
+    pub header: Option<String>,
+    pub multi_select: bool,
+    pub options: Vec<PromptOption>,
 }
 
 impl PendingPrompt {
@@ -427,6 +507,10 @@ impl PendingPrompt {
             // A drawn list and a written one with the same labels are different
             // claims, and an answer given to one must not be accepted for the other.
             if self.options_drawn == Some(true) { "drawn" } else { "" },
+            if self.options_read == Some(true) { "read" } else { "" },
+            &self.question_index.map(|n| n.to_string()).unwrap_or_default(),
+            self.summary.as_deref().unwrap_or(""),
+            if self.sandbox_off == Some(true) { "sandbox-off" } else { "" },
         ] {
             // Length-prefixed, so ("ab", "c") and ("a", "bc") differ.
             hasher.update((part.len() as u64).to_le_bytes());
@@ -576,8 +660,27 @@ pub enum ClientMessage {
     /// connection from a dead one unless it is handed something it can
     /// observe. So the beat is an application message in both directions
     /// (INV-4).
+    ///
+    /// `visible` is whether the tab is on screen, for the push channel: a
+    /// visible tab is already the notification (INV-14), so while any browser
+    /// says so nothing is pushed off the machine. Absent from a client older
+    /// than this field, which reads as not visible — a push nobody needed is
+    /// the cheaper mistake.
     #[serde(rename = "pong")]
-    Pong,
+    Pong {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        visible: Option<bool>,
+    },
+    /// The browser asking whether its socket is still alive.
+    ///
+    /// The server's own beat runs every 30s, which is the right cadence for
+    /// noticing a tab that has gone and the wrong one for a phone that has
+    /// just come back: it wakes holding a socket both ends still call open,
+    /// and the next thing it does is answer an agent. Sending this and
+    /// hearing nothing back within a few seconds is how it learns the socket
+    /// is dead now rather than a beat later (INV-4, the client's half).
+    #[serde(rename = "ping")]
+    Ping,
 }
 
 /* ---- server -> client ---- */
@@ -648,6 +751,9 @@ pub enum ServerMessage {
     /// behind Tailscale is holding.
     #[serde(rename = "ping")]
     Ping,
+    /// The answer to a client's `ping`; carries nothing, proves the socket.
+    #[serde(rename = "pong")]
+    Pong,
 }
 
 /// Structured error conditions a client may branch on.
@@ -963,6 +1069,7 @@ mod tests {
             options_drawn: None,
             detail: None,
             id: String::new(),
+            ..Default::default()
         }
     }
 
@@ -999,6 +1106,24 @@ mod tests {
         let mut drawn = base.clone();
         drawn.options_drawn = Some(true);
         assert_ne!(drawn.fingerprint("s1"), id);
+
+        // Labels read off the pane are a third claim, distinct from both.
+        let mut read = drawn.clone();
+        read.options_read = Some(true);
+        assert_ne!(read.fingerprint("s1"), drawn.fingerprint("s1"));
+
+        // Which question of a set is on screen, the agent's own account of
+        // the command, and whether it would run outside the sandbox: each is
+        // read before deciding, so each moves the id.
+        let mut second = base.clone();
+        second.question_index = Some(1);
+        assert_ne!(second.fingerprint("s1"), id);
+        let mut described = base.clone();
+        described.summary = Some("Rebuild the index".into());
+        assert_ne!(described.fingerprint("s1"), id);
+        let mut unsandboxed = base.clone();
+        unsandboxed.sandbox_off = Some(true);
+        assert_ne!(unsandboxed.fingerprint("s1"), id);
 
         // Stable across calls, or the client could never echo it back.
         assert_eq!(base.fingerprint("s1"), id);

@@ -15,10 +15,11 @@ const FOUR_MINUTES = 4 * 60_000
 
 const running = { pid: 84_639, command: 'npm test', since: Date.now() - FOUR_MINUTES }
 
-const kiro = (over: Partial<Agent> = {}): Agent =>
+/** A busy terminal: the one kind whose only activity signal is its process. */
+const shell = (over: Partial<Agent> = {}): Agent =>
   agent({
-    sessionId: 'tmux:kiro-1787832510',
-    agentKind: 'kiro',
+    sessionId: 'tmux:term-1787832900',
+    agentKind: 'terminal',
     status: 'busy',
     statusInferred: true,
     lastActivityAt: Date.now() - 4_000,
@@ -33,7 +34,7 @@ beforeEach(resetStore)
 
 describe('INV-11 a card names the process a busy agent is running', () => {
   it('stands in for the activity line on a card with no transcript', () => {
-    card(kiro())
+    card(shell())
     const line = screen.getByTestId('agent-activity')
     expect(line.textContent).toContain('running npm test')
     expect(line.textContent).toContain('4m')
@@ -56,14 +57,14 @@ describe('INV-11 a card names the process a busy agent is running', () => {
   })
 
   it('says nothing when the server sent nothing', () => {
-    card(kiro({ running: undefined }))
+    card(shell({ running: undefined }))
     expect(screen.getByTestId('agent-activity').dataset.running).toBeUndefined()
     fireEvent.click(screen.getByTestId('details-toggle'))
     expect(screen.queryByTestId('agent-running')).toBeNull()
   })
 
   it('is searchable', () => {
-    expect(matches(kiro(), 'npm')).toBe(true)
-    expect(matches(kiro({ running: undefined }), 'npm')).toBe(false)
+    expect(matches(shell(), 'npm')).toBe(true)
+    expect(matches(shell({ running: undefined }), 'npm')).toBe(false)
   })
 })

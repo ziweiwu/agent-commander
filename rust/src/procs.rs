@@ -1,6 +1,6 @@
 //! What a busy agent is running, read from the process table.
 //!
-//! A Claude agent's transcript says which tool it called; a Kiro agent's says
+//! A Claude agent's transcript says which tool it called; a terminal's says
 //! nothing, because there is none to read. The process table knows either way:
 //! the tool a busy agent is inside is a child of its process, and `ps` reports
 //! when that child started. That is a measurement rather than a claim (INV-11)
@@ -25,7 +25,7 @@
 //! For a tmux-discovered agent the root *is* the pane's shell, so everything
 //! under it qualifies — which is right: what a foreign CLI's pane is running is
 //! the only account of its work there is. A shell is never itself the answer,
-//! and neither is the agent's own program, or a Kiro sitting in its pane's
+//! and neither is the agent's own program, or a CLI sitting in its pane's
 //! shell would be reported as running itself.
 //!
 //! Among what is left, the newest wins, because a tool call started after
@@ -37,7 +37,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-use crate::agent_kinds::{is_shell_command, spec_of};
+use crate::agent_kinds::is_shell_command;
 use crate::env::CommandRunner;
 use crate::types::RunningProcess;
 
@@ -200,13 +200,14 @@ fn basename(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
 }
 
-/// A shell, or the agent's own program: neither is what the agent is running.
-fn is_the_agent_or_its_shell(proc_: &Proc, kind: &str) -> bool {
-    if is_shell(proc_) {
-        return true;
-    }
-    let name = basename(&proc_.argv[0]);
-    spec_of(kind).is_some_and(|spec| spec.process_names.contains(&name))
+/// A shell is never what the agent is running; it is how it runs things.
+///
+/// This used to also skip the agent's own program by name, for a kind that
+/// was found from tmux by its process name. No kind is, now: Claude Code
+/// rewrites its process title to its version number and a terminal's root
+/// *is* its shell, so the name list had nothing left to say.
+fn is_the_agent_or_its_shell(proc_: &Proc, _kind: &str) -> bool {
+    is_shell(proc_)
 }
 
 /// The program and the words that say which job it is doing.
@@ -252,7 +253,7 @@ pub fn running_of(table: &ProcTable, root: i64, kind: &str) -> Option<RunningPro
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::agent_kinds::CLAUDE_KIND;
+    use crate::agent_kinds::{CLAUDE_KIND, TERMINAL_KIND};
 
     const NOW: i64 = 1_788_600_000_000;
 
@@ -274,10 +275,10 @@ mod tests {
     const SHELL_WRAPPER: i64 = 77_904;
     const TOOL_CALL: i64 = 77_910;
     const TEST_BINARY: i64 = 77_911;
-    /// A pane's own shell, and the foreign CLI sitting in it.
+    /// A pane's own shell, and the program somebody ran in it.
     const PANE_SHELL: i64 = 10;
-    const KIRO: i64 = 11;
-    const KIRO_TOOL: i64 = 12;
+    const IN_SHELL: i64 = 11;
+    const IN_SHELL_TOOL: i64 = 12;
 
     /// One `ps` row. Elapsed time is a string because that is what `ps` prints.
     fn row(pid: i64, ppid: i64, etime: &str, command: &str) -> String {
@@ -410,7 +411,7 @@ mod tests {
         let text = [
             row(INIT, NOT_A_PROCESS, "10:00", "/sbin/launchd"),
             row(PANE_SHELL, INIT, "00:01", "/bin/zsh -c make"),
-            row(KIRO, PANE_SHELL, "00:01", "make all"),
+            row(IN_SHELL, PANE_SHELL, "00:01", "make all"),
         ]
         .concat();
         assert_eq!(running_of(&parse_table(&text, NOW), NOT_A_PROCESS, CLAUDE_KIND), None);
@@ -422,44 +423,24 @@ mod tests {
         assert_eq!(running_of(&parse_table(&text, NOW), CLAUDE, CLAUDE_KIND), None);
     }
 
-    /// A Kiro in a pane's shell: the walk from the pane's root finds the CLI
-    /// itself before anything else, and must not report it as its own tool.
-    #[test]
-    fn the_agents_own_program_is_skipped() {
-        let busy = [
-            row(PANE_SHELL, INIT, "10:00", "-zsh"),
-            row(KIRO, PANE_SHELL, "09:00", "kiro-cli chat"),
-            row(KIRO_TOOL, KIRO, "00:30", "npm test"),
-        ]
-        .concat();
-        let running = running_of(&parse_table(&busy, NOW), INIT, "kiro").unwrap();
-        assert_eq!(running.command, "npm test");
-
-        let idle = [
-            row(PANE_SHELL, INIT, "10:00", "-zsh"),
-            row(KIRO, PANE_SHELL, "09:00", "kiro-cli chat"),
-        ]
-        .concat();
-        assert_eq!(running_of(&parse_table(&idle, NOW), INIT, "kiro"), None);
-    }
-
     #[test]
     fn nothing_under_the_root_or_no_root_at_all_is_none() {
         assert_eq!(running_of(&table(), INIT, CLAUDE_KIND), None);
         assert_eq!(running_of(&ProcTable::default(), CLAUDE, CLAUDE_KIND), None);
     }
 
-    /// The other half of the rule, and why a tmux agent still reports: its
-    /// root is the pane's own shell, so everything under it is its work.
+    /// The other half of the rule, and why a terminal still reports: its root
+    /// is the pane's own shell, so everything under it is its work — the
+    /// newest thing, not the program that started it.
     #[test]
     fn a_pane_whose_root_is_a_shell_reports_what_runs_in_it() {
         let text = [
             row(PANE_SHELL, INIT, "10:00", "-zsh"),
-            row(KIRO, PANE_SHELL, "09:00", "kiro-cli chat"),
-            row(KIRO_TOOL, KIRO, "00:30", "npm test"),
+            row(IN_SHELL, PANE_SHELL, "09:00", "make watch"),
+            row(IN_SHELL_TOOL, IN_SHELL, "00:30", "npm test"),
         ]
         .concat();
-        let running = running_of(&parse_table(&text, NOW), PANE_SHELL, "kiro").unwrap();
+        let running = running_of(&parse_table(&text, NOW), PANE_SHELL, TERMINAL_KIND).unwrap();
         assert_eq!(running.command, "npm test");
     }
 

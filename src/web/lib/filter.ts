@@ -5,7 +5,7 @@ import { GROUPS, type GroupKey, matches } from './format.ts'
 
 export type StatusFilter = 'all' | GroupKey
 
-export const SORTS = ['recent', 'tokens', 'duration', 'name'] as const
+export const SORTS = ['recent', 'context', 'tokens', 'duration', 'name'] as const
 export type SortKey = (typeof SORTS)[number]
 
 export type SortDir = 'desc' | 'asc'
@@ -48,6 +48,8 @@ export function inScope(agents: Agent[], state: FleetState): Agent[] {
  */
 export const SORT_SENSE: Record<SortKey, { desc: SenseKey; asc: SenseKey }> = {
   recent: { desc: 'senseNewest', asc: 'senseOldest' },
+  // Fullest first by default: the question is "which one is about to compact".
+  context: { desc: 'senseFullest', asc: 'senseEmptiest' },
   tokens: { desc: 'senseMost', asc: 'senseLeast' },
   duration: { desc: 'senseLongest', asc: 'senseShortest' },
   name: { desc: 'senseZA', asc: 'senseAZ' },
@@ -56,6 +58,8 @@ export const SORT_SENSE: Record<SortKey, { desc: SenseKey; asc: SenseKey }> = {
 type SenseKey =
   | 'senseNewest'
   | 'senseOldest'
+  | 'senseFullest'
+  | 'senseEmptiest'
   | 'senseMost'
   | 'senseLeast'
   | 'senseLongest'
@@ -88,7 +92,7 @@ export const IN_GROUP: Record<GroupKey, ReadonlySet<AgentStatus>> = {
  *
  * And every one of those signals is read out of a transcript, so for an agent
  * whose CLI writes none they are all absent by construction. That is absence of
- * evidence, not evidence of disuse: without this clause a Kiro session working
+ * evidence, not evidence of disuse: without this clause a terminal working
  * away in its pane matches every test above and gets offered to a button that
  * types `/exit` into it.
  */
@@ -159,6 +163,8 @@ export function sortAgents(agents: Agent[], sort: SortKey, dir: SortDir = 'desc'
 
   return [...agents].sort((a, b) => {
     switch (sort) {
+      case 'context':
+        return compare(a.usage?.contextPct, b.usage?.contextPct) || byName(a, b)
       case 'tokens':
         return compare(a.tokens, b.tokens) || byName(a, b)
       case 'duration':

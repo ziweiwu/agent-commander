@@ -81,7 +81,7 @@ function pinnedNumbers(): Map<number, string[]> {
  * exemption that has to be written down is one somebody argues with, where a
  * silently skipped check is one nobody ever sees again.
  */
-const KNOWN_UNPINNED = new Set([10])
+const KNOWN_UNPINNED = new Set<number>([])
 
 describe('the invariant contract stays wired to the code', () => {
   it('numbers its invariants contiguously from 1', () => {

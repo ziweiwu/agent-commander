@@ -171,6 +171,20 @@
   font-weight: 600;
 }
 
+/*
+ * What the session is working on now. One line, always clipped: it is the
+ * user's own sentence rather than a generated label, so it has no length it
+ * can be relied on to respect.
+ */
+.description {
+  font-size: var(--text-sm);
+  color: var(--dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
 .line {
   display: flex;
   flex-wrap: wrap;
@@ -229,6 +243,17 @@
 .reach::before {
   content: none !important;
 }
+/*
+ * The context mark, drawn only past `CONTEXT_WARN_PCT`. Words carry it — the
+ * figure is in the text — and the weight, not a colour, is what lifts it off
+ * the line (INV-13: never colour alone).
+ */
+.context {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
 .folder {
   color: var(--text);
   font-weight: 550;

@@ -93,6 +93,13 @@ function repeatOf(last: { choice: number; at: number } | null, choice: number): 
  * that it could not read the question rather than inventing one, which is the
  * line INV-11 draws and INV-16 was already drawing for the two thinner shapes.
  */
+/** What the reference text under the question is, said per tool. */
+function detailLabel(tool: string): 'answerPlan' | 'answerCommand' | 'answerAbout' {
+  if (tool === 'ExitPlanMode') return 'answerPlan'
+  if (tool === 'Bash') return 'answerCommand'
+  return 'answerAbout'
+}
+
 export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPrompt | null }) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
@@ -163,6 +170,18 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
   const multi = prompt?.multiSelect === true
   const answerable = options.length > 0
   const drawn = prompt?.optionsDrawn === true
+  /*
+   * Labels read off the terminal just now, rather than from the table of what
+   * Claude Code usually draws. A stronger claim than `drawn`, and still not the
+   * transcript's, so it is still captioned and edged — in its own words.
+   */
+  const read = prompt?.optionsRead === true
+  /*
+   * One question of a set. The pane says which, so the card says where in the
+   * set the reader is — and a press here commits *this* question and moves the
+   * picker on, after which a new id arrives and the card resets for the next.
+   */
+  const inSet = prompt?.questionIndex !== undefined
   const disabled = !agent.paneId || !online || (sent && !multi)
   /*
    * The live pane is shown wherever the buttons are not the whole story: under
@@ -173,7 +192,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
    * toggles and cannot know their state. A single question the transcript
    * stated in full needs no second opinion.
    */
-  const peek = agent.paneId !== undefined && (drawn || multi || !answerable)
+  const peek = agent.paneId !== undefined && (drawn || multi || inSet || !answerable)
 
   /*
    * Sends the *choice*, not the keystroke. The server holds the prompt's id and
@@ -238,17 +257,40 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </p>
       )}
 
+      {prompt?.questionIndex !== undefined && (
+        <p className={styles.note} data-testid="answer-progress">
+          {t('answerProgress', {
+            n: prompt.questionIndex + 1,
+            total: prompt.questionIndex + 1 + (prompt.moreQuestions ?? 0),
+          })}
+        </p>
+      )}
+
       {prompt?.question !== undefined && (
         <p className={styles.question} data-testid="answer-question">
           {prompt.question}
         </p>
       )}
 
+      {/*
+        * The agent's own account of the command, kept apart from the command:
+        * one is a claim and the other is the fact (TODO §13d).
+        */}
+      {prompt?.summary !== undefined && (
+        <p className={styles.note} data-testid="answer-summary">
+          {t('answerSummary', { text: prompt.summary })}
+        </p>
+      )}
+
+      {prompt?.sandboxOff === true && (
+        <p className={styles.warning} role="note" data-testid="answer-sandbox">
+          {t('answerSandboxOff')}
+        </p>
+      )}
+
       {prompt?.detail !== undefined && (
         <>
-          <p className={styles.label}>
-            {t(prompt.tool === 'ExitPlanMode' ? 'answerPlan' : 'answerAbout')}
-          </p>
+          <p className={styles.label}>{t(detailLabel(prompt.tool))}</p>
           <pre className={styles.detail} data-testid="answer-detail">
             {prompt.detail}
           </pre>
@@ -256,8 +298,13 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
       )}
 
       {answerable && drawn && (
-        <p className={styles.drawnNote} id="answer-drawn-note" data-testid="answer-drawn">
-          {t('answerDrawn')}
+        <p
+          className={styles.drawnNote}
+          id="answer-drawn-note"
+          data-testid="answer-drawn"
+          data-read={read || undefined}
+        >
+          {t(read ? 'answerRead' : 'answerDrawn')}
         </p>
       )}
 
@@ -333,7 +380,9 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </p>
       )}
 
-      {prompt?.moreQuestions !== undefined && prompt.moreQuestions > 0 && (
+      {/* Only where the pane could not say which question is up: with a place
+          in the set known, the progress line above already says it. */}
+      {!inSet && prompt?.moreQuestions !== undefined && prompt.moreQuestions > 0 && (
         <p className={styles.note} data-testid="answer-more">
           {t('answerMore', { count: prompt.moreQuestions })}
         </p>

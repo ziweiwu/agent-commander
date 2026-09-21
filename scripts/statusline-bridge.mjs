@@ -27,6 +27,14 @@ import { fileURLToPath } from 'node:url'
 
 export const CACHE_DIR = join(homedir(), '.claude', 'agent-commander')
 export const CACHE_FILE = join(CACHE_DIR, 'rate-limits.json')
+/**
+ * One file per session, named by `session_id`, for the figures that are
+ * per-session rather than per-account: how full the context window is and
+ * what the session has cost. `rust/src/usage.rs` reads them. The docs endorse
+ * exactly this key — "stable for the lifetime of a session and unique per
+ * session" — where a pid would change on every render.
+ */
+export const SESSIONS_DIR = join(CACHE_DIR, 'sessions')
 
 /**
  * One window, normalised.
@@ -68,6 +76,40 @@ export function snapshot(input, now) {
   return out
 }
 
+/**
+ * The per-session figures, or null when the frame carries none.
+ *
+ * `context_window.used_percentage` is input tokens over `context_window_size`
+ * as the CLI computes it, and may be null early in a session and again right
+ * after `/compact`; `cost.total_cost_usd` is the CLI's own list-price estimate.
+ * Either alone is worth writing; neither means leave the file alone, for the
+ * reason `snapshot` gives — absent is not zero.
+ *
+ * The id has to be a file name. Anything that is not letters, digits, `-`,
+ * `_` or `.` is refused here and again by the reader, because a `..` in a
+ * field this app did not write would name a path outside the directory.
+ */
+export function sessionUsage(input, now) {
+  const frame = JSON.parse(input)
+  const id = frame?.session_id
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(id)) return null
+  const out = { sessionId: id, at: now }
+  const ctx = frame.context_window
+  if (Number.isFinite(ctx?.used_percentage)) {
+    out.contextPct = Math.max(0, Math.min(100, ctx.used_percentage))
+  }
+  if (Number.isFinite(ctx?.context_window_size)) out.contextSize = ctx.context_window_size
+  const cost = frame.cost?.total_cost_usd
+  if (Number.isFinite(cost) && cost >= 0) out.costUsd = cost
+  if (out.contextPct === undefined && out.costUsd === undefined) return null
+  return out
+}
+
+/** The same tmp-and-rename as `persist`, into the session's own file. */
+export function persistSession(usage, dir = SESSIONS_DIR) {
+  persist(usage, dir, join(dir, `${usage.sessionId}.json`))
+}
+
 export function render(snap) {
   if (!snap) return ''
   const parts = []
@@ -95,7 +137,11 @@ async function main() {
   process.stdin.setEncoding('utf8')
   for await (const chunk of process.stdin) input += chunk
 
-  const snap = snapshot(input, Date.now())
+  const now = Date.now()
+  // Each write decides for itself; a frame with no quota still has a context.
+  const usage = sessionUsage(input, now)
+  if (usage) persistSession(usage)
+  const snap = snapshot(input, now)
   if (!snap) return
   persist(snap)
   process.stdout.write(render(snap))

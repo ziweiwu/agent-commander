@@ -397,6 +397,15 @@ impl PaneHub {
         }
     }
 
+    /// The last read of a pane that is being watched, or nothing.
+    ///
+    /// Nothing is read to answer this: a pane nobody watches has no loop and
+    /// no cache, and the caller makes its own read then (INV-4).
+    pub fn cached(&self, pane_id: &str) -> Option<Arc<Sample>> {
+        let loop_ = self.inner.loops.lock().unwrap().get(pane_id).cloned();
+        loop_.and_then(|loop_| loop_.last())
+    }
+
     /// How many panes are being polled. Read by the tests and the benchmark.
     pub fn size(&self) -> usize {
         self.inner.loops.lock().unwrap().len()

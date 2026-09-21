@@ -44,7 +44,7 @@ describe('the terminal offers the mode chord', () => {
   })
 
   it('withholds it from a CLI that does not', () => {
-    open({ agentKind: 'kiro' })
+    open({ agentKind: 'terminal' })
     expect(screen.queryByTestId('shift-tab')).toBeNull()
   })
 

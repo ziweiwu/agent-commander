@@ -810,13 +810,13 @@ mod tests {
         }
     }
 
-    /// The one fixture in this file that is not Claude: a CLI that does not
-    /// understand a single thing this module types.
-    fn kiro() -> Agent {
+    /// The one fixture in this file that is not Claude: a plain terminal, a
+    /// shell that does not understand a single thing this module types.
+    fn shell() -> Agent {
         Agent {
-            session_id: "tmux:kiro-1".into(),
-            agent_kind: "kiro".into(),
-            tmux_session: Some("kiro-1".into()),
+            session_id: "tmux:term-1".into(),
+            agent_kind: crate::agent_kinds::TERMINAL_KIND.into(),
+            tmux_session: Some("term-1".into()),
             ..agent()
         }
     }
@@ -999,12 +999,12 @@ mod tests {
     /* ---- INV-7: another CLI is not typed at ---- */
 
     /// A Claude Code slash command is not a feature that degrades on another
-    /// CLI. Against Kiro it is this app typing a sentence of its own into
+    /// CLI. Against a shell it is this app typing a sentence of its own into
     /// somebody's prompt, so every one of these refuses — and refuses *before*
     /// anything is typed or pressed.
     #[tokio::test]
-    async fn inv8_refuses_slash_commands_for_kiro() {
-        let k = kiro();
+    async fn inv8_refuses_slash_commands_for_a_terminal() {
+        let k = shell();
 
         let f = Fake::new();
         assert!(set_model(Some(&k), "opus", &f).await.unwrap_err().is_client_error());
@@ -1039,18 +1039,18 @@ mod tests {
     /// agent's cooperation. Typing `/exit` first would leave a stray line in
     /// the prompt of a session the user asked to close.
     #[tokio::test]
-    async fn inv7_closes_kiro_by_killing_its_tmux_session_rather_than_typing() {
+    async fn inv7_closes_a_terminal_by_killing_its_tmux_session_rather_than_typing() {
         let f = Fake::new();
-        let result = close_agent(Some(&kiro()), &f).await.unwrap();
+        let result = close_agent(Some(&shell()), &f).await.unwrap();
         assert!(f.pastes().is_empty());
-        assert_eq!(f.killed.lock().unwrap().as_slice(), ["kiro-1"]);
+        assert_eq!(f.killed.lock().unwrap().as_slice(), ["term-1"]);
         assert_eq!(result, CloseResult { closed: true, forced: true });
     }
 
     #[tokio::test]
-    async fn inv7_refuses_to_close_a_foreign_cli_with_no_tmux_session() {
+    async fn inv7_refuses_to_close_a_terminal_with_no_tmux_session() {
         let f = Fake::new();
-        let a = Agent { tmux_session: None, ..kiro() };
+        let a = Agent { tmux_session: None, ..shell() };
         let err = close_agent(Some(&a), &f).await.unwrap_err();
         assert!(err.to_string().contains("no shutdown command"), "{err}");
     }

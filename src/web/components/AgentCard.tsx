@@ -1,7 +1,7 @@
 import { memo, useMemo, useState } from 'react'
 import type { Agent, AgentTree } from '../../shared/types.ts'
 import { CLAUDE_KIND, hasTranscripts, specOf } from '../../shared/agent-kinds.ts'
-import { relative, tildePath, tokens, uptimeParts } from '../lib/format.ts'
+import { CONTEXT_WARN_PCT, relative, tildePath, tokens, uptimeParts, usd } from '../lib/format.ts'
 import { plainText } from '../lib/chat.ts'
 import { claimOf, isStallCandidate, type DelegationClaim } from '../lib/delegation.ts'
 import { trailOf } from '../lib/trail.ts'
@@ -147,14 +147,33 @@ export const AgentCard = memo(function AgentCard({
   const since = ageFrom(agent)
   const rel = since === null ? '' : formatRelative(lang, relative(since))
   const tok = tokens(agent.tokens)
+  /*
+   * The one figure with a real denominator (INV-11): Claude Code's own reading
+   * of how full the context window is, via the statusLine bridge. It is
+   * captioned with when it was read, and it reaches the face only past
+   * `CONTEXT_WARN_PCT`, where "about to compact" is something a fleet-wide
+   * glance wants — below that it is a fact a reader asks for, so it folds.
+   */
+  const contextPct = agent.usage?.contextPct
+  const contextRounded = contextPct === undefined ? undefined : Math.round(contextPct)
+  const contextHot = contextRounded !== undefined && contextRounded >= CONTEXT_WARN_PCT
+  const usageWhen = agent.usage ? formatRelative(lang, relative(agent.usage.at)) : ''
   // Only for agents that are not the default: with a fleet of nine Claude
   // sessions there is nothing to disambiguate, and a badge on every card is a
   // word to read past on every card.
   const kindLabel = agent.agentKind === CLAUDE_KIND ? '' : (specOf(agent.agentKind)?.label ?? agent.agentKind)
   // Advertised on the card so a selector can ask for one that can hold a
   // conversation, rather than counting positions and hoping — which is what the
-  // UX and mobile audits were doing until a Kiro fixture sorted into the slot.
+  // UX and mobile audits were doing until a terminal fixture sorted into the slot.
   const transcripts = hasTranscripts(agent.agentKind)
+
+  /*
+   * What the session is working on now, shown only when it adds something the
+   * name above does not already say. With no `aiTitle` this line *is* the name
+   * (see `describeAgent`), and printing it twice is noise, not emphasis.
+   */
+  const subject = agent.description?.trim()
+  const descriptionLine = subject && subject !== displayName(agent) ? subject : ''
   const working = agent.status === 'busy'
   /*
    * INV-11. `lastActivityAt` means two different things depending on where it
@@ -284,6 +303,16 @@ export const AgentCard = memo(function AgentCard({
             )}
           </div>
 
+          {descriptionLine && (
+            <div
+              className={styles.description}
+              data-testid="agent-description"
+              title={t('descriptionTitle')}
+            >
+              {plainText(descriptionLine)}
+            </div>
+          )}
+
           <div className={styles.line} data-testid="agent-meta">
             <span
               className={styles.status}
@@ -322,6 +351,16 @@ export const AgentCard = memo(function AgentCard({
               {tildePath(agent.cwd)}
             </span>
             {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
+
+            {contextHot && contextRounded !== undefined && (
+              <span
+                className={styles.context}
+                data-testid="agent-context"
+                title={t('contextFaceTitle', { pct: contextRounded })}
+              >
+                {t('contextFace', { pct: contextRounded })}
+              </span>
+            )}
 
             {onFace && <DelegateLine agent={agent} claim={claim} />}
 
@@ -383,6 +422,28 @@ export const AgentCard = memo(function AgentCard({
               <div className={styles.fact} data-testid="agent-tokens">
                 <dt>{t('tokensLabel')}</dt>
                 <dd>{t('tokensSeen', { n: tok })}</dd>
+              </div>
+            )}
+            {/* INV-11: a percentage with a real denominator, said with when it
+                was read; and a cost said to be the CLI's own estimate. */}
+            {contextRounded !== undefined && (
+              <div className={styles.fact} data-testid="agent-context-fact">
+                <dt>{t('contextLabel')}</dt>
+                <dd>
+                  {agent.usage?.contextSize
+                    ? t('contextFold', {
+                        pct: contextRounded,
+                        size: tokens(agent.usage.contextSize),
+                        when: usageWhen,
+                      })
+                    : t('contextFoldNoSize', { pct: contextRounded, when: usageWhen })}
+                </dd>
+              </div>
+            )}
+            {agent.usage?.costUsd !== undefined && (
+              <div className={styles.fact} data-testid="agent-cost">
+                <dt>{t('costLabel')}</dt>
+                <dd>{t('costFold', { usd: usd(agent.usage.costUsd) })}</dd>
               </div>
             )}
             {isRenamed(agent) && (

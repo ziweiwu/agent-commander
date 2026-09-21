@@ -52,6 +52,9 @@ pub struct AgentPatch {
     pub subagents: Option<i64>,
     pub delegating: Option<bool>,
     pub ai_title: Option<String>,
+    /// The session's current subject, from `describe.rs`. Only ever set to a
+    /// prompt that named something, so a run of "ok"s leaves it where it was.
+    pub description: Option<String>,
     pub last_prompt: Option<String>,
     pub permission_mode: Option<String>,
     pub model: Option<String>,
@@ -67,6 +70,8 @@ pub struct AgentPatch {
     /// `Some(None)` clears it: an agent that went idle, or whose tool call
     /// ended, must stop being reported as running it (INV-11).
     pub running: Option<Option<crate::types::RunningProcess>>,
+    /// Context-window usage and cost from the bridge's per-session file.
+    pub usage: Option<crate::types::SessionUsage>,
 }
 
 impl AgentPatch {
@@ -78,6 +83,7 @@ impl AgentPatch {
             && self.subagents.is_none()
             && self.delegating.is_none()
             && self.ai_title.is_none()
+            && self.description.is_none()
             && self.last_prompt.is_none()
             && self.permission_mode.is_none()
             && self.model.is_none()
@@ -87,6 +93,7 @@ impl AgentPatch {
             && self.git_branch.is_none()
             && self.cwd.is_none()
             && self.running.is_none()
+            && self.usage.is_none()
     }
 
     /// Apply this patch onto an agent in place.
@@ -97,6 +104,7 @@ impl AgentPatch {
         if let Some(v) = self.subagents { agent.subagents = Some(v) }
         if let Some(v) = self.delegating { agent.delegating = Some(v) }
         if let Some(v) = &self.ai_title { agent.ai_title = Some(v.clone()) }
+        if let Some(v) = &self.description { agent.description = Some(v.clone()) }
         if let Some(v) = &self.last_prompt { agent.last_prompt = Some(v.clone()) }
         if let Some(v) = &self.permission_mode { agent.permission_mode = Some(v.clone()) }
         if let Some(v) = &self.model { agent.model = Some(v.clone()) }
@@ -105,6 +113,7 @@ impl AgentPatch {
         if let Some(v) = &self.waiting_for { agent.waiting_for = v.clone() }
         if let Some(v) = &self.git_branch { agent.git_branch = Some(v.clone()) }
         if let Some(v) = &self.running { agent.running = v.clone() }
+        if let Some(v) = &self.usage { agent.usage = Some(v.clone()) }
         if let Some(v) = &self.cwd {
             agent.cwd = v.clone();
             // Keep the precomputed basename in step with the path it describes.
@@ -216,4 +225,86 @@ pub struct Deps {
     pub limits: Arc<dyn LimitsApi>,
     /// Builds a tail reader for one session's transcript.
     pub tail_for: Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    fn source(file: &str) -> String {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("src").join(file);
+        std::fs::read_to_string(&path).expect("a source file of this crate")
+    }
+
+    /// The body of `fn <name>`, from its opening brace to the matching close.
+    fn body_of(src: &str, name: &str) -> String {
+        let at = src.find(&format!("fn {name}(")).unwrap_or_else(|| panic!("no fn {name}"));
+        let open = at + src[at..].find('{').expect("a function has a body");
+        let mut depth = 0i32;
+        for (i, c) in src[open..].char_indices() {
+            depth += match c {
+                '{' => 1,
+                '}' => -1,
+                _ => continue,
+            };
+            if depth == 0 {
+                return src[open..=open + i].to_string();
+            }
+        }
+        panic!("unbalanced braces in {name}")
+    }
+
+    fn patch_fields(src: &str) -> Vec<String> {
+        let at = src.find("pub struct AgentPatch {").expect("the patch is declared here");
+        let rest = &src[at..];
+        let end = rest.find("\n}").expect("the declaration closes");
+        rest[..end]
+            .lines()
+            .skip(1)
+            .filter_map(|line| line.trim().strip_prefix("pub "))
+            .filter_map(|decl| decl.split(':').next())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether `body` names `field` as a whole identifier, so that `activity`
+    /// is not found inside `last_activity_at`.
+    fn names(body: &str, field: &str) -> bool {
+        let part_of_a_name = |c: char| c.is_alphanumeric() || c == '_';
+        body.match_indices(field).any(|(at, _)| {
+            let before = body[..at].chars().next_back();
+            let after = body[at + field.len()..].chars().next();
+            !before.is_some_and(part_of_a_name) && !after.is_some_and(part_of_a_name)
+        })
+    }
+
+    /// Three functions carry a patch and none of them is checked by the
+    /// compiler: `is_empty` decides whether it is worth broadcasting, `apply`
+    /// writes it onto the agent, and `merge_patch` folds one provider's patch
+    /// into another's on the way between. A field missing from any of them is
+    /// dropped in silence — nothing fails to compile and no test goes red,
+    /// because the value simply never arrives.
+    ///
+    /// `description` shipped that way. It was produced, it was named in the
+    /// two functions either side, and `merge_patch` did not list it, so no
+    /// card ever carried one. `card_fields` is deliberately not checked here:
+    /// it is a struct literal with no `..` rest, so the compiler already
+    /// refuses a field it has not named.
+    #[test]
+    fn every_patch_field_is_named_by_the_three_functions_that_carry_it() {
+        let sources = source("sources.rs");
+        let fields = patch_fields(&sources);
+        assert!(fields.len() > 10, "the fields did not parse: {fields:?}");
+
+        let carriers = [
+            ("sources.rs::is_empty", body_of(&sources, "is_empty")),
+            ("sources.rs::apply", body_of(&sources, "apply")),
+            ("tmux_source.rs::merge_patch", body_of(&source("tmux_source.rs"), "merge_patch")),
+        ];
+        for (place, body) in &carriers {
+            for field in &fields {
+                assert!(names(body, field), "`{field}` is not named in {place}");
+            }
+        }
+    }
 }

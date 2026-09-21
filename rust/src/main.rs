@@ -27,6 +27,7 @@
 mod agent_kinds;
 mod browse;
 mod control;
+mod describe;
 mod enrich;
 mod env;
 mod frames;
@@ -40,6 +41,7 @@ mod pane_props;
 mod pending;
 mod poll;
 mod procs;
+mod push;
 mod registry;
 mod routes;
 mod sources;
@@ -51,6 +53,7 @@ mod transcript;
 mod tmux_client;
 mod token_file;
 mod types;
+mod usage;
 
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;

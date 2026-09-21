@@ -53,11 +53,18 @@ import {
   saveSidebarWidth,
   type Scheme,
   type SidebarState,
-  type Theme,
-} from '../lib/prefs.ts'
+  type Theme, loadFleetSnapshot } from '../lib/prefs.ts'
 
 export type Tab = 'chat' | 'attach'
 export type Conn = 'connecting' | 'open' | 'closed'
+/**
+ * Whether the *server* can be reached at all, as distinct from whether the
+ * socket is up. A closed socket with a reachable server is a reconnect in
+ * progress; a closed socket with an unreachable one is the tunnel, on a phone,
+ * and the caption should say so rather than promise a reconnect that cannot
+ * happen from here (INV-11). Learned by a probe, never assumed.
+ */
+export type Reach = 'unknown' | 'reachable' | 'unreachable'
 
 export interface HistoryView {
   sessionId: string
@@ -114,6 +121,7 @@ export interface AppState {
   env: ServerEnv | null
   mock: boolean
   conn: Conn
+  reach: Reach
 
   /* selection — the router owns the URL, this mirrors it for the transport */
   selected: string | null
@@ -337,6 +345,7 @@ export const useStore = create<AppState>()((set, get) => ({
   // pushing everything below it down 28px for a CLS of 0.121.
   mock: typeof document !== 'undefined' && document.documentElement.dataset.mock === 'true',
   conn: 'connecting',
+  reach: 'unknown',
 
   selected: null,
   tab: 'chat',
@@ -534,6 +543,17 @@ export const useStore = create<AppState>()((set, get) => ({
 /** Apply persisted preferences before the first paint. */
 export function initPreferences(): void {
   const { theme, scheme, lang } = useStore.getState()
+  /*
+   * The last fleet this browser saw, painted at once and captioned as a
+   * memory: `conn` is still `connecting`, so the stale caption FleetList
+   * already draws for a socket that dropped covers this frame too. A phone
+   * whose page was evicted otherwise spends the tunnel's reconnect on a
+   * spinner over a fleet it knew ten minutes ago. Names, states and folders
+   * only — see `saveFleetSnapshot` (INV-3) — and never an empty one, which
+   * would present "no sessions" as a reading (INV-11).
+   */
+  const snapshot = loadFleetSnapshot()
+  if (snapshot) useStore.setState({ agents: snapshot.agents, fleetAt: snapshot.at })
   // Scheme first: `applyTheme` reads `--bg` back off the document to colour the
   // status bar, and before the scheme is on it would read the wrong palette's.
   applyScheme(scheme)

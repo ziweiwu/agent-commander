@@ -1,6 +1,6 @@
 [package]
 name = "agent-commander"
-version = "0.16.0"
+version = "0.17.0"
 edition = "2021"
 rust-version = "1.82"
 
@@ -32,11 +32,13 @@ libc = "0.2.189"
 regex = "1"
 sha1 = "0.10"
 base64 = "0.22"
+# One outbound HTTPS request per push (`push.rs`). rustls rather than the
+# platform TLS so the four release binaries link the same thing.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"
-reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tokio-tungstenite = "0.24"
 ts-rs = "12"
 proptest = "1.9.0"

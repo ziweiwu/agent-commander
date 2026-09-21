@@ -167,6 +167,11 @@ pub struct Options {
     pub grants: Grants,
     /// Print the token in the startup banner instead of masking it.
     pub print_url: bool,
+    /// Where to push when an agent starts needing you: an ntfy topic URL or
+    /// `telegram:<chat_id>`. Parsed by `push::Channel`; nothing without it.
+    pub notify: Option<String>,
+    /// This app's address on the phone, so a push can open the card itself.
+    pub notify_link: Option<String>,
 }
 
 impl Default for Options {
@@ -185,6 +190,8 @@ impl Default for Options {
             rotate_token: false,
             grants: Grants::ALL,
             print_url: false,
+            notify: None,
+            notify_link: None,
         }
     }
 }
@@ -386,6 +393,8 @@ pub fn parse_args_with_token_file(argv: &[String], token_path: &Path) -> Result<
             "--rotate-token" => opts.rotate_token = true,
             "--grant" => opts.grants = Grants::parse(&take_value(&mut i)?)?,
             "--print-url" => opts.print_url = true,
+            "--notify" => opts.notify = Some(take_value(&mut i)?),
+            "--notify-link" => opts.notify_link = Some(take_value(&mut i)?),
             "--dev" => opts.dev = true,
             "--help" | "-h" => return Ok(Parsed::Help(help_text())),
             "--version" | "-V" => return Ok(Parsed::Version(version_text())),
@@ -453,7 +462,22 @@ fn finalise_options(mut opts: Options, token_path: &Path) -> Result<Parsed, Stri
         opts.token = Some(crate::token_file::read_or_create(token_path)?);
     }
     refuse_an_open_bind_without_a_token(&opts)?;
+    refuse_a_push_address_nobody_could_open(&opts)?;
     Ok(Parsed::Options(opts))
+}
+
+/// A link on a push has to be a URL the phone can open, or the tap on the
+/// notification goes nowhere and reads as the app being broken.
+fn refuse_a_push_address_nobody_could_open(opts: &Options) -> Result<(), String> {
+    match &opts.notify_link {
+        Some(link) if !(link.starts_with("https://") || link.starts_with("http://")) => Err(format!(
+            "--notify-link wants the URL this app has on your phone, like https://box.tail1234.ts.net, got {link:?}"
+        )),
+        Some(_) if opts.notify.is_none() => {
+            Err("--notify-link only means something with --notify".to_string())
+        }
+        _ => Ok(()),
+    }
 }
 
 /*
@@ -509,6 +533,12 @@ pub fn help_text() -> String {
         "      --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)"
             .to_string(),
         "      --print-url    print the full URL, token and all, then keep serving".to_string(),
+        "      --notify <to>  push when an agent starts needing you: an ntfy topic URL".to_string(),
+        "                     (https://ntfy.sh/<topic>) or telegram:<chat_id>; the Telegram".to_string(),
+        "                     bot token is read from AGENT_COMMANDER_TELEGRAM_TOKEN or".to_string(),
+        "                     ~/.claude/agent-commander/telegram-token".to_string(),
+        "      --notify-link <url>  this app's address on the phone, so a push opens the card"
+            .to_string(),
         "      --mock         serve fixture agents, touching nothing real".to_string(),
         "      --mock-transitions  like --mock, but statuses change on a timer".to_string(),
         "      --mock-empty   like --mock, with no agents at all".to_string(),
@@ -594,6 +624,17 @@ mod tests {
         for host in ["127.0.0.1", "localhost", "::1"] {
             assert!(parse(&["--host", host]).is_ok(), "{host}");
         }
+    }
+
+    #[test]
+    fn a_push_link_has_to_be_a_url_and_needs_a_channel() {
+        let ok = parse(&["--notify", "https://ntfy.sh/t", "--notify-link", "https://box.ts.net"]).unwrap();
+        assert_eq!(ok.notify.as_deref(), Some("https://ntfy.sh/t"));
+        assert_eq!(ok.notify_link.as_deref(), Some("https://box.ts.net"));
+        assert!(parse(&["--notify", "https://ntfy.sh/t", "--notify-link", "box.ts.net"])
+            .unwrap_err()
+            .contains("wants the URL"));
+        assert!(parse(&["--notify-link", "https://box.ts.net"]).unwrap_err().contains("--notify"));
     }
 
     #[test]

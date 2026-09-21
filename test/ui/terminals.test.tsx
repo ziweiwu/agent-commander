@@ -8,7 +8,7 @@
  * count that appears nowhere is a fleet with a hole in it (INV-11).
  *
  * Everything else about it falls out of the capability table it shares with
- * Kiro. It keeps no transcript, so the agent screen is the Attach tab alone,
+ * Claude Code. It keeps no transcript, so the agent screen is the Attach tab alone,
  * and it answers no slash command, so `/goal`, `/model`, `/clear` and
  * `/compact` are not offered at a shell that would only receive the words
  * (INV-7).

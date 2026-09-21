@@ -104,6 +104,24 @@ export function tokens(n: number | undefined): string {
   return String(n)
 }
 
+/**
+ * A cost in dollars, to the cent, as the CLI's own estimate reads. Under a
+ * cent is shown as such rather than as "$0.00", which would claim a zero the
+ * figure does not say.
+ */
+export function usd(n: number): string {
+  if (n > 0 && n < 0.01) return '<$0.01'
+  return `$${n.toFixed(2)}`
+}
+
+/**
+ * Where a context window is full enough to say so on the card's face. Below
+ * this the figure lives in the fold, where a reader asks for it; at or above
+ * it the card is about to compact, which is the one thing a fleet-wide glance
+ * wants to catch.
+ */
+export const CONTEXT_WARN_PCT = 80
+
 /** Shorten a home-relative path for display. */
 export function tildePath(path: string): string {
   const match = /^\/(?:Users|home)\/[^/]+/.exec(path)
@@ -121,10 +139,10 @@ export type GroupKey = (typeof GROUPS)[number]['key']
 /**
  * Does this agent match the free-text filter?
  *
- * The kind is in here because it is on the card: typing `kiro` and being told
- * nothing matches, while a card two inches away wears a `Kiro` badge, is the
+ * The kind is in here because it is on the card: typing `terminal` and being
+ * told nothing matches, while a card two inches away wears that badge, is the
  * plainest kind of broken search there is. Both the id and the label are
- * checked, so `kiro` and `Kiro` find it and so would a future kind whose label
+ * checked, so `terminal` and `Terminal` find it, and so would a kind whose label
  * and id differ.
  */
 export function matches(agent: Agent, query: string): boolean {

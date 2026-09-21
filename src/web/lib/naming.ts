@@ -30,7 +30,7 @@ function clip(text: string, max = MAX_LABEL): string {
 }
 
 /** Where the displayed name came from, so the UI can caption it honestly. */
-export type NameSource = 'given' | 'title' | 'prompt'
+export type NameSource = 'given' | 'title' | 'description' | 'prompt'
 
 export interface DisplayName {
   label: string
@@ -42,7 +42,8 @@ export interface DisplayName {
  *
  * 1. a name someone gave it — always wins
  * 2. the title the agent generated for its own conversation
- * 3. the first line of the last thing it was asked
+ * 3. what it is working on now, from the last prompt that named anything
+ * 4. the first line of the last thing it was asked
  *
  * With none of those, the session keeps its own name. Falling back to the
  * directory was tried and dropped: Claude Code derives these names *from* the
@@ -54,6 +55,13 @@ export function describeAgent(agent: Agent): DisplayName {
   if (!isDerivedName(agent)) return { label: agent.name, source: 'given' }
 
   if (agent.aiTitle?.trim()) return { label: clip(agent.aiTitle), source: 'title' }
+
+  // Above the raw last prompt because it *is* a last prompt, chosen: the server
+  // only sets it from one that named something, where `lastPrompt` is whatever
+  // was typed most recently and is regularly "ok" or "done".
+  if (agent.description?.trim()) {
+    return { label: clip(agent.description), source: 'description' }
+  }
 
   if (agent.lastPrompt?.trim()) {
     const firstLine = agent.lastPrompt.split('\n').find((line) => line.trim().length > 0)

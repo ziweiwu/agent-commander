@@ -12,7 +12,7 @@
  * never arrives.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { AGENT, card, entry, openFleet } from './helpers.ts'
+import { AGENT, entry, openFleet } from './helpers.ts'
 
 /** Open the fleet and expand one agent's delegates. */
 async function openDelegates(page: Page, sessionId: string): Promise<void> {
@@ -109,18 +109,14 @@ test.describe('delegates on the card', () => {
   })
 
   /*
-   * Two agents with no delegates on screen, for two different reasons, and the
-   * card has to make them different sentences rather than the same silence.
+   * "Delegated nothing" is a sentence, not a silence — and on an idle card it
+   * is in the fold rather than on the face. (The other sentence, "cannot
+   * tell", belongs to a kind with no transcript; the plain terminal is out of
+   * the fleet at rest, so `test/ui/fleet-delegates.test.tsx` carries it.)
    */
-  test('INV-13 separates "delegated nothing" from "cannot tell"', async ({ page }) => {
+  test('INV-13 says "delegated nothing" in the fold of an idle card', async ({ page }) => {
     await openFleet(page)
 
-    const cannotTell = card(page, AGENT.noSidecars).getByTestId('agent-delegates')
-    await expect(cannotTell).toHaveAttribute('data-claim', 'unknown')
-    await expect(cannotTell).toContainText(/cannot tell/i)
-
-    // On an idle card "delegated nothing" is in the fold rather than on the
-    // face: still a sentence, just not one read past forty times a day.
     const idle = entry(page, AGENT.idle)
     await expect(idle.getByTestId('agent-delegates')).toHaveCount(0)
     await idle.getByTestId('details-toggle').click()

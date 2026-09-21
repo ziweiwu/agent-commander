@@ -25,6 +25,7 @@ const EN = {
   connLive: 'live',
   connConnecting: 'connecting…',
   connReconnecting: 'reconnecting…',
+  connUnreachable: 'server unreachable — is Tailscale up?',
   searchPlaceholder: 'Filter agents…',
   searchLabel: 'Filter agents by name, folder, branch or activity',
   /* groups */
@@ -63,6 +64,7 @@ const EN = {
   reachable: 'terminal reachable',
   ageBlockedTitle: 'How long this agent has been waiting on you, not when it last wrote.',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
+  descriptionTitle: 'What this session last asked for, in its own words.',
   statusFromPane: 'quiet',
   /* delegates — INV-13 and INV-15 in the words themselves */
   delegatesNone: 'delegated nothing',
@@ -93,6 +95,16 @@ const EN = {
   cardAnswer: 'Answer →',
   tokensLabel: 'Output tokens',
   tokensSeen: '{n} seen in this transcript — not the session total',
+  contextLabel: 'Context window',
+  contextFold: '{pct}% of {size} used, as Claude Code reported it {when}',
+  contextFoldNoSize: '{pct}% used, as Claude Code reported it {when}',
+  contextFace: 'context {pct}%',
+  contextFaceTitle: 'Context window {pct}% full — close to compacting.',
+  costLabel: 'Cost',
+  costFold: '{usd} so far — Claude Code’s own estimate at list price, reset by /clear',
+  sortContext: 'Context used',
+  senseFullest: 'fullest',
+  senseEmptiest: 'emptiest',
   sessionNameLabel: 'Session',
   pathLabel: 'Folder',
   delegatesMoving: '{n} still moving, so this is not a stall',
@@ -102,18 +114,6 @@ const EN = {
   stallQuestionTitle:
     'This agent is quiet because it delegated, and every delegate is quiet too. Quiet is not "finished" — nothing recorded an ending. Worth a look.',
   trailLabel: 'Wrote for {worked}, silent for {silent}',
-  helpSectionKinds: 'Other agent CLIs',
-  helpKindsIntro:
-    'Kiro CLI sessions appear alongside Claude Code ones, found through tmux and ' +
-    'marked with a badge. They can be attached to like any other agent, but they ' +
-    'keep no transcript this app can read, so they have no conversation, no token ' +
-    'count and no Chat tab.',
-  helpKindsStatus:
-    'Their status is marked \u201Cquiet\u201D and drawn with a dashed outline, because ' +
-    'it is worked out from whether their terminal has produced output lately rather ' +
-    'than reported by the agent. For the same reason they never show ' +
-    '\u201Cwaiting\u201D: an agent stopped at a prompt and one that has finished look ' +
-    'identical from outside.',
   statusInferredTitle:
     "Worked out from whether this agent's terminal has produced output lately. It " +
     'does not report its own status the way Claude Code does, so it can never show ' +
@@ -175,6 +175,12 @@ const EN = {
   peekLabel: 'The bottom of the agent’s terminal, as it is now. Read-only.',
   answerPlan: 'The plan under review',
   answerAbout: 'What it is asking about',
+  answerCommand: 'The command it would run',
+  answerSummary: 'The agent describes it as: {text}',
+  answerSandboxOff: 'This would run outside the sandbox.',
+  answerProgress: 'Question {n} of {total}',
+  answerRead:
+    'These labels were read off the terminal just now — they are the rows it is numbering, not something the agent wrote down. The number is what is sent.',
   uptimePrefix: 'up',
   /* chat */
   you: 'You',
@@ -327,6 +333,10 @@ const EN = {
   helpPhoneStep3: 'Then open this address in Safari on your phone:',
   helpPhoneStep3Note:
     'Add the token to the end of it — `--print-url` prints the whole link ready to paste. A token is required: Tailscale Serve forwards this machine\u2019s own name to every peer on your tailnet, so the name alone cannot tell your phone from anything else on it. You only paste the link once; the server swaps it for a cookie and drops it from the address bar.',
+  helpPhoneNotify:
+    'Optional — to be told when an agent starts needing you while the phone is in your pocket, start the server with somewhere to push and its address on your phone:',
+  helpPhoneNotifyNote:
+    'Subscribe to the topic in the ntfy app (or use --notify telegram:<chat_id> with the bot token in AGENT_COMMANDER_TELEGRAM_TOKEN). A push fires only when an agent becomes blocked while no tab is on screen, and only ever goes out — the tap opens the card here, and the answer still goes through it.',
   helpPhoneStep4: 'To stop sharing later, run:',
   helpPhoneAlt: 'Alternative, without Tailscale Serve — bind the tailnet address directly:',
   helpPhoneAltNote:
@@ -469,6 +479,7 @@ const ZH: Record<Key, string> = {
   connLive: '已连接',
   connConnecting: '连接中…',
   connReconnecting: '重新连接中…',
+  connUnreachable: '无法连接服务器——Tailscale 在线吗？',
   searchPlaceholder: '筛选代理…',
   searchLabel: '按名称、目录、分支或活动筛选代理',
   groupWaiting: '需要你处理',
@@ -500,6 +511,7 @@ const ZH: Record<Key, string> = {
   reachable: '终端可连接',
   ageBlockedTitle: '这是该 agent 等待你的时长，而不是它最后一次写入的时间。',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
+  descriptionTitle: '这个会话最近提出的要求，用它自己的话。',
   statusFromPane: '窗格静默',
   delegatesNone: '未委派任何子代理',
   delegatesUnknown: '子代理：无法判断',
@@ -526,6 +538,16 @@ const ZH: Record<Key, string> = {
   cardAnswer: '回答 →',
   tokensLabel: '输出 token',
   tokensSeen: '此对话记录中看到 {n}——非本次会话总量',
+  contextLabel: '上下文窗口',
+  contextFold: '已用 {pct}%（共 {size}），为 Claude Code {when}报告的数值',
+  contextFoldNoSize: '已用 {pct}%，为 Claude Code {when}报告的数值',
+  contextFace: '上下文 {pct}%',
+  contextFaceTitle: '上下文窗口已用 {pct}%——即将压缩。',
+  costLabel: '费用',
+  costFold: '迄今 {usd}——Claude Code 按标价自行估算，/clear 后归零',
+  sortContext: '上下文用量',
+  senseFullest: '最满',
+  senseEmptiest: '最空',
   sessionNameLabel: '会话',
   pathLabel: '目录',
   delegatesMoving: '仍有 {n} 个在推进，因此不是停滞',
@@ -535,11 +557,6 @@ const ZH: Record<Key, string> = {
   stallQuestionTitle:
     '此代理因为委派而静默，且每个子代理也都静默。静默不等于「已完成」——没有任何记录表明它结束了。值得看一眼。',
   trailLabel: '写入 {worked}，静默 {silent}',
-  helpSectionKinds: '其他助手 CLI',
-  helpKindsIntro:
-    'Kiro CLI 会话会与 Claude Code 会话一同显示，通过 tmux 发现并带有标记。它们可以像其他助手一样接入终端，但没有本应用能读取的对话记录，因此没有对话、没有 token 统计，也没有“对话”标签页。',
-  helpKindsStatus:
-    '它们的状态标记为“窗格静默”并以虚线勾勒，因为这是根据终端近期是否有输出推断的，而非助手自报。同理，它们永远不会显示“等待中”——停在提示符前和已经完成，从外部看是一样的。',
   statusInferredTitle:
     '根据该助手终端近期是否有输出推断得出。它不像 Claude Code 那样自报状态，因此永远不会显示“等待中”——停在提示符前和已经完成，从外部看是一样的。',
   noTranscript: '此助手没有本应用能读取的对话记录。',
@@ -592,6 +609,11 @@ const ZH: Record<Key, string> = {
   peekLabel: '该 agent 终端的底部，当前实时画面。只读。',
   answerPlan: '待审阅的计划',
   answerAbout: '它正在询问的内容',
+  answerCommand: '它将要运行的命令',
+  answerSummary: '代理对它的描述：{text}',
+  answerSandboxOff: '这将在沙箱之外运行。',
+  answerProgress: '第 {n} 个问题，共 {total} 个',
+  answerRead: '这些标签是刚从终端读取的——是终端此刻正在编号的选项，而不是代理写下的内容。发送的是编号。',
   uptimePrefix: '已运行',
   you: '你',
   agent: '代理',
@@ -712,6 +734,9 @@ const ZH: Record<Key, string> = {
   helpPhoneStep3: '然后在手机的 Safari 中打开：',
   helpPhoneStep3Note:
     '需要在末尾加上令牌，`--print-url` 会打印可直接粘贴的完整链接。令牌是必需的：Tailscale Serve 会把本机自己的名字转发给 tailnet 上的每一台设备，只凭名字无法把你的手机和其它设备区分开。链接只需粘贴一次，服务会把它换成 Cookie 并从地址栏中移除。',
+  helpPhoneNotify: '可选——想在手机放在口袋里时得知有助手开始等你，启动服务器时给它一个推送地址和它在手机上的地址：',
+  helpPhoneNotifyNote:
+    '在 ntfy 应用里订阅该主题（或改用 --notify telegram:<chat_id>，机器人令牌放在 AGENT_COMMANDER_TELEGRAM_TOKEN）。只有当某个助手在没有标签页显示在屏幕上时进入等待，才会推送，且只会向外发送——点开推送回到这里的卡片，回答仍经由卡片完成。',
   helpPhoneStep4: '之后想停止共享，运行：',
   helpPhoneAlt: '另一种方式，不用 Tailscale Serve —— 直接绑定 tailnet 地址：',
   helpPhoneAltNote:

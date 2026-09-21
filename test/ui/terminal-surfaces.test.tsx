@@ -1,5 +1,6 @@
 /**
- * An agent whose CLI keeps no transcript, across every surface that shows one.
+ * A session with no transcript — a plain terminal — across every surface that
+ * shows one.
  *
  * The Chat tab was hidden in `AgentDetail` and left in `FullscreenView`, one
  * click apart — so full screen offered a tab that flickered a route change and
@@ -43,13 +44,14 @@ vi.mock('../../src/web/components/LazyTerminal.tsx', () => ({
   LazyTerminal: () => <div data-testid="term-stub" />,
 }))
 
-const kiro = (over: Partial<Agent> = {}): Agent =>
+/** A plain shell this app opened: the one kind that keeps no transcript. */
+const shell = (over: Partial<Agent> = {}): Agent =>
   agent({
-    sessionId: 'tmux:kiro-1787832510',
-    agentKind: 'kiro',
+    sessionId: 'tmux:term-1787832900',
+    agentKind: 'terminal',
     name: 'folio',
-    paneId: '%302',
-    tmuxSession: 'kiro-1787832510',
+    paneId: '%305',
+    tmuxSession: 'term-1787832900',
     ...over,
   })
 
@@ -66,7 +68,7 @@ function fullscreen(subject: Agent, tab: 'chat' | 'attach' = 'attach') {
 
 describe('full screen hides the Chat tab it cannot fill', () => {
   it('offers no Chat tab for an agent with no transcript', () => {
-    fullscreen(kiro())
+    fullscreen(shell())
     expect(screen.queryByTestId('fullscreen-tab-chat')).toBeNull()
     expect(screen.queryByTestId('fullscreen-tab-attach')).not.toBeNull()
   })
@@ -82,7 +84,7 @@ describe('full screen hides the Chat tab it cannot fill', () => {
    * exact state the hidden tab exists to prevent.
    */
   it('shows the terminal even when the route still says chat', () => {
-    fullscreen(kiro(), 'chat')
+    fullscreen(shell(), 'chat')
     expect(screen.queryByTestId('term-stub')).not.toBeNull()
   })
 })
@@ -92,7 +94,7 @@ describe('the detail panel agrees with full screen', () => {
     resetStore()
     render(
       <MemoryRouter>
-        <AgentDetail agent={kiro()} tab="attach" sheet={false} onTab={noop} onClose={noop} />
+        <AgentDetail agent={shell()} tab="attach" sheet={false} onTab={noop} onClose={noop} />
       </MemoryRouter>,
     )
     expect(screen.queryByTestId('tab-chat')).toBeNull()
@@ -104,7 +106,7 @@ describe('controls that would type a Claude command are not offered', () => {
     resetStore()
     render(
       <MemoryRouter>
-        <AgentControls agent={kiro({ status: 'idle' })} />
+        <AgentControls agent={shell({ status: 'idle' })} />
       </MemoryRouter>,
     )
     expect(screen.queryByTestId('close-agent')).not.toBeNull()
@@ -130,7 +132,7 @@ describe('controls that would type a Claude command are not offered', () => {
     resetStore()
     render(
       <MemoryRouter>
-        <ChatControls agent={kiro({ status: 'idle' })} />
+        <ChatControls agent={shell({ status: 'idle' })} />
       </MemoryRouter>,
     )
     expect(screen.queryByTestId('shift-tab')).toBeNull()

@@ -47,6 +47,12 @@
         "pid": 4422,
         "command": "cargo test",
         "since": 1786599340000
+      },
+      "usage": {
+        "contextPct": 62.0,
+        "contextSize": 200000,
+        "costUsd": 4.12,
+        "at": 1786599980000
       }
     },
     {
@@ -87,7 +93,13 @@
       "lastActivityAt": 1786599100000,
       "tokens": 41200,
       "subagents": 2,
-      "delegating": true
+      "delegating": true,
+      "usage": {
+        "contextPct": 91.0,
+        "contextSize": 200000,
+        "costUsd": 7.8,
+        "at": 1786599400000
+      }
     },
     {
       "sessionId": "mock-long-name",
@@ -123,7 +135,13 @@
       "tmuxSession": "claude-mock-e",
       "activity": "Repo is back to normal. `main` and `skills-find-suitable` both build.",
       "lastActivityAt": 1786599040000,
-      "tokens": 59800
+      "tokens": 59800,
+      "usage": {
+        "contextPct": 18.0,
+        "contextSize": 200000,
+        "costUsd": 0.41,
+        "at": 1786597000000
+      }
     },
     {
       "sessionId": "mock-idle-ce",
@@ -195,28 +213,6 @@
       "tokens": 2010
     },
     {
-      "sessionId": "tmux:kiro-1787832510",
-      "pid": 84638,
-      "name": "folio",
-      "cwd": "/Users/demo/Projects/folio",
-      "folder": "folio",
-      "status": "busy",
-      "statusInferred": true,
-      "agentKind": "kiro",
-      "kind": "interactive",
-      "startedAt": 1786599100000,
-      "gitBranch": "main",
-      "paneId": "%302",
-      "tmuxSession": "kiro-1787832510",
-      "lastActivityAt": 1786599996000,
-      "derivedName": true,
-      "running": {
-        "pid": 84639,
-        "command": "npm test",
-        "since": 1786599760000
-      }
-    },
-    {
       "sessionId": "mock-plan",
       "pid": 61402,
       "name": "plan-the-migration",
@@ -252,6 +248,24 @@
       "activity": "Bash: rm -rf dist && npm run build",
       "lastActivityAt": 1786599970000,
       "tokens": 3910
+    },
+    {
+      "sessionId": "mock-set",
+      "pid": 62210,
+      "name": "stock-the-shop",
+      "cwd": "/Users/demo/Projects/shopfront",
+      "folder": "shopfront",
+      "status": "waiting",
+      "waitingFor": "dialog open",
+      "agentKind": "claude",
+      "kind": "interactive",
+      "startedAt": 1786598700000,
+      "version": "2.1.278",
+      "paneId": "%86",
+      "tmuxSession": "claude-mock-set",
+      "activity": "AskUserQuestion: Colour, Sizes",
+      "lastActivityAt": 1786599910000,
+      "tokens": 6480
     },
     {
       "sessionId": "mock-gone",

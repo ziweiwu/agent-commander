@@ -2,7 +2,7 @@ import { useEffect, useRef, type CSSProperties } from 'react'
 import type { Agent } from '../../shared/types.ts'
 import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
-import { useStore } from '../store/store.ts'
+import { useStore, type Conn, type Reach } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import { countByGroup, inScope, isTerminal, type StatusFilter } from '../lib/filter.ts'
 import { successorOf } from '../lib/succession.ts'
@@ -10,6 +10,7 @@ import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
 import { useVisualViewport } from '../hooks/useVisualViewport.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import type { Key } from '../lib/i18n.ts'
 import { FleetList } from './FleetList.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
 import { NewAgentDialog } from './NewAgentDialog.tsx'
@@ -27,6 +28,17 @@ function TreePoll() {
 }
 
 /** Shell: topbar, layout, global keyboard. Routes render through `Outlet`. */
+/**
+ * What the chip says about the connection. A socket that is down over a
+ * server that cannot be reached is the tunnel, on a phone, and "reconnecting…"
+ * would promise what nothing here can do (INV-11).
+ */
+function connCaption(conn: Conn, reach: Reach): Key {
+  if (conn === 'open') return 'connLive'
+  if (reach === 'unreachable') return 'connUnreachable'
+  return conn === 'closed' ? 'connReconnecting' : 'connConnecting'
+}
+
 export function App() {
   const t = useTranslate()
   const navigate = useNavigate()
@@ -43,6 +55,7 @@ export function App() {
 
   const mock = useStore((s) => s.mock)
   const conn = useStore((s) => s.conn)
+  const reach = useStore((s) => s.reach)
   const toast = useStore((s) => s.toast)
   const selected = useStore((s) => s.selected)
   const fullscreen = useStore((s) => s.fullscreen)
@@ -184,8 +197,13 @@ export function App() {
         </Button>
         <NotifyButton />
         <SettingsMenu />
-        <div className={styles.conn} data-testid="connection-status" data-state={conn}>
-          {t(conn === 'open' ? 'connLive' : conn === 'closed' ? 'connReconnecting' : 'connConnecting')}
+        <div
+          className={styles.conn}
+          data-testid="connection-status"
+          data-state={conn}
+          data-reach={conn === 'open' ? undefined : reach}
+        >
+          {t(connCaption(conn, reach))}
         </div>
       </header>
 

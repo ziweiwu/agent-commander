@@ -5,7 +5,7 @@ Read this before changing anything.
 
 ## What this is
 
-A local web dashboard over every Claude Code and Kiro CLI session on the
+A local web dashboard over every Claude Code session on the
 machine — status, folder, what each one is doing — with a terminal you can
 answer a blocked agent from, including from a phone over Tailscale.
 
@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1391 tests: 626 Rust (the server) + 765 vitest (the web app)
+npm test              # 1441 tests: 648 Rust (the server) + 793 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 399 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 401 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -202,10 +202,12 @@ session. `qa-sweep.sh` refuses that port outright and `--mock` on it is rejected
 
 `npm run mock` serves a deliberately awkward fixture fleet — fifteen sessions,
 five sharing a home directory, one name too long for its card, five never
-prompted, one Kiro session so the degraded card an agent with no transcript
-gets is on screen rather than only in a test, all three shapes an agent blocks
+prompted, all three shapes an agent blocks
 on (a question with options, a plan awaiting approval, a tool awaiting
-permission — INV-16's three), one whose pane has exited, so the Attach tab's
+permission — INV-16's three) plus a two-question set whose pane moves under
+the keys the answer card sends (`mock-set`, reserved for
+`e2e/question-set.spec.ts` the way `mock-idle-db` is reserved for `/clear`),
+one whose pane has exited, so the Attach tab's
 dead-pane notice is a thing you can look at, and one plain terminal — which is
 *not* on screen at rest, because terminals are out of the fleet's scope until
 the chip admits them, and a filter with nothing behind it cannot be looked at. `--mock-empty` serves the
@@ -276,6 +278,24 @@ commit.
 
 ## Things that have already bitten
 
+- **Kiro CLI support was removed, deliberately.** The app once listed Kiro
+  sessions found through tmux — by session name or process name — as a
+  degraded card with no conversation. Every flag on that row was a claim about
+  another program's interface checked against no version, and it went stale
+  for a whole major version before anybody looked. Rather than carry a second
+  CLI it could only half-read, the fleet is Claude Code plus this app's own
+  terminals; `agent_kinds.rs` has two rows and `tmux_agents` recognises a pane
+  only by the marker this app wrote on it. Do not re-add a kind by name or
+  process matching without a reader for what it writes.
+- **The bridge writes two things now.** `scripts/statusline-bridge.mjs` spills
+  `rate_limits` to `rate-limits.json` as before and, per session, the context
+  percentage and cost to `sessions/<session_id>.json`; `usage.rs` reads the
+  second inside the enrichment pass. `--install-statusline` is unchanged.
+- **Push goes out through `--notify`, and only out.** `push.rs` posts to an
+  ntfy topic or a Telegram bot when an agent *becomes* waiting while no browser
+  reports itself visible (INV-14, server-side); `--notify-link` is this app's
+  address on the phone so the push opens the card. It is off unless the flag is
+  given, and there is no channel in mock mode to point a review agent at.
 - **`bin` points at a launcher, not at the server.** The server is a Rust
   binary, and `bin` has to name something node can run, so
   `scripts/launch.mjs` finds `rust/target/release/agent-commander` and execs it.
@@ -355,9 +375,24 @@ commit.
   goal-clear and a trap for any new patch producer. A new `AgentPatch` field
   has to be named in four places or it silently does nothing: `apply` and
   `is_empty` in `sources.rs`, the `overwrite_named_fields!` list in
-  `tmux_source.rs`, and `card_fields` plus `differs` in `enrich.rs`. `running`
+  `tmux_source.rs`, and `card_fields` plus `differs` in `enrich.rs`. `usage`
   was the last one added and touched all four.
-- **`tokens` is output tokens only**, accumulated per tail from a 256 KiB
+
+  **`description` was the next one added and touched three, which cost an
+  afternoon.** It was produced correctly, `apply` would have written it, and
+  `merge_patch` did not list it — so it was dropped in between, every card
+  showed nothing, and the whole suite stayed green, because there is no
+  compiler and no test that reads a field's journey end to end. The half hour
+  that went into proving the *parser* was right was spent on the one component
+  that had never been wrong.
+
+  Only `card_fields` is safe by construction: it is a struct literal with no
+  `..` rest, so a new field is a compile error there. The other three are now
+  held by `sources::tests::every_patch_field_is_named_by_the_three_functions_that_carry_it`,
+  which parses the struct and fails naming the field and the function that
+  forgot it. Verified the way a guard has to be — by deleting `description`
+  from `merge_patch` and watching it go red.
+- **`tokens` is output tokens only**, accumulated per tail from a bounded
   backfill — not the session's spend, despite being presented as cost and used
   as a sort key.
 - **A half-open socket kept polling for a browser that was gone.** A phone
@@ -751,3 +786,15 @@ idea does not get re-proposed as a new one.
 - Explain *why*, not just what. The body is where the reasoning goes.
 - **Never add a `Co-Authored-By: Claude` or any AI-attribution trailer.**
 - Commit or push only when asked.
+
+**`.cleancode.json` turns `magic-number` down to a warning, and only that
+rule.** The pre-commit hook relaxes its thresholds for test code, but it decides
+what is test code from the *path* — so `test/ui/*.test.tsx` is relaxed and a
+`#[cfg(test)] mod tests` inside `rust/src/usage.rs` can never be, because Rust
+does not put its tests in a test path. Of the 28 findings that blocked the
+0.17.0 release, 16 were exactly that: assertion literals a line below the
+fixture they round-trip, where lifting the number into a shared constant would
+stop the test from catching a transcription error rather than help it. The rest
+were structural — a byte offset into a literal buffer, `splitn(4, '/')` for a
+URL path, the `0.01` named by the `'<$0.01'` beside it. Every other rule still
+blocks, and the hook's secret scan cannot be disarmed from in here at all.

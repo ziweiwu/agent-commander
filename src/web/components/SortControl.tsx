@@ -7,6 +7,7 @@ import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 
 const SORT_KEY: Record<SortKey, Key> = {
   recent: 'sortRecent',
+  context: 'sortContext',
   tokens: 'sortTokens',
   duration: 'sortDuration',
   name: 'sortName',

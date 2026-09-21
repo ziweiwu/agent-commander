@@ -103,12 +103,12 @@ tmux list-panes -a            ──3s────────────► Tm
 ```
 
 Two providers behind one `AgentSource`. `Registry` finds Claude sessions from
-the files Claude Code writes about itself; `TmuxProvider` finds every other CLI
-by asking tmux what is running, because they write nothing this app can use —
-Kiro's own `~/.kiro/sessions/cli/<uuid>.json` records neither the pane it runs
-in nor whether it is blocked, so it can be neither attached to nor sorted from.
-Claude is listed first and wins any clash over a tmux session, since what an
-agent reports about itself always beats what this app can infer from a pane.
+the files Claude Code writes about itself; `TmuxProvider` finds the plain
+terminals this app opened by asking tmux what is running, since a shell writes
+nothing about itself and the marker on its session is the only way to tell it
+from a husk. Claude is listed first and wins any clash over a tmux session,
+since what an agent reports about itself always beats what this app can infer
+from a pane.
 
 The tmux side is one `list-panes -a` for the whole machine — O(1) in agents, and
 it reads no pane content. A row is an agent only if its command is not a shell:
@@ -138,7 +138,7 @@ otherwise `unknown`. See "Where it is fragile", item 14.
 ### Transcript — what they are doing
 
 ```
-~/.claude/projects/**/<sid>.jsonl ──5s, one tail per agent──► 11 card fields
+~/.claude/projects/**/<sid>.jsonl ──5s, one tail per agent──► 12 card fields
                                   ──1s, focused tab only────► TimelineEvent[]
 <sid>/subagents/*.jsonl (mtime)  ─────────────────────────► delegating + clock
 <sid>/subagents/*.meta.json      ──3s, forest view only───► AgentTree
@@ -151,6 +151,18 @@ still move, and one per focused tab every `TIMELINE_MS = 1000` (`routes.ts:43`)
 for the conversation. They hold separate byte offsets; this is deliberate, and
 `mock.rs` documents the bug that appears when a single drain-on-read queue is
 shared between them.
+
+`describe.rs` is a leaf off that parse and the one field on a card that is a
+quotation. `ai-title` is written once per session and never revised — 236
+transcripts here, one distinct value each — so a card's name describes the
+opening prompt for as long as the session runs. The describer answers "what is
+this session on *now*" by keeping the most recent prompt a person actually
+typed that named something: `origin.kind == "human"` to tell a person from the
+SDK, a hook or a compaction summary, then a word-count floor and a stop-list to
+drop the "ok"s and "do it"s that are most of what gets typed at a working
+agent. It calls nothing and composes nothing — a description is a clipped line
+of the user's own text or it is absent (INV-11) — so it costs one pass over
+records the tail had already parsed, and no extra read.
 
 The most important derivation in the app is delegation (`transcript.ts:363`). An
 agent that hands work to a subagent stops writing its own transcript at that
@@ -517,9 +529,14 @@ compares size, `status`, `name`, `cwd`, `waitingFor` and `paneId` — so `activi
 raising an error.
 
 **4. `tokens` is not the session's spend.** It is output tokens only
-(`transcript.ts:244`), accumulated per tail, from a backfill capped at
-`BACKFILL_BYTES = 256 * 1024` (`transcript.ts:17`). The card presents it as the
-agent's cost and it is a sort key.
+(`transcript.rs`), accumulated per tail, from a bounded backfill — the last
+`BACKFILL_MESSAGES` messages, at least `BACKFILL_BYTES` and at most
+`BACKFILL_SCAN_BYTES` of the file — and the card says so. The honest figures sit
+beside it now: `usage.rs` reads the context-window percentage and the cost
+Claude Code reports to its statusLine, per session, off the bridge's
+`sessions/<id>.json` — so the sort-by-tokens question ("which one is burning
+the window") has a real answer in the `context` sort, and this entry is kept
+only because `tokens` itself is still what it was.
 
 **5. `BASE_MS = 140` (`pane-hub.ts:40`) is calibrated to a cost that no longer
 exists.** It was chosen when a frame needed two round trips at p50 141ms; through

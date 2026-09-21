@@ -183,6 +183,17 @@ describe('relative time', () => {
   })
 })
 
+describe('context', () => {
+  const withContext = (name: string, pct?: number): Agent =>
+    agent({ sessionId: name, name, usage: pct === undefined ? undefined : { contextPct: pct, at: 1 } })
+
+  it('puts the fullest window first, and one with no reading last either way', () => {
+    const list = [withContext('half', 50), withContext('none'), withContext('full', 91)]
+    expect(sortAgents(list, 'context').map((a) => a.name)).toEqual(['full', 'half', 'none'])
+    expect(sortAgents(list, 'context', 'asc').map((a) => a.name)).toEqual(['half', 'full', 'none'])
+  })
+})
+
 describe('tokens', () => {
   it('abbreviates thousands and millions', () => {
     expect(tokens(950)).toBe('950')

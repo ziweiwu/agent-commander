@@ -50,7 +50,16 @@ tmuxSession?: string, attachBlockedReason?: string, activity?: string, lastActiv
 /**
  * Handed work to a subagent and doing nothing itself until it returns.
  */
-delegating?: boolean, aiTitle?: string, lastPrompt?: string, derivedName?: boolean, permissionMode?: string, model?: string, goal?: GoalState, 
+delegating?: boolean, aiTitle?: string, lastPrompt?: string, derivedName?: boolean, permissionMode?: string, 
+/**
+ * What the session is working on now, in the user's own words.
+ *
+ * `ai_title` above is written once, from the opening exchange, and never
+ * revisited, so a long session keeps a name it outgrew. This is the most
+ * recent prompt that named anything, and it moves as the work moves. Read
+ * from the transcript, never generated (`describe.rs`).
+ */
+description?: string, model?: string, goal?: GoalState, 
 /**
  * The tool process a busy agent is inside, read from the process table.
  *
@@ -61,7 +70,15 @@ delegating?: boolean, aiTitle?: string, lastPrompt?: string, derivedName?: boole
  * payload is byte-stable for the life of the process (INV-4) and the
  * browser does the arithmetic.
  */
-running?: RunningProcess, };
+running?: RunningProcess, 
+/**
+ * How full the session's context window is, and what it has cost, as
+ * Claude Code itself reports them to its statusLine — bridged to a file
+ * per session and read back here. The one figure on a card with a real
+ * denominator: `tokens` above is output only, from a capped tail, and was
+ * once shown as spend (INV-11). Absent until the bridge has written.
+ */
+usage?: SessionUsage, };
 
 export type AgentStatus = "busy" | "idle" | "waiting" | "unknown";
 
@@ -80,7 +97,7 @@ unknown?: boolean, };
 
 export type ChangedRow = { row: number, text: string, };
 
-export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong" };
+export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong", visible?: boolean | null, } | { "type": "ping" };
 
 /**
  * `{ ok: true, detail? } | { ok: false, error }`
@@ -201,9 +218,42 @@ multiSelect?: boolean,
  */
 optionsDrawn?: boolean, 
 /**
- * How many questions this one call asks, when it asks more than one.
+ * How many questions of this call still follow the one on screen.
  */
 moreQuestions?: number, 
+/**
+ * Which question of a multi-question set this is, counted from zero.
+ *
+ * Only set for a set. The transcript writes every question of an
+ * `AskUserQuestion` call at once and nothing on disk says which one the
+ * picker is showing; the pane does, and this is what it said. Past the
+ * last question it is the count itself: the picker's review page, whose
+ * rows are read off the pane like any drawn dialog's.
+ */
+questionIndex?: number, 
+/**
+ * True when `options` were read off the pane rather than taken from the
+ * table of what Claude Code usually draws — a stronger claim than
+ * `options_drawn` alone, and still not the transcript's (INV-16).
+ */
+optionsRead?: boolean, 
+/**
+ * The agent's own one-line account of what the tool would do.
+ *
+ * For `Bash` this is the `description` field — the agent's claim, kept
+ * apart from `detail`, which is the command itself. Measured on this
+ * machine, 42.6% of Bash calls are several lines long and about half
+ * open with a `cd`, so a card showing only the first line was approving
+ * a directory change.
+ */
+summary?: string, 
+/**
+ * True when the call asks to run outside the sandbox
+ * (`dangerouslyDisableSandbox`). A materially different decision, and
+ * one the card could not say it was: 178 such calls on this machine went
+ * unmarked.
+ */
+sandboxOff?: boolean, 
 /**
  * Reference text: the plan under review, or the command being asked about.
  */
@@ -290,7 +340,17 @@ prompt?: PendingPrompt, } | { "type": "frame", frame: Frame, } | { "type": "hist
  * pane-exit case is the one state a viewer must react to
  * structurally, because INV-1 means there is no pty to report it.
  */
-kind?: ErrorKind, } | { "type": "ping" };
+kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" };
+
+/**
+ * One session's context-window usage and cost, from Claude Code's statusLine.
+ *
+ * `context_pct` is input tokens over `context_size`, as the CLI computes it;
+ * `cost_usd` is the CLI's own estimate at list price, which it resets on
+ * `/clear`. `at` is when the bridge wrote it, so the card can say how old a
+ * reading is rather than present it as now.
+ */
+export type SessionUsage = { contextPct?: number, contextSize?: number, costUsd?: number, at: number, };
 
 /**
  * One delegate in an agent's tree, and everything below it.

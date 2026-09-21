@@ -400,7 +400,7 @@ export function plainText(text: string): string {
  * arrived, one that cannot be got at, and one that is genuinely empty, and the
  * app spent its life claiming the third whenever the socket was open. It was
  * open for the whole of the window in which the server finds the transcript,
- * backfills up to 256 KiB of it and sends it — seconds, from a phone over
+ * backfills its tail and sends it — seconds, from a phone over
  * Tailscale — so the chat read "Nothing said yet" at agents mid-sentence.
  * `conn` was the wrong question: what the reader is waiting for is a
  * `timeline` frame, so that is what is asked about.

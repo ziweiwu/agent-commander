@@ -1,7 +1,7 @@
 {
   "name": "agent-commander",
   "short_name": "agents",
-  "description": "Every Claude Code and Kiro session on the machine — and which one needs you.",
+  "description": "Every Claude Code session on the machine — and which one needs you.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

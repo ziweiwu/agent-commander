@@ -235,6 +235,7 @@ fn merge_patch(dst: &mut AgentPatch, src: AgentPatch) {
         delegating,
         ai_title,
         last_prompt,
+        description,
         permission_mode,
         model,
         goal,
@@ -243,6 +244,7 @@ fn merge_patch(dst: &mut AgentPatch, src: AgentPatch) {
         git_branch,
         cwd,
         running,
+        usage,
     );
 }
 
@@ -415,17 +417,18 @@ mod tests {
         }
     }
 
-    fn kiro_pane(session: &str) -> PaneFacts {
+    /// A terminal this app opened, the one kind of session tmux alone yields.
+    fn shell_pane(session: &str) -> PaneFacts {
         PaneFacts {
             pane_id: "%302".into(),
             session: session.into(),
             pid: 84_638,
-            command: "kiro-cli".into(),
+            command: "zsh".into(),
             activity_at: now_ms() / 1_000,
             window_panes: 1,
             dead: false,
             cwd: "/Users/ziweiwu/Projects/folio".into(),
-            marker: String::new(),
+            marker: crate::pane::MARKER_TERMINAL.into(),
         }
     }
 
@@ -510,17 +513,17 @@ mod tests {
 
     #[tokio::test]
     async fn lists_the_agents_the_first_read_found() {
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let provider = TmuxProvider::new(facts.reader());
         provider.start().await.unwrap();
         let ids: Vec<_> = provider.list().into_iter().map(|a| a.session_id).collect();
-        assert_eq!(ids, vec!["tmux:kiro-1787832510"]);
+        assert_eq!(ids, vec!["tmux:term-1787832510"]);
         provider.stop();
     }
 
     #[tokio::test]
     async fn broadcasts_only_when_the_fleet_actually_moved() {
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let provider = TmuxProvider::new(facts.reader());
         provider.start().await.unwrap();
 
@@ -534,7 +537,7 @@ mod tests {
         provider.refresh().await;
         assert_eq!(hits.load(Ordering::SeqCst), 0);
 
-        facts.set(vec![kiro_pane("kiro-1787832510"), kiro_pane("kiro-1787900000")]);
+        facts.set(vec![shell_pane("term-1787832510"), shell_pane("term-1787900000")]);
         provider.refresh().await;
         assert_eq!(hits.load(Ordering::SeqCst), 1);
         provider.stop();
@@ -544,7 +547,7 @@ mod tests {
     /// blanking the fleet would read on screen exactly like them all exiting.
     #[tokio::test]
     async fn inv5_a_failed_read_keeps_the_last_known_fleet() {
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let provider = TmuxProvider::new(facts.reader());
         provider.start().await.unwrap();
         assert_eq!(provider.list().len(), 1);
@@ -566,7 +569,7 @@ mod tests {
     /// stops reading rather than leaving a timer running against nothing.
     #[tokio::test]
     async fn inv4_stopping_the_provider_stops_the_polling() {
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let provider = TmuxProvider::with_tick(facts.reader(), BRISK_POLL);
         provider.start().await.unwrap();
         tokio::time::sleep(SEVERAL_POLLS).await;
@@ -583,7 +586,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_agent_it_publishes_names_its_kind() {
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let provider = TmuxProvider::new(facts.reader());
         provider.start().await.unwrap();
         for a in provider.list() {
@@ -596,8 +599,8 @@ mod tests {
 
     #[tokio::test]
     async fn claude_wins_a_tmux_session_both_providers_claim() {
-        let first = StaticProvider::new(vec![claude("uuid-1", Some("kiro-1787832510"))]);
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let first = StaticProvider::new(vec![claude("uuid-1", Some("term-1787832510"))]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let second: Arc<dyn AgentProvider> = Arc::new(TmuxProvider::new(facts.reader()));
         second.start().await.unwrap();
 
@@ -609,14 +612,14 @@ mod tests {
     #[tokio::test]
     async fn keeps_a_tmux_agent_no_claude_session_claims() {
         let first = StaticProvider::new(vec![claude("uuid-1", Some("claude-42"))]);
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let second: Arc<dyn AgentProvider> = Arc::new(TmuxProvider::new(facts.reader()));
         second.start().await.unwrap();
 
         let source = CompositeSource::new(vec![first, second]);
         let mut ids: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
         ids.sort();
-        assert_eq!(ids, vec!["tmux:kiro-1787832510", "uuid-1"]);
+        assert_eq!(ids, vec!["tmux:term-1787832510", "uuid-1"]);
     }
 
     /// An agent with no tmux session can never be shadowed by one, however
@@ -700,12 +703,7 @@ mod tests {
     }
 
     fn terminal_pane(session: &str) -> PaneFacts {
-        PaneFacts {
-            pane_id: "%85".into(),
-            command: "zsh".into(),
-            marker: crate::pane::MARKER_TERMINAL.into(),
-            ..kiro_pane(session)
-        }
+        PaneFacts { pane_id: "%85".into(), ..shell_pane(session) }
     }
 
     fn placeholder(tmux_session: &str) -> Agent {
@@ -781,8 +779,8 @@ mod tests {
     #[tokio::test]
     async fn a_real_claude_session_still_wins_over_the_sweep() {
         let source = composite_of(
-            vec![claude("uuid-1", Some("kiro-1"))],
-            vec![kiro_pane("kiro-1")],
+            vec![claude("uuid-1", Some("term-1"))],
+            vec![shell_pane("term-1")],
         )
         .await;
         let found: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
@@ -795,7 +793,7 @@ mod tests {
     #[async_trait]
     impl AgentSource for OneAgent {
         fn list(&self) -> Vec<Agent> {
-            vec![claude("uuid-1", Some("kiro-1787832510"))]
+            vec![claude("uuid-1", Some("term-1787832510"))]
         }
         fn get(&self, session_id: &str) -> Option<Agent> {
             self.list().into_iter().find(|a| a.session_id == session_id)
@@ -818,7 +816,7 @@ mod tests {
         let claude_source = Arc::new(OneAgent(Listeners::new()));
         let bridged: Arc<dyn AgentProvider> =
             Arc::new(SourceAsProvider(claude_source.clone() as Arc<dyn AgentSource>));
-        let facts = FakeFacts::new(vec![kiro_pane("kiro-1787832510")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
         let tmux: Arc<dyn AgentProvider> = Arc::new(TmuxProvider::new(facts.reader()));
 
         let source = CompositeSource::new(vec![bridged, tmux]);

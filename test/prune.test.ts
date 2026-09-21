@@ -93,25 +93,25 @@ describe('unusedAgents', () => {
  *
  * `isUnused` reads "no activity line, no tokens, no title, no last prompt" as
  * evidence a session was opened and forgotten. Every one of those signals comes
- * out of a transcript, so for a Kiro agent they are absent by construction —
- * absence of evidence, not evidence of disuse. Without the guard, a Kiro
- * session working away in its pane matches every test and is offered to a
+ * out of a transcript, so for a terminal they are absent by construction —
+ * absence of evidence, not evidence of disuse. Without the guard, a shell
+ * working away in its pane matches every test and is offered to a
  * button whose whole job is to close it.
  */
 describe('an agent with no transcript is never prunable', () => {
-  const kiro = agent({
-    sessionId: 'tmux:kiro-1787832510',
-    agentKind: 'kiro',
+  const shell = agent({
+    sessionId: 'tmux:term-1787832900',
+    agentKind: 'terminal',
     status: 'idle',
     paneId: '%302',
   })
 
   it('is not offered for pruning, even with every transcript field empty', () => {
-    expect(isUnused(kiro)).toBe(false)
+    expect(isUnused(shell)).toBe(false)
   })
 
   it('is not offered even once its pane has been quiet for a while', () => {
-    expect(isUnused({ ...kiro, lastActivityAt: undefined })).toBe(false)
+    expect(isUnused({ ...shell, lastActivityAt: undefined })).toBe(false)
   })
 
   // The same shape of Claude agent still is, so the guard is not just off.

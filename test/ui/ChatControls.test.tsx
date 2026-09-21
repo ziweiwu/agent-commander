@@ -422,7 +422,7 @@ describe('clear and compact from the composer strip', () => {
   // INV-7: these type a Claude Code slash command. For another CLI they are not
   // a disabled feature but a wrong one.
   it('does not offer them for a CLI that takes no slash commands', () => {
-    renderApp(<ChatControls agent={agent({ sessionId: 'a', agentKind: 'kiro', paneId: '%1' })} />)
+    renderApp(<ChatControls agent={agent({ sessionId: 'a', agentKind: 'terminal', paneId: '%1' })} />)
     expect(screen.queryByTestId('clear-agent')).toBeNull()
     expect(screen.queryByTestId('compact-agent')).toBeNull()
   })

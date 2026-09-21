@@ -23,6 +23,7 @@ use crate::sources::{History,
 };
 use crate::transcript::drawn_choices;
 use crate::types::{
+    SessionUsage,
     now_ms, Agent, AgentStatus, AgentTree, GoalState, PendingPrompt, PromptOption, RateLimits,
     RunningProcess, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
 };
@@ -44,6 +45,9 @@ const ESC: &str = "\u{001b}[";
 /// mock frames draw that dialog (see `MockPanes::capture`).
 const PLAN_PANE: &str = "%82";
 const PERMISSION_PANE: &str = "%83";
+/// The pane of the fixture blocked on a two-question set, whose frames follow
+/// the picker as the keys the answer path sends move it (see `Picker`).
+const SET_PANE: &str = "%86";
 
 /// How often `--mock-transitions` moves the blocked fixture. Slow enough to
 /// watch a card change, fast enough that a review does not have to wait for it.
@@ -79,9 +83,9 @@ const IDLE_CE_PID: i64 = 50893;
 const IDLE_DB_PID: i64 = 53848;
 const FRESH_PID: i64 = 2330;
 const HEADLESS_PID: i64 = 6556;
-const KIRO_PID: i64 = 84638;
 const PLAN_PID: i64 = 61402;
 const PERMISSION_PID: i64 = 61577;
+const SET_PID: i64 = 62210;
 const GONE_PID: i64 = 9034;
 const TERMINAL_PID: i64 = 71255;
 /// The one fixture pane tmux reports as dead: the agent's process has exited
@@ -113,9 +117,9 @@ fn fixtures() -> Vec<Agent> {
         idle_under_its_last_prompt(),
         never_prompted(),
         headless_outside_tmux(),
-        kiro_seen_only_from_tmux(),
         blocked_on_a_plan(),
         blocked_on_a_permission(),
+        blocked_on_a_set(),
         whose_pane_has_exited(),
         a_plain_terminal(),
     ]
@@ -204,6 +208,33 @@ fn blocked_on_a_permission() -> Agent {
     }
 }
 
+/// An agent blocked on a two-question `AskUserQuestion` set: a single-select,
+/// then a multi-select — the shape 45% of this machine's questions take, and
+/// the one the card could not finish (TODO §13a, §11). Its pane draws the
+/// picker as Claude Code 2.1.278 draws it and moves with the keys sent to it,
+/// so `npm run e2e` can answer the set to the end from the Chat tab.
+fn blocked_on_a_set() -> Agent {
+    Agent {
+        session_id: "mock-set".into(),
+        pid: SET_PID,
+        name: "stock-the-shop".into(),
+        cwd: "/Users/demo/Projects/shopfront".into(),
+        folder: "shopfront".into(),
+        status: AgentStatus::Waiting,
+        waiting_for: Some("dialog open".into()),
+        kind: "interactive".into(),
+        started_at: START - 1_300_000,
+        version: Some("2.1.278".into()),
+        pane_id: Some(SET_PANE.into()),
+        tmux_session: Some("claude-mock-set".into()),
+        activity: Some("AskUserQuestion: Colour, Sizes".into()),
+        last_activity_at: Some(START - 90_000),
+        tokens: Some(6_480),
+        agent_kind: CLAUDE_KIND.into(),
+        ..Default::default()
+    }
+}
+
 /// An agent whose pane has ended. INV-1 forbids the pty that would report an
 /// exit, so the frame path finds out from `display-message` the way it would
 /// for real: `meta` reports the pane dead, and the Attach tab has to say so
@@ -275,6 +306,14 @@ fn working_towards_a_rejected_goal() -> Agent {
         activity: Some("Task → Rerun the exhaustive sweep against fixed code".into()),
         last_activity_at: Some(START - 12_000),
         tokens: Some(111_800),
+        // What the bridge would have written for it: a window over half full
+        // and a real cost, so the fold has both figures to show.
+        usage: Some(SessionUsage {
+            context_pct: Some(62.0),
+            context_size: Some(200_000),
+            cost_usd: Some(4.12),
+            at: START - 20_000,
+        }),
         subagents: Some(BUSY_SUBAGENT_COUNT),
         // Working towards a goal that has already been evaluated once and
         // rejected: the state the goal control has to render well, since it
@@ -360,6 +399,14 @@ fn a_family_that_has_gone_quiet() -> Agent {
         delegating: Some(true),
         subagents: Some(2),
         tokens: Some(41_200),
+        // Past the mark where the face says so: the one card a reader would
+        // sort to the top to see what is about to compact.
+        usage: Some(SessionUsage {
+            context_pct: Some(91.0),
+            context_size: Some(200_000),
+            cost_usd: Some(7.80),
+            at: START - 600_000,
+        }),
         agent_kind: CLAUDE_KIND.into(),
         ..Default::default()
     }
@@ -409,6 +456,12 @@ fn idle_in_the_home_directory() -> Agent {
         ),
         last_activity_at: Some(START - 960_000),
         tokens: Some(59_800),
+        usage: Some(SessionUsage {
+            context_pct: Some(18.0),
+            context_size: Some(200_000),
+            cost_usd: Some(0.41),
+            at: START - 3_000_000,
+        }),
         pane_id: Some("%72".into()),
         tmux_session: Some("claude-mock-e".into()),
         agent_kind: CLAUDE_KIND.into(),
@@ -510,42 +563,6 @@ fn headless_outside_tmux() -> Agent {
         last_activity_at: Some(START - 60_000),
         tokens: Some(2_010),
         agent_kind: CLAUDE_KIND.into(),
-        ..Default::default()
-    }
-}
-
-/// A Kiro session, discovered from tmux rather than from a session file it
-/// wrote about itself.
-///
-/// Here so the degraded card is on screen and not only in a test. It has no
-/// transcript, so there is no chat to read and no slash command that may be
-/// typed at it — and its status is `statusInferred`, because all this app knows
-/// is that the pane produced output lately (INV-11). That is a far weaker claim
-/// than a Claude session's "waiting, dialog open" wearing the same word.
-fn kiro_seen_only_from_tmux() -> Agent {
-    Agent {
-        session_id: "tmux:kiro-1787832510".into(),
-        pid: KIRO_PID,
-        name: "folio".into(),
-        derived_name: Some(true),
-        cwd: "/Users/demo/Projects/folio".into(),
-        folder: "folio".into(),
-        status: AgentStatus::Busy,
-        status_inferred: Some(true),
-        agent_kind: "kiro".into(),
-        kind: "interactive".into(),
-        started_at: START - 900_000,
-        git_branch: Some("main".into()),
-        pane_id: Some("%302".into()),
-        tmux_session: Some("kiro-1787832510".into()),
-        last_activity_at: Some(START - 4_000),
-        // The one activity signal a CLI with no transcript has: the tool
-        // process under its pane, read from the process table.
-        running: Some(RunningProcess {
-            pid: KIRO_PID + 1,
-            command: "npm test".into(),
-            since: START - 240_000,
-        }),
         ..Default::default()
     }
 }
@@ -669,6 +686,76 @@ struct Echo {
 /// gone for good and the chat marked it "not delivered" although the server had
 /// accepted it. This mirrors how `TranscriptTail` already works: each reader
 /// holds its own offset into a log nobody consumes.
+/// Where the set fixture's picker is, moved by the keys the answer path sends.
+///
+/// The frames in `MockPanes::capture` are transcribed from a real two-question
+/// picker on Claude Code 2.1.278, and the keys move it as that one moved: a
+/// digit on the single-select answers and advances, a digit on the multi-select
+/// toggles a row, `→` opens the review page, and `1` or Enter there submits.
+/// A submitted picker comes back after `PICKER_RESET_MS`, because every e2e
+/// project shares one server and the next test wants the question asked.
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+struct Picker {
+    colour: Option<usize>,
+    sizes: Vec<usize>,
+    page: PickerPage,
+    submitted: bool,
+    submitted_at: i64,
+}
+
+#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
+enum PickerPage {
+    #[default]
+    Colour,
+    Sizes,
+    Review,
+}
+
+/// How long a submitted set stays submitted before the fixture asks again.
+const PICKER_RESET_MS: i64 = 6_000;
+
+impl Picker {
+    /// The state as of now: a submission old enough has been forgotten.
+    fn settle(&mut self) -> &mut Self {
+        if self.submitted && now_ms() - self.submitted_at > PICKER_RESET_MS {
+            *self = Picker::default();
+        }
+        self
+    }
+
+    fn press(&mut self, key: &str) {
+        self.settle();
+        let digit = key.parse::<usize>().ok().filter(|d| (1..=3).contains(d));
+        match (self.page, key, digit) {
+            (PickerPage::Colour, _, Some(d)) => {
+                self.colour = Some(d);
+                self.page = PickerPage::Sizes;
+            }
+            (PickerPage::Sizes, _, Some(d)) => self.toggle(d),
+            (PickerPage::Sizes, "Right", _) => self.page = PickerPage::Review,
+            (PickerPage::Sizes, "Left", _) => self.page = PickerPage::Colour,
+            (PickerPage::Review, "Enter", _) | (PickerPage::Review, "1", _) => {
+                self.submitted = true;
+                self.submitted_at = now_ms();
+            }
+            (PickerPage::Review, "2", _) | (_, "Escape", _) => *self = Picker::default(),
+            (PickerPage::Review, "Left", _) => self.page = PickerPage::Sizes,
+            _ => {}
+        }
+    }
+
+    fn toggle(&mut self, row: usize) {
+        match self.sizes.iter().position(|r| *r == row) {
+            Some(at) => {
+                self.sizes.remove(at);
+            }
+            None => self.sizes.push(row),
+        }
+    }
+}
+
+static PICKER: LazyLock<Mutex<Picker>> = LazyLock::new(|| Mutex::new(Picker::default()));
+
 static ECHOES: LazyLock<Mutex<HashMap<String, Vec<Echo>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -1200,6 +1287,7 @@ impl PaneApi for MockPanes {
                     .to_string(),
                 "   3. No, and tell Claude what to do differently (esc)".to_string(),
             ]),
+            SET_PANE => lines.extend(picker_frame(&PICKER.lock().unwrap().settle().clone())),
             // A shell prompt, not a TUI: the terminal fixture is the one pane
             // here with no agent drawing into it.
             TERMINAL_PANE => lines.extend([
@@ -1289,9 +1377,56 @@ impl PaneApi for MockPanes {
         Ok(())
     }
 
-    async fn key(&self, _pane_id: &str, _key: &SendableKey) -> anyhow::Result<()> {
+    async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()> {
+        if pane_id == SET_PANE {
+            PICKER.lock().unwrap().press(key.as_str());
+        }
         Ok(())
     }
+}
+
+/// The picker as Claude Code 2.1.278 drew it, page by page, from a capture.
+fn picker_frame(picker: &Picker) -> Vec<String> {
+    let tab = |done: bool, name: &str| format!("{} {name}", if done { "☒" } else { "☐" });
+    let tab_strip = format!(
+        "←  {}  {}  ✔ Submit  →",
+        tab(picker.colour.is_some(), "Colour"),
+        tab(picker.page == PickerPage::Review, "Sizes")
+    );
+    let ticked = |row: usize| if picker.sizes.contains(&row) { "[✔]" } else { "[ ]" };
+    let mut lines = vec![tab_strip];
+    match picker.page {
+        PickerPage::Colour => lines.extend([
+            "Which colour do you want?".to_string(),
+            format!(" {ESC}36m❯{ESC}39m 1. Red"),
+            "     Warm, and what the mockup used".to_string(),
+            "   2. Green".to_string(),
+            "     Matches the brand mark".to_string(),
+            "   3. Blue".to_string(),
+            "     The safe default".to_string(),
+            "   4. Type something.".to_string(),
+            "   5. Chat about this".to_string(),
+        ]),
+        PickerPage::Sizes => lines.extend([
+            "Which sizes should we stock?".to_string(),
+            format!(" {ESC}36m❯{ESC}39m 1. {} Small", ticked(1)),
+            format!("   2. {} Medium", ticked(2)),
+            format!("   3. {} Large", ticked(3)),
+            "   4. [ ] Type something".to_string(),
+            "   5. Chat about this".to_string(),
+        ]),
+        PickerPage::Review => lines.extend([
+            "Review your answers".to_string(),
+            " ● Which colour do you want?".to_string(),
+            format!("   → {}", ["Red", "Green", "Blue"][picker.colour.unwrap_or(1) - 1]),
+            " ● Which sizes should we stock?".to_string(),
+            "Ready to submit your answers?".to_string(),
+            format!(" {ESC}36m❯{ESC}39m 1. Submit answers"),
+            "   2. Cancel".to_string(),
+        ]),
+    }
+    lines.push("Enter to select · Tab/Arrow keys to navigate · Esc to cancel".to_string());
+    lines
 }
 
 /* ------------------------------------------------------------------ tail -- */
@@ -1300,6 +1435,10 @@ pub struct MockTail {
     session_id: String,
     sent: bool,
     echo_cursor: usize,
+    /// What the last read said the agent was blocked on, so a read can say
+    /// whether that changed — the real tail's `prompt_changed`, which is what
+    /// retires a card once the set fixture's picker has been submitted.
+    last_prompt: Option<PendingPrompt>,
 }
 
 impl MockTail {
@@ -1308,7 +1447,16 @@ impl MockTail {
             session_id,
             sent: false,
             echo_cursor: 0,
+            last_prompt: None,
         }
+    }
+
+    /// The prompt now, and whether it differs from the one last reported.
+    fn report_prompt(&mut self) -> (Option<PendingPrompt>, bool) {
+        let prompt = self.blocked_on();
+        let changed = prompt != self.last_prompt;
+        self.last_prompt = prompt.clone();
+        (prompt, changed)
     }
 }
 
@@ -1321,8 +1469,11 @@ impl MockTail {
             .get(&self.session_id)
             .cloned()
             .unwrap_or_default();
+        // The prompt rides on every read, as it does off a real transcript: a
+        // read that said nothing about it would read as the call having closed.
         if self.echo_cursor >= log.len() {
-            return TailRead::default();
+            let (prompt, prompt_changed) = self.report_prompt();
+            return TailRead { prompt, prompt_changed, ..TailRead::default() };
         }
         let events = log[self.echo_cursor..]
             .iter()
@@ -1346,13 +1497,8 @@ impl MockTail {
             })
             .collect();
         self.echo_cursor = log.len();
-        TailRead {
-            events,
-            patch: AgentPatch::default(),
-            first: false,
-            prompt: self.blocked_on(),
-            prompt_changed: false,
-        }
+        let (prompt, prompt_changed) = self.report_prompt();
+        TailRead { events, patch: AgentPatch::default(), first: false, prompt, prompt_changed }
     }
 
     /*
@@ -1367,10 +1513,44 @@ impl MockTail {
     fn blocked_on(&self) -> Option<PendingPrompt> {
         match self.session_id.as_str() {
             "mock-waiting" => Some(Self::question_with_options()),
+            "mock-set" => Self::question_set(),
             "mock-plan" => Some(Self::plan_awaiting_approval()),
             "mock-permission" => Some(Self::tool_awaiting_permission()),
             _ => None,
         }
+    }
+
+    /// The set, as the transcript writes it — through the real parser, so the
+    /// fixture is a genuine `AskUserQuestion` payload and not a hand-built
+    /// prompt that happens to resemble one. Gone once the picker has been
+    /// submitted, the way a `tool_result` closes the real call.
+    fn question_set() -> Option<PendingPrompt> {
+        if PICKER.lock().unwrap().settle().submitted {
+            return None;
+        }
+        let input = serde_json::json!({ "questions": [
+            {
+                "header": "Colour",
+                "question": "Which colour do you want?",
+                "multiSelect": false,
+                "options": [
+                    { "label": "Red", "description": "Warm, and what the mockup used" },
+                    { "label": "Green", "description": "Matches the brand mark" },
+                    { "label": "Blue", "description": "The safe default" }
+                ]
+            },
+            {
+                "header": "Sizes",
+                "question": "Which sizes should we stock?",
+                "multiSelect": true,
+                "options": [
+                    { "label": "Small" },
+                    { "label": "Medium" },
+                    { "label": "Large" }
+                ]
+            }
+        ]});
+        Some(crate::transcript::pending_prompt("AskUserQuestion", Some(&input)))
     }
 
     /// The other two blocked shapes INV-16 names, thinner on purpose: the
@@ -1392,6 +1572,7 @@ impl MockTail {
                     .into(),
             ),
             id: String::new(),
+            ..Default::default()
         }
     }
 
@@ -1404,8 +1585,11 @@ impl MockTail {
             multi_select: None,
             more_questions: None,
             options_drawn: Some(true),
+            // The command is the fact; the agent's account of it is the claim.
             detail: Some("rm -rf dist && npm run build".into()),
+            summary: Some("Rebuild dist from scratch".into()),
             id: String::new(),
+            ..Default::default()
         }
     }
 
@@ -1438,16 +1622,18 @@ impl MockTail {
                 },
             ],
             multi_select: None,
-            more_questions: Some(1),
+            // One question, whole: the set that needs walking is `mock-set`.
+            more_questions: None,
             options_drawn: None,
             detail: None,
             id: String::new(),
+            ..Default::default()
         }
     }
 
     /// The backfill every reader gets once: the fixture conversation, stamped
     /// with this session's ids.
-    fn replay_the_fixture_timeline(&self) -> TailRead {
+    fn replay_the_fixture_timeline(&mut self) -> TailRead {
         let events = mock_timeline()
             .into_iter()
             .enumerate()
@@ -1467,7 +1653,7 @@ impl MockTail {
             events,
             patch: AgentPatch::default(),
             first: true,
-            prompt: self.blocked_on(),
+            prompt: self.report_prompt().0,
             prompt_changed: true,
         }
     }
@@ -1495,7 +1681,7 @@ pub type Transitions = bool;
 /// What the fixture fleet holds, as the CLI asked for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Fleet {
-    /// The fourteen awkward fixtures, static or moving.
+    /// The fifteen awkward fixtures, static or moving.
     Fixtures { transitions: Transitions },
     /// No agents at all: `--mock-empty`.
     Empty,
@@ -1513,6 +1699,10 @@ pub fn mock_deps(fleet: Fleet) -> (Deps, Arc<MockSource>) {
         panes: Arc::new(MockPanes::over(source.clone())),
         limits: Arc::new(MockLimits::new(transitions)),
         tail_for: Arc::new(|agent: &Agent| {
+            // A terminal has no conversation to read (INV-4).
+            if !has_transcripts(&agent.agent_kind) {
+                return None;
+            }
             Some(Box::new(MockTail::new(agent.session_id.clone())) as Box<dyn TailApi>)
         }),
     };
@@ -1617,8 +1807,8 @@ mod tests {
 
     #[test]
     fn inv13_a_cli_with_no_transcript_says_unknown_rather_than_none() {
-        let kiro = by_id("tmux:kiro-1787832510");
-        let tree = mock_tree(&kiro, now_ms());
+        let shell = by_id("tmux:term-1787832900");
+        let tree = mock_tree(&shell, now_ms());
         // Absence of evidence, not evidence of absence: an empty `children`
         // here must never read as "delegated nothing".
         assert_eq!(tree.unknown, Some(true));
@@ -1708,11 +1898,11 @@ mod tests {
                 "mock-idle-db",
                 "mock-fresh",
                 "mock-no-tmux",
-                // Discovered from tmux, not from a session file it wrote.
-                "tmux:kiro-1787832510",
                 // The two thinner blocked shapes, and a pane that has ended.
                 "mock-plan",
                 "mock-permission",
+                // A two-question set, single- then multi-select.
+                "mock-set",
                 "mock-gone",
                 // A plain terminal, which the fleet hides until asked for.
                 "tmux:term-1787832900",
@@ -1740,9 +1930,9 @@ mod tests {
                 (IDLE_DB_PID, Some("%78")),
                 (FRESH_PID, Some("%0")),
                 (HEADLESS_PID, None),
-                (KIRO_PID, Some("%302")),
                 (PLAN_PID, Some("%82")),
                 (PERMISSION_PID, Some("%83")),
+                (SET_PID, Some(SET_PANE)),
                 (GONE_PID, Some(DEAD_PANE)),
                 (TERMINAL_PID, Some(TERMINAL_PANE)),
             ]
@@ -1777,7 +1967,7 @@ mod tests {
             .collect();
         assert_eq!(
             never,
-            vec!["mock-fresh", "tmux:kiro-1787832510", "tmux:term-1787832900"]
+            vec!["mock-fresh", "tmux:term-1787832900"]
         );
         let a = by_id("mock-fresh");
         assert_eq!(a.tokens, None);
@@ -1814,7 +2004,6 @@ mod tests {
                 "mock-idle-ce",
                 "mock-idle-db",
                 "mock-fresh",
-                "tmux:kiro-1787832510",
                 "tmux:term-1787832900",
             ]
         );
@@ -1875,6 +2064,40 @@ mod tests {
         );
     }
 
+    /// The set fixture moves as the real picker moved under the same keys,
+    /// and a submission closes the call for long enough to be seen.
+    #[tokio::test]
+    async fn the_set_fixture_walks_like_the_picker_it_was_copied_from() {
+        *PICKER.lock().unwrap() = Picker::default();
+        let panes = MockPanes::default();
+        let press = |k: &'static str| {
+            let panes = &panes;
+            async move { panes.key(SET_PANE, &SendableKey::server_composed(k)).await }
+        };
+        let text = || async {
+            let lines = panes.capture(SET_PANE, PANE_ROWS).await.unwrap();
+            crate::transcript::strip_ansi(&lines.join("\n"))
+        };
+        assert!(text().await.contains("Which colour do you want?"));
+        assert!(MockTail::question_set().is_some());
+
+        press("1").await.unwrap();
+        assert!(text().await.contains("Which sizes should we stock?"), "a digit answers and advances");
+        press("1").await.unwrap();
+        press("3").await.unwrap();
+        assert!(text().await.contains("1. [✔] Small"));
+        assert!(text().await.contains("3. [✔] Large"));
+        press("Right").await.unwrap();
+        assert!(text().await.contains("1. Submit answers"), "→ opens the review page");
+        press("Enter").await.unwrap();
+        assert!(MockTail::question_set().is_none(), "submitted, so the call is closed");
+
+        // Forgotten once the reset window has passed, so the next test can ask.
+        PICKER.lock().unwrap().submitted_at -= PICKER_RESET_MS + 1;
+        assert!(MockTail::question_set().is_some());
+        assert!(text().await.contains("Which colour do you want?"));
+    }
+
     #[test]
     fn tokens_are_exactly_as_written() {
         let got: Vec<Option<i64>> = fixtures().into_iter().map(|a| a.tokens).collect();
@@ -1891,11 +2114,9 @@ mod tests {
                 Some(8_800),
                 None,
                 Some(2_010),
-                // A CLI that keeps no transcript has no token count to give,
-                // and absent is the honest answer rather than zero (INV-11).
-                None,
                 Some(12_400),
                 Some(3_910),
+                Some(6_480),
                 Some(21_006),
                 // Nor has a shell with nobody in it.
                 None,

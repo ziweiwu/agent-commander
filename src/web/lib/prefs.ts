@@ -8,6 +8,7 @@
 import { detectLang, isLang, type Lang } from './i18n.ts'
 import { GROUPS } from './format.ts'
 import { SORTS, type SortDir, type SortKey, type StatusFilter } from './filter.ts'
+import type { Agent } from '../../shared/types.ts'
 
 export const THEMES = ['system', 'light', 'dark'] as const
 export type Theme = (typeof THEMES)[number]
@@ -382,4 +383,88 @@ export function loadSidebarWidth(): number {
 
 export function saveSidebarWidth(width: number): void {
   write(SIDEBAR_WIDTH_KEY, String(clampSidebarWidth(width)))
+}
+
+/*
+ * The last fleet this browser saw, for the next cold start.
+ *
+ * What is kept is the fleet's *shape* — which sessions, what state, where —
+ * so a phone whose page iOS evicted can paint that at once, captioned as a
+ * memory, while the tunnel re-forms. What is not kept is anything an agent
+ * said: the activity line is a tool call with its arguments, the last prompt
+ * is the user's words, the title is made from the conversation, and the goal
+ * is an instruction. The token left browser storage because a phone's history
+ * and screenshots are where such storage ends up (INV-3), and a conversation
+ * is what the token protects. The allow-list below is the whole of what may
+ * be written; a new `Agent` field is out until it is named here.
+ *
+ * An empty fleet is forgotten rather than saved: the confirmed-empty screen is
+ * a claim the server made once, not one this browser may repeat from memory
+ * (INV-11).
+ */
+const FLEET_KEY = 'agent-commander.fleet'
+
+export interface FleetSnapshot {
+  at: number
+  agents: Agent[]
+}
+
+const REMEMBERED: readonly (keyof Agent)[] = [
+  'sessionId',
+  'pid',
+  'name',
+  'cwd',
+  'folder',
+  'status',
+  'statusInferred',
+  'waitingFor',
+  'agentKind',
+  'kind',
+  'startedAt',
+  'lastActivityAt',
+  'paneId',
+  'gitBranch',
+  'derivedName',
+]
+
+function remembered(agent: Agent): Agent {
+  const kept: Partial<Agent> = {}
+  for (const key of REMEMBERED) {
+    if (agent[key] !== undefined) (kept as Record<string, unknown>)[key] = agent[key]
+  }
+  return kept as Agent
+}
+
+export function saveFleetSnapshot(agents: Agent[], savedAt: number): void {
+  if (agents.length === 0) {
+    try {
+      localStorage.removeItem(FLEET_KEY)
+    } catch {
+      /* not fatal */
+    }
+    return
+  }
+  write(FLEET_KEY, JSON.stringify({ at: savedAt, agents: agents.map(remembered) }))
+}
+
+function isSnapshot(value: unknown): value is FleetSnapshot {
+  if (typeof value !== 'object' || value === null) return false
+  const snap = value as { at?: unknown; agents?: unknown }
+  return (
+    typeof snap.at === 'number' &&
+    Array.isArray(snap.agents) &&
+    snap.agents.length > 0 &&
+    snap.agents.every((a) => typeof a === 'object' && a !== null && typeof a.sessionId === 'string')
+  )
+}
+
+export function loadFleetSnapshot(): FleetSnapshot | null {
+  const raw = read(FLEET_KEY)
+  if (raw === null) return null
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    return isSnapshot(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }

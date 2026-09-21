@@ -47,8 +47,8 @@ use crate::pending::SpawnedSession;
 use crate::sources::{Deps, PaneApi, PaneSample, Submit, TailApi, Unsubscribe};
 use crate::types::{
     Agent, AgentStatus, AgentTree, ClientMessage, ControlResponse, DirListing, ErrorKind,
-    FleetTree, Geom, GoalState, NewAgentRequest, NewAgentResponse, NewTerminalRequest, ServerEnv,
-    ServerMessage,
+    FleetTree, Geom, GoalState, NewAgentRequest, NewAgentResponse, NewTerminalRequest, PendingPrompt,
+    ServerEnv, ServerMessage,
 };
 
 /// How often a focused tab's transcript is re-read.
@@ -250,6 +250,13 @@ pub trait HubApi: Send + Sync + 'static {
     ) -> Unsubscribe;
     /// Poll this pane at full speed again, because something just changed it.
     fn wake(&self, pane_id: &str);
+    /// The last read of a pane somebody is already watching, or nothing.
+    ///
+    /// INV-4: a prompt that needs the pane (`transcript::needs_pane`) is shown
+    /// beside a live peek of that pane, so the read has usually been made
+    /// already; this is how the timeline pump borrows it rather than making a
+    /// second one every tick.
+    fn cached(&self, pane_id: &str) -> Option<Arc<crate::pane_hub::Sample>>;
 }
 
 impl HubApi for crate::pane_hub::PaneHub {
@@ -262,6 +269,9 @@ impl HubApi for crate::pane_hub::PaneHub {
     }
     fn wake(&self, pane_id: &str) {
         crate::pane_hub::PaneHub::wake(self, pane_id)
+    }
+    fn cached(&self, pane_id: &str) -> Option<Arc<crate::pane_hub::Sample>> {
+        crate::pane_hub::PaneHub::cached(self, pane_id)
     }
 }
 
@@ -327,10 +337,28 @@ pub enum Watched {
 #[derive(Default)]
 pub struct Viewers {
     count: AtomicUsize,
+    /// How many of them say their tab is on screen. The push channel's
+    /// "a visible tab is the notification" (INV-14) reads this.
+    visible: AtomicUsize,
     listener: std::sync::OnceLock<Box<dyn Fn(Watched) + Send + Sync>>,
 }
 
 impl Viewers {
+    /// Whether any connected browser reports itself visible right now.
+    pub fn any_visible(&self) -> bool {
+        self.visible.load(Ordering::SeqCst) > 0
+    }
+
+    fn shown(&self) {
+        self.visible.fetch_add(1, Ordering::SeqCst);
+    }
+
+    fn hidden(&self) {
+        // Saturating: a socket that never said "visible" cannot take the
+        // count below zero on its way out.
+        let _ = self.visible.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
+    }
+
     /// Run this whenever the fleet goes from unwatched to watched, or back.
     pub fn on_change(&self, listener: Box<dyn Fn(Watched) + Send + Sync>) {
         let _ = self.listener.set(listener);
@@ -1449,11 +1477,17 @@ struct ViewerState {
     /// Releases this tab's share of the pane poller; see `HubApi`.
     unwatch: Option<Unsubscribe>,
     tail_task: Option<JoinHandle<()>>,
+    /// The id of the prompt this tab was last sent, so a prompt that changed
+    /// only in what the pane says of it — the next question of a set, a
+    /// dialog's rows — is still a reason to send (INV-16).
+    last_prompt_id: Option<String>,
 }
 
 struct Viewer {
     tx: UnboundedSender<ServerMessage>,
     state: Mutex<ViewerState>,
+    /// Whether this tab last said it was on screen; see `Viewers::visible`.
+    visible: std::sync::atomic::AtomicBool,
     /// INV-12: how much this tab may still ask of a live agent. Outside the
     /// state lock because it has its own, and because a refusal must not have
     /// to wait on a pane read holding that one.
@@ -1461,8 +1495,25 @@ struct Viewer {
 }
 
 impl Viewer {
+    /// Record that the tab is on screen, moving the fleet-wide count only on
+    /// a change.
+    fn came_on_screen(&self, viewers: &Viewers) {
+        if !self.visible.swap(true, Ordering::SeqCst) {
+            viewers.shown();
+        }
+    }
+
+    /// Record that the tab is off screen — hidden, or gone — moving the
+    /// fleet-wide count only on a change.
+    fn went_off_screen(&self, viewers: &Viewers) {
+        if self.visible.swap(false, Ordering::SeqCst) {
+            viewers.hidden();
+        }
+    }
+
     fn new(tx: UnboundedSender<ServerMessage>) -> Self {
         Self {
+            visible: std::sync::atomic::AtomicBool::new(false),
             tx,
             state: Mutex::new(ViewerState {
                 focused: None,
@@ -1472,6 +1523,7 @@ impl Viewer {
                 frame_fails: 0,
                 unwatch: None,
                 tail_task: None,
+                last_prompt_id: None,
             }),
             budget: crate::control::WriteBudget::default(),
         }
@@ -1610,6 +1662,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     off_limits();
     viewer.clear_timers();
     writer.abort();
+    viewer.went_off_screen(&app.viewers);
     app.viewers.left();
 }
 
@@ -1700,7 +1753,18 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
     // inside it. Running it through `grant_for_message` would make a server
     // started with a narrow `--grant` reply to its own heartbeat with an
     // error, once every beat, for the life of the connection.
-    if matches!(msg, ClientMessage::Pong) {
+    if let ClientMessage::Pong { visible } = &msg {
+        match visible.unwrap_or(false) {
+            true => viewer.came_on_screen(&app.viewers),
+            false => viewer.went_off_screen(&app.viewers),
+        }
+        return;
+    }
+    // The client's own probe, answered the same way and for the same reason:
+    // a tab that has just come back asks, and a narrow grant must not turn
+    // the answer into an error.
+    if matches!(msg, ClientMessage::Ping) {
+        viewer.send(ServerMessage::Pong);
         return;
     }
     // The socket is checked per message rather than at the handshake: one
@@ -1733,7 +1797,7 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
             on_history(&session_id, (before, lines), viewer, app).await;
         }
         // Returned above, before the grant gate.
-        ClientMessage::Pong => {}
+        ClientMessage::Pong { .. } | ClientMessage::Ping => {}
     }
 }
 
@@ -1751,7 +1815,7 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
         | ClientMessage::Key { session_id, .. }
         | ClientMessage::Answer { session_id, .. }
         | ClientMessage::History { session_id, .. } => Some(session_id),
-        ClientMessage::Pong => None,
+        ClientMessage::Pong { .. } | ClientMessage::Ping => None,
     }
 }
 
@@ -1763,7 +1827,8 @@ fn grant_for_message(message: &ClientMessage) -> Grant {
         // Never reached — `handle` returns on a pong before asking. Named
         // rather than left to a wildcard so that adding a message cannot
         // acquire `Read` by omission.
-        | ClientMessage::Pong => Grant::Read,
+        | ClientMessage::Pong { .. }
+        | ClientMessage::Ping => Grant::Read,
         ClientMessage::Answer { .. } => Grant::Respond,
         ClientMessage::Paste { .. } | ClientMessage::Key { .. } => Grant::Drive,
     }
@@ -1871,7 +1936,22 @@ async fn answer_keystroke(
     if agent.status != AgentStatus::Waiting {
         return Err("the agent is not waiting on anything now — the answer was not sent");
     }
-    let current = read.prompt.ok_or("that question has already been answered")?;
+    let written = read.prompt.ok_or("that question has already been answered")?;
+    let pane_id = agent.pane_id.clone().ok_or("agent is no longer available")?;
+    /*
+     * Read the pane once, here, for itself: the card was drawn from a read
+     * made earlier, and what matters is what the pane is numbering at the
+     * instant the answer arrived. A set's current question and a drawn
+     * dialog's rows both come from it (INV-16, "what the pane confirms").
+     */
+    let pane = match crate::transcript::needs_pane(&written) {
+        true => Some(app.deps.panes.sample(&pane_id).await.map_err(|_| CANNOT_READ_PANE)?),
+        false => None,
+    };
+    let current = match &pane {
+        Some(sample) => crate::transcript::resolve_on_pane(&written, &sample.lines),
+        None => written,
+    };
     if current.fingerprint(&answer.session_id) != answer.prompt_id {
         return Err("the agent is asking something else now — the answer was not sent");
     }
@@ -1880,14 +1960,11 @@ async fn answer_keystroke(
     if answer.choice >= current.options.len().max(1) {
         return Err("no such option");
     }
-    let pane_id = agent.pane_id.clone().ok_or("agent is no longer available")?;
-    // A drawn choice is a claim about the CLI, and the pane is what can refute
-    // it: Claude Code draws the permission dialog with two rows as often as
-    // three, and the plan dialog with two to five. The digit goes only where
-    // the pane is numbering that label right now.
-    if current.options_drawn == Some(true) {
+    // A drawn choice is a claim about the CLI, and a set's option is relative
+    // to whichever question the picker is on; the pane is what can refute
+    // either. The digit goes only where the pane is numbering that label now.
+    if let Some(sample) = pane {
         let label = current.options.get(answer.choice).map(|o| o.label.as_str()).unwrap_or("");
-        let sample = app.deps.panes.sample(&pane_id).await.map_err(|_| CANNOT_READ_PANE)?;
         if !crate::transcript::drawn_row_matches(&sample.lines, answer.choice, label) {
             return Err(CHOICE_NOT_ON_SCREEN);
         }
@@ -1956,6 +2033,7 @@ fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
         st.attached = false;
         st.reset_pane();
         st.focused = session_id.clone();
+        st.last_prompt_id = None;
     }
     let Some(session_id) = session_id else { return };
     let Some(agent) = app.deps.source.get(&session_id) else { return };
@@ -2192,22 +2270,68 @@ async fn pump_timeline(
     if !read.patch.is_empty() {
         app.deps.source.enrich(session_id, read.patch);
     }
+    // The id travels with the question and is echoed back on the answer, so a
+    // reply cannot land on a prompt that has moved on.
+    let prompt = match read.prompt {
+        Some(prompt) => Some(shown_prompt(prompt, session_id, app).await.with_id(session_id)),
+        None => None,
+    };
     /*
-     * `prompt_changed` is its own reason to send. Answering a question writes a
-     * `tool_result`, which is plumbing rather than a message and produces no
+     * A changed prompt is its own reason to send. Answering a question writes
+     * a `tool_result`, which is plumbing rather than a message and produces no
      * event — so without it the card offering the answer would have nothing to
-     * retire it.
+     * retire it. And the transcript is not the only thing that changes one:
+     * the pane moving to the next question of a set changes nothing on disk,
+     * so the id this tab was last sent is what is compared.
      */
-    if !read.events.is_empty() || read.first || read.prompt_changed {
+    let prompt_id = prompt.as_ref().map(|p| p.id.clone());
+    let prompt_moved = {
+        let mut st = viewer.state.lock().unwrap();
+        // Only a prompt that *is* there counts as having moved here: a read
+        // with none says either that the call closed — which the tail itself
+        // reports as `prompt_changed` — or that nothing could be read this
+        // tick (INV-5), and the second must not retire a card the next tick
+        // would put straight back.
+        let moved = prompt_id.is_some() && st.last_prompt_id != prompt_id;
+        if prompt_id.is_some() || read.prompt_changed {
+            st.last_prompt_id = prompt_id;
+        }
+        moved
+    };
+    if !read.events.is_empty() || read.first || read.prompt_changed || prompt_moved {
         viewer.send(ServerMessage::Timeline {
             session_id: session_id.to_string(),
             events: read.events,
             reset: read.first,
-            // The id travels with the question and is echoed back on the
-            // answer, so a reply cannot land on a prompt that has moved on.
-            prompt: read.prompt.map(|p| p.with_id(session_id)),
+            prompt,
         });
     }
+}
+
+/// The prompt as the pane shows it, where the transcript alone cannot say.
+///
+/// Only a waiting agent's pane is read — an open call on a busy agent is a
+/// running tool, not a dialog — and the read is borrowed from the hub wherever
+/// a tab is already watching that pane (INV-4). A pane that cannot be read
+/// leaves the prompt as the transcript had it; the answer path reads it again
+/// for itself before anything is typed.
+async fn shown_prompt(prompt: PendingPrompt, session_id: &str, app: &App) -> PendingPrompt {
+    if !crate::transcript::needs_pane(&prompt) {
+        return prompt;
+    }
+    let Some(agent) = app.deps.source.get(session_id) else { return prompt };
+    if agent.status != AgentStatus::Waiting {
+        return prompt;
+    }
+    let Some(pane_id) = agent.pane_id.as_deref() else { return prompt };
+    let lines = match app.hub.cached(pane_id) {
+        Some(sample) => sample.lines.clone(),
+        None => match app.deps.panes.sample(pane_id).await {
+            Ok(sample) => sample.lines,
+            Err(_) => return prompt,
+        },
+    };
+    crate::transcript::resolve_on_pane(&prompt, &lines)
 }
 
 /// Point this tab at a pane and turn shared reads into frames only it can use.
@@ -2914,6 +3038,11 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     };
     let enricher =
         crate::enrich::FleetEnricher::new(deps.source.clone(), deps.tail_for.clone(), procs);
+    // The bridge's per-session files: real agents only, since the fixtures
+    // carry their own figures and there is no bridge writing for them.
+    if !opts.mock {
+        enricher.read_usage_from(Arc::new(crate::usage::UsageReader::new()));
+    }
     // Idle until somebody is looking (INV-4). `watch` starts the loop and takes
     // a pass at once, so the first tab to connect paints filled cards rather
     // than waiting a tick for them.
@@ -2921,6 +3050,13 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
 
     let app = build_app(&opts, deps, pending, mock_source).await;
     idle_the_enricher_on_viewers(&app, &enricher);
+    if let Some(spec) = &opts.notify {
+        let channel = crate::push::Channel::parse(spec, &|key| std::env::var(key).ok())
+            .map_err(|why| anyhow::anyhow!(why))?;
+        let notifier =
+            crate::push::Notifier::new(crate::push::HttpPusher::new(channel), opts.notify_link.clone());
+        push_on_transitions(&app, notifier);
+    }
     let count = app.deps.source.list().len();
     let listener = bind(&opts).await?;
     announce(&opts, count);
@@ -2953,6 +3089,23 @@ fn fleet_for(
     };
     let (deps, source) = crate::mock::mock_deps(fleet);
     (deps, Some(source))
+}
+
+/// INV-14, server-side: every fleet change goes past the push tracker, which
+/// fires only for a transition it watched while no browser was visible. The
+/// listener stays for the life of the server, so its handle is let go.
+fn push_on_transitions(app: &Arc<App>, notifier: Arc<crate::push::Notifier>) {
+    let viewers = app.clone();
+    let _keep = app.deps.source.on_change(Box::new(move |agents| {
+        if viewers.viewers.any_visible() {
+            notifier.watched_on_screen(&agents);
+            return;
+        }
+        for push in notifier.freshly_blocked(&agents) {
+            let notifier = notifier.clone();
+            tokio::spawn(async move { notifier.deliver(push).await });
+        }
+    }));
 }
 
 /// INV-4's first rule, wired: the enricher runs only while a browser is here.
@@ -3308,6 +3461,9 @@ mod tests {
     }
 
     impl HubApi for FakeHub {
+        fn cached(&self, _pane_id: &str) -> Option<Arc<crate::pane_hub::Sample>> {
+            None
+        }
         fn subscribe(
             &self,
             pane_id: &str,
@@ -3493,6 +3649,7 @@ mod tests {
             more_questions: Some(1),
             detail: None,
             id: String::new(),
+            ..Default::default()
         }
     }
 
@@ -3574,12 +3731,12 @@ mod tests {
     #[tokio::test]
     async fn inv4_a_focus_on_a_cli_with_no_transcripts_probes_once() {
         let parts = harness_parts(FakePanes::new());
-        add_agent(&parts.source, "kiro-1", "kiro");
+        add_agent(&parts.source, "term-1", crate::agent_kinds::TERMINAL_KIND);
         let (probes, tails) = tails_appearing_after(usize::MAX);
         let port = serve_with_tails(&parts, tails).await;
         let mut client = open(port).await;
 
-        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"kiro-1"})).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"term-1"})).await;
         const PAST_TWO_TICKS_MS: u64 = TIMELINE_MS * 5 / 2;
         tokio::time::sleep(Duration::from_millis(PAST_TWO_TICKS_MS)).await;
         assert_eq!(probes.load(Ordering::SeqCst), 1, "asked once, never again");
@@ -4564,6 +4721,17 @@ mod tests {
         assert_eq!(h.app.viewers.count(), 1, "answering keeps the socket");
     }
 
+    /// The client's half of the beat: a tab that has just come back asks, and
+    /// is answered at once rather than a beat later.
+    #[tokio::test]
+    async fn inv4_a_returning_tab_can_ask_whether_its_socket_is_alive() {
+        let h = beating(Duration::from_secs(3600)).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"ping"})).await;
+        let pong = next_msg(&mut client, |m| is_type(m, "pong")).await;
+        assert!(pong.is_some(), "answered");
+    }
+
     #[tokio::test]
     async fn sends_the_fleet_the_moment_the_socket_opens() {
         let h = plain(FakePanes::new()).await;
@@ -4882,13 +5050,15 @@ mod tests {
     /// The table said three rows; the pane draws two. The label the card
     /// showed for `2` is not what the pane numbers 2, so nothing is typed —
     /// this is the case that made the pane check necessary.
+    ///
+    /// One row, deliberately: a pane drawing two or more has its rows *read*
+    /// as the options (the test after this one), so the table — and the
+    /// mislabel this guards against — only survives on a pane the reader
+    /// cannot make a dialog of.
     #[tokio::test]
     async fn inv16_a_drawn_choice_the_pane_is_not_showing_is_refused() {
         let panes = FakePanes::new();
-        panes.draw(vec![
-            " ❯ 1. Yes".to_string(),
-            "   2. No, and tell Claude what to do differently (esc)".to_string(),
-        ]);
+        panes.draw(vec![" ❯ 1. Yes".to_string()]);
         let parts = harness_parts(panes.clone());
         parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
         let port = serve_with_tails(&parts, tails_reporting_a_drawn_prompt()).await;
@@ -4921,6 +5091,128 @@ mod tests {
         .await;
         tokio::time::sleep(ANSWER_SETTLE).await;
         assert_eq!(panes.last_key().as_deref(), Some("1"));
+    }
+
+    fn tails_reporting_a_set() -> Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync> {
+        Arc::new(|_agent: &Agent| {
+            let prompt = crate::transcript::pending_prompt(
+                "AskUserQuestion",
+                Some(&serde_json::json!({ "questions": [
+                    { "header": "Colour", "question": "Which colour do you want?",
+                      "options": [{ "label": "Red" }, { "label": "Green" }, { "label": "Blue" }] },
+                    { "header": "Sizes", "question": "Which sizes should we stock?", "multiSelect": true,
+                      "options": [{ "label": "Small" }, { "label": "Medium" }, { "label": "Large" }] },
+                ]})),
+            );
+            Some(Box::new(FakeTail { n: 0, prompt: Some(prompt) }) as Box<dyn TailApi>)
+        })
+    }
+
+    /// The pane drawn on the set's second question, with a client focused on
+    /// it and that question's card in hand. `parts` comes back so the caller
+    /// keeps the server's web root alive.
+    async fn focused_on_the_sizes_question() -> (HarnessParts, Client, serde_json::Value) {
+        let panes = FakePanes::new();
+        panes.draw(vec![
+            "←  ☒ Colour  ☐ Sizes  ✔ Submit  →".to_string(),
+            "Which sizes should we stock?".to_string(),
+            " ❯ 1. [ ] Small".to_string(),
+            "   2. [ ] Medium".to_string(),
+            "   3. [ ] Large".to_string(),
+        ]);
+        let parts = harness_parts(panes);
+        parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
+        let port = serve_with_tails(&parts, tails_reporting_a_set()).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":BLOCKED})).await;
+        let msg = next_msg(&mut client, |m| is_type(m, "timeline") && m["prompt"].is_object())
+            .await
+            .expect("the set is reported");
+        let prompt = msg["prompt"].clone();
+        (parts, client, prompt)
+    }
+
+    /// TODO §13a. A set's second question is what the card is sent once the
+    /// pane draws it, and an answer to it is checked against the pane's rows
+    /// before the digit goes.
+    #[tokio::test]
+    async fn inv16_a_sets_second_question_is_shown_and_answered_off_the_pane() {
+        let (parts, mut client, prompt) = focused_on_the_sizes_question().await;
+        assert_eq!(prompt["questionIndex"], serde_json::json!(1), "the pane is on question two");
+        assert_eq!(prompt["multiSelect"], serde_json::json!(true));
+        assert_eq!(prompt["options"][2]["label"], serde_json::json!("Large"));
+        let id = prompt["id"].as_str().unwrap().to_string();
+
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":2}),
+        )
+        .await;
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(parts.panes.last_key().as_deref(), Some("3"), "the row the pane numbers 3");
+    }
+
+    /// TODO §13a, second half: a card still holding the first question's id is
+    /// refused rather than answering the wrong question (INV-2).
+    #[tokio::test]
+    async fn inv16_an_answer_to_another_question_in_the_set_is_refused() {
+        let (parts, mut client, prompt) = focused_on_the_sizes_question().await;
+        let written = crate::transcript::pending_prompt(
+            "AskUserQuestion",
+            Some(&serde_json::json!({ "questions": [
+                { "header": "Colour", "question": "Which colour do you want?",
+                  "options": [{ "label": "Red" }, { "label": "Green" }, { "label": "Blue" }] },
+                { "header": "Sizes", "question": "Which sizes should we stock?", "multiSelect": true,
+                  "options": [{ "label": "Small" }, { "label": "Medium" }, { "label": "Large" }] },
+            ]})),
+        );
+        let stale = written.fingerprint(BLOCKED);
+        assert_ne!(stale, prompt["id"].as_str().unwrap());
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":stale,"choice":0}),
+        )
+        .await;
+        let err = next_msg(&mut client, |m| {
+            is_type(m, "error") && m["message"].as_str().is_some_and(|s| s.contains("something else"))
+        })
+        .await
+        .expect("refused, and said why");
+        assert_eq!(err["kind"], serde_json::json!("answer-refused"));
+        assert!(parts.panes.keys.lock().unwrap().is_empty(), "nothing reached the pane");
+    }
+
+    /// TODO §12. A drawn dialog's rows are read off the pane, marked as read,
+    /// and the digit answers the row the pane numbers — on wording no table
+    /// anticipated.
+    #[tokio::test]
+    async fn inv16_a_drawn_dialogs_rows_are_read_off_the_pane_and_answered_by_number() {
+        let panes = FakePanes::new();
+        panes.draw(vec![
+            " ❯ 1. Yes".to_string(),
+            "   2. Yes, and don’t ask again for: rm -rf dist".to_string(),
+            "   3. No".to_string(),
+        ]);
+        let parts = harness_parts(panes.clone());
+        parts.source.agents.lock().unwrap()[0].status = AgentStatus::Waiting;
+        let port = serve_with_tails(&parts, tails_reporting_a_drawn_prompt()).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":BLOCKED})).await;
+        let msg = next_msg(&mut client, |m| is_type(m, "timeline") && m["prompt"].is_object())
+            .await
+            .expect("the drawn prompt is reported");
+        let prompt = &msg["prompt"];
+        assert_eq!(prompt["optionsRead"], serde_json::json!(true));
+        assert_eq!(prompt["options"][2]["label"], serde_json::json!("No"));
+        assert_eq!(prompt["summary"], serde_json::json!("Clear dist"));
+        let id = prompt["id"].as_str().unwrap().to_string();
+        send_json(
+            &mut client,
+            serde_json::json!({"type":"answer","sessionId":BLOCKED,"promptId":id,"choice":2}),
+        )
+        .await;
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(panes.last_key().as_deref(), Some("3"));
     }
 
     /// The card's gate, held server-side as well: an open call outlives the

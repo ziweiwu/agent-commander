@@ -42,6 +42,10 @@ pub struct FleetEnricher {
     task: Mutex<Option<JoinHandle<()>>>,
     /// Whether anyone is looking at this. See [`watch`](Self::watch).
     watched: AtomicBool,
+    /// The bridge's per-session files, when the live server wires them in.
+    /// Set once; `None` in mock mode and in most tests, where the fixtures say
+    /// what they cost themselves.
+    usage: std::sync::OnceLock<Arc<crate::usage::UsageReader>>,
 }
 
 impl FleetEnricher {
@@ -68,7 +72,13 @@ impl FleetEnricher {
             running: AtomicBool::new(false),
             task: Mutex::new(None),
             watched: AtomicBool::new(true),
+            usage: std::sync::OnceLock::new(),
         })
+    }
+
+    /// Read context-window usage and cost for every Claude agent from here.
+    pub fn read_usage_from(&self, reader: Arc<crate::usage::UsageReader>) {
+        let _ = self.usage.set(reader);
     }
 
     /// Tick now, then on the interval, until [`stop`](Self::stop).
@@ -168,7 +178,7 @@ impl FleetEnricher {
             /*
              * INV-4: never open a tail that cannot resolve. `find_transcript`
              * stats every directory under ~/.claude/projects looking for a file
-             * a Kiro session will never have, misses, caches nothing, and would
+             * a plain terminal will never have, misses, caches nothing, and would
              * do it again for every such agent every five seconds forever.
              */
             if !has_transcripts(&agent.agent_kind) {
@@ -183,13 +193,18 @@ impl FleetEnricher {
             let tail = tails.get_mut(&agent.session_id).expect("inserted above");
             // INV-5: one unreadable transcript must not stall the other agents.
             let Ok(read) = tail.read().await else { continue };
-            let card = card_fields(read.patch);
+            let mut card = card_fields(read.patch);
+            // One `stat` per agent per pass, and the file only when it moved.
+            card.usage = self.usage.get().and_then(|reader| reader.read(&agent.session_id));
             if !card.is_empty() && differs(agent, &card) {
                 self.source.enrich(&agent.session_id, card);
                 changed = true;
             }
         }
         drop(tails);
+        if let Some(reader) = self.usage.get() {
+            reader.retain(&agents.iter().map(|a| a.session_id.clone()).collect::<Vec<_>>());
+        }
         if self.refresh_running(&agents).await {
             changed = true;
         }
@@ -285,6 +300,7 @@ fn card_fields(patch: AgentPatch) -> AgentPatch {
         subagents: patch.subagents,
         delegating: patch.delegating,
         ai_title: patch.ai_title,
+        description: patch.description,
         last_prompt: patch.last_prompt,
         permission_mode: patch.permission_mode,
         model: patch.model,
@@ -294,6 +310,7 @@ fn card_fields(patch: AgentPatch) -> AgentPatch {
         waiting_for: None,
         cwd: None,
         running: None,
+        usage: None,
     }
 }
 
@@ -306,6 +323,7 @@ fn differs(agent: &Agent, patch: &AgentPatch) -> bool {
     }
     if text_differs(&patch.activity, &agent.activity)
         || text_differs(&patch.ai_title, &agent.ai_title)
+        || text_differs(&patch.description, &agent.description)
         || text_differs(&patch.last_prompt, &agent.last_prompt)
         || text_differs(&patch.permission_mode, &agent.permission_mode)
         || text_differs(&patch.model, &agent.model)
@@ -314,6 +332,9 @@ fn differs(agent: &Agent, patch: &AgentPatch) -> bool {
         return true;
     }
     if matches!(&patch.running, Some(v) if !same_process(&agent.running, v)) {
+        return true;
+    }
+    if matches!(&patch.usage, Some(v) if agent.usage.as_ref() != Some(v)) {
         return true;
     }
     if matches!(patch.last_activity_at, Some(v) if agent.last_activity_at != Some(v))
@@ -487,6 +508,35 @@ mod tests {
         assert_eq!(source.find("a").unwrap().tokens, Some(10));
         assert_eq!(source.find("a").unwrap().git_branch.as_deref(), Some("main"));
         assert_eq!(source.notifications(), 1);
+    }
+
+    /// INV-11: the bridge's per-session reading reaches the card, and reaches
+    /// only a session whose file the bridge wrote — a Claude agent with none
+    /// is left saying nothing rather than zero.
+    #[tokio::test]
+    async fn the_bridges_context_and_cost_reach_the_card_it_wrote_them_for() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("a.json"),
+            r#"{"at": 7, "contextPct": 42, "contextSize": 200000, "costUsd": 1.5}"#,
+        )
+        .unwrap();
+        let source = FakeSource::with(vec![agent("a"), agent("b")]);
+        let enricher = FleetEnricher::new(
+            source.clone(),
+            factory(|_| Some(Box::new(FakeTail(AgentPatch::default())))),
+            None,
+        );
+        enricher.read_usage_from(Arc::new(crate::usage::UsageReader::in_dir(dir.path().to_path_buf())));
+        enricher.tick().await;
+        let usage = source.find("a").unwrap().usage.expect("read off the bridge's file");
+        assert_eq!(usage.context_pct, Some(42.0));
+        assert_eq!(usage.cost_usd, Some(1.5));
+        assert_eq!(source.find("b").unwrap().usage, None, "no file, no figure");
+        // The same reading again is not a change worth a broadcast (INV-4).
+        let before = source.notifications();
+        enricher.tick().await;
+        assert_eq!(source.notifications(), before);
     }
 
     /// INV-4: an unchanged fleet must not rebroadcast to every browser tab.
@@ -985,11 +1035,11 @@ mod tests {
 
     /// INV-4: no transcript tail for a CLI that keeps no transcripts. Without
     /// this guard, `find_transcript` stats every project directory looking for
-    /// a file a Kiro session will never have, every five seconds, forever.
+    /// a file a plain shell will never have, every five seconds, forever.
     #[tokio::test]
     async fn inv4_never_opens_a_tail_for_a_cli_with_no_transcripts() {
-        let kiro = Agent { agent_kind: "kiro".into(), ..agent("k") };
-        let source = FakeSource::with(vec![kiro, agent("c")]);
+        let shell = Agent { agent_kind: crate::agent_kinds::TERMINAL_KIND.into(), ..agent("k") };
+        let source = FakeSource::with(vec![shell, agent("c")]);
         let asked = Arc::new(StdMutex::new(Vec::<String>::new()));
         let seen = asked.clone();
         let enricher = FleetEnricher::new(

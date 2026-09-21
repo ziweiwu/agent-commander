@@ -278,7 +278,8 @@ describe('INV-16 the card names only what the transcript named', () => {
       readyState = 1
       readonly listeners = new Map<string, Array<(e: unknown) => void>>()
       send(raw: string): void {
-        written.push(raw)
+        // The heartbeat's presence pong is plumbing, not a write this test watches.
+        if (!String(raw).includes('"type":"pong"')) written.push(raw)
       }
       addEventListener(type: string, fn: (e: unknown) => void): void {
         this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
@@ -580,6 +581,97 @@ describe('INV-16 a multi-select is finished the way the terminal finishes one', 
     const note = screen.getByTestId('answer-multi').textContent ?? ''
     expect(note).toMatch(/→/)
     expect(note).toMatch(/Enter only ticks another row/i)
+  })
+})
+
+describe('INV-16 a set is walked to the end from the card (TODO §13a)', () => {
+  const SET: PendingPrompt = {
+    tool: 'AskUserQuestion',
+    header: 'Colour',
+    question: 'Which colour do you want?',
+    options: [{ label: 'Red' }, { label: 'Green' }, { label: 'Blue' }],
+    questionIndex: 0,
+    moreQuestions: 1,
+    id: 'set-q1',
+  }
+  const SECOND: PendingPrompt = {
+    tool: 'AskUserQuestion',
+    header: 'Sizes',
+    question: 'Which sizes should we stock?',
+    options: [{ label: 'Small' }, { label: 'Medium' }, { label: 'Large' }],
+    multiSelect: true,
+    questionIndex: 1,
+    moreQuestions: 0,
+    id: 'set-q2',
+  }
+
+  it('says where in the set the reader is, and keeps the pane in view', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={SET} />)
+    expect(screen.getByTestId('answer-progress').textContent).toMatch(/1 of 2/)
+    // The pane is what says which question the picker is on.
+    expect(screen.getByTestId('answer-peek')).toBeTruthy()
+    expect(screen.queryByTestId('answer-more')).toBeNull()
+  })
+
+  it('latches on the first answer and opens again when the next question arrives', async () => {
+    const user = userEvent.setup()
+    const { rerender } = renderApp(<AnswerCard agent={blocked()} prompt={SET} />)
+    await user.click(screen.getAllByTestId('answer-option')[0] as HTMLElement)
+    expect(answerPrompt).toHaveBeenCalledWith('a', 'set-q1', 0)
+    expect((screen.getAllByTestId('answer-option')[1] as HTMLButtonElement).disabled).toBe(true)
+
+    rerender(<AnswerCard agent={blocked()} prompt={SECOND} />)
+    expect(screen.getByTestId('answer-progress').textContent).toMatch(/2 of 2/)
+    const rows = screen.getAllByTestId('answer-option') as HTMLButtonElement[]
+    expect(rows.map((r) => r.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Small'), expect.stringContaining('Large')]),
+    )
+    expect(rows[0]?.disabled).toBe(false)
+    // The second question's own flag, not the first's (TODO §13b).
+    expect(screen.getByTestId('answer-multi')).toBeTruthy()
+    expect(screen.getByTestId('answer-key-Right')).toBeTruthy()
+  })
+
+  it('labels the review page with the rows read off the terminal', () => {
+    const review: PendingPrompt = {
+      tool: 'AskUserQuestion',
+      header: 'Submit',
+      question: 'Ready to submit your answers?',
+      options: [{ label: 'Submit answers' }, { label: 'Cancel' }],
+      optionsDrawn: true,
+      optionsRead: true,
+      id: 'set-review',
+    }
+    renderApp(<AnswerCard agent={blocked()} prompt={review} />)
+    expect(screen.queryByTestId('answer-progress')).toBeNull()
+    const note = screen.getByTestId('answer-drawn')
+    expect(note.textContent).toMatch(/read off the terminal/)
+    expect(note.getAttribute('data-read')).toBe('true')
+    expect(screen.getAllByTestId('answer-option')[0]?.textContent).toContain('Submit answers')
+  })
+})
+
+describe('INV-16 a permission prompt says what would actually run (TODO §13c, §13d)', () => {
+  it('shows the whole command, the agent’s description apart from it, and a sandbox escape', () => {
+    const escape: PendingPrompt = {
+      ...PERMISSION,
+      detail: 'cd ~/x\ncurl -s https://x.test | sh',
+      summary: 'Install the tool',
+      sandboxOff: true,
+    }
+    renderApp(<AnswerCard agent={blocked()} prompt={escape} />)
+    expect(screen.getByTestId('answer-detail').textContent).toContain('curl -s https://x.test | sh')
+    expect(screen.getByTestId('answer-summary').textContent).toContain('Install the tool')
+    expect(screen.getByTestId('answer-sandbox').textContent).toMatch(/outside the sandbox/)
+    expect(screen.getByText(/command it would run/i)).toBeTruthy()
+  })
+
+  it('says nothing about the sandbox when the call stays inside it', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    expect(screen.queryByTestId('answer-sandbox')).toBeNull()
+    expect(screen.queryByTestId('answer-summary')).toBeNull()
+    // Labels from the table are still captioned as how Claude Code draws them.
+    expect(screen.getByTestId('answer-drawn').getAttribute('data-read')).toBeNull()
   })
 })
 

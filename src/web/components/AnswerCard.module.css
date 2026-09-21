@@ -188,3 +188,17 @@
     max-height: 120px;
   }
 }
+
+/*
+ * A sandbox escape is a different decision from the command under it, and
+ * it must not read as one more line of grey. Colour is never the only signal
+ * (INV-13): the words say it, and the border says it in greyscale.
+ */
+.warning {
+  margin: 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--danger);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
