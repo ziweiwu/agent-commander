@@ -432,6 +432,59 @@ may be *sent* — only what the reader is told before sending it.
 **Done when:** a two-question `AskUserQuestion` can be answered to the end from
 the Chat tab, and the fixture that proves it is in `mock.rs`.
 
+### 14. Send a picture to a session
+
+Asked for directly, 2026-09-20. The composer can send an agent anything you can
+type and nothing you cannot, and a screenshot is the thing you most want to
+hand an agent from a phone — the one device where the file is already in your
+hand and there is no terminal to drag it into.
+
+**Why it is not just another `paste`.** Everything the composer sends today is
+text that ends up in a tmux pane: `ClientMessage::Paste { session_id, text,
+submit, seq }` (`types.rs:602`), capped at `MAX_PASTE` 100 KB with the frame
+itself capped at `MAX_FRAME_BYTES` 1 MB (`control.rs:679`, `:689`), and
+metered per tab by `control::WriteBudget` (`:719`) under INV-12. An image is
+none of those things: it is binary, it is routinely larger than both caps, and
+tmux has no way to carry it. The only route that reaches Claude Code through a
+pane is a **path** — the CLI reads an image file named in a prompt — so the
+picture has to land on the server's filesystem first and what goes into the
+pane stays text.
+
+**The shape that follows.** An HTTP `POST` beside the socket rather than a new
+`ClientMessage`, because a megabyte of base64 through the fleet socket blocks
+every other tab's frames behind it: the upload answers with a path, and the
+composer then sends the ordinary `Paste` it already sends, with that path in
+the text. That also keeps INV-12 honest — the budget goes on meaning
+keystrokes-into-a-live-agent, and the upload gets its own limit rather than
+borrowing one that was sized for typing.
+
+**The parts with no obvious answer yet, in the order they bite:**
+
+1. **Where the bytes go.** `~/.claude/agent-commander/` already holds the
+   Telegram token, so a `pictures/<session_id>/` under it is the least
+   surprising place — but nothing in this app has ever written a file an agent
+   then reads, and nothing deletes one. Decide the retention rule *before*
+   writing the first byte, not after: a directory that only grows is the
+   failure mode, and `UsageReader::retain` (`usage.rs`) is the existing
+   pattern for "the session is gone, so this is too".
+2. **What the server accepts.** A path built from client-supplied bytes is the
+   classic hole; INV-9's `browse::WithinRoot` exists for exactly this and the
+   name must come from the server, not the upload. Sniff the magic bytes
+   rather than trusting a declared content type, and take only the formats
+   Claude Code actually reads.
+3. **Whether the agent can read it at all.** The server and the agent share a
+   filesystem today because both are on this machine, and that is the whole
+   reason this works. Say so where the limit will be met.
+
+**Watch for:** the read-only case. An agent started outside tmux has no pane,
+so the composer is already disabled for it (README, "Your agents must run
+inside tmux") — a picture button must be disabled on the same condition and
+for the same reason, not on its own new one.
+
+**Done when:** a picture chosen from a phone's camera roll reaches a real
+agent, that agent describes it back in the Chat tab, and the path it was given
+is gone from disk once the session is.
+
 ## Not doing
 
 **TLA+ for the invariant set.** Evaluated and rejected. Of the 16, one (INV-2)
