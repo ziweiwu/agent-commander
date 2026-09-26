@@ -2,6 +2,14 @@
   display: flex;
   flex-direction: column;
   min-height: 100dvh;
+  /*
+   * The containing block for every `.sr-only` label. Without it they resolve
+   * against the page itself, so a label on a card below the fold of the fleet
+   * column escaped the column's `overflow: auto` and made the document taller
+   * than the screen: 988px at 1440x900 on the mock fleet, which Chrome scrolled
+   * into as empty space below the app.
+   */
+  position: relative;
 }
 
 .mockBanner {

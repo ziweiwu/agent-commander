@@ -21,6 +21,8 @@
     overflow-y: auto;
     min-height: 0;
     scrollbar-gutter: stable;
+    /* The end of the list is the end of the scroll; it is not handed on. */
+    overscroll-behavior-y: contain;
   }
 }
 

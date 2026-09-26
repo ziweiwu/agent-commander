@@ -113,12 +113,10 @@ test.describe('sending a message', () => {
       PIN_SLACK,
     )
     if (overflowing) {
-      // The scroller is `scroll-behavior: smooth`, so the pin to the end on
-      // mount is an animation that is still at the top when the first message
-      // becomes visible. A `scrollTo(0)` issued then is a no-op — no scroll
-      // event, so nothing unpins — and the animation carries on to the end.
-      // Let it land first, then leave instantly so one scroll event carries
-      // the whole distance.
+      // Opening lands on the end at once rather than animating there: the
+      // scroller used to be `scroll-behavior: smooth`, and the whole
+      // conversation scrolled past on every open. The poll is for content
+      // still arriving over the socket, not for an animation.
       await expect
         .poll(() => scroll.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
         .toBeLessThan(2)

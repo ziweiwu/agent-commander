@@ -17,8 +17,14 @@
   max-height: min(56vh, 620px);
   overflow-y: auto;
   padding-right: 6px;
-  scroll-behavior: smooth;
+  /*
+   * No `scroll-behavior: smooth`. Every pin to the end is a `scrollTop`
+   * assignment, and smooth turned each into an animation — most visibly on
+   * opening an agent, where the whole conversation scrolled past before the
+   * last message arrived. Opening one lands on its end, at once.
+   */
   height: 100%;
+  overscroll-behavior-y: contain;
 }
 
 /*

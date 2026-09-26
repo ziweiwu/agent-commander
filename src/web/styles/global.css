@@ -31,6 +31,23 @@ body.no-scroll {
   min-height: 100%;
 }
 
+/*
+ * A desktop is one screenful and the page itself never scrolls: the fleet
+ * column and the conversation carry their own scroll (`App.module.css`). So
+ * the document is locked rather than trusted to fit. Anything that escapes a
+ * column — the `.sr-only` labels did, by 1618px — then has nowhere to push
+ * the page to, and macOS Chrome's elastic overscroll has no root scroller to
+ * bounce: a wheel that ran past the end of the fleet list used to chain up to
+ * the document and drag blank space into view below the app.
+ */
+@media (min-width: 901px) {
+  html,
+  body {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+}
+
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
