@@ -123,6 +123,7 @@ nothing is answered from the lock screen.
 5. The picture button beside it hands the agent a screenshot: the file is put
    where the agent can read it and its path lands in the box, so you write what
    to do with it and send that yourself. It goes when the session does.
+   Pasting a screenshot into the box does the same.
 6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent — or a plain terminal — with **+ New agent**, and prune

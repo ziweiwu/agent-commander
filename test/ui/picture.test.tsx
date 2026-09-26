@@ -14,7 +14,7 @@
  * (TODO §14, "Watch for").
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Chat } from '../../src/web/components/Chat.tsx'
 import { agent, renderApp, resetStore } from './helpers.tsx'
@@ -85,6 +85,53 @@ describe('INV-11 a picture is offered as a path, never sent as a message', () =>
 
     await waitFor(() => expect(useStore.getState().toast).toMatch(/not a PNG/))
     expect(box().value).toBe('')
+  })
+})
+
+/** A paste event's clipboard, holding the given files and text. */
+const clipboard = (files: File[], text = '') => ({
+  files,
+  getData: (type: string) => (type === 'text/plain' ? text : ''),
+  types: [...(files.length ? ['Files'] : []), ...(text ? ['text/plain'] : [])],
+})
+
+describe('INV-2 a pasted screenshot is uploaded like an attached one', () => {
+  it('uploads the picture and puts its path in the box, sending nothing', async () => {
+    uploadPicture.mockResolvedValue({ ok: true, path: '/tmp/pics/a/abc.png' })
+    renderApp(<Chat agent={idle()} />)
+
+    fireEvent.paste(box(), { clipboardData: clipboard([shot()]) })
+
+    await waitFor(() => expect(box().value).toBe('/tmp/pics/a/abc.png '))
+    expect(uploadPicture).toHaveBeenCalledWith('a', expect.any(File))
+    expect(sendMessage).not.toHaveBeenCalled()
+  })
+
+  it('leaves a text paste to the browser', () => {
+    renderApp(<Chat agent={idle()} />)
+
+    const prevented = !fireEvent.paste(box(), { clipboardData: clipboard([], 'hello') })
+
+    expect(prevented).toBe(false)
+    expect(uploadPicture).not.toHaveBeenCalled()
+  })
+
+  it('does not take a file that is not a picture', () => {
+    renderApp(<Chat agent={idle()} />)
+
+    const notes = new File(['x'], 'notes.txt', { type: 'text/plain' })
+    fireEvent.paste(box(), { clipboardData: clipboard([notes]) })
+
+    expect(uploadPicture).not.toHaveBeenCalled()
+  })
+
+  it('uploads nothing while nothing typed here could arrive', () => {
+    useStore.setState({ conn: 'closed' })
+    renderApp(<Chat agent={idle()} />)
+
+    fireEvent.paste(box(), { clipboardData: clipboard([shot()]) })
+
+    expect(uploadPicture).not.toHaveBeenCalled()
   })
 })
 

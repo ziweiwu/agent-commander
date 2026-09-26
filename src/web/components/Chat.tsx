@@ -49,6 +49,19 @@ const STRIP_ID = 'composer-strip'
 const VIEWPORT_EDGE_PX = 8
 /** The gap between the Replies chip and the list that opens above it. */
 const REPLIES_GAP_PX = 6
+/** What the attach button offers and a paste is taken over for. */
+const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+/**
+ * The picture a paste carries, if it carries one.
+ *
+ * A screenshot copied on macOS arrives as a file with no name worth keeping;
+ * the type is what says it is a picture. A copied web image can carry its
+ * HTML alongside, and the picture is still the part worth taking.
+ */
+function pastedPicture(clipboard: DataTransfer): File | undefined {
+  return Array.from(clipboard.files).find((file) => PICTURE_TYPES.includes(file.type))
+}
 
 /**
  * The replies that get typed over and over: unblock it, approve it, make it
@@ -686,6 +699,20 @@ export function Chat({ agent }: { agent: Agent }) {
               e.target.style.height = 'auto'
               e.target.style.height = `${e.target.scrollHeight}px`
             }}
+            /*
+             * A screenshot pasted here takes the attach button's path: the
+             * picture is uploaded and its path lands in the draft, and nothing
+             * is sent (INV-2). Only a paste that carries an image is taken over;
+             * text pastes as it always did. The button's own gates apply, so a
+             * paste while offline or mid-upload is left to the browser, which
+             * inserts nothing for an image.
+             */
+            onPaste={(e) => {
+              const picture = pastedPicture(e.clipboardData)
+              if (!picture || !sendable || attaching) return
+              e.preventDefault()
+              void attachPicture(picture)
+            }}
             onKeyDown={(e) => {
               /*
                * An IME's Enter belongs to the IME.
@@ -750,7 +777,7 @@ export function Chat({ agent }: { agent: Agent }) {
               <input
                 ref={pictureRef}
                 type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
+                accept={PICTURE_TYPES.join(',')}
                 className={styles.hiddenFile}
                 data-testid="picture-input"
                 tabIndex={-1}
