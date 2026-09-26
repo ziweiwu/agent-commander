@@ -155,6 +155,16 @@
   padding-top: 8px;
   border-top: 1px solid var(--line);
 }
+/*
+ * The file picker behind the picture button. `display: none` rather than the
+ * off-screen clip a visually-hidden control needs: nothing reaches this by
+ * keyboard or by screen reader, because the button beside it is what has the
+ * name and the focus, and it is clicked by hand.
+ */
+.hiddenFile {
+  display: none;
+}
+
 /* The button that opens it, in the composer row. */
 .menu {
   display: flex;

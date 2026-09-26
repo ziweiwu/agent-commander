@@ -119,6 +119,62 @@ describe('reconcile', () => {
     expect(reconcile(confirmed, [local])).toHaveLength(1)
   })
 
+  /*
+   * The composer writes the path the upload handed back and Claude Code
+   * records `[Image #1]` where it read the file, so the same message reaches
+   * `reconcile` under two names. Comparing them literally left every picture
+   * a person sent marked "not delivered" while the agent was answering it —
+   * INV-2 says an unconfirmed message is marked rather than retried, and that
+   * only means something if the mark is true.
+   */
+  it('INV-2 confirms a picture the transcript names its own way', () => {
+    const path = '/Users/x/.claude/agent-commander/pictures/s1/abc.png'
+    const asRead = buildMessages([
+      ev({ kind: 'user', text: '[Image #1]\n\nname the stripe colours', at: 1000 }),
+    ])
+    const local = pendingMessage(`${path} name the stripe colours`, 2000, 0)
+    expect(reconcile(asRead, [local])).toHaveLength(1)
+  })
+
+  /*
+   * And the two names are not in the same place. Typing the question first
+   * and attaching afterwards — which is the order a person writes in, and the
+   * order the composer appends in — puts the path at the end, while Claude
+   * Code puts the `[Image #n]` it swapped in at the front. Measured live: the
+   * message was submitted, read and answered, and the echo beside it still
+   * said "not delivered".
+   */
+  it('INV-2 confirms a picture wherever each side names it', () => {
+    const path = '/Users/x/.claude/agent-commander/pictures/s1/abc.png'
+    const asRead = buildMessages([
+      ev({ kind: 'user', text: '[Image #1]\n\nname the stripe colours', at: 1000 }),
+    ])
+    const local = pendingMessage(`name the stripe colours ${path} `, 2000, 0)
+    expect(reconcile(asRead, [local])).toHaveLength(1)
+  })
+
+  // Order stops mattering; how many pictures were handed over still does.
+  it('INV-2 does not confirm two pictures with the transcript’s one', () => {
+    const dir = '/Users/x/.claude/agent-commander/pictures/s1'
+    const asRead = buildMessages([ev({ kind: 'user', text: '[Image #1]\n\ncompare', at: 1000 })])
+    const local = pendingMessage(`compare ${dir}/abc.png ${dir}/def.png`, 2000, 0)
+    expect(reconcile(asRead, [local])).toHaveLength(2)
+  })
+
+  it('INV-2 still counts a second picture as a second message', () => {
+    const path = '/Users/x/.claude/agent-commander/pictures/s1/abc.png'
+    const asRead = buildMessages([ev({ kind: 'user', text: '[Image #1]', at: 1000 })])
+    const again = pendingMessage(path, 2000, 0, 1)
+    expect(reconcile(asRead, [again])).toHaveLength(2)
+  })
+
+  // A path an agent merely mentioned is prose, not a picture this app sent.
+  it('INV-11 folds only this app’s own pictures', () => {
+    const asRead = buildMessages([ev({ kind: 'user', text: '[Image #1]', at: 1000 })])
+    const other = pendingMessage('/Users/x/Pictures/holiday.png', 2000, 0)
+    expect(reconcile(asRead, [other])).toHaveLength(2)
+  })
+
   it('is a no-op with nothing pending', () => {
     expect(reconcile(confirmed, [])).toBe(confirmed)
   })

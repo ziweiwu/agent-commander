@@ -59,6 +59,8 @@ export const ICON_PATHS = {
     '<rect x="3.2" y="4.6" width="17.6" height="12.4" rx="2.4"/><path d="M9 20.4H15"/>',
   'screen-off':
     '<rect x="3.2" y="4.6" width="17.6" height="12.4" rx="2.4"/><path d="M9 20.4H15"/><path d="M3.4 19.6L20.6 4.4"/>',
+  'picture':
+    '<rect x="3.6" y="4.6" width="16.8" height="14.8" rx="2.4"/><path d="M4.4 16.4L9.6 10.6L14.4 15.4"/><circle cx="15.6" cy="9.2" r="1.2"/>',
 } as const
 
 export type IconName = keyof typeof ICON_PATHS

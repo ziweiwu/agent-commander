@@ -9,7 +9,13 @@ import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useStore } from '../store/store.ts'
-import { interruptAndSend, sendConfirmedKey, sendMessage, sendShiftTab } from '../store/transport.ts'
+import {
+  interruptAndSend,
+  sendConfirmedKey,
+  sendMessage,
+  sendShiftTab,
+  uploadPicture,
+} from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
 import { AnswerCard } from './AnswerCard.tsx'
 import { ChatControls } from './ChatControls.tsx'
@@ -196,6 +202,8 @@ export function Chat({ agent }: { agent: Agent }) {
   /** The synchronous truth about the draft; `draft` is only for rendering. */
   const draftRef = useRef('')
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
+  const pictureRef = useRef<HTMLInputElement>(null)
+  const [attaching, setAttaching] = useState(false)
 
   const attachable = Boolean(agent.paneId)
   /*
@@ -429,6 +437,36 @@ export function Chat({ agent }: { agent: Agent }) {
     else sendMessage(text)
     setDraft('')
     setPinned(true)
+    inputRef.current?.focus()
+  }
+
+  /*
+   * A picture becomes a path in the box, and stops there.
+   *
+   * Uploading is not sending. The agent reads the file by being told where it
+   * is, and what to do with it is a sentence only the user can write — "what
+   * is wrong with this layout" and "transcribe this" are different
+   * instructions about identical bytes. Composing one here would be this app
+   * writing prose on somebody's behalf (INV-11); sending it would be input
+   * nobody typed (INV-2). So the path lands in the draft, the box takes
+   * focus, and Send stays the deliberate act it already is.
+   *
+   * It is appended rather than assigned for the same reason the quick prompts
+   * leave the draft alone: whatever is half-written there is the user's.
+   */
+  const attachPicture = async (file: File) => {
+    setAttaching(true)
+    const answer = await uploadPicture(agent.sessionId, file)
+    setAttaching(false)
+    if (!answer.ok) {
+      showToast(t('pictureFailed', { error: answer.error }))
+      return
+    }
+    const before = draftRef.current
+    const spaced = before.length === 0 || /\s$/.test(before) ? before : `${before} `
+    draftRef.current = `${spaced}${answer.path} `
+    setDraft(draftRef.current)
+    showToast(t('picturePlaced'))
     inputRef.current?.focus()
   }
 
@@ -696,6 +734,49 @@ export function Chat({ agent }: { agent: Agent }) {
             the two context actions. Beside Send because the composer row is
             the one row this layout always has, at every width and height.
           */}
+          {/*
+            The one thing the composer can send that cannot be typed.
+
+            Gated on `attachable` and on nothing of its own: an agent started
+            outside tmux has no pane, so the box beside this is already
+            disabled, and a picture whose path could never be sent anywhere is
+            a button that does nothing (TODO §14, "Watch for"). The file input
+            itself is hidden rather than styled, because a browser's own file
+            control cannot be made to match anything and the button is the
+            part that has to look like the row it sits in.
+          */}
+          {attachable && (
+            <>
+              <input
+                ref={pictureRef}
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                className={styles.hiddenFile}
+                data-testid="picture-input"
+                tabIndex={-1}
+                aria-hidden="true"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  // Cleared so that choosing the same picture twice is two
+                  // events rather than one: a `change` fires on a new value.
+                  e.target.value = ''
+                  if (file) void attachPicture(file)
+                }}
+              />
+              <Button
+                type="button"
+                variant="compact"
+                data-testid="attach-picture"
+                title={t('attachPictureTitle')}
+                aria-label={t('attachPicture')}
+                disabled={!sendable || attaching}
+                aria-describedby={sendable ? undefined : OFFLINE_HINT_ID}
+                onClick={() => pictureRef.current?.click()}
+              >
+                <Icon name="picture" />
+              </Button>
+            </>
+          )}
           {attachable && (
             <div
               className={styles.menu}

@@ -14,6 +14,7 @@ import type {
   DirListing,
   FleetTree,
   NewAgentResponse,
+  PictureResponse,
   ServerEnv,
   ServerMessage,
 } from '../../shared/types.ts'
@@ -445,6 +446,36 @@ async function spawnRequest(path: string, body: object): Promise<NewAgentRespons
       return { ok: false, error: translate(useStore.getState().lang, 'staleServer') }
     }
     return (await res.json()) as NewAgentResponse
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+/**
+ * Hand a picture to a session and get back the path to type at it.
+ *
+ * Plain HTTP rather than a sixth client message. A megabyte of picture on the
+ * fleet socket would sit in front of every other tab's frames until it
+ * finished, and that socket's caps were sized for keystrokes. The bytes go as
+ * themselves rather than base64, which would make a 10MB photo a 13MB body
+ * and buy nothing.
+ *
+ * Uploading is not sending: this answers with a path, and what reaches the
+ * agent is still a message the reader chose to send.
+ */
+export async function uploadPicture(sessionId: string, file: File): Promise<PictureResponse> {
+  try {
+    const res = await fetch(`/api/agents/${encodeURIComponent(sessionId)}/picture`, {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file,
+    })
+    // The same stale-server trap `spawnRequest` documents: an unknown route is
+    // the SPA shell, and `res.json()` on HTML blames the parser for it.
+    if (!(res.headers.get('content-type') ?? '').includes('application/json')) {
+      return { ok: false, error: translate(useStore.getState().lang, 'staleServer') }
+    }
+    return (await res.json()) as PictureResponse
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }

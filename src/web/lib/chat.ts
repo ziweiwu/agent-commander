@@ -140,13 +140,46 @@ export function pendingMessage(
   }
 }
 
+/**
+ * A picture, however the two sides happen to name it.
+ *
+ * The composer writes the path the upload handed back; Claude Code reads the
+ * file at its prompt and records `[Image #1]` in its place. Same message,
+ * two spellings, and comparing them byte for byte marked every delivered
+ * picture "not delivered" — the one claim INV-2's marking exists to make
+ * truthfully. Only this app's own picture directory is folded, so a path an
+ * agent happened to mention stays the text it is.
+ */
+const NAMED_PICTURE = /(?:\S*\/\.claude\/agent-commander\/pictures\/\S+|\[Image #\d+\])/g
+
+/**
+ * One message's text as something to compare, never as something to draw.
+ *
+ * Runs of whitespace fold to one space — the CLI lays a prompt out to its own
+ * width, so an echo and its confirmation differ in newlines that neither party
+ * typed.
+ *
+ * A picture folds to a *count* rather than to a token where it stood, because
+ * the two sides do not stand it in the same place: the composer appends the
+ * path after what was typed, and Claude Code lifts the `[Image #1]` it swaps
+ * in to the front of the line. Same message, same picture, two word orders —
+ * and folding in place left a delivered picture marked "not delivered", which
+ * is the one claim INV-2's marking exists to make truthfully. The count is
+ * what keeps a message carrying two pictures from matching one carrying one.
+ */
+function saidAs(text: string): string {
+  const pictures = text.match(NAMED_PICTURE)?.length ?? 0
+  const words = text.replace(NAMED_PICTURE, ' ').split(/\s+/).filter(Boolean).join(' ')
+  return `${pictures} picture(s) with: ${words}`
+}
+
 /** How many times you have already said this, counting messages still in flight. */
 export function countSaid(messages: ChatMessage[], text: string): number {
-  const key = text.trim()
+  const key = saidAs(text)
   // A failed message is one the transcript never recorded, so it is not
   // something the next copy of this text can be confirmed by.
   return messages.filter(
-    (m) => m.role === 'you' && m.failed !== true && m.text.trim() === key,
+    (m) => m.role === 'you' && m.failed !== true && saidAs(m.text) === key,
   ).length
 }
 

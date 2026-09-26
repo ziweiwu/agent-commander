@@ -129,27 +129,25 @@ now asserts the kind.
 
 ## Tier 5 — what INV-17 left open
 
-### 7. The parity list is written twice, by hand
+### 7. The parity list is written twice, by hand — done
 
-**Filed with INV-17, 2026-09-03.** `test/ui/inv17-parity.test.tsx` and
-`e2e/responsive.spec.ts` each carry the same list of action test ids, and the
-comment in the e2e one argues that having to notice a divergence is a feature.
-That is true and it is also how the list rots: an action added to the app and
-to neither list is invisible to both.
+`src/shared/surfaces.ts` exports `AGENT_SCREEN_ACTIONS`, and both
+`test/ui/inv17-parity.test.tsx` and `e2e/responsive.spec.ts` import it. Adding
+an action is one edit; the two lists can no longer disagree, because there is
+one.
 
-The honest fix is to derive it. A single `src/shared/surfaces.ts` exporting the
-ids, imported by both tests, would make "add an action, add it to the list" one
-edit instead of two — and a lint rule or a test that walks the components for
-`data-testid` on an interactive element could then compare the app against the
-list rather than the lists against each other.
+The "watch for" was answered rather than waived. The list is still **declared**
+— a discovered one would shrink with the control it is meant to catch, and the
+two shape-comparing tests would agree with themselves and say nothing. What is
+derived is the other direction: `test/surfaces.test.ts` parses the component
+source for a `data-testid` on an interactive element and fails on a declared id
+that names nothing, which catches the rename and the typo without ever asking
+what a render looks like. A source string cannot agree with itself the way a
+render can.
 
-**Watch for:** the reason it is two lists today is that a *discovered* list
-cannot catch a control that stopped rendering everywhere — it would agree with
-itself. So the derived list has to come from the source, not from a rendered
-tree, or the invariant loses the case it was written for.
-
-**Done when:** one list, both tests read it, and deleting a control from the
-app fails a test rather than shrinking a list.
+`test/ui/one-place.test.tsx` is the third leg and was already there: it
+enumerates the controls on the agent screen and fails on one nobody wrote
+down, which is what caught the picture button (§14) on the way in.
 
 ### 8. The composer's growth cap is a desktop number applied to a phone
 
@@ -432,58 +430,39 @@ may be *sent* — only what the reader is told before sending it.
 **Done when:** a two-question `AskUserQuestion` can be answered to the end from
 the Chat tab, and the fixture that proves it is in `mock.rs`.
 
-### 14. Send a picture to a session
+### 14. Send a picture to a session — done
 
-Asked for directly, 2026-09-20. The composer can send an agent anything you can
-type and nothing you cannot, and a screenshot is the thing you most want to
-hand an agent from a phone — the one device where the file is already in your
-hand and there is no terminal to drag it into.
+Asked for directly, 2026-09-20, and shipped the same day.
 
-**Why it is not just another `paste`.** Everything the composer sends today is
-text that ends up in a tmux pane: `ClientMessage::Paste { session_id, text,
-submit, seq }` (`types.rs:602`), capped at `MAX_PASTE` 100 KB with the frame
-itself capped at `MAX_FRAME_BYTES` 1 MB (`control.rs:679`, `:689`), and
-metered per tab by `control::WriteBudget` (`:719`) under INV-12. An image is
-none of those things: it is binary, it is routinely larger than both caps, and
-tmux has no way to carry it. The only route that reaches Claude Code through a
-pane is a **path** — the CLI reads an image file named in a prompt — so the
-picture has to land on the server's filesystem first and what goes into the
-pane stays text.
+`POST /api/agents/<id>/picture` takes the raw bytes beside the socket rather
+than on it, and answers with a path. `rust/src/pictures.rs` owns the file:
+the format is sniffed from the magic bytes (PNG, JPEG, GIF, WebP — a RIFF that
+is a WAV is refused), the directory is the session id held to `usage::safe_id`'s
+rule, the name is the digest of the bytes, and the cap is its own
+`MAX_PICTURE_BYTES` (10MB) rather than a share of `MAX_PASTE`. `PictureStore`
+is `PictureStore::retain`, run from the enricher's existing pass beside
+`UsageReader::retain` and wired only when `--mock` is off.
 
-**The shape that follows.** An HTTP `POST` beside the socket rather than a new
-`ClientMessage`, because a megabyte of base64 through the fleet socket blocks
-every other tab's frames behind it: the upload answers with a path, and the
-composer then sends the ordinary `Paste` it already sends, with that path in
-the text. That also keeps INV-12 honest — the budget goes on meaning
-keystrokes-into-a-live-agent, and the upload gets its own limit rather than
-borrowing one that was sized for typing.
+The three questions the entry raised were answered in the order it listed them:
+the bytes go under `~/.claude/agent-commander/pictures/<session_id>/` with the
+retention rule written before the first write; nothing in the path comes off the
+wire; and the module's own doc says where the limit is — this works because the
+server and the agent share a filesystem, and an agent elsewhere would need the
+bytes themselves to travel.
 
-**The parts with no obvious answer yet, in the order they bite:**
+The browser's half is deliberately small: the button is offered on exactly the
+condition the composer is (`attachable`), and the path it gets back is
+**appended to the draft, not sent**. What to do with the picture is a sentence
+only the user can write (INV-11), and sending one nobody typed is INV-2's one
+prohibition.
 
-1. **Where the bytes go.** `~/.claude/agent-commander/` already holds the
-   Telegram token, so a `pictures/<session_id>/` under it is the least
-   surprising place — but nothing in this app has ever written a file an agent
-   then reads, and nothing deletes one. Decide the retention rule *before*
-   writing the first byte, not after: a directory that only grows is the
-   failure mode, and `UsageReader::retain` (`usage.rs`) is the existing
-   pattern for "the session is gone, so this is too".
-2. **What the server accepts.** A path built from client-supplied bytes is the
-   classic hole; INV-9's `browse::WithinRoot` exists for exactly this and the
-   name must come from the server, not the upload. Sniff the magic bytes
-   rather than trusting a declared content type, and take only the formats
-   Claude Code actually reads.
-3. **Whether the agent can read it at all.** The server and the agent share a
-   filesystem today because both are on this machine, and that is the whole
-   reason this works. Say so where the limit will be met.
-
-**Watch for:** the read-only case. An agent started outside tmux has no pane,
-so the composer is already disabled for it (README, "Your agents must run
-inside tmux") — a picture button must be disabled on the same condition and
-for the same reason, not on its own new one.
-
-**Done when:** a picture chosen from a phone's camera roll reaches a real
-agent, that agent describes it back in the Chat tab, and the path it was given
-is gone from disk once the session is.
+**Walked end to end, 2026-09-21**, which is what this entry's "done when"
+asked for: two screenshots from a phone's camera roll, uploaded from the
+dashboard on that phone, appended to the draft as paths, submitted, and read by
+a live session. Two defects only that walk could find are fixed and recorded in
+INV-2 — the `Enter` Claude Code swallows when it rides along with a picture
+paste, and the reconcile that compared the path and the `[Image #n]` in the
+order each side happened to write them.
 
 ## Not doing
 

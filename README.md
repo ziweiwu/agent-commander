@@ -120,7 +120,10 @@ nothing is answered from the lock screen.
 4. The **⋯** beside Send holds everything that is not typing: common replies,
    what Send does to a working agent, permission mode, model, goal, compact
    and clear. It is a menu so the conversation keeps the room.
-5. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
+5. The picture button beside it hands the agent a screenshot: the file is put
+   where the agent can read it and its path lands in the box, so you write what
+   to do with it and send that yourself. It goes when the session does.
+6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent — or a plain terminal — with **+ New agent**, and prune
 sessions you opened and never used with **Prune**. Terminals are kept out of

@@ -68,6 +68,14 @@ const CONTROLS = [
   'controls-toggle',
   'composer-input',
   'composer-send',
+  'attach-picture',
+  /*
+   * The file picker behind it. Not a second home for the action — it is the
+   * button's mechanism, hidden, out of the tab order and unnamed — but it is
+   * an `<input>` under the composer, so the sweep below finds it and the rule
+   * that a control is named here rather than drifting in applies to it too.
+   */
+  'picture-input',
 ] as const
 
 /**

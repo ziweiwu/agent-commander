@@ -243,6 +243,38 @@ Geometry travels one way only. `computeScale` never returns more than 1 in the
 panel, refuses to shrink text below ~9.5px, and pans instead — the browser's
 width is a CSS transform and never a `resize`.
 
+### Pictures — the one thing the composer sends that is not text
+
+```
+POST /api/agents/:id/picture   raw image bytes, no JSON envelope
+   └─ the fleet must hold that session                     routes.rs
+   └─ extension_of()  format read off the magic bytes    pictures.rs
+   └─ <digest>.<ext> under ~/.claude/agent-commander/pictures/<id>/
+   └─ answers with the path, for the browser to put in the draft
+```
+
+Beside the socket rather than on it, and deliberately. A megabyte of picture
+sent as a `ClientMessage` would sit in front of every other tab's frames until
+it finished, and the socket's caps (`MAX_PASTE`, `MAX_FRAME_BYTES`) were sized
+for keystrokes; base64 would make a 10MB photo a 13MB body and buy nothing. So
+the bytes travel as themselves over HTTP, and what goes into the pane is still
+text — the path — because a pane carries nothing else.
+
+Nothing in the stored path comes off the wire. The directory is the session id,
+held to the same rule `usage::safe_id` applies (INV-9), and the file name is the
+digest of the bytes, so the same screenshot uploaded twice is one file. The
+retention rule was written before the first byte: `PictureStore::retain` runs
+inside the enricher's existing pass beside `UsageReader::retain`, and reads the
+directory rather than remembering what it wrote, so pictures left by an earlier
+run of the server are collected too. It is wired only when `--mock` is off —
+pointed at the real directory under a fixture fleet, it would delete every real
+session's pictures.
+
+**The limit to meet before this grows a remote story:** it works because the
+server and the agent share a filesystem. An agent somewhere else would need the
+bytes themselves to travel, and the path this hands back would name a file that
+machine does not have.
+
 ### Control — typing on the user's behalf
 
 ```

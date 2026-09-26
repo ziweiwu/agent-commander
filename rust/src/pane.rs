@@ -523,6 +523,18 @@ impl Control for LiveControl {
 /// sessions will do it — spawning returns `EAGAIN` readily, and it did so twice
 /// while this path was being measured. Before this, one `EAGAIN` dropped the
 /// character the user had just typed, or stopped their terminal outright.
+/// How long a picture paste is left alone before the Enter that submits it.
+///
+/// Claude Code reads an image path out of a paste and swaps it for an
+/// `[Image #n]` attachment, and an Enter arriving on the heels of that paste is
+/// taken to be part of it: the message is left sitting at the prompt, unsent.
+/// Measured against 2.1.278 by driving a live session down this same control
+/// client — 1ms was swallowed twice, 5ms once of three times, and 10, 20, 30,
+/// 40, 50 and 400ms submitted every time, the picture read. It is a race rather
+/// than a threshold, so this is two orders of magnitude of slack over where the
+/// losses stopped, and it is paid only by a message that hands over a picture.
+const PICTURE_SETTLE: Duration = Duration::from_millis(150);
+
 pub(crate) const SPAWN_RETRIES: usize = 4;
 const SPAWN_RETRY_BASE_MS: u64 = 20;
 
@@ -1073,7 +1085,8 @@ impl Panes {
     /// Send text to the pane as a bracketed paste, so multi-line input and
     /// shell-special characters arrive intact rather than being re-interpreted
     /// as keypresses. `submit` presses Enter afterwards, in the same command
-    /// sequence.
+    /// sequence — except for the one text where that Enter never arrives; see
+    /// below.
     pub async fn paste(&self, pane_id: &str, text: &str, submit: Submit) -> Result<(), PaneError> {
         assert_pane(pane_id)?;
         if text.is_empty() && submit == Submit::No {
@@ -1087,11 +1100,37 @@ impl Panes {
             return self.send(enter, None).await.map_err(|failed| failed.error);
         }
 
-        let prepared = self.prepare_paste(pane_id, text, submit).await;
-        match self.send(prepared, Some(text)).await {
-            Ok(()) => Ok(()),
-            Err(failed) => Err(self.tidy_after(failed).await),
+        /*
+         * A paste that hands over a picture is submitted by an Enter of its
+         * own, a moment later.
+         *
+         * Claude Code takes input that arrives on the heels of a paste to be
+         * part of that paste, and a picture paste is where this app fell into
+         * it: the Enter travelling in the same `load-buffer ; paste-buffer ;
+         * send-keys` sequence was swallowed, the message was left at the prompt
+         * unsent, and the browser marked it undelivered — the truth, and no use
+         * to anybody. `PICTURE_SETTLE` carries the measurement.
+         *
+         * Both writes stay under one ticket, so nothing can be pasted between
+         * the text and the Enter that submits it (INV-2), and the Enter is
+         * still sent exactly once whatever it finds.
+         */
+        let enter_of_its_own = submit == Submit::Yes && crate::pictures::names_a_picture(text);
+        let with_the_text = match enter_of_its_own {
+            true => Submit::No,
+            false => submit,
+        };
+
+        let prepared = self.prepare_paste(pane_id, text, with_the_text).await;
+        if let Err(failed) = self.send(prepared, Some(text)).await {
+            return Err(self.tidy_after(failed).await);
         }
+        if enter_of_its_own {
+            tokio::time::sleep(PICTURE_SETTLE).await;
+            let enter = self.prepare_key(pane_id, "Enter");
+            return self.send(enter, None).await.map_err(|failed| failed.error);
+        }
+        Ok(())
     }
 
     /// Send a single control key. The caller must have validated it against
@@ -1646,6 +1685,51 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["load-buffer", "paste-buffer", "send-keys"]
         );
+    }
+
+    /// Measured against Claude Code 2.1.278: an Enter sent on the heels of a
+    /// picture paste is read as part of it and the message is left at the
+    /// prompt. Folding this Enter back into the paste sequence fails here.
+    #[tokio::test(start_paused = true)]
+    async fn submits_a_picture_with_an_enter_of_its_own() {
+        let (_c, once, panes) = rig();
+        let picture = crate::pictures::pictures_dir().join("s1").join("a.png");
+        let text = format!("what is this? {}", picture.to_string_lossy());
+        panes.paste("%76", &text, Submit::Yes).await.unwrap();
+
+        let sequences: Vec<Vec<String>> = once
+            .calls()
+            .iter()
+            .map(|call| {
+                FakeOnce::commands_in(&call.args).iter().map(|c| c[0].clone()).collect()
+            })
+            .collect();
+        assert_eq!(
+            sequences,
+            vec![vec!["load-buffer", "paste-buffer"], vec!["send-keys"]],
+            "the text, and then the Enter as a write of its own"
+        );
+    }
+
+    /// And it is a write *later*, which is the half a shape assertion cannot
+    /// see: the whole defect was an Enter that arrived too soon.
+    #[tokio::test(start_paused = true)]
+    async fn leaves_the_picture_alone_before_that_enter() {
+        let (_c, _once, panes) = rig();
+        let picture = crate::pictures::pictures_dir().join("s1").join("a.png");
+        let started = tokio::time::Instant::now();
+        panes.paste("%76", &picture.to_string_lossy(), Submit::Yes).await.unwrap();
+        assert!(started.elapsed() >= PICTURE_SETTLE, "{:?}", started.elapsed());
+    }
+
+    /// Nothing else waits: a message with no picture in it submits in the one
+    /// sequence it always did.
+    #[tokio::test(start_paused = true)]
+    async fn ordinary_text_is_not_made_to_wait_for_a_picture_that_is_not_there() {
+        let (_c, _once, panes) = rig();
+        let started = tokio::time::Instant::now();
+        panes.paste("%76", "~/Downloads/holiday.png is the one I mean", Submit::Yes).await.unwrap();
+        assert!(started.elapsed() < PICTURE_SETTLE, "{:?}", started.elapsed());
     }
 
     #[tokio::test]

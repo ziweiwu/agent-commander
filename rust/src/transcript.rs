@@ -10,10 +10,12 @@
 #![allow(dead_code)]
 
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use async_trait::async_trait;
+use regex::Regex;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
@@ -61,6 +63,47 @@ const STATE_TYPES: &[&str] = &["permission-mode", "ai-title", "last-prompt"];
 
 /// Tools that mean this agent has delegated work to subagents.
 const SUBAGENT_TOOLS: &[&str] = &["Task", "Agent", "Workflow"];
+
+/// The envelope Claude Code wraps a long paste in, opening tag and closing.
+///
+/// It writes the id into both, so the closing tag carries an id attribute as
+/// well, where a stricter reader would expect a bare closing tag.
+/// The newline each tag sits on goes with it: Claude Code lays the envelope
+/// out on lines of its own, and leaving them behind turns one blank line into
+/// two in the conversation.
+static PASTE_ENVELOPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:<pasted_content[^>\n]{0,64}>\n?)|(?:\n?</pasted_content[^>\n]{0,64}>)")
+        .unwrap()
+});
+
+/// A prompt as the person typed it, with the paste envelope taken off.
+///
+/// Claude Code wraps anything past its paste threshold — measured here at 107
+/// characters against Claude Code 2.1.278, where six characters went
+/// unwrapped — in `<pasted_content id="…">`. Everything this app sends arrives
+/// as a paste (INV-2 stages text through a file), so the envelope is on the
+/// ordinary case rather than an unusual one, and it was reaching the reader
+/// verbatim.
+///
+/// Only the tags go. The words inside them are the user's own, and dropping a
+/// single one of them would be this app editing what somebody said (INV-11).
+fn unwrap_paste(text: &str) -> String {
+    PASTE_ENVELOPE.replace_all(text, "").trim().to_string()
+}
+
+/// Whether a record spelled as blocks is a person talking rather than
+/// machinery.
+///
+/// Claude Code writes its own notes as `user` records — the `[Image: source:
+/// …]` line it files beside a picture is one — and marks every one of them
+/// `isMeta`. Quoting those back into the conversation as though the user had
+/// typed them is the claim INV-11 forbids, and it is a claim only the block
+/// path can make: a bare string carries no picture and no note.
+fn is_the_user_speaking(rec: &Value) -> bool {
+    rec.get("isMeta").and_then(Value::as_bool) != Some(true)
+        && rec.get("isCompactSummary").and_then(Value::as_bool) != Some(true)
+        && rec.get("toolUseResult").is_none()
+}
 
 /// `~/.claude/projects`, where Claude Code files transcripts by project.
 pub fn projects_dir() -> PathBuf {
@@ -1062,23 +1105,24 @@ impl Batch<'_> {
                 .then_some(true),
         };
         if kind == "user" {
-            self.push_user_prompt(content, context);
+            self.push_user_prompt(rec, content, context);
         } else if kind == "assistant" {
             self.push_assistant_blocks(content, context, sets);
         }
     }
 
-    fn push_user_prompt(&mut self, content: Option<&Value>, context: EventContext) {
-        // Array content on a user record is tool_result plumbing; not shown as
-        // a message, but it is exactly what closes an open call.
-        if let Some(blocks) = content.and_then(Value::as_array) {
-            for block in blocks {
-                if let Some(id) = text_field(block, "tool_use_id") {
-                    self.out.answered.push(id.to_string());
-                }
-            }
-        }
-        let Some(text) = content.and_then(Value::as_str) else { return };
+    fn push_user_prompt(&mut self, rec: &Value, content: Option<&Value>, context: EventContext) {
+        // A user record spelled as blocks is usually tool_result plumbing, and
+        // that is what closes an open call. It is not *only* that: a prompt
+        // carrying a picture is blocks too, because the image rides beside the
+        // text (INV-11 — a message the agent answered must not read as one it
+        // never received).
+        let from_blocks = content
+            .and_then(Value::as_array)
+            .map(|blocks| self.read_prompt_blocks(rec, blocks))
+            .unwrap_or_default();
+        let text = content.and_then(Value::as_str).unwrap_or(&from_blocks);
+        let text = unwrap_paste(text.trim());
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -1097,6 +1141,22 @@ impl Batch<'_> {
             tokens_before: None,
             tokens_after: None,
         });
+    }
+
+    /// Closes every call a block answers, and returns the text the blocks say
+    /// when a person said it — empty for plumbing.
+    fn read_prompt_blocks(&mut self, rec: &Value, blocks: &[Value]) -> String {
+        let mut said = Vec::new();
+        for block in blocks {
+            if let Some(id) = text_field(block, "tool_use_id") {
+                self.out.answered.push(id.to_string());
+            }
+            said.extend(text_field(block, "text"));
+        }
+        if !is_the_user_speaking(rec) {
+            return String::new();
+        }
+        said.join("\n")
     }
 
     fn push_assistant_blocks(
@@ -1979,6 +2039,70 @@ mod tests {
         let out = parse(&[&line]);
         assert_eq!(out.events[0].kind, TimelineKind::User);
         assert_eq!(out.events[0].text, "add dark mode");
+    }
+
+    /// A picture prompt is blocks, and used to reach the conversation as
+    /// nothing at all: the reader never saw the message and the browser's echo
+    /// of it counted down to "not delivered" while the agent was answering it.
+    #[test]
+    fn inv11_a_prompt_carrying_a_picture_is_a_message_the_reader_can_see() {
+        let text = json!({ "type": "text", "text": "[Image #1]\n\nwhat is wrong with this layout?" });
+        let image = json!({ "type": "image", "source": { "type": "base64" } });
+        let picture_prompt = json!([text, image]);
+        let line = json!({
+            "type": "user", "timestamp": "2026-08-14T00:00:00Z",
+            "origin": { "kind": "human" }, "promptSource": "typed",
+            "message": { "content": picture_prompt },
+        })
+        .to_string();
+        let out = parse(&[&line]);
+        assert_eq!(out.events[0].kind, TimelineKind::User);
+        assert_eq!(out.events[0].text, "[Image #1]\n\nwhat is wrong with this layout?");
+    }
+
+    /// The note Claude Code files beside a picture is its own record, and it is
+    /// not something anybody said.
+    #[test]
+    fn inv11_the_notes_claude_code_writes_to_itself_are_not_the_user_talking() {
+        let picture_note = json!({
+            "type": "user", "timestamp": "2026-08-14T00:00:00Z", "isMeta": true,
+            "message": { "content": [{
+                "type": "text",
+                "text": "[Image: source: /Users/x/.claude/agent-commander/pictures/s1/a.png]",
+            }] },
+        })
+        .to_string();
+        let tool_result = json!({
+            "type": "user", "timestamp": "2026-08-14T00:00:00Z",
+            "toolUseResult": { "stdout": "" },
+            "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "t1" },
+                { "type": "text", "text": "ok" },
+            ] },
+        })
+        .to_string();
+        let out = parse(&[&picture_note, &tool_result]);
+        assert!(out.events.is_empty(), "neither is a message: {:?}", out.events);
+        assert_eq!(out.answered, vec!["t1"], "and the call is still closed");
+    }
+
+    /// Everything this app sends is a paste (INV-2), so the envelope Claude
+    /// Code puts round a long one was on the ordinary message rather than an
+    /// unusual one — and it reached the reader verbatim.
+    #[test]
+    fn inv11_a_long_message_is_read_back_as_the_words_rather_than_the_envelope() {
+        let wrapped = concat!(
+            "\n\n<pasted_content id=\"c74a\">\n",
+            "name the stripe colours top to bottom\n",
+            "</pasted_content id=\"c74a\">\n",
+        );
+        let line = json!({
+            "type": "user", "timestamp": "2026-08-14T00:00:00Z",
+            "message": { "content": wrapped },
+        })
+        .to_string();
+        let out = parse(&[&line]);
+        assert_eq!(out.events[0].text, "name the stripe colours top to bottom");
     }
 
     #[test]

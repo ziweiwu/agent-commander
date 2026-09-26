@@ -359,6 +359,15 @@ over the list with a back control; on a wide one, a second column.
   an `href`; anything else MUST stay the literal text it arrived as, and the
   link MUST carry `noopener` and `noreferrer`. **(INV-18)**
   *`test/chat.test.ts`, `test/ui/message-links.test.tsx`, `e2e/chat.spec.ts`.*
+- **FR-CHAT-14** — The composer MUST be able to hand an agent a **picture**,
+  and the picture MUST arrive as a path rather than as a message. A pane
+  carries only keystrokes, so an image cannot travel the way text does; Claude
+  Code reads an image file named in a prompt, so the bytes are uploaded and the
+  *path* is written into the draft. Writing the prompt around it MUST stay the
+  user's: nothing is composed and nothing is sent by the upload itself
+  **(INV-2, INV-11)**. The button MUST be offered on exactly the condition the
+  composer is — an agent with a pane — and MUST NOT grow a gate of its own.
+  *`test/ui/picture.test.tsx`, `routes::a_picture_is_stored_and_its_path_comes_back_to_be_typed`.*
 
 ### 4.2 Answering a blocked agent
 
@@ -745,6 +754,15 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **NFR-SEC-15** — No client may queue unbounded work into a running agent.
   Writes MUST be charged against a per-connection budget, and a frame that could
   not be a legitimate message MUST be refused before it is parsed. **(INV-12)**
+- **NFR-SEC-16** — An uploaded picture MUST be named by the server, never by
+  the caller: the session id MUST pass the same directory-name rule `usage.rs`
+  applies (INV-9) and the file name MUST be the digest of the bytes. The format
+  MUST be read from the bytes' own magic numbers rather than from a declared
+  content type, and only what Claude Code reads — PNG, JPEG, GIF, WebP — MUST
+  be stored. The upload MUST carry its own size limit rather than borrowing
+  `MAX_PASTE`, which is sized for typing, and a session the fleet no longer
+  holds MUST lose its pictures on the same pass that retires its usage
+  readings. *`pictures::tests`.*
 
 ---
 

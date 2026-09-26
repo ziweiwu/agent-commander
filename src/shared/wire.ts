@@ -269,6 +269,15 @@ detail?: string,
 id?: string, };
 
 /**
+ * `{ ok: true, path } | { ok: false, error }`
+ *
+ * `path` is the picture on this machine, ready to be typed at an agent. The
+ * server answers with it rather than sending it: what reaches a live pane is
+ * still a `paste` the reader chose to send, inside the prompt they wrote.
+ */
+export type PictureResponse = { ok: true, path: string, } | { ok: false, error: string, };
+
+/**
  * One choice in a prompt the agent is blocked on.
  */
 export type PromptOption = { label: string, description?: string, 

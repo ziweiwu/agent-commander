@@ -175,6 +175,33 @@ arrived was never marked undelivered either. Marking is the only honest
 response to a message that may not have landed, and it only works if the app
 can tell this copy from the last one.
 
+**A message that hands over a picture is submitted by an Enter of its own, and
+is matched back by a picture *count* rather than by where the picture stood.**
+Both halves were the same discovery, measured end to end against Claude Code
+2.1.278 rather than reasoned about.
+
+The CLI treats input arriving on the heels of a paste as part of that paste,
+and a picture paste is where this app fell into it: it reads the image path
+out, swaps an `[Image #n]` attachment in, and swallows the Enter travelling in
+the same `load-buffer ; paste-buffer ; send-keys` sequence. The message sat at
+the prompt unsent and the browser marked it undelivered — which was true, and
+no use to anybody. Driving a live session down this same control client, a 1ms
+gap was swallowed twice and a 5ms gap once of three, while 10, 20, 30, 40, 50
+and 400ms submitted every time with the picture read: a race rather than a
+threshold, so `PICTURE_SETTLE` is two orders of magnitude of slack over where
+the losses stopped, and only a message carrying a picture pays it. Both writes
+stay under one ticket, so nothing can be pasted between the text and the Enter
+that submits it, and the Enter is still sent exactly once whatever it finds.
+
+Then the same swap breaks the match. The composer appends the path *after* what
+was typed — which is the order a person writes in — and the CLI records the
+`[Image #n]` at the *front* of the line, so the echo and its confirmation carry
+the same words in two orders. Folding the picture to a token where it stood
+compared those orders and never matched, so a picture that was delivered, read
+and answered was still marked "not delivered". `saidAs` folds a picture to a
+count instead: position stops mattering, and a message carrying two pictures
+still cannot be confirmed by one carrying one.
+
 "Exactly once" cannot rest on React state. `draft` is read from a closure and
 `setDraft('')` does not land until React flushes, so three Enter keydowns
 delivered in one batch — key repeat, a double click on Send, input queued behind
@@ -185,6 +212,13 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
 
 - `test/ui/burst-send.test.tsx` — asserts one send from a burst of three, for
   Enter, for the Send button, and for a double-tapped chip
+- `pane::tests` (the picture group) — a picture is pasted and then submitted by
+  a second write, left alone for `PICTURE_SETTLE` in between, while ordinary
+  text — a path an agent was merely told about included — is not made to wait;
+  and `pictures::tests` for the line between the two, which is this app's own
+  directory rather than "looks like an image path"
+- `test/chat.test.ts` (the picture group) — the picture confirmed wherever each
+  side names it, and two pictures not confirmed by the transcript's one
 - `pane::tests` (the write-path group) — two overlapping pastes never swap payloads,
   writes to one pane keep their order, a load and its paste travel as one tmux
   invocation, and a spawn refused for want of a process slot is retried rather

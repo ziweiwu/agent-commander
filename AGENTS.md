@@ -392,6 +392,14 @@ commit.
   which parses the struct and fails naming the field and the function that
   forgot it. Verified the way a guard has to be — by deleting `description`
   from `merge_patch` and watching it go red.
+- **A new wire type has to be named in `wire::render_once()` or `gen:types`
+  emits nothing.** ts-rs exports from a *root list*, not from the `#[derive]`:
+  `types.rs`'s `render_once` calls `export_all` on each root, and a type nobody
+  calls it for is simply absent from `src/shared/wire.ts`. The failure is
+  silent in the worst way — `npm run gen:types` succeeds, prints nothing, and
+  leaves `wire.ts` byte-identical, so it reads as "already up to date" rather
+  than "never written". `PictureResponse` was the last one added; the minute
+  spent re-reading the derive was spent on the half that was right.
 - **`tokens` is output tokens only**, accumulated per tail from a bounded
   backfill — not the session's spend, despite being presented as cost and used
   as a sort key.

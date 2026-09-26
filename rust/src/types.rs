@@ -316,6 +316,36 @@ impl NewAgentResponse {
     }
 }
 
+/// `{ ok: true, path } | { ok: false, error }`
+///
+/// `path` is the picture on this machine, ready to be typed at an agent. The
+/// server answers with it rather than sending it: what reaches a live pane is
+/// still a `paste` the reader chose to send, inside the prompt they wrote.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, Serialize)]
+#[serde(untagged)]
+pub enum PictureResponse {
+    Ok {
+        #[cfg_attr(test, ts(type = "true"))]
+        ok: bool,
+        path: String,
+    },
+    Err {
+        #[cfg_attr(test, ts(type = "false"))]
+        ok: bool,
+        error: String,
+    },
+}
+
+impl PictureResponse {
+    pub fn ok(path: String) -> Self {
+        PictureResponse::Ok { ok: true, path }
+    }
+    pub fn err(error: impl Into<String>) -> Self {
+        PictureResponse::Err { ok: false, error: error.into() }
+    }
+}
+
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -991,6 +1021,7 @@ pub mod wire {
         DirListing::export_all(&cfg)?;
         ControlResponse::export_all(&cfg)?;
         NewAgentResponse::export_all(&cfg)?;
+        PictureResponse::export_all(&cfg)?;
         FleetTree::export_all(&cfg)?;
         let types = std::fs::read_to_string(dir.path().join("wire.ts"))?;
         Ok(format!("{HEADER}\n{}\n\n{}", types.trim_end(), values()))

@@ -46,6 +46,7 @@ pub struct FleetEnricher {
     /// Set once; `None` in mock mode and in most tests, where the fixtures say
     /// what they cost themselves.
     usage: std::sync::OnceLock<Arc<crate::usage::UsageReader>>,
+    pictures: std::sync::OnceLock<Arc<crate::pictures::PictureStore>>,
 }
 
 impl FleetEnricher {
@@ -73,12 +74,22 @@ impl FleetEnricher {
             task: Mutex::new(None),
             watched: AtomicBool::new(true),
             usage: std::sync::OnceLock::new(),
+            pictures: std::sync::OnceLock::new(),
         })
     }
 
     /// Read context-window usage and cost for every Claude agent from here.
     pub fn read_usage_from(&self, reader: Arc<crate::usage::UsageReader>) {
         let _ = self.usage.set(reader);
+    }
+
+    /// Clear the pictures of sessions that have ended from here.
+    ///
+    /// Retention rides the pass that already knows the whole fleet, rather
+    /// than a timer of its own: the set of live sessions is exactly what a
+    /// tick holds, and a second loop would be a second thing to get wrong.
+    pub fn clear_pictures_in(&self, store: Arc<crate::pictures::PictureStore>) {
+        let _ = self.pictures.set(store);
     }
 
     /// Tick now, then on the interval, until [`stop`](Self::stop).
@@ -202,8 +213,14 @@ impl FleetEnricher {
             }
         }
         drop(tails);
-        if let Some(reader) = self.usage.get() {
-            reader.retain(&agents.iter().map(|a| a.session_id.clone()).collect::<Vec<_>>());
+        if self.usage.get().is_some() || self.pictures.get().is_some() {
+            let live: Vec<String> = agents.iter().map(|a| a.session_id.clone()).collect();
+            if let Some(reader) = self.usage.get() {
+                reader.retain(&live);
+            }
+            if let Some(store) = self.pictures.get() {
+                store.retain(&live);
+            }
         }
         if self.refresh_running(&agents).await {
             changed = true;

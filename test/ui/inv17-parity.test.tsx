@@ -18,6 +18,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentDetail } from '../../src/web/components/AgentDetail.tsx'
+import { AGENT_SCREEN_ACTIONS } from '../../src/shared/surfaces.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 import { setViewport } from './setup.ts'
 import { useStore } from '../../src/web/store/store.ts'
@@ -39,38 +40,6 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   clearGoal: vi.fn(),
   sendShiftTab: vi.fn(),
 }))
-
-/**
- * The actions the agent view offers, by the test id that reaches each one.
- *
- * Spelled out rather than discovered, because a discovered list would shrink
- * quietly with the thing it is meant to catch: if a control stops rendering
- * everywhere, a "compare the shapes" test that reads both sides from the DOM
- * agrees with itself and says nothing.
- */
-const ACTIONS = [
-  'tab-chat',
-  'tab-attach',
-  'fullscreen-toggle',
-  // The agent's own settings and the two context actions.
-  'model-select',
-  'clear-agent',
-  'compact-agent',
-  /*
-   * Close is on this list now that it folds at every width rather than only
-   * below 900px. The fold is the whole point of the change, so the thing worth
-   * asserting is that it cost no shape its ability to end a session.
-   */
-  'close-agent',
-  // The composer, and everything in the strip above it.
-  'composer-input',
-  'composer-send',
-  'send-mode-queue',
-  'send-mode-interrupt',
-  'goal-toggle',
-  'strip-toggle',
-  'shift-tab',
-] as const
 
 /** A wide, fine-pointer desktop: nothing is behind a disclosure here. */
 const DESKTOP = () => false
@@ -116,7 +85,7 @@ describe('INV-17 every shape offers every action', () => {
     const user = userEvent.setup()
     open()
     await revealEverything(user)
-    const missing = ACTIONS.filter((id) => screen.queryAllByTestId(id).length === 0)
+    const missing = AGENT_SCREEN_ACTIONS.filter((id) => screen.queryAllByTestId(id).length === 0)
     expect(missing, `unreachable on this shape: ${missing.join(', ')}`).toEqual([])
   })
 

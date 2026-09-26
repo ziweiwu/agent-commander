@@ -20,33 +20,11 @@
  *     WCAG 2.2 AA asks 24x24; a coarse pointer wants 44.
  */
 import { expect, test, type Page } from '@playwright/test'
+import { AGENT_SCREEN_ACTIONS } from '../src/shared/surfaces.ts'
 import { AGENT, openAgent, openFleet } from './helpers.ts'
 
 /** WCAG 2.2 AA, 2.5.8. The audits hold the touch surfaces to 44. */
 const MIN_TARGET = 24
-
-/**
- * The actions an open agent offers. Kept in step with the list in
- * `test/ui/inv17-parity.test.tsx` by hand, and deliberately so: this one is
- * about whether they can be *seen and hit*, which is a different question from
- * whether they were rendered, and the two lists diverging is a fact worth
- * having to notice.
- */
-const ACTIONS = [
-  'tab-chat',
-  'tab-attach',
-  'fullscreen-toggle',
-  'model-select',
-  'clear-agent',
-  'compact-agent',
-  'composer-input',
-  'composer-send',
-  'send-mode-queue',
-  'send-mode-interrupt',
-  'goal-toggle',
-  'strip-toggle',
-  'shift-tab',
-]
 
 /** Open every disclosure this shape has folded something behind. */
 async function revealEverything(page: Page): Promise<void> {
@@ -88,7 +66,7 @@ test.describe('INV-17 every shape is the whole app', () => {
     await revealEverything(page)
 
     const missing: string[] = []
-    for (const id of ACTIONS) {
+    for (const id of AGENT_SCREEN_ACTIONS) {
       // `first()`: `fullscreen-toggle` is rendered once per layout, in the
       // header on a desktop and in the tab row on a phone.
       const control = page.getByTestId(id).first()

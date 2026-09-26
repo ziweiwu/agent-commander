@@ -38,6 +38,7 @@ mod pane;
 mod pane_hub;
 #[cfg(test)]
 mod pane_props;
+mod pictures;
 mod pending;
 mod poll;
 mod procs;

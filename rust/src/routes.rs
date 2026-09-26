@@ -48,7 +48,7 @@ use crate::sources::{Deps, PaneApi, PaneSample, Submit, TailApi, Unsubscribe};
 use crate::types::{
     Agent, AgentStatus, AgentTree, ClientMessage, ControlResponse, DirListing, ErrorKind,
     FleetTree, Geom, GoalState, NewAgentRequest, NewAgentResponse, NewTerminalRequest, PendingPrompt,
-    ServerEnv, ServerMessage,
+    PictureResponse, ServerEnv, ServerMessage,
 };
 
 /// How often a focused tab's transcript is re-read.
@@ -303,6 +303,8 @@ pub struct App {
     pub grants: Grants,
     /// How many browsers are connected. See [`Viewers`].
     pub viewers: Viewers,
+    /// Where a picture a tab uploads is stored until its session ends.
+    pub pictures: Arc<crate::pictures::PictureStore>,
     /// How often a quiet socket is pinged. `HEARTBEAT_MS` outside tests.
     ///
     /// A field rather than the constant read directly, because the property
@@ -834,6 +836,11 @@ fn grant_for(method: &Method, path: &str) -> Grant {
     if path == "/api/dirs" {
         return Grant::Spawn;
     }
+    // Uploading writes a file on this machine that an agent is then pointed
+    // at, which is driving it by a longer route rather than reading it.
+    if picture_route(path).is_some() && method == Method::POST {
+        return Grant::Drive;
+    }
     if control_route(path).is_some() {
         // `/clear` destroys a conversation, `mode` can cycle onto a permission
         // mode that stops asking, and `close` kills the session. All of them
@@ -941,6 +948,11 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
     if path == "/api/tree" {
         return handle_tree(&app, &parts.headers).await;
     }
+    if let Some(session_id) = picture_route(&path) {
+        if method == Method::POST {
+            return handle_picture(&app, body, &session_id).await;
+        }
+    }
     if let Some((session_id, action)) = control_route(&path) {
         if method == Method::POST {
             return handle_control(&app, body, &session_id, &action).await;
@@ -960,6 +972,20 @@ fn control_route(path: &str) -> Option<(String, String)> {
         return None;
     }
     Some((decode_component(id), action.to_string()))
+}
+
+/// `^/api/agents/([^/]+)/picture$`, id decoded.
+///
+/// Its own route rather than another `control_route` action because the body
+/// is a picture rather than JSON, and because it is the one endpoint here
+/// whose size bound is measured in megabytes.
+fn picture_route(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("/api/agents/")?;
+    let (id, action) = rest.rsplit_once('/')?;
+    if id.is_empty() || id.contains('/') || action != "picture" {
+        return None;
+    }
+    Some(decode_component(id))
 }
 
 /* -------------------------------------------------------------------------
@@ -1317,6 +1343,37 @@ fn value_of(body: &serde_json::Value) -> String {
         Some(serde_json::Value::String(s)) => s.clone(),
         Some(other) => other.to_string(),
     }
+}
+
+/// Store a picture for one session and answer with the path to type at it.
+///
+/// Plain HTTP beside the socket rather than a fifth client message: a
+/// megabyte through the fleet socket would sit in front of every other tab's
+/// frames until it finished, and the socket's own cap (`MAX_FRAME_BYTES`) was
+/// sized for keystrokes. It also keeps `WriteBudget` meaning what INV-12 says
+/// it means — how much a tab may still ask of a *live agent* — instead of
+/// spending that allowance on a file nobody has been shown yet.
+async fn handle_picture(app: &App, body: Body, session_id: &str) -> Response {
+    use crate::pictures::Refused;
+    if app.deps.source.get(session_id).is_none() {
+        return refused_picture(StatusCode::NOT_FOUND, &Refused::UnknownSession);
+    }
+    // The cap is the reader's: `to_bytes` stops at it rather than buffering a
+    // body of any size and measuring afterwards.
+    let Ok(bytes) = axum::body::to_bytes(body, crate::pictures::MAX_PICTURE_BYTES).await else {
+        return refused_picture(StatusCode::PAYLOAD_TOO_LARGE, &Refused::TooLarge);
+    };
+    match app.pictures.save(session_id, &bytes) {
+        Ok(path) => json_of(StatusCode::OK, &PictureResponse::ok(crate::pictures::as_typed(&path))),
+        Err(why) if why.is_the_callers_fault() => {
+            refused_picture(StatusCode::BAD_REQUEST, &why)
+        }
+        Err(why) => refused_picture(StatusCode::INTERNAL_SERVER_ERROR, &why),
+    }
+}
+
+fn refused_picture(status: StatusCode, why: &crate::pictures::Refused) -> Response {
+    json_of(status, &PictureResponse::err(why.message()))
 }
 
 /// What one control action answers with, or the status its failure earns.
@@ -2961,6 +3018,7 @@ async fn build_app(
         grants: opts.grants,
         tree: Some(tree_reader(opts)),
         viewers: Viewers::default(),
+        pictures: Arc::new(crate::pictures::PictureStore::new()),
         heartbeat: Duration::from_millis(HEARTBEAT_MS),
     })
 }
@@ -3049,6 +3107,13 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     enricher.unwatch().await;
 
     let app = build_app(&opts, deps, pending, mock_source).await;
+    // Real agents only, and for a sharper reason than usage: retention deletes
+    // what is not in the fleet, and a mock fleet is fixtures. Pointed at the
+    // real directory it would clear the pictures of every session that is
+    // actually running.
+    if !opts.mock {
+        enricher.clear_pictures_in(app.pictures.clone());
+    }
     idle_the_enricher_on_viewers(&app, &enricher);
     if let Some(spec) = &opts.notify {
         let channel = crate::push::Channel::parse(spec, &|key| std::env::var(key).ok())
@@ -3781,6 +3846,11 @@ mod tests {
             grants: Grants::ALL,
             tree: None,
             viewers: Viewers::default(),
+            // Under the harness's own temp root, so a test that stores a
+            // picture never writes into the real `~/.claude`.
+            pictures: Arc::new(crate::pictures::PictureStore::in_dir(
+                parts.web_root.path().join("pictures"),
+            )),
             heartbeat: Duration::from_millis(HEARTBEAT_MS),
         })
     }
@@ -4984,6 +5054,74 @@ mod tests {
         let h = blocked(FakePanes::new()).await;
         let res = post(h.port, "/api/agents", "", Some("{}")).await;
         assert!(!status(&res).contains("403"), "{}", status(&res));
+    }
+
+    /* ---- Pictures: bytes over HTTP, a path back, nothing typed ---- */
+
+    /// Like `post`, but the payload is bytes. A PNG's own header is not UTF-8,
+    /// so it cannot be handed to the `&str` version at all.
+    async fn post_bytes(port: u16, path: &str, payload: &[u8]) -> String {
+        let mut request = format!(
+            "POST {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\
+             Content-Type: application/octet-stream\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n",
+            payload.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(payload);
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        stream.write_all(&request).await.unwrap();
+        let mut out = String::new();
+        let _ = stream.read_to_string(&mut out).await;
+        out
+    }
+
+    fn a_png() -> Vec<u8> {
+        let mut bytes = b"\x89PNG\r\n\x1a\n".to_vec();
+        bytes.extend_from_slice(b"pretend this is a screenshot");
+        bytes
+    }
+
+    fn picture_path(session_id: &str) -> String {
+        format!("/api/agents/{session_id}/picture")
+    }
+
+    #[tokio::test]
+    async fn a_picture_is_stored_and_its_path_comes_back_to_be_typed() {
+        let h = blocked(FakePanes::new()).await;
+        let res = post_bytes(h.port, &picture_path(BLOCKED), &a_png()).await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+        let answer: serde_json::Value = serde_json::from_str(&body(&res)).unwrap();
+        let path = answer["path"].as_str().expect("the path to type");
+        assert!(std::path::Path::new(path).exists(), "the file is really there: {path}");
+        assert!(path.contains("pictures"), "under this server's own store: {path}");
+        // The upload alone sends nothing: what reaches a live pane is still a
+        // paste the reader chose to send (INV-12).
+        assert!(h.panes.keys.lock().unwrap().is_empty(), "nothing was typed at the agent");
+    }
+
+    #[tokio::test]
+    async fn a_picture_for_a_session_the_fleet_does_not_hold_is_refused() {
+        let h = blocked(FakePanes::new()).await;
+        let res = post_bytes(h.port, &picture_path("nobody"), &a_png()).await;
+        assert!(status(&res).contains("404"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn what_is_not_a_picture_is_refused_and_says_what_would_be_taken() {
+        let h = blocked(FakePanes::new()).await;
+        let res = post_bytes(h.port, &picture_path(BLOCKED), b"#!/bin/sh\nrm -rf /").await;
+        assert!(status(&res).contains("400"), "{}", status(&res));
+        assert!(body(&res).contains("PNG"), "{}", body(&res));
+    }
+
+    /// Uploading puts a file on this machine that an agent is then pointed at,
+    /// so it is the drive power. `--grant read` must not be a way to write here.
+    #[tokio::test]
+    async fn a_read_only_credential_cannot_upload_a_picture() {
+        let h = granting(Grants::parse("read").unwrap(), FakePanes::new()).await;
+        let res = post_bytes(h.port, &picture_path(BLOCKED), &a_png()).await;
+        assert!(status(&res).contains("403"), "{}", status(&res));
     }
 
     /* ---- INV-2: an answer is bound to the question it was given for ---- */
