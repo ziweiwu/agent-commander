@@ -152,6 +152,8 @@ pub struct Options {
     pub port: u16,
     pub host: String,
     pub token: Option<String>,
+    /// `--no-token`: serve tokenless, which only loopback may (INV-3).
+    pub no_token: bool,
     pub mock: bool,
     pub mock_transitions: bool,
     /// `--mock-empty`: the fixture server with no fixtures, so the genuine
@@ -180,6 +182,7 @@ impl Default for Options {
             port: PROD_PORT,
             host: "127.0.0.1".into(),
             token: None,
+            no_token: false,
             mock: false,
             mock_transitions: false,
             mock_empty: false,
@@ -388,6 +391,7 @@ pub fn parse_args_with_token_file(argv: &[String], token_path: &Path) -> Result<
             "--port" | "-p" => opts.port = port_from(&take_value(&mut i)?)?,
             "--host" => opts.host = take_value(&mut i)?,
             "--token" => opts.token = Some(take_value(&mut i)?),
+            "--no-token" => opts.no_token = true,
             "--web-root" => opts.web_root = resolved(&take_value(&mut i)?),
             "--install-statusline" => opts.install_statusline = true,
             "--rotate-token" => opts.rotate_token = true,
@@ -458,12 +462,37 @@ fn finalise_options(mut opts: Options, token_path: &Path) -> Result<Parsed, Stri
     // process". Reading it back is what lets a saved link outlive a restart;
     // see `token_file`. A literal `--token` is left exactly as typed — it is an
     // explicit override, and writing it to disk would be a surprise.
+    if opts.no_token && opts.token.is_some() {
+        return Err("--token and --no-token contradict each other".into());
+    }
+    if wants_the_stored_token(&opts) {
+        opts.token = Some("auto".into());
+    }
     if opts.token.as_deref() == Some("auto") {
         opts.token = Some(crate::token_file::read_or_create(token_path)?);
     }
     refuse_an_open_bind_without_a_token(&opts)?;
     refuse_a_push_address_nobody_could_open(&opts)?;
     Ok(Parsed::Options(opts))
+}
+
+/// Whether a server that named no token gets the stored one anyway.
+///
+/// Loopback used to mean tokenless, on the reasoning that the origin gate keeps
+/// browsers out and the network cannot reach 127.0.0.1. Both are true and
+/// neither covers a local process that is not a browser: it sends no `Origin`,
+/// so it passes the gate, and a tokenless server then hands it every grant —
+/// another account on the machine, a container on the host network, or one of
+/// the very agents this app supervises, answering its own permission prompt
+/// with `curl`. So a server that touches real agents keeps a token unless told
+/// otherwise. Fixtures touch nothing and stay open, which is what the e2e
+/// suite and the audits rely on; the flags that serve nothing need none.
+fn wants_the_stored_token(opts: &Options) -> bool {
+    opts.token.is_none()
+        && !opts.no_token
+        && !opts.mock
+        && !opts.rotate_token
+        && !opts.install_statusline
 }
 
 /// A link on a push has to be a URL the phone can open, or the tap on the
@@ -530,6 +559,8 @@ pub fn help_text() -> String {
             .to_string(),
         "      --token <s>    require this token; \"auto\" uses the stored one".to_string(),
         "      --rotate-token  replace the stored token and exit".to_string(),
+        "      --no-token     serve without one (loopback only; the default is the stored token)"
+            .to_string(),
         "      --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)"
             .to_string(),
         "      --print-url    print the full URL, token and all, then keep serving".to_string(),
@@ -598,9 +629,23 @@ mod tests {
     fn defaults_to_loopback() {
         let o = parse(&[]).unwrap();
         assert_eq!(o.host, "127.0.0.1");
-        assert!(o.token.is_none());
         assert_eq!(o.port, PROD_PORT);
         assert!(!o.mock);
+    }
+
+    /// INV-3: loopback keeps browsers out, not local processes. A server over
+    /// real agents therefore keeps the stored token unless told not to.
+    #[test]
+    fn inv3_a_real_server_keeps_a_token_by_default() {
+        let store = tempfile::tempdir().unwrap();
+        let path = store.path().join("token");
+        let first = parse_in(&[], &path).unwrap().token.expect("a token by default");
+        assert_eq!(first.len(), TOKEN_HEX_CHARS);
+        assert_eq!(parse_in(&[], &path).unwrap().token, Some(first), "the stored one, kept");
+        assert!(parse_in(&["--no-token"], &path).unwrap().token.is_none());
+        // Fixtures drive nothing, and the e2e suite and audits reach them bare.
+        assert!(parse_in(&["--mock", "--port", "4400"], &path).unwrap().token.is_none());
+        assert!(parse_in(&["--token", "x", "--no-token"], &path).is_err());
     }
 
     /// INV-3: this app can approve permission prompts, so an open bind needs a
@@ -608,7 +653,7 @@ mod tests {
     #[test]
     fn inv3_refuses_a_non_loopback_bind_without_a_token() {
         for host in ["0.0.0.0", "192.168.1.5", "100.64.0.1", "::"] {
-            let err = parse(&["--host", host]).unwrap_err();
+            let err = parse(&["--host", host, "--no-token"]).unwrap_err();
             assert!(err.contains("refusing to bind"), "{host}: {err}");
         }
     }

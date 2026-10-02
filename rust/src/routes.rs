@@ -595,17 +595,65 @@ fn is_self_name(hostname: &str, allowed: &[String]) -> bool {
     is_loopback_name(hostname) || is_allowed_name(hostname, allowed)
 }
 
+/// The port written in an authority, if one is.
+fn port_of(authority: &str) -> Option<&str> {
+    let after_host = match authority.strip_prefix('[') {
+        Some(inner) => &inner[inner.find(']')? + 1..],
+        None => authority.find(':').map_or("", |at| &authority[at..]),
+    };
+    after_host.strip_prefix(':').filter(|port| !port.is_empty())
+}
+
+/// The port an origin was served on, `None` when it is its scheme's default.
+///
+/// `http://x` and `Host: x:80` are the same place, and so are `https://x` and a
+/// bare `Host: x` behind `tailscale serve`. Folding the default to `None` on
+/// both sides is what lets the comparison below be a plain equality.
+fn origin_port<'a>(origin: &str, authority: &'a str) -> Option<&'a str> {
+    let default = match origin.split_once("://").map(|(s, _)| s.to_ascii_lowercase()) {
+        Some(scheme) if scheme == "https" => "443",
+        _ => "80",
+    };
+    port_of(authority).filter(|port| *port != default)
+}
+
+/// Whether `Origin` names the very host *and port* the request was sent to.
+///
+/// Comparing hostnames alone was the hole: every port on loopback is the same
+/// name, so a page served by any other local server — a dev server, a
+/// notebook, a tool a package started — passed as this app's own, and the
+/// browser attaches the session cookie across ports, because cookies are not
+/// port-isolated. An origin is scheme, host and port; this checks the two a
+/// request can disagree on, which is what a browser means by same-origin.
+fn origin_matches_host(origin: &str, host: &str) -> bool {
+    let (Some(from), Some(asked)) = (authority_of(origin), authority_of(host)) else {
+        return false;
+    };
+    let (Some(from_name), Some(asked_name)) = (hostname_of(Some(from)), hostname_of(Some(asked)))
+    else {
+        return false;
+    };
+    let asked_port = origin_port(origin, asked);
+    from_name == asked_name && origin_port(origin, from) == asked_port
+}
+
 fn same_origin_request(headers: &HeaderMap, allowed: &[String]) -> bool {
+    let host = headers.get(header::HOST).and_then(|v| v.to_str().ok());
     if let Some(origin) = headers.get(header::ORIGIN) {
         // A sandboxed iframe or a file:// page sends the literal "null". It
         // parses as a hostname of that name, which is not one of ours, so it
         // is refused by the same line as anything else foreign.
-        match hostname_of(origin.to_str().ok()) {
+        let origin = origin.to_str().ok();
+        match hostname_of(origin) {
             Some(from) if is_self_name(&from, allowed) => {}
             _ => return false,
         }
+        match (origin, host) {
+            (Some(origin), Some(host)) if origin_matches_host(origin, host) => {}
+            _ => return false,
+        }
     }
-    match hostname_of(headers.get(header::HOST).and_then(|v| v.to_str().ok())) {
+    match hostname_of(host) {
         Some(asked) => is_self_name(&asked, allowed),
         None => false,
     }
@@ -619,9 +667,62 @@ pub const SESSION_COOKIE: &str = "ac_session";
 /// This is the *session's* lifetime, not the credential's. The token itself is
 /// long-lived and stable (see `token_file`) so a bookmark keeps working; what
 /// ages out is one browser's right to skip presenting it. Revocation is
-/// `--rotate-token`, which invalidates every cookie at once because the cookie
-/// carries the token.
+/// `--rotate-token`, which invalidates every cookie at once because every
+/// cookie is signed with the token.
 const SESSION_MAX_AGE: u32 = 60 * 60 * 24 * 30;
+
+/// Bytes of randomness in each cookie, so no two browsers hold the same one.
+const SESSION_NONCE_BYTES: usize = 16;
+
+/// What the MAC covers besides the cookie's own fields, so a signature made
+/// for anything else this app might ever sign with the token cannot pass here.
+const SESSION_CONTEXT: &str = "agent-commander session v1";
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+fn session_mac(token: &str, expires: u64, nonce: &str) -> String {
+    use hmac::{Hmac, Mac};
+    let mut mac = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes())
+        .expect("HMAC takes a key of any length");
+    mac.update(format!("{SESSION_CONTEXT}.{expires}.{nonce}").as_bytes());
+    mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A fresh cookie value: `<expires>.<nonce>.<mac>`, never the token itself.
+///
+/// The cookie used to *be* the token, for thirty days. Cookies are not
+/// port-isolated, so every other server on this host was handed the master
+/// credential on each request a browser made to it, and a copy lifted from
+/// anywhere was the token for good — usable as `?token=` or as a bearer, and
+/// with no expiry but the one the browser chose to honour. This value is
+/// signed with the token instead: it opens nothing but a cookie slot, and it
+/// stops working on the server's clock, not the browser's.
+fn session_cookie(token: &str, lifetime: u32) -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; SESSION_NONCE_BYTES];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let nonce: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let expires = now_unix().saturating_add(u64::from(lifetime));
+    let mac = session_mac(token, expires, &nonce);
+    format!("{expires}.{nonce}.{mac}")
+}
+
+/// Whether `value` is a cookie this server signed with `token` and still honours.
+fn valid_session_cookie(value: &str, token: &str, now: u64) -> bool {
+    let mut parts = value.splitn(3, '.');
+    let (Some(expires), Some(nonce), Some(mac)) = (parts.next(), parts.next(), parts.next())
+    else {
+        return false;
+    };
+    let Ok(expires_at) = expires.parse::<u64>() else {
+        return false;
+    };
+    expires_at > now && safe_equal(mac, &session_mac(token, expires_at, nonce))
+}
 
 /// One cookie's value out of a `Cookie:` header.
 ///
@@ -701,8 +802,9 @@ fn cookie_exchange(app: &App, gate: &Gate<'_>) -> Option<Response> {
         .and_then(|v| v.to_str().ok())
         .is_some_and(|proto| proto.eq_ignore_ascii_case("https"));
     let secure = if https { "; Secure" } else { "" };
+    let value = session_cookie(token, SESSION_MAX_AGE);
     let cookie = format!(
-        "{SESSION_COOKIE}={token}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Strict{secure}"
+        "{SESSION_COOKIE}={value}; Path=/; Max-Age={SESSION_MAX_AGE}; HttpOnly; SameSite=Strict{secure}"
     );
 
     Some(
@@ -749,11 +851,11 @@ impl App {
         // header at all, and is the reason the query parameter existed. The
         // query is now only the first request of a session, before the
         // exchange below has run.
-        let from_cookie = cookie_value(headers, SESSION_COOKIE);
-        match from_query.or(from_header).or(from_cookie) {
-            Some(supplied) => safe_equal(&supplied, token),
-            None => false,
+        if let Some(supplied) = from_query.or(from_header) {
+            return safe_equal(&supplied, token);
         }
+        cookie_value(headers, SESSION_COOKIE)
+            .is_some_and(|cookie| valid_session_cookie(&cookie, token, now_unix()))
     }
 
     /// True when this request may act at all.
@@ -772,7 +874,23 @@ impl App {
  * ---------------------------------------------------------------------- */
 
 pub fn router(app: Arc<App>) -> Router {
-    Router::new().fallback(dispatch).with_state(app)
+    use axum::http::HeaderValue;
+    use tower_http::set_header::SetResponseHeaderLayer;
+    // Every response, page and API alike, because the gate above decides who
+    // may *ask* and says nothing about who may *frame*: a tokenless page could
+    // be loaded invisibly inside another site and clicked through. These forbid
+    // that, stop the browser guessing a type the server did not send, and keep
+    // this app's address — a tailnet name, from a phone — out of the
+    // `Referer` of any link an agent wrote (INV-18).
+    let headers = [
+        (header::CONTENT_SECURITY_POLICY, "frame-ancestors 'none'"),
+        (header::X_FRAME_OPTIONS, "DENY"),
+        (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+        (header::REFERRER_POLICY, "no-referrer"),
+    ];
+    headers.into_iter().fold(Router::new().fallback(dispatch).with_state(app), |r, (name, value)| {
+        r.layer(SetResponseHeaderLayer::if_not_present(name, HeaderValue::from_static(value)))
+    })
 }
 
 fn text(status: StatusCode, body: &'static str) -> Response {
@@ -3065,7 +3183,9 @@ fn announce(opts: &Options, count: usize) {
         .unwrap_or_default();
     println!("agent-commander on http://{shown}:{}/{query}", opts.port);
     if opts.token.is_some() && !opts.print_url {
-        println!("  token masked — run with --print-url for the whole link");
+        println!(
+            "  token masked — run with --print-url for the whole link, or --no-token on loopback"
+        );
     }
     if opts.mock {
         println!("  mock mode — no real agent is touched");
@@ -4084,7 +4204,9 @@ mod tests {
         assert!(status(&res).contains("302"), "{}", status(&res));
         let lower = res.to_ascii_lowercase();
         assert!(lower.contains("location: /"), "{res}");
-        assert!(lower.contains("ac_session=s3cret"), "{res}");
+        assert!(lower.contains("ac_session="), "{res}");
+        // The cookie is signed with the token and never carries it.
+        assert!(!lower.contains("s3cret"), "{res}");
         assert!(lower.contains("httponly"), "{res}");
         assert!(lower.contains("samesite=strict"), "{res}");
         // Loopback http is already a secure context; the flag is for the
@@ -4120,13 +4242,44 @@ mod tests {
     async fn the_cookie_then_stands_in_for_the_token() {
         // The point of the exchange: the next request carries no token at all.
         let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let request = format!(
+            "GET /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\n\
+             Cookie: ac_session={}\r\nConnection: close\r\n\r\n",
+            session_cookie("s3cret", SESSION_MAX_AGE)
+        );
+        let res = raw(h.port, &request).await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn the_token_itself_is_not_a_cookie() {
+        // A copy of the old cookie was the master token; it opens nothing now.
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
         let res = raw(
             h.port,
             "GET /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\n\
              Cookie: ac_session=s3cret\r\nConnection: close\r\n\r\n",
         )
         .await;
-        assert!(status(&res).contains("200"), "{}", status(&res));
+        assert!(status(&res).contains("401"), "{}", status(&res));
+    }
+
+    #[test]
+    fn a_session_cookie_expires_on_the_servers_clock_and_dies_with_the_token() {
+        let cookie = session_cookie("s3cret", SESSION_MAX_AGE);
+        let now = now_unix();
+        assert!(valid_session_cookie(&cookie, "s3cret", now));
+        assert!(!valid_session_cookie(&cookie, "rotated", now));
+        let past_expiry = now + u64::from(SESSION_MAX_AGE) + 1;
+        assert!(!valid_session_cookie(&cookie, "s3cret", past_expiry));
+        // Moving the expiry forward breaks the signature.
+        let (_, rest) = cookie.split_once('.').unwrap();
+        let extended = format!("{}.{rest}", past_expiry + 1);
+        assert!(!valid_session_cookie(&extended, "s3cret", now));
+        assert_ne!(cookie, session_cookie("s3cret", SESSION_MAX_AGE), "each browser gets its own");
+        for junk in ["", "s3cret", "1.2", "x.y.z"] {
+            assert!(!valid_session_cookie(junk, "s3cret", now), "{junk}");
+        }
     }
 
     #[tokio::test]
@@ -4151,13 +4304,13 @@ mod tests {
         // the browser attaches this cookie to a cross-site request without the
         // user having asked for anything.
         let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
-        let res = raw(
-            h.port,
+        let request = format!(
             "POST /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\n\
-             Origin: https://evil.example\r\nCookie: ac_session=s3cret\r\n\
-             Content-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
-        )
-        .await;
+             Origin: https://evil.example\r\nCookie: ac_session={}\r\n\
+             Content-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}",
+            session_cookie("s3cret", SESSION_MAX_AGE)
+        );
+        let res = raw(h.port, &request).await;
         assert!(status(&res).contains("403"), "{}", status(&res));
     }
 
@@ -4247,6 +4400,62 @@ mod tests {
         let h = plain(FakePanes::new()).await;
         let res = get(h.port, "/api/agents", "Origin: null\r\n").await;
         assert!(status(&res).contains("403"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn inv3_a_page_on_another_loopback_port_is_a_foreign_origin() {
+        // Every port on loopback shares one name, so comparing hostnames let a
+        // page from any other local server read the fleet and answer prompts.
+        let h = plain(FakePanes::new()).await;
+        let other = h.port.wrapping_add(1);
+        for origin in [
+            format!("http://127.0.0.1:{other}"),
+            "http://127.0.0.1".to_string(),
+            format!("http://localhost:{}", h.port),
+        ] {
+            let res = get(h.port, "/api/agents", &format!("Origin: {origin}\r\n")).await;
+            assert!(status(&res).contains("403"), "{origin}: {}", status(&res));
+        }
+    }
+
+    #[tokio::test]
+    async fn inv3_a_cookie_from_another_loopback_port_buys_nothing() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let cookie = session_cookie("s3cret", SESSION_MAX_AGE);
+        let other = h.port.wrapping_add(1);
+        let res = get(
+            h.port,
+            "/api/agents",
+            &format!("Origin: http://127.0.0.1:{other}\r\nCookie: {SESSION_COOKIE}={cookie}\r\n"),
+        )
+        .await;
+        assert!(status(&res).contains("403"), "{}", status(&res));
+    }
+
+    #[test]
+    fn an_origin_matches_its_host_only_on_the_same_port() {
+        assert!(origin_matches_host("http://127.0.0.1:4317", "127.0.0.1:4317"));
+        assert!(origin_matches_host("http://[::1]:4317", "[::1]:4317"));
+        // A scheme's default port is the same place written or not.
+        assert!(origin_matches_host("http://localhost", "localhost:80"));
+        assert!(origin_matches_host("https://box.tail1234.ts.net", "box.tail1234.ts.net"));
+        assert!(origin_matches_host("https://box.tail1234.ts.net", "box.tail1234.ts.net:443"));
+        assert!(!origin_matches_host("http://127.0.0.1:5173", "127.0.0.1:4317"));
+        assert!(!origin_matches_host("http://127.0.0.1", "127.0.0.1:4317"));
+        assert!(!origin_matches_host("http://localhost:4317", "127.0.0.1:4317"));
+        assert!(!origin_matches_host("http://[::1]:9", "[::1]:4317"));
+    }
+
+    #[tokio::test]
+    async fn inv3_no_response_may_be_framed_by_another_site() {
+        let h = plain(FakePanes::new()).await;
+        for path in ["/", "/api/agents", "/no-such-route"] {
+            let lower = get(h.port, path, "").await.to_ascii_lowercase();
+            assert!(lower.contains("content-security-policy: frame-ancestors 'none'"), "{path}");
+            assert!(lower.contains("x-frame-options: deny"), "{path}");
+            assert!(lower.contains("x-content-type-options: nosniff"), "{path}");
+            assert!(lower.contains("referrer-policy: no-referrer"), "{path}");
+        }
     }
 
     /* ---- INV-3: DNS rebinding ---- */
