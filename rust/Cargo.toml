@@ -31,6 +31,9 @@ notify = "8.2.0"
 libc = "0.2.189"
 regex = "1"
 sha1 = "0.10"
+# The session cookie is an HMAC of the token rather than the token (`routes.rs`).
+hmac = "0.12"
+sha2 = "0.10"
 base64 = "0.22"
 # One outbound HTTPS request per push (`push.rs`). rustls rather than the
 # platform TLS so the four release binaries link the same thing.

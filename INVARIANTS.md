@@ -262,6 +262,15 @@ Binds `127.0.0.1`. `--host` is accepted for Tailscale use but is refused without
 `--token`, because this app can type into live agents and answer their
 permission prompts. `--token auto` generates one.
 
+**A server over real agents keeps a token by default, loopback included.**
+Loopback keeps the network out and the origin gate below keeps browsers out;
+neither covers a local process that is not a browser. It sends no `Origin`,
+passes the gate by design, and a tokenless server handed it every grant —
+another account on the machine, a container on the host network, or one of the
+supervised agents answering its own permission prompt with `curl`. So with no
+`--token` the stored one is used (`wants_the_stored_token`), `--no-token` opts
+out on loopback only, and `--mock` stays open because fixtures drive nothing.
+
 Binding loopback keeps the network out. It does nothing about the one program
 guaranteed to be running on this machine: the browser. WebSockets are exempt
 from CORS entirely, and a `POST` with a `text/plain` body is a CORS "simple
@@ -280,6 +289,17 @@ machine*. Two headers, because they answer different questions:
   where `evil.example` is re-pointed at 127.0.0.1 and the origin then matches
   the host perfectly — both say `evil.example`, and only the fact that neither
   is a loopback name gives it away.
+
+**An origin is scheme, host and port, and the gate compares the port.** It
+compared hostnames only, and every port on loopback shares one: a page served
+by any other local server — a dev server, a notebook, something a package
+started — passed as this app's own, and the browser attaches the session cookie
+across ports because cookies are not port-isolated. `origin_matches_host` now
+requires the `Origin` to name the very host and port in `Host`, a scheme's
+default port folded so `tailscale serve`'s bare name still matches. Every
+response also forbids being framed (`frame-ancestors 'none'`,
+`X-Frame-Options: DENY`), because a tokenless page loaded invisibly inside
+another site could otherwise be clicked through.
 
 A tokenless server answers to loopback and to nothing else. Names beyond it —
 the address `--host` bound, and this host's own Tailscale `DNSName` — are
@@ -335,6 +355,10 @@ than an attacker.
 - *The address bar, which the token no longer touches.* It arrives once, as
   `?token=…` on the URL the user opened; `cookie_exchange` trades it for an
   `HttpOnly; SameSite=Strict` cookie and redirects to the same path without it.
+  The cookie is *signed with* the token, never the token: `expires.nonce.mac`,
+  checked on the server's clock. Carrying the token itself meant every other
+  server on this host was handed the master credential on each request, and a
+  lifted copy worked as `?token=` for good.
   The reload, the bookmark and the link sent to a phone are then served by the
   cookie, so the router dropping the query string on `navigate('/agent/x')` is
   correct rather than a bug to work around.

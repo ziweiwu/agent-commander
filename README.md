@@ -82,10 +82,16 @@ from the **+ New agent** button are put in tmux for you.
 From a clone, `npm install && npm start`. On macOS, `npm run app:install`
 puts a launcher in `~/Applications`.
 
+The server keeps a token even on loopback, stored in
+`~/.claude/agent-commander/token`: any local process can reach 127.0.0.1,
+including the agents it supervises. `--print-url` prints the whole link to
+open; the macOS launcher opens it for you. `--no-token` serves tokenless, on
+loopback only.
+
 ### From a phone
 
 ```sh
-agent-commander --token auto --print-url   # prints the link, token and all
+agent-commander --print-url   # prints the link, token and all
 tailscale serve --bg 4317
 ```
 

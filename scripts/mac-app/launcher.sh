@@ -303,7 +303,9 @@ wait_ready() {
   i=0
   while [ "$i" -lt "$READY_TRIES" ]; do
     if ! /bin/kill -0 "$1" 2>/dev/null; then DIED=1; return 0; fi
-    if probe; then READY=1; return 0; fi
+    # 3 is up and token-gated, which is how the server starts by default now.
+    probe
+    case $? in 0|3) READY=1; return 0 ;; esac
     /bin/sleep "$READY_SLEEP"
     i=$((i + 1))
   done
@@ -381,11 +383,31 @@ stop_ours() {
   return 0
 }
 
+# The server keeps a token unless started with --no-token, and keeps it in
+# TOKENFILE, so a link this launcher opens carries it when it exists. A copy
+# started with a literal --token never writes that file; only its own printed
+# address opens it.
+open_app() {
+  STORED=""
+  if [ -r "$TOKENFILE" ]; then
+    STORED=$(/usr/bin/head -n 1 "$TOKENFILE" | /usr/bin/tr -d '[:space:]')
+  fi
+  if [ -n "$STORED" ]; then
+    /usr/bin/open "$URL?token=$STORED"
+  else
+    /usr/bin/open "$URL"
+  fi
+}
+
 probe
-case $? in
-  0)
+PROBED=$?
+GATED_WITHOUT_FILE=""
+if [ "$PROBED" -eq 3 ] && [ ! -s "$TOKENFILE" ]; then GATED_WITHOUT_FILE=1; fi
+case $PROBED in
+  0|3)
     # Ours, and up to date -- or ours but somebody else's copy, which is not
-    # this app's to restart. Either way: show it.
+    # this app's to restart. Either way: show it. 3 is the same server behind
+    # its token, which is how every copy this launcher starts now runs.
     if stale_running && ours_to_replace; then
       if ! stop_ours; then
         alert "Agent Commander could not restart" \
@@ -395,29 +417,18 @@ It is not being force-quit, because that would leave a tmux control client and a
 temporary directory behind. Its log is at ~/Library/Logs/agent-commander/server.log"
         exit 1
       fi
-    else
-      /usr/bin/open "$URL"
-      exit 0
-    fi
-    ;;
-  3) # Token-gated. The token is kept in a file now, so the common case — a
-     # copy the user started with --token auto — is one this launcher can open
-     # after all. Only a literal --token, which is deliberately never stored,
-     # still needs the address that copy printed.
-     STORED=""
-     if [ -r "$TOKENFILE" ]; then
-       STORED=$(/usr/bin/head -n 1 "$TOKENFILE" | /usr/bin/tr -d '[:space:]')
-     fi
-     if [ -n "$STORED" ]; then
-       /usr/bin/open "$URL?token=$STORED"
-       exit 0
-     fi
-     alert "Agent Commander is already running with a token" \
+    elif [ -n "$GATED_WITHOUT_FILE" ]; then
+      alert "Agent Commander is already running with a token" \
 "A copy is listening on port $PORT and asking for a token this launcher cannot find.
 
 That copy was started with a literal --token, which is never written to
 $TOKENFILE. Use the address it printed when it started — it ends in ?token=…"
-     exit 0 ;;
+      exit 0
+    else
+      open_app
+      exit 0
+    fi
+    ;;
   2) alert "Port $PORT is already in use" \
 "Something that is not Agent Commander is listening on 127.0.0.1:$PORT.
 
@@ -449,7 +460,7 @@ printf '%s\n' "$SERVER_PID" >"$PIDFILE" 2>/dev/null || true
 wait_ready "$SERVER_PID"
 
 if [ "$READY" -eq 1 ]; then
-  /usr/bin/open "$URL"
+  open_app
   exit 0
 fi
 
