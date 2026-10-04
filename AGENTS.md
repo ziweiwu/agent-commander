@@ -103,7 +103,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1497 tests: 684 Rust (the server) + 813 vitest (the web app)
+npm test              # 1504 tests: 691 Rust (the server) + 813 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 406 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -136,6 +136,13 @@ second engine is not redundancy: every browser on iOS is WebKit, and for this
 app's first five releases every "iPhone" and "iPad" result it produced was
 Chromium wearing an iPhone user-agent. `ENGINE=webkit npm run audit:mobile`
 runs the device audit on WebKit too. The rest are local.
+
+Everything there builds on `stable`, so the `floor` job also checks the server
+on the toolchain `rust-version` in `rust/Cargo.toml` names. That number is a
+promise to anyone building from source, and the lockfile once moved past it
+with every gate green. A `cargo update` that needs a newer compiler fails
+there: run it with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`, or
+raise `rust-version` and the handbook's line together.
 
 The first three also run as a `Stop` hook, so a turn that leaves the tree
 failing is refused rather than summarised. The hook lives in the `harness`

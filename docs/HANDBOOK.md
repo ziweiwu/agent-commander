@@ -751,7 +751,7 @@ the server; the browser no longer sends one.
 React 19 + Vite for the browser bundle, and a Rust server. Vitest covers the
 browser app in two projects — node for pure logic, jsdom for components — and
 `cargo test` covers the server. Node >= 20 to build the bundle; a Rust toolchain
-(1.82 or newer) to build the server.
+(1.88 or newer) to build the server.
 
 The server used to be TypeScript. It is preserved on the
 `old-node-backend-branch` branch, and the port is held to the old one's

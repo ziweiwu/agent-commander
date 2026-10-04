@@ -2,7 +2,7 @@
 name = "agent-commander"
 version = "0.17.1"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.88"
 
 description = "See every Claude Code agent on your machine at a glance"
 license = "MIT"

@@ -28,11 +28,11 @@ import styles from './Terminal.module.css'
 const FALLBACK_COLS = 80
 
 /** A colour or cursor escape, which takes no room on screen. */
+// eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE = /\u001b\[[\d;?]*[A-Za-z]/g
 
 /** The widest a line is once its escapes are set aside. */
 function visibleWidth(line: string): number {
-  // eslint-disable-next-line no-control-regex
   return line.replace(ANSI_ESCAPE, '').length
 }
 

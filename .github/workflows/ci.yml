@@ -104,6 +104,17 @@ jobs:
       - name: the built CLI starts
         run: rust/target/release/agent-commander --help
 
+      # `rust-version` is the server's `engines`, and it went false unnoticed:
+      # it said 1.82 while the lockfile had moved to crates that need 1.88,
+      # because every Rust job here runs `stable`. This builds against the
+      # number itself, read from `rust/Cargo.toml` so there is one copy of it.
+      - name: the server builds on its declared rust-version
+        run: |
+          floor=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' rust/Cargo.toml)
+          test -n "$floor" || { echo "no rust-version in rust/Cargo.toml" >&2; exit 1; }
+          rustup toolchain install "$floor" --profile minimal
+          RUSTUP_TOOLCHAIN="$floor" ./scripts/cargo.sh check --locked --manifest-path rust/Cargo.toml
+
   e2e:
     runs-on: ubuntu-latest
     steps:
