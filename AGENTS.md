@@ -137,6 +137,13 @@ app's first five releases every "iPhone" and "iPad" result it produced was
 Chromium wearing an iPhone user-agent. `ENGINE=webkit npm run audit:mobile`
 runs the device audit on WebKit too. The rest are local.
 
+Everything there builds on `stable`, so the `floor` job also checks the server
+on the toolchain `rust-version` in `rust/Cargo.toml` names. That number is a
+promise to anyone building from source, and the lockfile once moved past it
+with every gate green. A `cargo update` that needs a newer compiler fails
+there: run it with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`, or
+raise `rust-version` and the handbook's line together.
+
 The first three also run as a `Stop` hook, so a turn that leaves the tree
 failing is refused rather than summarised. The hook lives in the `harness`
 plugin and reads its list from **`.claude/gates.json`** here — `watch`
