@@ -358,6 +358,12 @@ impl Viewers {
     fn hidden(&self) {
         // Saturating: a socket that never said "visible" cannot take the
         // count below zero on its way out.
+        //
+        // Rust 1.99 deprecated `fetch_update` in favour of `try_update`, which
+        // is only stable since 1.95; `rust-version` is older than that, so
+        // clippy's `incompatible_msrv` refuses the new name. Same method,
+        // older spelling, until the floor moves past 1.95.
+        #[allow(deprecated)]
         let _ = self.visible.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
     }
 
