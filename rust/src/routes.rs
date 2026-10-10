@@ -597,6 +597,17 @@ pub fn origin_names(host: &str, tailnet: Option<String>, token: Option<&str>) ->
     names
 }
 
+/// The set this server's options ask for. `--trust-tailnet` is the operator
+/// asking for exactly the publication `origin_names` refuses tokenless, so it
+/// admits the tailnet name and nothing more: the bind is still loopback, and
+/// the gate still refuses a foreign page and a rebound host.
+pub fn origin_names_for(opts: &Options, tailnet: Option<String>) -> Vec<String> {
+    if opts.trust_tailnet {
+        return tailnet.into_iter().collect();
+    }
+    origin_names(&opts.host, tailnet, opts.token.as_deref())
+}
+
 fn is_self_name(hostname: &str, allowed: &[String]) -> bool {
     is_loopback_name(hostname) || is_allowed_name(hostname, allowed)
 }
@@ -3124,7 +3135,7 @@ async fn build_app(
     // Read once, before `env` is moved into the App: the CLI probe is a
     // subprocess and this cannot change under us.
     let tailnet = own_tailnet_name(&env);
-    let origin_names = origin_names(&opts.host, tailnet.clone(), opts.token.as_deref());
+    let origin_names = origin_names_for(opts, tailnet.clone());
     Arc::new(App {
         deps,
         hub,
@@ -3200,6 +3211,23 @@ fn announce(opts: &Options, count: usize) {
     }
 }
 
+/// What `--trust-tailnet` opened, or that it opened nothing.
+///
+/// The tailnet name is read once at startup, so a server started before
+/// Tailscale was up answers to loopback alone until it is restarted. Saying so
+/// here is what tells that apart from a phone that is simply refused.
+fn announce_tailnet_trust(opts: &Options, tailnet: Option<&str>) {
+    if !opts.trust_tailnet {
+        return;
+    }
+    match tailnet {
+        Some(name) => println!("  no token: every device on the tailnet may use https://{name}"),
+        None => println!(
+            "  --trust-tailnet: Tailscale was not running at start, so only loopback answers"
+        ),
+    }
+}
+
 /// Start the server described by `opts` and run until the process is asked to stop.
 pub async fn serve(opts: Options) -> anyhow::Result<()> {
     let pending = Arc::new(crate::pending::PendingStore::new());
@@ -3251,6 +3279,7 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     let count = app.deps.source.list().len();
     let listener = bind(&opts).await?;
     announce(&opts, count);
+    announce_tailnet_trust(&opts, app.tailnet.as_deref());
 
     let result = axum::serve(listener, router(app.clone()))
         .with_graceful_shutdown(shutdown_signal())
@@ -4194,6 +4223,33 @@ mod tests {
             origin_names("box.tail1234.ts.net", tailnet, Some("s3cret")),
             vec!["box.tail1234.ts.net".to_string()]
         );
+    }
+
+    #[test]
+    fn inv3_trust_tailnet_answers_to_the_tailnet_name_and_keeps_the_origin_gate() {
+        // `--trust-tailnet` is the operator saying every tailnet device may
+        // drive the fleet, so the one name `tailscale serve` forwards joins the
+        // set without a token. Nothing else does, and the gate still refuses a
+        // page from anywhere else and a rebound host.
+        let tailnet = Some("box.tail1234.ts.net".to_string());
+        let trusting = Options { trust_tailnet: true, ..Options::default() };
+        let ours = origin_names_for(&trusting, tailnet.clone());
+        assert_eq!(ours, vec!["box.tail1234.ts.net".to_string()]);
+        assert!(origin_names_for(&trusting, None).is_empty(), "no Tailscale, loopback only");
+        assert!(
+            origin_names_for(&Options::default(), tailnet).is_empty(),
+            "without the flag a tokenless server still answers loopback only"
+        );
+
+        let request = |origin: &str, host: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::ORIGIN, origin.parse().unwrap());
+            headers.insert(header::HOST, host.parse().unwrap());
+            headers
+        };
+        assert!(same_origin_request(&request("https://box.tail1234.ts.net", "box.tail1234.ts.net"), &ours));
+        assert!(!same_origin_request(&request("https://evil.example", "box.tail1234.ts.net"), &ours));
+        assert!(!same_origin_request(&request("http://evil.example", "evil.example"), &ours));
     }
 
     /* ---- INV-3: the token is exchanged for a cookie, once ---- */

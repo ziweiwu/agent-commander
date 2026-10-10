@@ -98,7 +98,8 @@ tailscale serve --bg 4317
 Open the printed link on the phone once. The token becomes a cookie and the
 plain address works from then on. The token is required: `tailscale serve`
 hands every peer on your tailnet the same name, so the name alone cannot tell
-your phone from anything else.
+your phone from anything else. If every device on the tailnet is yours,
+`--trust-tailnet` serves it tokenless instead.
 
 To be told when an agent starts needing you while the phone is in your pocket,
 give the server somewhere to push — an [ntfy](https://ntfy.sh) topic or a

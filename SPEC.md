@@ -694,8 +694,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   WebSockets are exempt from CORS entirely. **(INV-3)** *`routes::inv3_*`.*
 - **NFR-SEC-4** — A tokenless server MUST answer to loopback alone. Behind
   `tailscale serve` every tailnet peer arrives wearing this machine's own name,
-  so the name alone cannot tell one peer from another and buys nothing.
-  **(INV-3)**
+  so the name alone cannot tell one peer from another and buys nothing. The one
+  exception MUST be asked for: `--trust-tailnet` admits this host's tailnet name
+  tokenless, and nothing else. **(INV-3)**
 
 ### 7.2 The credential
 

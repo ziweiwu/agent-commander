@@ -154,6 +154,10 @@ pub struct Options {
     pub token: Option<String>,
     /// `--no-token`: serve tokenless, which only loopback may (INV-3).
     pub no_token: bool,
+    /// `--trust-tailnet`: serve tokenless to this host's own Tailscale name as
+    /// well as loopback, for an operator who trusts every device on the
+    /// tailnet. Still a loopback bind; `tailscale serve` is the way in (INV-3).
+    pub trust_tailnet: bool,
     pub mock: bool,
     pub mock_transitions: bool,
     /// `--mock-empty`: the fixture server with no fixtures, so the genuine
@@ -183,6 +187,7 @@ impl Default for Options {
             host: "127.0.0.1".into(),
             token: None,
             no_token: false,
+            trust_tailnet: false,
             mock: false,
             mock_transitions: false,
             mock_empty: false,
@@ -392,6 +397,7 @@ pub fn parse_args_with_token_file(argv: &[String], token_path: &Path) -> Result<
             "--host" => opts.host = take_value(&mut i)?,
             "--token" => opts.token = Some(take_value(&mut i)?),
             "--no-token" => opts.no_token = true,
+            "--trust-tailnet" => opts.trust_tailnet = true,
             "--web-root" => opts.web_root = resolved(&take_value(&mut i)?),
             "--install-statusline" => opts.install_statusline = true,
             "--rotate-token" => opts.rotate_token = true,
@@ -465,6 +471,9 @@ fn finalise_options(mut opts: Options, token_path: &Path) -> Result<Parsed, Stri
     if opts.no_token && opts.token.is_some() {
         return Err("--token and --no-token contradict each other".into());
     }
+    if opts.trust_tailnet && opts.token.is_some() {
+        return Err("--trust-tailnet serves without a token, so it cannot take --token".into());
+    }
     if wants_the_stored_token(&opts) {
         opts.token = Some("auto".into());
     }
@@ -490,6 +499,7 @@ fn finalise_options(mut opts: Options, token_path: &Path) -> Result<Parsed, Stri
 fn wants_the_stored_token(opts: &Options) -> bool {
     opts.token.is_none()
         && !opts.no_token
+        && !opts.trust_tailnet
         && !opts.mock
         && !opts.rotate_token
         && !opts.install_statusline
@@ -561,6 +571,9 @@ pub fn help_text() -> String {
         "      --rotate-token  replace the stored token and exit".to_string(),
         "      --no-token     serve without one (loopback only; the default is the stored token)"
             .to_string(),
+        "      --trust-tailnet  serve without one to loopback and to every device on this"
+            .to_string(),
+        "                     host's tailnet, through `tailscale serve`".to_string(),
         "      --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)"
             .to_string(),
         "      --print-url    print the full URL, token and all, then keep serving".to_string(),
@@ -646,6 +659,22 @@ mod tests {
         // Fixtures drive nothing, and the e2e suite and audits reach them bare.
         assert!(parse_in(&["--mock", "--port", "4400"], &path).unwrap().token.is_none());
         assert!(parse_in(&["--token", "x", "--no-token"], &path).is_err());
+    }
+
+    /// INV-3: `--trust-tailnet` serves tokenless, so it mints and reads no
+    /// token, and it opens the tailnet, never the network.
+    #[test]
+    fn inv3_trust_tailnet_serves_without_a_token_on_loopback_only() {
+        let store = tempfile::tempdir().unwrap();
+        let path = store.path().join("token");
+        let o = parse_in(&["--trust-tailnet"], &path).unwrap();
+        assert!(o.trust_tailnet);
+        assert!(o.token.is_none());
+        assert!(!path.exists(), "a server that uses no token must not mint one");
+        let both = parse(&["--trust-tailnet", "--token", "x"]).unwrap_err();
+        assert!(both.contains("--trust-tailnet"), "{both}");
+        let open = parse(&["--trust-tailnet", "--host", "0.0.0.0"]).unwrap_err();
+        assert!(open.contains("refusing to bind"), "{open}");
     }
 
     /// INV-3: this app can approve permission prompts, so an open bind needs a
