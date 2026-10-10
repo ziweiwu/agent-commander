@@ -583,7 +583,8 @@ now costs.
 whatever `origin_names` gathered (`routes.rs`): the address `--host` bound, and
 this host's own Tailscale `DNSName` from the CLI probe at startup. That list is
 empty without a token, so a tokenless server answers to loopback and nothing
-else.
+else — unless `--trust-tailnet` asks for the tailnet name alone, which is the
+operator deciding every tailnet device may drive the fleet.
 
 This used to accept the Tailscale name unconditionally, and the reasoning —
 recorded here and in `INVARIANTS.md` — was that the name meant "this machine".

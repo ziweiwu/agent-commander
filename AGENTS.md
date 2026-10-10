@@ -335,10 +335,12 @@ commit.
   the token the credential and the exemption at once. `origin_names` is empty
   without a token, so a tokenless server answers to loopback alone; the
   Tailscale name buys nothing on its own, because `tailscale serve` hands every
-  tailnet peer the same name. The token travels in the query string once and is
+  tailnet peer the same name. `origin_names_for` lets `--trust-tailnet` add that
+  one name, which is the operator choosing exactly that. The token travels in the query string once and is
   traded for a cookie signed with it; `announce` masks it unless `--print-url`.
   The origin gate compares the port as well as the name, and a real server
-  keeps a token by default (`--no-token` to opt out on loopback). See
+  keeps a token by default (`--no-token` to opt out on loopback,
+  `--trust-tailnet` to admit the whole tailnet without one). See
   `ARCHITECTURE.md` §"Where it is fragile" 6 and 6a before touching either gate.
 - **Development used to default to 4317.** A fixture fleet on the production
   port is indistinguishable from your real one having vanished, and the composer

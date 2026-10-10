@@ -700,6 +700,20 @@ claimed it could; it could not, and a tokenless server behind `tailscale serve`
 was reachable by any tailnet peer. A tokenless server now answers to loopback
 and nothing else, so the phone needs the token to get in at all.
 
+If every device on your tailnet is yours and you would rather have no token at
+all, say so:
+
+```
+npm run serve -- --trust-tailnet
+tailscale serve --bg 4317
+```
+
+That serves tokenless to loopback and to this machine's tailnet name, and to
+nothing else. Every tailnet device — and every local process — then has every
+grant, so do not use it on a tailnet you share. The startup banner names the
+address it admitted, or says Tailscale was not running yet, in which case
+restart the server once it is.
+
 If you would rather bind the tailnet address directly, name it — do **not** use
 `--host 0.0.0.0`, which also publishes the app on whatever Wi-Fi you are
 currently joined to:

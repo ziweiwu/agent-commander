@@ -317,6 +317,17 @@ The unit test that appeared to prove otherwise asserted that *another machine's*
 name is not a self-name. True, and irrelevant: a peer never announces its own
 name in `Host`, only the one it asked for.
 
+**Amended: `--trust-tailnet` is the one way to give that name away tokenless,
+and it has to be asked for.** An operator whose tailnet is theirs alone may
+decide that "anyone on the tailnet" is exactly who should get in. The flag
+serves without a token and adds this host's Tailscale name, and only that name,
+to `origin_names`. It does not widen anything else: the bind stays loopback
+(`--host` still demands a token), the origin gate still refuses a foreign page
+and a rebound host, and `--token` alongside it is refused as a contradiction.
+What it costs is stated plainly in the help text and the startup banner: every
+tailnet device, and every local process, has every grant. A server started
+before Tailscale is up finds no name and says so, answering loopback alone.
+
 So the two gates ask two questions and neither substitutes for the other. The
 name says the request reached the server it was addressed to; the **token** says
 who sent it. `--host` already requires a token
@@ -380,6 +391,10 @@ than an attacker.
   loopback (`inv3_a_tokenless_server_answers_to_no_name_but_loopback`) while a
   token widens the set to the bound host and this host's own tailnet name
   without ever replacing the gate (`a_token_does_not_replace_the_origin_gate`),
+  `--trust-tailnet` admits the tailnet name alone and keeps the gate
+  (`inv3_trust_tailnet_answers_to_the_tailnet_name_and_keeps_the_origin_gate`)
+  and mints no token while refusing an open bind
+  (`options::inv3_trust_tailnet_serves_without_a_token_on_loopback_only`),
   and the bundle is exempt from the token while the document, the fleet and the
   socket are not
 - `test/ui/token.test.tsx` — the page puts no token on any request and none in
