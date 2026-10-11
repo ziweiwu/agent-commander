@@ -986,6 +986,10 @@ remains the guard for everything that types.
   still alive after a grace period — the pane and never the tmux session around
   it, because a split window holds other agents and shells that were not asked
   to close (`control::inv8_close_forces_only_the_pane_of_an_agent_that_ignores_exit`).
+  A forced kill that finds the pane already gone is reported as the exit it
+  was, not as a failure to close: `/exit` landed between the last look and
+  the kill
+  (`control::an_exit_that_lands_just_before_the_forced_kill_is_reported_as_an_exit`).
 - **Model** is set with the CLI's `/model <alias>`, the alias checked against the
   allow-list before anything is typed.
 - **Shift+Tab** sends one `BTab` and reports that it was sent. It never presses

@@ -597,8 +597,13 @@ pub async fn close_agent(agent: Option<&Agent>, deps: &dyn ControlDeps) -> Act<C
         waited += POLL_MS;
     }
 
-    deps.kill_pane(pane).await.map_err(ControlFailure::Failed)?;
-    Ok(CloseResult { closed: true, forced: true })
+    match deps.kill_pane(pane).await {
+        Ok(()) => Ok(CloseResult { closed: true, forced: true }),
+        // `/exit` can land between the last look and the kill, which then
+        // finds no pane: the agent did what it was asked.
+        Err(_) if !deps.pane_alive(pane).await => Ok(CloseResult { closed: true, forced: false }),
+        Err(err) => Err(ControlFailure::Failed(err)),
+    }
 }
 
 /* --------------------------------------------- INV-6: destructive keys */
@@ -862,6 +867,9 @@ mod tests {
         typed: StdMutex<bool>,
         pressed: StdMutex<bool>,
         alive: StdMutex<bool>,
+        /// The pane exits on its own just as the forced kill is sent, so the
+        /// kill finds nothing to kill.
+        gone_before_kill: StdMutex<bool>,
     }
 
     impl Fake {
@@ -936,6 +944,10 @@ mod tests {
             Ok(())
         }
         async fn kill_pane(&self, pane_id: &str) -> anyhow::Result<()> {
+            if *self.gone_before_kill.lock().unwrap() {
+                *self.alive.lock().unwrap() = false;
+                anyhow::bail!("can't find pane: {pane_id}");
+            }
             self.killed_panes.lock().unwrap().push(pane_id.into());
             Ok(())
         }
@@ -1229,6 +1241,18 @@ mod tests {
         let r = close_agent(Some(&a), &f).await.unwrap();
         assert_eq!(r, CloseResult { closed: true, forced: true });
         assert_eq!(f.killed_panes.lock().unwrap().as_slice(), ["%1"]);
+    }
+
+    /// `/exit` can finish between the last look and the kill, and the kill
+    /// then finds no pane. The agent did what it was asked, so that is a clean
+    /// exit rather than a failure to close.
+    #[tokio::test]
+    async fn an_exit_that_lands_just_before_the_forced_kill_is_reported_as_an_exit() {
+        let f = Fake::new();
+        *f.alive.lock().unwrap() = true;
+        *f.gone_before_kill.lock().unwrap() = true;
+        let r = close_agent(Some(&agent()), &f).await.unwrap();
+        assert_eq!(r, CloseResult { closed: true, forced: false });
     }
 
     /* ---- goal ---- */

@@ -173,6 +173,12 @@ fn parse_meta(line: &str) -> Result<PaneMeta, PaneError> {
             "unexpected display-message output: {line}"
         )));
     }
+    // tmux 3.6a answers for a pane that no longer exists with every field
+    // blank and a clean exit, where it used to refuse the target. No real pane
+    // reads that way, because `pane_dead` is always 0 or 1.
+    if parts.iter().all(|field| field.trim().is_empty()) {
+        return Err(PaneError::msg("can't find pane"));
+    }
     // A field tmux could not resolve reads as zero rather than failing the
     // whole frame.
     let num = |field: usize| -> usize { parts[field].trim().parse::<usize>().unwrap_or(0) };
@@ -1442,6 +1448,18 @@ mod tests {
         // A field tmux could not resolve reads as zero rather than failing the
         // whole frame.
         assert_eq!(parse_meta("|24|0|0|0|0").unwrap().cols, 0);
+    }
+
+    /// tmux 3.6a answers `display-message -t` about a pane that no longer
+    /// exists with exit 0 and every field blank, where it used to refuse the
+    /// target. Read as a pane, that is a live one, 0x0: Close then waited out
+    /// its whole grace for an agent that had already exited, and went on to
+    /// kill a pane that was not there.
+    #[tokio::test]
+    async fn a_pane_tmux_answers_about_with_nothing_is_gone() {
+        let (_control, once, panes) = rig();
+        *once.reply.lock().unwrap() = Some("|||||\n".into());
+        assert!(panes.read_meta("%76").await.is_err());
     }
 
     #[test]
