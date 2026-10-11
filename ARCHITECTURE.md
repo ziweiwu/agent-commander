@@ -110,6 +110,14 @@ from a husk. Claude is listed first and wins any clash over a tmux session,
 since what an agent reports about itself always beats what this app can infer
 from a pane.
 
+Within one provider an agent's seat is its **pane**, not its tmux session. A
+split window holds two terminals, and `claude` started in each is two sessions
+naming one tmux session; one winner per session hid whichever sorted second. A
+`claude -p` run from inside a session is the opposite case: it inherits
+`$TMUX_PANE`, so its session file names its parent's pane, and one card per
+pane keeps it from being a second card aimed at the same terminal
+(`tmux_source::one_per_seat`).
+
 The tmux side is one `list-panes -a` for the whole machine — O(1) in agents, and
 it reads no pane content. A row is an agent only if its command is not a shell:
 tmux-resurrect restores sessions by name long after the process inside them

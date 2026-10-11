@@ -2776,8 +2776,8 @@ mod live {
     }
 
     /// One session's deps: writes through the pane API, the goal read from
-    /// that session's transcript, and a session that ignores `/exit` killed
-    /// through tmux.
+    /// that session's transcript, and the pane of a session that ignores
+    /// `/exit` killed through tmux.
     fn live_deps(panes: Arc<dyn PaneApi>, session_id: &str) -> Arc<dyn ControlDeps> {
         let for_goal = session_id.to_string();
         Arc::new(LiveDeps {
@@ -2789,6 +2789,11 @@ mod live {
             kill: Arc::new(|session: String| {
                 Box::pin(
                     async move { crate::pane::kill_session(&session).await.map_err(anyhow::Error::from) },
+                )
+            }),
+            kill_pane: Arc::new(|pane_id: String| {
+                Box::pin(
+                    async move { crate::pane::kill_pane(&pane_id).await.map_err(anyhow::Error::from) },
                 )
             }),
         })
@@ -3031,6 +3036,10 @@ mod mock_control {
         }
 
         async fn kill_session(&self, _tmux_session: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        async fn kill_pane(&self, _pane_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
 

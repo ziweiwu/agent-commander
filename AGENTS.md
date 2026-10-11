@@ -103,7 +103,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1504 tests: 691 Rust (the server) + 813 vitest (the web app)
+npm test              # 1514 tests: 701 Rust (the server) + 813 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 406 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -426,6 +426,16 @@ commit.
   term echoed verbatim into "No agent matches …" forced the document to 2175px.
   The review agents found that one, plus an xterm use-after-dispose crash on
   every full-screen toggle and a sort that ranked unknown values as smallest.
+- **tmux 3.6a answers for a pane that is gone.** `display-message -p -t %N`
+  about a pane that no longer exists exits 0 with every format field blank,
+  where earlier releases refused the target. `parse_meta` read that as a live
+  0x0 pane, so Close waited out its whole grace for an agent that had already
+  exited and then force-killed a pane that was not there, reporting "can't
+  find pane" about a close that worked. Every gate stayed green; one live
+  Close against a real split window found it. A reply with every field blank
+  is now an error (`pane::tests::a_pane_tmux_answers_about_with_nothing_is_gone`).
+  `kill-pane` and `capture-pane` still refuse a missing target, so a
+  `display-message` on its own is the one read to distrust.
 - **A control whose success cannot be observed must not claim it failed.** The
   permission-mode button was reported broken three times across two rewrites,
   and the key was never at fault: `tmux send-keys BTab` emits `\033[Z`, and

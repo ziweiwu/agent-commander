@@ -173,6 +173,12 @@ fn parse_meta(line: &str) -> Result<PaneMeta, PaneError> {
             "unexpected display-message output: {line}"
         )));
     }
+    // tmux 3.6a answers for a pane that no longer exists with every field
+    // blank and a clean exit, where it used to refuse the target. No real pane
+    // reads that way, because `pane_dead` is always 0 or 1.
+    if parts.iter().all(|field| field.trim().is_empty()) {
+        return Err(PaneError::msg("can't find pane"));
+    }
     // A field tmux could not resolve reads as zero rather than failing the
     // whole frame.
     let num = |field: usize| -> usize { parts[field].trim().parse::<usize>().unwrap_or(0) };
@@ -1208,11 +1214,20 @@ impl Panes {
             .collect())
     }
 
-    /// End a whole tmux session. Used only as the forced fallback when an agent
-    /// has ignored `/exit`; this creates no client, so INV-1 is unaffected.
+    /// End a whole tmux session. Used only to close a plain terminal, which
+    /// has no shutdown command of its own (INV-7); this creates no client, so
+    /// INV-1 is unaffected.
     pub async fn kill_session(&self, session: &str) -> Result<(), PaneError> {
         assert_session(session)?;
         self.run(&strs(&["kill-session", "-t", session]), None).await?;
+        Ok(())
+    }
+
+    /// End one pane. The forced fallback when an agent has ignored `/exit`:
+    /// the session may hold other panes, and they are somebody else's.
+    pub async fn kill_pane(&self, pane_id: &str) -> Result<(), PaneError> {
+        assert_pane(pane_id)?;
+        self.run(&strs(&["kill-pane", "-t", pane_id]), None).await?;
         Ok(())
     }
 
@@ -1305,6 +1320,10 @@ pub async fn kill_session(session: &str) -> Result<(), PaneError> {
     live_panes().kill_session(session).await
 }
 
+pub async fn kill_pane(pane_id: &str) -> Result<(), PaneError> {
+    live_panes().kill_pane(pane_id).await
+}
+
 /// Every pane on the machine, for `tmux_source`'s fleet sweep.
 pub async fn fleet_facts() -> Result<Vec<PaneFacts>, PaneError> {
     live_panes().fleet_facts().await
@@ -1375,6 +1394,24 @@ mod tests {
         assert!(once.calls().is_empty());
     }
 
+    #[tokio::test]
+    async fn pane_ids_are_checked_before_kill_pane() {
+        let (_c, once, panes) = rig();
+        let err = panes.kill_pane("%9; kill-server").await.unwrap_err();
+        assert!(err.message.contains("malformed pane id"), "{err}");
+        assert!(once.calls().is_empty());
+    }
+
+    /// Forcing a close ends the one pane, never the session holding it.
+    #[tokio::test]
+    async fn kill_pane_ends_that_pane_and_nothing_around_it() {
+        let (_c, once, panes) = rig();
+        panes.kill_pane("%9").await.unwrap();
+        let sent: Vec<Vec<String>> =
+            once.calls().iter().flat_map(|call| FakeOnce::commands_in(&call.args)).collect();
+        assert_eq!(sent, vec![vec!["kill-pane", "-t", "%9"]]);
+    }
+
     #[test]
     fn every_paste_gets_a_buffer_of_its_own() {
         // With one shared name, two overlapping pastes interleaved as load(A)
@@ -1411,6 +1448,18 @@ mod tests {
         // A field tmux could not resolve reads as zero rather than failing the
         // whole frame.
         assert_eq!(parse_meta("|24|0|0|0|0").unwrap().cols, 0);
+    }
+
+    /// tmux 3.6a answers `display-message -t` about a pane that no longer
+    /// exists with exit 0 and every field blank, where it used to refuse the
+    /// target. Read as a pane, that is a live one, 0x0: Close then waited out
+    /// its whole grace for an agent that had already exited, and went on to
+    /// kill a pane that was not there.
+    #[tokio::test]
+    async fn a_pane_tmux_answers_about_with_nothing_is_gone() {
+        let (_control, once, panes) = rig();
+        *once.reply.lock().unwrap() = Some("|||||\n".into());
+        assert!(panes.read_meta("%76").await.is_err());
     }
 
     #[test]
