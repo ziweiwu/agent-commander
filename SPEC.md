@@ -194,6 +194,12 @@ the default for an unrecognised kind is deny.
   given; over Tailscale on a phone the gap before it does is seconds long.
   `--mock-empty` serves the confirmed-empty screen so it can be looked at.
   **(INV-11)** *`test/ui/stale-fleet.test.tsx`, `e2e/loading.spec.ts`.*
+- **FR-FLEET-12** — Two Claude Code sessions in split panes of one tmux session
+  MUST both be listed, and two session files naming the same pane MUST be one
+  agent: a `claude -p` run from inside a session names its parent's pane, and a
+  second card there would aim its controls at the parent.
+  *`tmux_source::tests::two_claude_sessions_in_split_panes_of_one_tmux_session_both_appear`,
+  `tmux_source::tests::a_nested_claude_sharing_its_parents_pane_is_one_agent`.*
 
 ### 3.2 The card
 
@@ -549,8 +555,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   to claim anything when no new session appeared, and following the agent to its
   new id in the right order.
 - **FR-CTL-9** — **Close** MUST send `/exit` first and force only a session that
-  ignores it. For a kind with no slash commands, Close MUST close the tmux
-  session instead. **(INV-7)**
+  ignores it, and then only its pane: the tmux session around it may hold other
+  agents and shells. For a kind with no slash commands, Close MUST close the tmux
+  session instead. **(INV-7, INV-8)**
 - **FR-CTL-10** — **Goal** MUST be confirmed against the `goal_status` record
   `/goal` leaves in the transcript, so a paste that went into a dialog instead of
   the prompt is reported rather than shown as a goal that is quietly not set.

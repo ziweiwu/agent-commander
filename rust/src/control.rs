@@ -171,12 +171,15 @@ pub trait ControlDeps: Send + Sync {
     async fn read_session_id(&self, pid: i64) -> Option<String>;
     async fn pane_alive(&self, pane_id: &str) -> bool;
     async fn kill_session(&self, tmux_session: &str) -> anyhow::Result<()>;
+    async fn kill_pane(&self, pane_id: &str) -> anyhow::Result<()>;
     async fn wait(&self, millis: u64);
 }
 
 type BoxFut<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 pub type GoalReader = Arc<dyn Fn() -> BoxFut<'static, Option<GoalState>> + Send + Sync>;
 pub type SessionKiller = Arc<dyn Fn(String) -> BoxFut<'static, anyhow::Result<()>> + Send + Sync>;
+/// The same shape as [`SessionKiller`], handed a pane id instead.
+pub type PaneKiller = SessionKiller;
 
 /// The production wiring: writes go through the pane API, reads through
 /// closures the composition root supplies.
@@ -184,6 +187,7 @@ pub struct LiveDeps {
     pub panes: Arc<dyn PaneApi>,
     pub read_goal: GoalReader,
     pub kill: SessionKiller,
+    pub kill_pane: PaneKiller,
 }
 
 #[async_trait]
@@ -229,6 +233,9 @@ impl ControlDeps for LiveDeps {
     }
     async fn kill_session(&self, tmux_session: &str) -> anyhow::Result<()> {
         (self.kill)(tmux_session.to_string()).await
+    }
+    async fn kill_pane(&self, pane_id: &str) -> anyhow::Result<()> {
+        (self.kill_pane)(pane_id.to_string()).await
     }
     async fn wait(&self, millis: u64) {
         tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
@@ -549,7 +556,9 @@ pub struct CloseResult {
 /// Close a session.
 ///
 /// `/exit` is Claude Code's own shutdown path, so it gets the chance to finish
-/// writing its transcript. Only a session that ignores it is killed outright.
+/// writing its transcript. Only a session that ignores it is killed outright,
+/// and only its pane: a split window holds other agents and shells in the
+/// same tmux session, and they were not asked to close.
 ///
 /// An agent that does not speak that command skips straight to closing its
 /// tmux session. Typing `/exit` at it would not shut anything down — it would
@@ -588,12 +597,7 @@ pub async fn close_agent(agent: Option<&Agent>, deps: &dyn ControlDeps) -> Act<C
         waited += POLL_MS;
     }
 
-    let Some(session) = agent.tmux_session.as_deref() else {
-        return Err(
-            ControlError::new("agent ignored /exit and has no tmux session to close").into()
-        );
-    };
-    deps.kill_session(session).await.map_err(ControlFailure::Failed)?;
+    deps.kill_pane(pane).await.map_err(ControlFailure::Failed)?;
     Ok(CloseResult { closed: true, forced: true })
 }
 
@@ -846,6 +850,7 @@ mod tests {
         pastes: StdMutex<Vec<(String, String, Submit)>>,
         keys: StdMutex<Vec<(String, String)>>,
         killed: StdMutex<Vec<String>>,
+        killed_panes: StdMutex<Vec<String>>,
         /// Goal before anything is typed, and after — the whole question
         /// `set_goal` exists to answer.
         goal_before: StdMutex<Option<GoalState>>,
@@ -928,6 +933,10 @@ mod tests {
         }
         async fn kill_session(&self, session: &str) -> anyhow::Result<()> {
             self.killed.lock().unwrap().push(session.into());
+            Ok(())
+        }
+        async fn kill_pane(&self, pane_id: &str) -> anyhow::Result<()> {
+            self.killed_panes.lock().unwrap().push(pane_id.into());
             Ok(())
         }
         /// Instant, so the tests do not spend six real seconds proving a grace
@@ -1197,21 +1206,29 @@ mod tests {
         assert!(f.killed.lock().unwrap().is_empty());
     }
 
+    /// The fallback ends the agent's pane, not the tmux session around it. A
+    /// split window is two terminals, and killing the session took the agent
+    /// in the other pane, and the shell beside them, down with this one.
     #[tokio::test]
-    async fn close_forces_a_session_that_ignores_exit() {
+    async fn inv8_close_forces_only_the_pane_of_an_agent_that_ignores_exit() {
         let f = Fake::new();
         *f.alive.lock().unwrap() = true;
         let r = close_agent(Some(&agent()), &f).await.unwrap();
         assert_eq!(r, CloseResult { closed: true, forced: true });
-        assert_eq!(f.killed.lock().unwrap().as_slice(), ["claude-1"]);
+        assert_eq!(f.killed_panes.lock().unwrap().as_slice(), ["%1"]);
+        assert!(f.killed.lock().unwrap().is_empty());
     }
 
+    /// The pane is all the fallback needs, so a tmux session name nobody could
+    /// read is no reason to leave an agent that ignored `/exit` running.
     #[tokio::test]
-    async fn close_reports_rather_than_hanging_when_there_is_nothing_left_to_kill() {
+    async fn close_forces_the_pane_even_when_its_tmux_session_is_unknown() {
         let f = Fake::new();
         *f.alive.lock().unwrap() = true;
         let a = Agent { tmux_session: None, ..agent() };
-        assert!(close_agent(Some(&a), &f).await.unwrap_err().to_string().contains("ignored /exit"));
+        let r = close_agent(Some(&a), &f).await.unwrap();
+        assert_eq!(r, CloseResult { closed: true, forced: true });
+        assert_eq!(f.killed_panes.lock().unwrap().as_slice(), ["%1"]);
     }
 
     /* ---- goal ---- */
@@ -1392,6 +1409,7 @@ mod tests {
             panes: Arc::new(Panes { dead, answers }),
             read_goal: Arc::new(|| Box::pin(async { None })),
             kill: Arc::new(|_| Box::pin(async { Ok(()) })),
+            kill_pane: Arc::new(|_| Box::pin(async { Ok(()) })),
         };
 
         // Alive: tmux answers and the process is still running.
@@ -1431,6 +1449,9 @@ mod tests {
             false
         }
         async fn kill_session(&self, _session: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn kill_pane(&self, _pane_id: &str) -> anyhow::Result<()> {
             Ok(())
         }
         async fn wait(&self, _millis: u64) {}

@@ -268,8 +268,46 @@ fn claims_its_tmux_session(claimed: &mut HashSet<String>, agent: &Agent) -> bool
     }
 }
 
+/// Where an agent sits: its pane when the pane is known, its tmux session when
+/// only that is.
+#[derive(PartialEq, Eq, Hash)]
+enum Seat {
+    Pane(String),
+    Session(String),
+}
+
+fn seat_of(agent: &Agent) -> Option<Seat> {
+    match (&agent.pane_id, &agent.tmux_session) {
+        (Some(pane), _) => Some(Seat::Pane(pane.clone())),
+        (None, Some(session)) => Some(Seat::Session(session.clone())),
+        (None, None) => None,
+    }
+}
+
+/// One provider's agents, minus any in a tmux session an earlier provider
+/// holds, and one per seat among the rest.
+///
+/// **The seat is the pane, not the tmux session.** A split window is two
+/// terminals, and `claude` started in each writes two session files naming
+/// the same tmux session — two agents, both of which have to be on screen.
+/// What one seat does rule out is a `claude -p` run from inside a session: it
+/// inherits `$TMUX_PANE`, so its session file names its parent's pane, and a
+/// second card there would aim the child's controls at the parent.
+fn one_per_seat(agents: Vec<Agent>, held_by_earlier: &HashSet<String>) -> Vec<Agent> {
+    let mut taken: HashSet<Seat> = HashSet::new();
+    agents
+        .into_iter()
+        .filter(|agent| {
+            let session = agent.tmux_session.as_ref();
+            session.is_none_or(|session| !held_by_earlier.contains(session))
+        })
+        .filter(|agent| seat_of(agent).is_none_or(|seat| taken.insert(seat)))
+        .collect()
+}
+
 impl CompositeInner {
-    /// Every provider's agents, one winner per tmux session.
+    /// Every provider's agents, one per seat, and a tmux session held by an
+    /// earlier provider is held by it outright.
     ///
     /// **Placeholders claim last, whichever provider emitted them.** A
     /// `pending:` entry stands in for a session nobody has found yet, so the
@@ -290,13 +328,12 @@ impl CompositeInner {
         let mut claimed: HashSet<String> = HashSet::new();
         let mut placeholders: Vec<Agent> = Vec::new();
         for provider in &self.providers {
-            for agent in provider.list() {
-                if crate::pending::is_placeholder(&agent) {
-                    placeholders.push(agent);
-                } else if claims_its_tmux_session(&mut claimed, &agent) {
-                    out.push(agent);
-                }
-            }
+            let (pending, found): (Vec<Agent>, Vec<Agent>) =
+                provider.list().into_iter().partition(crate::pending::is_placeholder);
+            placeholders.extend(pending);
+            let kept = one_per_seat(found, &claimed);
+            claimed.extend(kept.iter().filter_map(|agent| agent.tmux_session.clone()));
+            out.extend(kept);
         }
         for agent in placeholders {
             if claims_its_tmux_session(&mut claimed, &agent) {
@@ -620,6 +657,67 @@ mod tests {
         let mut ids: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
         ids.sort();
         assert_eq!(ids, vec!["tmux:term-1787832510", "uuid-1"]);
+    }
+
+    fn claude_in_pane(session_id: &str, tmux_session: &str, pane: &str) -> Agent {
+        Agent { pane_id: Some(pane.into()), ..claude(session_id, Some(tmux_session)) }
+    }
+
+    /// A split window is two terminals, and `claude` started in each is two
+    /// sessions writing two session files that name the same tmux session.
+    /// One winner per tmux session hid whichever sorted second — on the
+    /// machine this was found on, an idle session hid one whose status
+    /// Claude Code had written as `shell`.
+    #[test]
+    fn two_claude_sessions_in_split_panes_of_one_tmux_session_both_appear() {
+        let both = StaticProvider::new(vec![
+            claude_in_pane("uuid-1", "claude-1791076558", "%16"),
+            claude_in_pane("uuid-2", "claude-1791076558", "%9"),
+        ]);
+        let source = CompositeSource::new(vec![both]);
+        let mut ids: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
+        ids.sort();
+        assert_eq!(ids, vec!["uuid-1", "uuid-2"]);
+    }
+
+    /// A `claude -p` run from inside a session inherits `$TMUX_PANE`, so its
+    /// session file names its parent's pane, and `claude agents` confirms it.
+    /// Two cards on one pane would send the child's controls into the parent.
+    #[test]
+    fn a_nested_claude_sharing_its_parents_pane_is_one_agent() {
+        let nested = StaticProvider::new(vec![
+            claude_in_pane("parent", "claude-1791158175", "%15"),
+            claude_in_pane("child", "claude-1791158175", "%15"),
+        ]);
+        let source = CompositeSource::new(vec![nested]);
+        let ids: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(ids, vec!["parent"]);
+    }
+
+    /// The pane is the seat when it is known; when it is not, the tmux session
+    /// still is, so an unreadable pane reference cannot double an agent.
+    #[test]
+    fn two_claude_sessions_without_a_pane_still_share_one_seat() {
+        let unplaced = StaticProvider::new(vec![
+            claude("uuid-1", Some("claude-42")),
+            claude("uuid-2", Some("claude-42")),
+        ]);
+        let source = CompositeSource::new(vec![unplaced]);
+        assert_eq!(source.list().len(), 1);
+    }
+
+    /// The sweep's row sits in `%302` and Claude in `%303`, so seats alone would
+    /// keep both; only the earlier provider's hold on the tmux session stops it.
+    #[tokio::test]
+    async fn claude_in_a_split_pane_still_wins_its_tmux_session_from_the_sweep() {
+        let first = StaticProvider::new(vec![claude_in_pane("uuid-1", "term-1787832510", "%303")]);
+        let facts = FakeFacts::new(vec![shell_pane("term-1787832510")]);
+        let second: Arc<dyn AgentProvider> = Arc::new(TmuxProvider::new(facts.reader()));
+        second.start().await.unwrap();
+
+        let source = CompositeSource::new(vec![first, second]);
+        let ids: Vec<_> = source.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(ids, vec!["uuid-1"]);
     }
 
     /// An agent with no tmux session can never be shadowed by one, however

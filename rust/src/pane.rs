@@ -1208,11 +1208,20 @@ impl Panes {
             .collect())
     }
 
-    /// End a whole tmux session. Used only as the forced fallback when an agent
-    /// has ignored `/exit`; this creates no client, so INV-1 is unaffected.
+    /// End a whole tmux session. Used only to close a plain terminal, which
+    /// has no shutdown command of its own (INV-7); this creates no client, so
+    /// INV-1 is unaffected.
     pub async fn kill_session(&self, session: &str) -> Result<(), PaneError> {
         assert_session(session)?;
         self.run(&strs(&["kill-session", "-t", session]), None).await?;
+        Ok(())
+    }
+
+    /// End one pane. The forced fallback when an agent has ignored `/exit`:
+    /// the session may hold other panes, and they are somebody else's.
+    pub async fn kill_pane(&self, pane_id: &str) -> Result<(), PaneError> {
+        assert_pane(pane_id)?;
+        self.run(&strs(&["kill-pane", "-t", pane_id]), None).await?;
         Ok(())
     }
 
@@ -1305,6 +1314,10 @@ pub async fn kill_session(session: &str) -> Result<(), PaneError> {
     live_panes().kill_session(session).await
 }
 
+pub async fn kill_pane(pane_id: &str) -> Result<(), PaneError> {
+    live_panes().kill_pane(pane_id).await
+}
+
 /// Every pane on the machine, for `tmux_source`'s fleet sweep.
 pub async fn fleet_facts() -> Result<Vec<PaneFacts>, PaneError> {
     live_panes().fleet_facts().await
@@ -1373,6 +1386,24 @@ mod tests {
         let err = panes.kill_session("work; rm -rf /").await.unwrap_err();
         assert!(err.message.contains("malformed session name"), "{err}");
         assert!(once.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn pane_ids_are_checked_before_kill_pane() {
+        let (_c, once, panes) = rig();
+        let err = panes.kill_pane("%9; kill-server").await.unwrap_err();
+        assert!(err.message.contains("malformed pane id"), "{err}");
+        assert!(once.calls().is_empty());
+    }
+
+    /// Forcing a close ends the one pane, never the session holding it.
+    #[tokio::test]
+    async fn kill_pane_ends_that_pane_and_nothing_around_it() {
+        let (_c, once, panes) = rig();
+        panes.kill_pane("%9").await.unwrap();
+        let sent: Vec<Vec<String>> =
+            once.calls().iter().flat_map(|call| FakeOnce::commands_in(&call.args)).collect();
+        assert_eq!(sent, vec![vec!["kill-pane", "-t", "%9"]]);
     }
 
     #[test]
