@@ -82,6 +82,19 @@ const RECONCILE: Duration = Duration::from_secs(30);
 /// hour — was the price of a check that now runs in a syscall.
 const BACKSTOP: Duration = Duration::from_secs(300);
 
+/// How many answers in a row may leave out a session file that says nothing
+/// of its own process before the question about it is settled until the
+/// backstop. One miss can be the CLI lagging a file written just before it
+/// was asked; asking every period for good was the poll this file set out to
+/// end, for a stale file from a build that writes no `procStart`.
+const SILENT_MISSES: u8 = 2;
+
+/// How many times one `refresh` call reads the directory again for requests
+/// that arrived while it was reading. The rest is left to the next tick: a
+/// watch that reports the reads' own opens as writes — inotify does — would
+/// otherwise keep one call reading for ever.
+const READS_PER_REFRESH: usize = 3;
+
 /// `claude agents --json` gets this long before it is written off, matching the
 /// `execFile` timeout in `registry.ts`.
 const CLI_TIMEOUT: Duration = Duration::from_secs(15);
@@ -244,11 +257,16 @@ pub fn process_start(pid: i64) -> Option<u64> {
     // Counted from the field after the command name, which is parenthesised
     // and may itself hold spaces or parentheses — hence the last `)`.
     const START_TIME_AFTER_THE_NAME: usize = 19;
-    static BOOTED: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
-    let booted = (*BOOTED.get_or_init(|| {
-        let stat = std::fs::read_to_string("/proc/stat").ok()?;
-        stat.lines().find_map(|line| line.strip_prefix("btime "))?.trim().parse::<u64>().ok()
-    }))?;
+    static BOOTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    // Kept only once read: a `/proc/stat` that could not be read once must
+    // not turn every start unreadable for the life of the server.
+    let booted = match BOOTED.get() {
+        Some(booted) => *booted,
+        None => {
+            let booted = boot_time()?;
+            *BOOTED.get_or_init(|| booted)
+        }
+    };
     // SAFETY: `sysconf` reads a system constant and has no preconditions.
     let ticks_per_second = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
@@ -257,6 +275,14 @@ pub fn process_start(pid: i64) -> Option<u64> {
         after_the_name.split_whitespace().nth(START_TIME_AFTER_THE_NAME)?.parse().ok()?;
     (ticks_per_second > 0)
         .then(|| booted * MICROS_PER_SECOND + ticks * MICROS_PER_SECOND / ticks_per_second)
+}
+
+/// `btime` from `/proc/stat`: when the machine booted, in seconds since the
+/// epoch.
+#[cfg(target_os = "linux")]
+fn boot_time() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    stat.lines().find_map(|line| line.strip_prefix("btime "))?.trim().parse::<u64>().ok()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -296,7 +322,7 @@ fn evidence(claim: Option<&str>, start: Option<u64>) -> Evidence {
         return Evidence::Silent;
     };
     let Ok(started) = i64::try_from(start / MICROS_PER_SECOND) else { return Evidence::Silent };
-    if names_this_start(claimed, started, local_offset(started)) {
+    if names_this_start(claimed, started, || local_offset(started)) {
         Evidence::Same
     } else {
         Evidence::Another
@@ -309,9 +335,15 @@ fn evidence(claim: Option<&str>, start: Option<u64>) -> Evidence {
 /// `lstart` carries no zone. The builds seen here write UTC, and `ps` left to
 /// itself writes local time, so either reading of the same second is the same
 /// process.
-fn names_this_start(claimed: i64, started: i64, local_offset: Option<i64>) -> bool {
+fn names_this_start(
+    claimed: i64,
+    started: i64,
+    local_offset: impl FnOnce() -> Option<i64>,
+) -> bool {
     let near = |expected: i64| (claimed - expected).abs() <= SAME_START_SLACK;
-    near(started) || local_offset.is_some_and(|offset| near(started + offset))
+    // The zone is looked up only when the UTC reading missed: a `localtime_r`
+    // per session per pass buys nothing for the builds that write UTC.
+    near(started) || local_offset().is_some_and(|offset| near(started + offset))
 }
 
 /// The local zone's offset from UTC at `epoch_seconds`, in seconds east.
@@ -328,24 +360,48 @@ fn local_offset(epoch_seconds: i64) -> Option<i64> {
 
 /// `ps -o lstart` — `Mon Oct 12 01:43:15 2026` — as seconds since the epoch,
 /// reading the wall clock as UTC. `None` for anything else, including a
-/// month name in another language.
+/// month name in another language and a date or time no clock shows: the
+/// file is written by another program, and a 99th hour is no start at all.
 fn claimed_start(lstart: &str) -> Option<i64> {
     const MONTHS: [&str; 12] =
         ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const SECONDS_PER_DAY: i64 = 86_400;
     const SECONDS_PER_HOUR: i64 = 3_600;
     const SECONDS_PER_MINUTE: i64 = 60;
+    const HOURS: std::ops::Range<i64> = 0..24;
+    const MINUTES: std::ops::Range<i64> = 0..60;
+    /// Up to 60, for a leap second.
+    const SECONDS: std::ops::RangeInclusive<i64> = 0..=60;
+    const YEARS: std::ops::RangeInclusive<i64> = 1970..=9999;
     let [_weekday, month, day, clock, year] =
         <[&str; 5]>::try_from(lstart.split_whitespace().collect::<Vec<_>>()).ok()?;
     let month = MONTHS.iter().position(|name| *name == month)? + 1;
     let day: u32 = day.parse().ok()?;
-    let year: i64 = year.parse().ok()?;
+    let year: i64 = year.parse().ok().filter(|year| YEARS.contains(year))?;
     let [hours, minutes, seconds] = <[i64; 3]>::try_from(
         clock.split(':').map(str::parse).collect::<Result<Vec<i64>, _>>().ok()?,
     )
     .ok()?;
+    let on_the_clock =
+        HOURS.contains(&hours) && MINUTES.contains(&minutes) && SECONDS.contains(&seconds);
+    if !on_the_clock || day > days_in_the_month(year, month)? {
+        return None;
+    }
     let days = days_since_the_epoch(year, u32::try_from(month).ok()?, day)?;
-    Some(days * SECONDS_PER_DAY + hours * SECONDS_PER_HOUR + minutes * SECONDS_PER_MINUTE + seconds)
+    let into_the_day = hours * SECONDS_PER_HOUR + minutes * SECONDS_PER_MINUTE + seconds;
+    days.checked_mul(SECONDS_PER_DAY)?.checked_add(into_the_day)
+}
+
+/// How many days `month` (1 for January) has in `year`, a leap February's
+/// 29th included.
+fn days_in_the_month(year: i64, month: usize) -> Option<u32> {
+    const DAYS: [u32; 12] = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    const FEBRUARY: usize = 2;
+    const LEAP_EVERY: i64 = 4;
+    const EXCEPT_EVERY: i64 = 100;
+    const UNLESS_EVERY: i64 = 400;
+    let leap = year % LEAP_EVERY == 0 && (year % EXCEPT_EVERY != 0 || year % UNLESS_EVERY == 0);
+    Some(DAYS.get(month.checked_sub(1)?)? + u32::from(month == FEBRUARY && leap))
 }
 
 /// Days from 1970-01-01 to a proleptic Gregorian date — Howard Hinnant's
@@ -357,13 +413,13 @@ fn days_since_the_epoch(year: i64, month: u32, day: u32) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let year = if month <= 2 { year - 1 } else { year };
+    let year = if month <= 2 { year.checked_sub(1)? } else { year };
     let era = year.div_euclid(YEARS_IN_AN_ERA);
     let year_of_era = year - era * YEARS_IN_AN_ERA;
     let shifted_month = i64::from((month + 9) % 12);
     let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    Some(era * DAYS_IN_AN_ERA + day_of_era - DAYS_BEFORE_THE_EPOCH)
+    era.checked_mul(DAYS_IN_AN_ERA)?.checked_add(day_of_era - DAYS_BEFORE_THE_EPOCH)
 }
 
 /// Read a string field, treating an empty one as absent.
@@ -661,20 +717,30 @@ struct Inner {
     /// read it the first time that id was seen on that pid. A start that has
     /// moved means the kernel handed the pid to somebody else, and whatever
     /// the CLI said about the session is no longer about the process there.
-    started: Mutex<HashMap<String, (i64, u64)>>,
+    started: Mutex<HashMap<String, Sighting>>,
     /// `process_start`, as a seam: a test cannot make the kernel reuse a pid.
     start_of: Arc<StartReader>,
     /// Ids on disk whose file names another process than the one holding its
     /// pid, as of the last pass.
     contradicted: Mutex<HashSet<String>>,
-    /// Contradicted ids the CLI has since declined to list. Settled rather
-    /// than open: the file cannot start naming the right process, so asking
-    /// again every period would be a poll on a certainty. A new start on the
-    /// pid, or the file going away, reopens it.
+    /// Ids the CLI has declined to list: a contradicted one the first time,
+    /// since the file cannot start naming the right process, and one whose
+    /// file says nothing of its process after `SILENT_MISSES`. Settled rather
+    /// than open — asking again every period would be a poll on a certainty —
+    /// until the backstop's call, a new start on the pid, the CLI listing it,
+    /// or the file going away.
     declined: Mutex<HashSet<String>>,
+    /// How many answers in a row have left out each id that was put to them.
+    misses: Mutex<HashMap<String, u8>>,
+    /// A call has failed before the CLI ever answered. Until one has, a file
+    /// naming another process is held back, so the first fleet shows no ghost
+    /// for the moment the CLI takes; once one has, there is no answer coming
+    /// to wait for, and holding them back would empty the fleet for as long
+    /// as the CLI stays broken.
+    authority_lost: AtomicBool,
     /// When the CLI last answered. `None` before its first answer and after a
     /// call that failed, both of which leave a question open.
-    answered_at: Mutex<Option<std::time::Instant>>,
+    answered_at: Mutex<Option<Instant>>,
     /// How long the periodic pass may go without asking while no question is
     /// open. `None` asks every period, which is what a platform without
     /// `process_start` needs: there the poll is the only thing that notices a
@@ -690,6 +756,45 @@ struct Inner {
 
 /// Reads a process's start, as `process_start` does.
 type StartReader = dyn Fn(i64) -> Option<u64> + Send + Sync;
+
+/// The pid a session id was last seen on, and when the process there started.
+#[derive(Clone, Copy)]
+struct Sighting {
+    pid: i64,
+    start: u64,
+}
+
+/// How long the source may go without each of its two costs while nothing
+/// moves. `None` pays it every period.
+#[derive(Clone, Copy, Default)]
+struct Quiet {
+    /// How long the periodic pass may go without asking the CLI while no
+    /// question is open. `None` is what a platform without `process_start`
+    /// needs: there the poll is the only thing that notices a reused pid.
+    backstop: Option<Duration>,
+    /// How long the tick may go without reading the directory.
+    reread: Option<Duration>,
+}
+
+/// What the directory watch reports to the task that acts on it.
+pub(crate) enum Watched {
+    /// Something in the directory changed.
+    Changed,
+    /// The watch failed, and with it any promise that a write is reported.
+    Lost,
+}
+
+/// Whether a watch event says a file changed, rather than that somebody —
+/// this server, as often as not — looked at it. inotify reports every open
+/// and read: on Linux a watch that counted them answered each of the
+/// server's own reads with another, and never stopped.
+pub(crate) fn announces_a_change(event: &notify::Event) -> bool {
+    use notify::event::{EventKind, MetadataKind, ModifyKind};
+    !matches!(
+        event.kind,
+        EventKind::Access(_) | EventKind::Modify(ModifyKind::Metadata(MetadataKind::AccessTime))
+    )
+}
 
 /// Resets an in-flight flag however the work exits, standing in for the TS
 /// `finally`.
@@ -709,13 +814,16 @@ impl Inner {
     }
 
     async fn refresh(self: &Arc<Self>) {
-        loop {
+        // Asked for before trying to take the pass, not after failing to: a
+        // pass that ended between the two would have checked `wanted` before
+        // it was set, and the request would be lost with nobody reading.
+        self.wanted.store(true, Ordering::SeqCst);
+        for _ in 0..READS_PER_REFRESH {
             if self
                 .refreshing
                 .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
             {
-                self.wanted.store(true, Ordering::SeqCst);
                 return;
             }
             {
@@ -729,6 +837,9 @@ impl Inner {
                 return;
             }
         }
+        // Still wanted after every read this call may make: the next tick
+        // reads rather than trusting a watch that will not stop asking.
+        *self.read_at.lock().unwrap() = None;
     }
 
     /// Whether this tick has to read the directory, or can trust that the
@@ -753,9 +864,8 @@ impl Inner {
         let agents = self.agents.lock().unwrap();
         let started = self.started.lock().unwrap();
         agents.values().filter(|agent| !crate::pending::is_placeholder(agent)).any(|agent| {
-            let was = started.get(&agent.session_id).filter(|(pid, _)| *pid == agent.pid);
-            !is_alive(agent.pid)
-                || was.is_some_and(|(pid, start)| (self.start_of)(*pid) != Some(*start))
+            let was = started.get(&agent.session_id).filter(|seen| seen.pid == agent.pid);
+            !is_alive(agent.pid) || was.is_some_and(|seen| (self.start_of)(seen.pid) != Some(seen.start))
         })
     }
 
@@ -810,7 +920,7 @@ impl Inner {
                 Evidence::Silent => ledger.admit_on_the_clis_word(&agent, &agents, &on_disk),
             };
             if listed {
-                ledger.asked.remove(&agent.session_id);
+                ledger.settled_by_listing(&agent.session_id);
                 carry_enrichment_forward(&agents, &mut next, agent);
             }
         }
@@ -830,6 +940,8 @@ impl Inner {
             started: self.started.lock().unwrap(),
             contradicted: self.contradicted.lock().unwrap(),
             declined: self.declined.lock().unwrap(),
+            misses: self.misses.lock().unwrap(),
+            authority_lost: self.authority_lost.load(Ordering::SeqCst),
             met_an_unrecognised_id: false,
         }
     }
@@ -843,22 +955,29 @@ impl Inner {
         (self.start_of)(agent.pid)
     }
 
-    /// Close the questions a contradicted file put to the CLI once it has
-    /// declined to list them. Only questions put before this call count: a
-    /// file written while it ran may simply have been too late for it.
+    /// Close the questions the CLI has declined to answer: a contradicted
+    /// file's at its first refusal, a silent one's after `SILENT_MISSES`.
+    /// Only questions put before this call count: a file written while it ran
+    /// may simply have been too late for it.
     fn settle(&self, put: &HashSet<String>, listed: &HashSet<String>) {
         let mut asked = self.asked.lock().unwrap();
         let contradicted = self.contradicted.lock().unwrap();
         let mut declined = self.declined.lock().unwrap();
-        for id in put.iter().filter(|id| contradicted.contains(*id) && !listed.contains(*id)) {
-            asked.remove(id);
-            declined.insert(id.clone());
+        let mut misses = self.misses.lock().unwrap();
+        for id in put.iter().filter(|id| !listed.contains(*id)) {
+            let missed = misses.entry(id.clone()).or_default();
+            *missed = missed.saturating_add(1);
+            if contradicted.contains(id) || *missed >= SILENT_MISSES {
+                asked.remove(id);
+                declined.insert(id.clone());
+            }
         }
     }
 
     /// Whether the periodic pass has nothing to put to the CLI: no id on disk
     /// is waiting on its word, its last call answered, and that answer is
-    /// younger than the backstop.
+    /// younger than the backstop. A settled id waits for the backstop too,
+    /// whose call can still list it.
     fn nothing_to_ask(&self) -> bool {
         let Some(backstop) = self.backstop else { return false };
         let answered_at = *self.answered_at.lock().unwrap();
@@ -895,18 +1014,35 @@ impl Inner {
         {
             return;
         }
-        let _guard = InFlightGuard(&self.reconciling);
+        // Held for the call, not for the read after it: a read that ran long
+        // would otherwise drop every reconcile asked for in the meantime.
+        let changed = {
+            let _guard = InFlightGuard(&self.reconciling);
+            self.ask_the_cli().await
+        };
+        if changed {
+            self.refresh().await;
+        }
+    }
 
+    /// One `claude agents --json`, and what its answer settles. Whether the
+    /// fleet wants reading again for it.
+    async fn ask_the_cli(&self) -> bool {
         let put = self.asked.lock().unwrap().clone();
         let known = read_cli_session_ids(self.runner.as_ref()).await;
-        *self.answered_at.lock().unwrap() = known.as_ref().map(|_| std::time::Instant::now());
+        *self.answered_at.lock().unwrap() = known.as_ref().map(|_| Instant::now());
         // A CLI that did not answer leaves the previous answer in place rather
         // than dropping the filter — losing the authority must not silently
-        // resurrect ghosts, and must not empty the fleet either.
-        let Some(listed) = known else { return };
+        // resurrect ghosts, and must not empty the fleet either. With no
+        // previous answer there is nothing to keep, and what it held back
+        // waiting for one is shown — see `authority_lost`.
+        let Some(listed) = known else {
+            let never_answered = self.known.lock().unwrap().is_none();
+            return never_answered && !self.authority_lost.swap(true, Ordering::SeqCst);
+        };
         self.settle(&put, &listed);
         *self.known.lock().unwrap() = Some(listed);
-        self.refresh().await;
+        true
     }
 }
 
@@ -914,9 +1050,12 @@ impl Inner {
 struct Ledger<'a> {
     known: MutexGuard<'a, Option<HashSet<String>>>,
     asked: MutexGuard<'a, HashSet<String>>,
-    started: MutexGuard<'a, HashMap<String, (i64, u64)>>,
+    started: MutexGuard<'a, HashMap<String, Sighting>>,
     contradicted: MutexGuard<'a, HashSet<String>>,
     declined: MutexGuard<'a, HashSet<String>>,
+    misses: MutexGuard<'a, HashMap<String, u8>>,
+    /// See `Inner::authority_lost`.
+    authority_lost: bool,
     /// The pass met a session id nobody has asked the CLI about yet.
     met_an_unrecognised_id: bool,
 }
@@ -928,13 +1067,22 @@ impl Ledger<'_> {
     /// back, and so is any question settled about it.
     fn forget_a_moved_start(&mut self, agent: &Agent, start: Option<u64>) {
         let Some(start) = start else { return };
-        let before = self.started.insert(agent.session_id.clone(), (agent.pid, start));
-        if before.is_some_and(|(pid, then)| pid == agent.pid && then != start) {
+        let seen = Sighting { pid: agent.pid, start };
+        let before = self.started.insert(agent.session_id.clone(), seen);
+        if before.is_some_and(|then| then.pid == agent.pid && then.start != start) {
             if let Some(confirmed) = self.known.as_mut() {
                 confirmed.remove(&agent.session_id);
             }
             self.declined.remove(&agent.session_id);
+            self.misses.remove(&agent.session_id);
         }
+    }
+
+    /// A listed id has no question left open, settled or not.
+    fn settled_by_listing(&mut self, id: &str) {
+        self.asked.remove(id);
+        self.declined.remove(id);
+        self.misses.remove(id);
     }
 
     /// The file names the process holding its pid: the answer the CLI would
@@ -950,6 +1098,11 @@ impl Ledger<'_> {
     fn hold_unless_listed(&mut self, agent: &Agent) -> bool {
         let id = &agent.session_id;
         if self.known.as_ref().is_some_and(|confirmed| confirmed.contains(id)) {
+            return true;
+        }
+        if self.known.is_none() && self.authority_lost {
+            // No answer is coming: weighed as a file that says nothing, which
+            // with no answer to filter by is shown.
             return true;
         }
         self.contradicted.insert(id.clone());
@@ -978,8 +1131,11 @@ impl Ledger<'_> {
         }
         // Not a ghost yet — just unconfirmed. Ask the authority now rather
         // than at the next 30s reconcile; `asked` is what keeps that from
-        // becoming a loop.
-        self.met_an_unrecognised_id |= self.asked.insert(agent.session_id.clone());
+        // becoming a loop, and `declined` what keeps a refused one from
+        // being asked again until the backstop.
+        if !self.declined.contains(&agent.session_id) {
+            self.met_an_unrecognised_id |= self.asked.insert(agent.session_id.clone());
+        }
         false
     }
 
@@ -988,8 +1144,8 @@ impl Ledger<'_> {
     fn forget_what_left(&mut self, on_disk: &HashSet<String>) {
         self.asked.retain(|id| on_disk.contains(id));
         self.started.retain(|id, _| on_disk.contains(id));
-        let contradicted = &self.contradicted;
-        self.declined.retain(|id| contradicted.contains(id));
+        self.declined.retain(|id| on_disk.contains(id));
+        self.misses.retain(|id, _| on_disk.contains(id));
     }
 }
 
@@ -1171,25 +1327,20 @@ impl LiveSource {
         };
         // Our own start is readable exactly when every agent's is.
         let backstop = process_start(i64::from(std::process::id())).map(|_| BACKSTOP);
-        Self::assembled(config, Arc::new(process_start), backstop, Some(REREAD))
+        let quiet = Quiet { backstop, reread: Some(REREAD) };
+        Self::assembled(config, Arc::new(process_start), quiet)
     }
 
     /// Fully injected, for tests: a temp directory of session files, a stubbed
     /// command runner, and intervals short enough to observe. Nothing in the
     /// test suite may require a real `claude` binary.
     pub fn configured(config: SourceConfig) -> Arc<LiveSource> {
-        Self::assembled(config, Arc::new(process_start), None, None)
+        Self::assembled(config, Arc::new(process_start), Quiet::default())
     }
 
-    /// `configured`, plus how a process's start is read, how long the
-    /// periodic pass may stay quiet with no question open, and how long the
-    /// tick may go without reading the directory (`None`: every tick).
-    fn assembled(
-        config: SourceConfig,
-        start_of: Arc<StartReader>,
-        backstop: Option<Duration>,
-        reread: Option<Duration>,
-    ) -> Arc<LiveSource> {
+    /// `configured`, plus how a process's start is read and how long each
+    /// cost may be skipped while nothing moves.
+    fn assembled(config: SourceConfig, start_of: Arc<StartReader>, quiet: Quiet) -> Arc<LiveSource> {
         Arc::new(LiveSource {
             inner: Arc::new(Inner {
                 dir: config.dir,
@@ -1201,7 +1352,7 @@ impl LiveSource {
                 known: Mutex::new(None),
                 refreshing: AtomicBool::new(false),
                 wanted: AtomicBool::new(false),
-                reread,
+                reread: quiet.reread,
                 armed_at: Mutex::new(None),
                 read_at: Mutex::new(None),
                 reconciling: AtomicBool::new(false),
@@ -1209,9 +1360,11 @@ impl LiveSource {
                 started: Mutex::new(HashMap::new()),
                 contradicted: Mutex::new(HashSet::new()),
                 declined: Mutex::new(HashSet::new()),
+                misses: Mutex::new(HashMap::new()),
+                authority_lost: AtomicBool::new(false),
                 start_of,
                 answered_at: Mutex::new(None),
-                backstop,
+                backstop: quiet.backstop,
                 stopped: AtomicBool::new(false),
                 listeners: Listeners::new(),
                 tasks: Mutex::new(Vec::new()),
@@ -1229,12 +1382,15 @@ impl LiveSource {
     /// reads every period until the watch has settled, and every `REREAD` after.
     /// `None` on any of those, which is not an error.
     fn watch_the_sessions_directory(&self) -> Option<JoinHandle<()>> {
-        let (events, mut arrivals) = tokio::sync::mpsc::unbounded_channel::<()>();
+        let (events, mut arrivals) = tokio::sync::mpsc::unbounded_channel::<Watched>();
         let mut watcher =
             notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-                if event.is_ok() {
-                    let _ = events.send(());
-                }
+                let report = match event {
+                    Ok(event) if announces_a_change(&event) => Watched::Changed,
+                    Ok(_) => return,
+                    Err(_) => Watched::Lost,
+                };
+                let _ = events.send(report);
             })
             .ok()?;
         watcher.watch(&self.inner.dir, RecursiveMode::NonRecursive).ok()?;
@@ -1243,10 +1399,18 @@ impl LiveSource {
 
         let inner = Arc::clone(&self.inner);
         Some(tokio::spawn(async move {
-            while arrivals.recv().await.is_some() {
+            while let Some(first) = arrivals.recv().await {
                 // Drain the burst: one write to one session file can arrive as
                 // several events, and they all want the same single re-read.
-                while arrivals.try_recv().is_ok() {}
+                let mut lost = matches!(first, Watched::Lost);
+                while let Ok(next) = arrivals.try_recv() {
+                    lost |= matches!(next, Watched::Lost);
+                }
+                if lost {
+                    // A watch that has failed once may have missed writes it
+                    // will never report: every tick reads, as with none.
+                    *inner.armed_at.lock().unwrap() = None;
+                }
                 inner.refresh().await;
             }
         }))
@@ -1470,7 +1634,7 @@ mod tests {
         calls: Arc<AtomicUsize>,
         in_flight: Arc<AtomicUsize>,
         max_in_flight: Arc<AtomicUsize>,
-        starts: Arc<Mutex<Vec<std::time::Instant>>>,
+        starts: Arc<Mutex<Vec<Instant>>>,
     }
 
     impl FakeCli {
@@ -1490,7 +1654,7 @@ mod tests {
     impl CommandRunner for FakeCli {
         async fn run(&self, _bin: &str, _args: &[&str], _timeout: Duration) -> Option<String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
-            self.starts.lock().unwrap().push(std::time::Instant::now());
+            self.starts.lock().unwrap().push(Instant::now());
             let n = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_in_flight.fetch_max(n, Ordering::SeqCst);
             tokio::time::sleep(self.cost).await;
@@ -2203,7 +2367,8 @@ mod tests {
             tick: LONGER_THAN_THE_TEST,
             reconcile_every,
         };
-        LiveSource::assembled(config, start_of, Some(LONGER_THAN_THE_TEST), None)
+        let quiet = Quiet { backstop: Some(LONGER_THAN_THE_TEST), reread: None };
+        LiveSource::assembled(config, start_of, quiet)
     }
 
     /// `anchored_source`, with a tick allowed to skip the read for longer than
@@ -2220,10 +2385,15 @@ mod tests {
             tick: LONGER_THAN_THE_TEST,
             reconcile_every: LONGER_THAN_THE_TEST,
         };
-        let quiet = Some(LONGER_THAN_THE_TEST);
-        let src = LiveSource::assembled(config, start_of, quiet, quiet);
-        *src.inner.armed_at.lock().unwrap() = Some(Instant::now() - SETTLING);
+        let quiet = Quiet { backstop: Some(LONGER_THAN_THE_TEST), reread: Some(LONGER_THAN_THE_TEST) };
+        let src = LiveSource::assembled(config, start_of, quiet);
+        *src.inner.armed_at.lock().unwrap() = Some(settled_watch());
         src
+    }
+
+    /// When a watch armed long enough ago to have settled was armed.
+    fn settled_watch() -> Instant {
+        Instant::now().checked_sub(SETTLING).expect("the clock reaches back past one settling")
     }
 
     /// INV-4: an idle fleet costs a liveness check a tick, not a read and a
@@ -2335,6 +2505,41 @@ mod tests {
         assert_eq!(held.passes.load(Ordering::SeqCst), 2, "the pass in flight read again");
     }
 
+    /// A watch that answers every read with another request — inotify
+    /// reporting the read's own opens — cannot keep one call reading for
+    /// ever: it stops, and leaves the next tick to read.
+    #[tokio::test]
+    async fn inv4_a_refresh_wanted_again_after_every_read_leaves_the_rest_to_the_tick() {
+        #[derive(Default)]
+        struct Echoing {
+            passes: AtomicUsize,
+            source: std::sync::OnceLock<std::sync::Weak<Inner>>,
+        }
+        #[async_trait]
+        impl PendingMerge for Echoing {
+            async fn merge(&self, real: Vec<Agent>) -> Vec<Agent> {
+                self.passes.fetch_add(1, Ordering::SeqCst);
+                if let Some(inner) = self.source.get().and_then(std::sync::Weak::upgrade) {
+                    inner.refresh().await;
+                }
+                real
+            }
+
+            fn waiting(&self) -> bool {
+                false
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let echoing = Arc::new(Echoing::default());
+        let (_start, start_of) = movable_start();
+        let src = quiet_source(dir.path(), start_of, Some(echoing.clone()));
+        echoing.source.set(Arc::downgrade(&src.inner)).unwrap();
+
+        src.inner.refresh().await;
+        assert_eq!(echoing.passes.load(Ordering::SeqCst), READS_PER_REFRESH);
+        assert!(src.inner.must_read(), "the next tick reads what this call left");
+    }
+
     /// What the 30s reconcile used to be the only defence against: the
     /// session file outlives its process and the pid goes to somebody else.
     /// `is_alive` says yes; the start says it is not the same process, and the
@@ -2400,10 +2605,11 @@ mod tests {
         src.stop();
     }
 
-    /// An open question keeps the old cadence: a ghost the CLI refused, or an
-    /// agent it has not caught up with yet, is asked about every period.
+    /// An open question keeps the old cadence until it is settled: a ghost
+    /// the CLI refused, or an agent it has not caught up with yet, is asked
+    /// about each period until `SILENT_MISSES` answers have left it out.
     #[tokio::test]
-    async fn inv4_an_open_question_is_asked_every_period() {
+    async fn inv4_an_open_question_is_asked_until_the_cli_settles_it() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
         let (_start, start_of) = movable_start();
@@ -2414,11 +2620,56 @@ mod tests {
         src.start().await.unwrap();
         tokio::time::sleep(SEVERAL_QUIET_TICKS).await;
 
-        // Startup, the ask on sight, then one per period for the ghost.
+        // Startup, the ask on sight, then a period for the ghost's second miss.
         let calls = cli.calls.load(Ordering::SeqCst);
         assert!(calls > 2, "the open question was asked {calls} times");
         assert_eq!(src.list().len(), 1, "a ghost reached the fleet");
         src.stop();
+    }
+
+    /// `anchored_source`, allowed to stay quiet for `backstop` once nothing is
+    /// left to ask.
+    fn backstopped_source(dir: &Path, cli: Arc<FakeCli>, backstop: Duration) -> Arc<LiveSource> {
+        let config = SourceConfig {
+            dir: dir.into(),
+            runner: cli,
+            pending: None,
+            tick: LONGER_THAN_THE_TEST,
+            reconcile_every: LONGER_THAN_THE_TEST,
+        };
+        let (_start, start_of) = movable_start();
+        LiveSource::assembled(config, start_of, Quiet { backstop: Some(backstop), reread: None })
+    }
+
+    /// A file that says nothing of its process, which the CLI keeps leaving
+    /// out, is a question settled after `SILENT_MISSES` answers rather than
+    /// one put every period for as long as the file lies there — a stale file
+    /// from a build that writes no `procStart` was exactly that poll. The
+    /// backstop's call can still list it.
+    #[tokio::test]
+    async fn inv4_a_silent_file_the_cli_keeps_refusing_waits_for_the_backstop() {
+        const BACKSTOP_IN_THE_TEST: Duration = Duration::from_secs(1);
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let src = backstopped_source(dir.path(), cli.clone(), BACKSTOP_IN_THE_TEST);
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        write_session(dir.path(), "ghost.json", live_session("ghost"));
+
+        Arc::clone(&src.inner).reconcile().await;
+        settle().await;
+        assert!(!src.inner.nothing_to_ask(), "one refusal may be the CLI lagging the file");
+        Arc::clone(&src.inner).reconcile().await;
+        assert!(src.inner.nothing_to_ask(), "refused twice, the question is still open");
+        src.inner.refresh().await;
+        settle().await;
+        assert!(src.inner.nothing_to_ask(), "a later pass reopened a settled question");
+        assert_eq!(src.list().len(), 1, "a ghost reached the fleet");
+
+        tokio::time::sleep(BACKSTOP_IN_THE_TEST).await;
+        assert!(!src.inner.nothing_to_ask(), "the backstop did not ask");
+        *cli.out.lock().unwrap() = Some(r#"[{"sessionId":"live-one"},{"sessionId":"ghost"}]"#.into());
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 2, "the backstop's answer listed it");
     }
 
     /// A CLI that failed has not answered anything, so the question stays
@@ -2462,30 +2713,62 @@ mod tests {
         (start, Arc::new(move |_pid| Some(reader.load(Ordering::SeqCst))))
     }
 
+    /// A CLI that has never answered and failed when asked is no answer worth
+    /// waiting for: a file naming another process is held back while the
+    /// first call is out, then shown, rather than the fleet staying empty for
+    /// as long as the CLI stays broken.
+    #[tokio::test]
+    async fn inv4_a_cli_that_never_answers_does_not_empty_the_fleet() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(None, Duration::ZERO);
+        let (_start, start_of) = own_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+        write_session(dir.path(), "live-one.json", claiming("live-one", STALE_START));
+
+        src.inner.refresh().await;
+        assert!(src.list().is_empty(), "shown before the CLI was asked");
+        Arc::clone(&src.inner).reconcile().await;
+        settle().await;
+        assert_eq!(src.list().len(), 1, "a CLI that never answered emptied the fleet");
+    }
+
     #[test]
-    fn lstart_is_read_as_a_utc_wall_clock() {
+    fn inv4_lstart_is_read_as_a_utc_wall_clock() {
         assert_eq!(claimed_start(OWN_START), i64::try_from(OWN_START_SECS).ok());
         assert_eq!(claimed_start(STALE_START), Some(1_767_603_600));
         assert_eq!(claimed_start("Thu Feb 29 23:59:59 2024"), Some(1_709_251_199));
-        for unreadable in ["", "yesterday", "Mo 12 Okt 01:43:15 2026", "Mon Oct 12 01:43 2026"] {
+        for unreadable in [
+            "",
+            "yesterday",
+            "Mo 12 Okt 01:43:15 2026",
+            "Mon Oct 12 01:43 2026",
+            "Mon Oct 12 24:00:00 2026",
+            "Mon Oct 12 01:60:00 2026",
+            "Mon Oct 12 01:43:61 2026",
+            "Fri Feb 29 12:00:00 2025",
+            "Wed Apr 31 12:00:00 2026",
+            "Mon Oct 12 01:43:15 99999999999999999",
+            "Mon Oct 12 99999999999999999:00:00 2026",
+        ] {
             assert_eq!(claimed_start(unreadable), None, "{unreadable:?}");
         }
+        assert!(claimed_start("Sat Dec 31 23:59:60 2016").is_some(), "a leap second is a second");
     }
 
     /// `lstart` names no zone, so a start written in local time is the same
     /// process as one written in UTC — and nothing else is.
     #[test]
-    fn either_reading_of_a_zoneless_start_is_the_same_process() {
+    fn inv4_either_reading_of_a_zoneless_start_is_the_same_process() {
         const EAST_OF_UTC: i64 = -4 * 3_600;
         let started = 1_000_000;
-        assert!(names_this_start(started, started, None));
-        assert!(names_this_start(started + EAST_OF_UTC, started, Some(EAST_OF_UTC)));
-        assert!(!names_this_start(started + EAST_OF_UTC, started, None));
-        assert!(!names_this_start(started - 2, started, Some(0)));
+        assert!(names_this_start(started, started, || panic!("the zone is asked for")));
+        assert!(names_this_start(started + EAST_OF_UTC, started, || Some(EAST_OF_UTC)));
+        assert!(!names_this_start(started + EAST_OF_UTC, started, || None));
+        assert!(!names_this_start(started - 2, started, || Some(0)));
     }
 
     #[test]
-    fn evidence_is_silent_without_both_sides() {
+    fn inv4_evidence_is_silent_without_both_sides() {
         assert_eq!(evidence(None, Some(OWN_START_MICROS)), Evidence::Silent);
         assert_eq!(evidence(Some(OWN_START), None), Evidence::Silent);
         assert_eq!(evidence(Some("not a date"), Some(OWN_START_MICROS)), Evidence::Silent);
@@ -2593,8 +2876,8 @@ mod tests {
     }
 
     async fn wait_until(mut check: impl FnMut() -> bool) {
-        let until = std::time::Instant::now() + PATIENCE;
-        while std::time::Instant::now() < until {
+        let until = Instant::now() + PATIENCE;
+        while Instant::now() < until {
             if check() {
                 return;
             }

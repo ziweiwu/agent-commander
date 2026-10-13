@@ -135,7 +135,11 @@ that started — and re-reads the directory when that check fails, while a spawn
 waits to register, for the first 10s after the watch is armed (macOS drops
 writes landing just after a watch is registered), and every 30s regardless
 (`REREAD`, `SETTLING`). Re-reading every tick was most of what an idle server
-spent.
+spent. The watch counts writes, not reads: inotify reports every open, and a
+watch that counted the server's own reads answered each with another. A watch
+that reports an error is no longer trusted, and every tick reads. One refresh
+call re-reads at most `READS_PER_REFRESH` times for requests that arrived while
+it read, and leaves anything still owed to the next tick.
 
 `claude agents --json` costs ~680ms and answers one question: is this pid still
 really a session? A pid can be reused. Most of the time the file answers it
@@ -149,10 +153,17 @@ included — until the CLI vouches for it, so it never reaches a tab. The
 CLI is asked when a question is open (an id with no readable `procStart` it has
 not vouched for, a contradicted file it has not yet declined, a pid whose start
 moved, a call that failed), every `RECONCILE` = 30s while one stays open, and
-otherwise only as a 5-minute backstop (`BACKSTOP`). It stays the authority
-wherever the file is silent or contradicted; it is no longer asked to confirm
-what the file and the kernel already agree on. On a platform where a process's
-start cannot be read, every period asks, as before.
+otherwise only as a 5-minute backstop (`BACKSTOP`). A question is settled when
+the CLI declines it: a contradicted file at the first answer that leaves it out,
+a silent one after `SILENT_MISSES` = 2, since one miss can be the CLI lagging a
+file written just before it was asked. A settled id waits for the backstop,
+whose call can still list it. It stays the authority wherever the file is
+silent or contradicted; it is no longer asked to confirm what the file and the
+kernel already agree on. A CLI that has never answered holds a contradicted
+file back only until its first call fails — after that there is no answer
+coming, and holding them would empty the fleet for as long as the CLI stays
+broken. On a platform where a process's start cannot be read, every period
+asks, as before.
 
 `PendingStore` covers a gap that has no other cover: a freshly spawned `claude`
 writes no session file until it has started up, and in an unfamiliar directory it
@@ -176,8 +187,12 @@ otherwise `unknown`. See "Where it is fragile", item 14.
 `transcript.rs` turns JSONL into events plus a `Partial<Agent>` patch. Two
 independent tails run over the same file: `FleetEnricher` every
 `TICK_MS = 5000` (`enrich.ts:14`) so cards for agents you are *not* looking at
-still move, and one per focused tab every `TIMELINE_MS = 1000` (`routes.ts:43`)
-for the conversation. They hold separate byte offsets; this is deliberate, and
+still move, and one per focused tab for the conversation — on each write to the
+transcript, at most one read per `WRITE_GAP` = 150ms, and every
+`TIMELINE_MS = 1000` (`routes.rs`) regardless, for the pane's prompt that
+nothing on disk announces. The watch follows the tail to a new file when the
+session moves to one, and one that cannot be set up is retried every
+`WATCH_RETRY` = 30s rather than every tick. They hold separate byte offsets; this is deliberate, and
 `mock.rs` documents the bug that appears when a single drain-on-read queue is
 shared between them.
 
@@ -202,8 +217,11 @@ read, because most agents never delegate and the common case should cost one
 syscall.
 
 `procs.rs` is the enricher's other source, and the only one that is not a file
-Claude Code wrote. One `ps` over the machine per pass, when anything is busy,
-names the tool process each busy agent is inside — the newest non-shell child of
+Claude Code wrote. One read of the process table per pass, when anything is
+busy — on macOS a single `sysctl(KERN_PROC_ALL)` snapshot off the async
+threads, with arguments read only for the processes under the busy agents'
+pids; elsewhere one `ps` over the machine — names the tool process each busy
+agent is inside — the newest non-shell child of
 its pid — and when it started. That is the whole activity signal a CLI with no
 transcript has, and for a Claude agent it adds the one thing the transcript's
 `Bash: cargo test` cannot say, which is how long. It travels as a command and a
@@ -365,7 +383,7 @@ file, the focused agent's transcript), `AgentSource.onChange` and
 | Fleet-wide transcript enrichment | 5s | `enrich.ts:14` |
 | Process table of the busy agents' trees, in the same pass, while any is busy | 5s | `enrich.rs`, `procs.rs` |
 | Earlier output above the pane | on request, one page per press | `routes.rs` `on_history` |
-| Focused-agent transcript tail: on each write, plus a 1s tick for the pane's prompt | 1s | `routes.rs` `TIMELINE_MS` |
+| Focused-agent transcript tail: on each write (at most every 150ms), plus a 1s tick for the pane's prompt | 1s | `routes.rs` `TIMELINE_MS`, `WRITE_GAP` |
 | Quota file `stat` | 2s | `limits.ts:37` |
 | Pane capture (focused + attached only) | 140ms → 1s | `pane-hub.ts:40`, `:42` |
 | …while an echo is expected, after a write | 25ms for ≤1s | `pane-hub.ts:76`, `:58` |

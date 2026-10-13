@@ -49,7 +49,8 @@ use crate::types::RunningProcess;
 pub struct Proc {
     pub pid: i64,
     pub ppid: i64,
-    /// Epoch milliseconds, to the second — `etime` has no finer resolution.
+    /// Epoch milliseconds: to the second from `ps`, whose `etime` has no finer
+    /// resolution, and to the millisecond from the kernel reader.
     pub started_at: i64,
     pub argv: Vec<String>,
 }
@@ -149,7 +150,7 @@ pub fn parse_table(text: &str, now: i64) -> ProcTable {
 /// The cheapest reader this platform has.
 #[cfg(target_os = "macos")]
 pub fn machine_reader() -> Arc<dyn ProcApi> {
-    Arc::new(KernelProcs)
+    Arc::new(KernelProcs::default())
 }
 
 /// The cheapest reader this platform has.
@@ -162,19 +163,34 @@ pub fn machine_reader() -> Arc<dyn ProcApi> {
 ///
 /// `ps` costs ~40ms of CPU a read, measured, and nearly all of it goes on
 /// fetching the arguments of every process on the machine — ~850 here — to
-/// answer a question about the handful under the busy agents. This asks the
-/// kernel for every process's parent, which costs about a millisecond for the
-/// lot, walks down from the roots, and reads start times and arguments only
-/// for what it finds there. The start is the kernel's own rather than `etime`
-/// counted back from now, so it does not drift a second between passes.
+/// answer a question about the handful under the busy agents. This takes one
+/// snapshot of every process's record from the kernel, walks down from the
+/// roots, and reads arguments only for what it finds there. The start is the
+/// kernel's own rather than `etime` counted back from now, so it does not
+/// drift a second between passes.
 #[cfg(target_os = "macos")]
-pub struct KernelProcs;
+#[derive(Default)]
+pub struct KernelProcs {
+    /// The argument buffer, kept between passes: it is `kern.argmax` long,
+    /// and allocating and zeroing a megabyte a pass was most of what a pass
+    /// cost beyond the syscalls themselves.
+    arguments: Arc<std::sync::Mutex<Vec<u8>>>,
+}
 
 #[cfg(target_os = "macos")]
 #[async_trait]
 impl ProcApi for KernelProcs {
     async fn table(&self, _now: i64, roots: &[i64]) -> Option<ProcTable> {
-        kernel::table(roots)
+        let roots = roots.to_vec();
+        let arguments = Arc::clone(&self.arguments);
+        // A snapshot of the machine and a syscall per process found: blocking
+        // work, kept off the threads the WebSocket frames and timers run on.
+        tokio::task::spawn_blocking(move || {
+            let mut buffer = arguments.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            kernel::table(&roots, &mut buffer)
+        })
+        .await
+        .ok()?
     }
 }
 
@@ -186,50 +202,63 @@ mod kernel {
     use std::mem::size_of;
     use std::ops::Range;
 
-    /// `struct kinfo_proc` on 64-bit macOS. It opens with `p_starttime`, a
-    /// `timeval`: seconds, then microseconds.
+    /// `struct kinfo_proc` on 64-bit macOS: `extern_proc` (296 bytes), then
+    /// `eproc`. The offsets below were read off a live record against
+    /// `getpid`/`getppid`, and the kernel-reader test holds them.
     const KINFO_PROC_BYTES: usize = 648;
+    /// `p_starttime`, a `timeval`: seconds, then microseconds.
     const START_SECONDS: Range<usize> = 0..8;
     const START_MICROS: Range<usize> = 8..12;
+    const PID: Range<usize> = 40..44;
+    /// `p_comm`: `MAXCOMLEN + 1` bytes, NUL-terminated.
+    const COMM: Range<usize> = 243..260;
+    /// `kp_eproc.e_ppid`.
+    const PPID: Range<usize> = 560..564;
     const MICROS_PER_MS: i64 = 1_000;
-    /// Room for processes started between counting the pids and listing them.
-    const PIDS_HEADROOM: usize = 64;
+    /// Room for processes started between sizing the snapshot and taking it.
+    const RECORDS_HEADROOM: usize = 64;
+    /// How often a snapshot that outgrew its headroom is retried.
+    const SNAPSHOT_ATTEMPTS: usize = 3;
 
-    /// What the short BSD record says about one process.
-    struct Entry {
-        ppid: i32,
-        /// The kernel's name for it, for when its arguments cannot be read.
-        comm: String,
-    }
-
-    pub(super) fn table(roots: &[i64]) -> Option<ProcTable> {
-        let entries = every_entry()?;
+    pub(super) fn table(roots: &[i64], arguments: &mut Vec<u8>) -> Option<ProcTable> {
+        let snapshot = every_record()?;
+        let (records, _) = snapshot.as_chunks::<KINFO_PROC_BYTES>();
         let mut children: HashMap<i32, Vec<i32>> = HashMap::new();
-        for (pid, entry) in &entries {
-            children.entry(entry.ppid).or_default().push(*pid);
+        let mut by_pid: HashMap<i32, &[u8]> = HashMap::with_capacity(records.len());
+        for record in records.iter().map(<[u8; KINFO_PROC_BYTES]>::as_slice) {
+            let (Some(pid), Some(ppid)) = (field_i32(record, PID), field_i32(record, PPID)) else {
+                continue;
+            };
+            children.entry(ppid).or_default().push(pid);
+            by_pid.insert(pid, record);
         }
-        let mut args = ArgsArea::new()?;
-        let rows = under(roots, &children)
+        size_for_arguments(arguments)?;
+        let rows: Vec<Proc> = under(roots, &children)
             .into_iter()
             .filter_map(|pid| {
-                let entry = entries.get(&pid)?;
+                let record = by_pid.get(&pid)?;
                 Some(Proc {
                     pid: pid.into(),
-                    ppid: entry.ppid.into(),
-                    started_at: started_at(pid)?,
-                    argv: args.argv(pid).unwrap_or_else(|| vec![entry.comm.clone()]),
+                    ppid: field_i32(record, PPID)?.into(),
+                    started_at: started_at(record)?,
+                    argv: argv(pid, arguments).unwrap_or_else(|| vec![comm(record)]),
                 })
             })
-            .collect::<Vec<Proc>>();
+            .collect();
         Some(ProcTable::from_rows(rows))
     }
 
-    /// The roots and everything below them, each once.
-    fn under(roots: &[i64], children: &HashMap<i32, Vec<i32>>) -> Vec<i32> {
+    /// The roots and everything below them, each once. A root that is not a
+    /// real process — a placeholder's pid 0 — is no root at all: a walk from
+    /// there reaches launchd, and with it every process on the machine.
+    pub(super) fn under(roots: &[i64], children: &HashMap<i32, Vec<i32>>) -> Vec<i32> {
         let mut seen = HashSet::new();
         let mut found = Vec::new();
-        let mut frontier: Vec<i32> =
-            roots.iter().filter_map(|root| i32::try_from(*root).ok()).collect();
+        let mut frontier: Vec<i32> = roots
+            .iter()
+            .filter_map(|root| i32::try_from(*root).ok())
+            .filter(|root| *root > 0)
+            .collect();
         while let Some(pid) = frontier.pop() {
             if seen.insert(pid) {
                 found.push(pid);
@@ -239,76 +268,76 @@ mod kernel {
         found
     }
 
-    /// Every process's parent and name. The short record is the one the
-    /// kernel hands out for any process, root's included; the full one only
-    /// for our own.
-    fn every_entry() -> Option<HashMap<i32, Entry>> {
-        // SAFETY: a null buffer asks for the count alone.
-        let counted = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
-        let capacity = usize::try_from(counted).ok()? + PIDS_HEADROOM;
-        let mut pids: Vec<c_int> = vec![0; capacity];
-        let bytes = c_int::try_from(capacity * size_of::<c_int>()).ok()?;
-        // SAFETY: the kernel writes at most `bytes` bytes, and the buffer was
-        // sized to hold that many.
-        let listed = unsafe { libc::proc_listallpids(pids.as_mut_ptr().cast(), bytes) };
-        pids.truncate(usize::try_from(listed).ok()?);
-        Some(pids.into_iter().filter_map(|pid| Some((pid, short_entry(pid)?))).collect())
+    /// Every process's `kinfo_proc`, in one call.
+    fn every_record() -> Option<Vec<u8>> {
+        let mut name = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL, 0];
+        for _ in 0..SNAPSHOT_ATTEMPTS {
+            let needed = sysctl_size(&mut name)?;
+            let mut snapshot = vec![0u8; needed + RECORDS_HEADROOM * KINFO_PROC_BYTES];
+            if let Some(written) = sysctl(&mut name, &mut snapshot) {
+                snapshot.truncate(written);
+                return Some(snapshot);
+            }
+        }
+        None
     }
 
-    fn short_entry(pid: c_int) -> Option<Entry> {
-        // SAFETY: an all-zero record is a valid value of a plain C struct.
-        let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
-        let size = c_int::try_from(size_of::<libc::proc_bsdshortinfo>()).ok()?;
-        // SAFETY: the buffer is a record of exactly the size passed.
-        let written = unsafe {
-            libc::proc_pidinfo(pid, libc::PROC_PIDT_SHORTBSDINFO, 0, (&raw mut info).cast(), size)
-        };
-        if written != size {
-            return None;
-        }
-        let name: Vec<u8> = info.pbsi_comm.iter().take_while(|c| **c != 0).map(|c| *c as u8).collect();
-        Some(Entry {
-            ppid: i32::try_from(info.pbsi_ppid).ok()?,
-            comm: String::from_utf8_lossy(&name).into_owned(),
-        })
+    fn field_i32(record: &[u8], span: Range<usize>) -> Option<i32> {
+        Some(i32::from_ne_bytes(record.get(span)?.try_into().ok()?))
     }
 
-    /// Epoch milliseconds the process started at, from its `kinfo_proc`.
-    fn started_at(pid: c_int) -> Option<i64> {
-        let mut record = [0u8; KINFO_PROC_BYTES];
-        let written = sysctl(&mut [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid], &mut record)?;
-        // A pid with no process behind it is answered with nothing at all.
-        if written != KINFO_PROC_BYTES {
-            return None;
-        }
-        let seconds = i64::from_ne_bytes(record[START_SECONDS].try_into().ok()?);
-        let micros = i32::from_ne_bytes(record[START_MICROS].try_into().ok()?);
+    /// Epoch milliseconds the process started at.
+    fn started_at(record: &[u8]) -> Option<i64> {
+        let seconds = i64::from_ne_bytes(record.get(START_SECONDS)?.try_into().ok()?);
+        let micros = field_i32(record, START_MICROS)?;
         Some(seconds * MS_PER_SECOND + i64::from(micros) / MICROS_PER_MS)
     }
 
-    /// One buffer, sized once, for reading argument areas into.
-    ///
-    /// Sized to `kern.argmax` because a smaller one is not refused: the
-    /// kernel copies the *end* of the area into it, which is environment
-    /// rather than arguments.
-    struct ArgsArea {
-        buffer: Vec<u8>,
+    /// The kernel's name for a process, for when its arguments cannot be read.
+    fn comm(record: &[u8]) -> String {
+        let name = &record[COMM];
+        let name = &name[..name.iter().position(|byte| *byte == 0).unwrap_or(name.len())];
+        String::from_utf8_lossy(name).into_owned()
     }
 
-    impl ArgsArea {
-        fn new() -> Option<Self> {
+    /// Grow the argument buffer to `kern.argmax` the first time it is used.
+    ///
+    /// Sized to the maximum because a smaller buffer is not refused: the
+    /// kernel copies the *end* of the area into it, which is environment
+    /// rather than arguments.
+    fn size_for_arguments(arguments: &mut Vec<u8>) -> Option<()> {
+        if arguments.is_empty() {
             let mut max = [0u8; size_of::<c_int>()];
             sysctl(&mut [libc::CTL_KERN, libc::KERN_ARGMAX], &mut max)?;
-            let max = usize::try_from(c_int::from_ne_bytes(max)).ok()?;
-            Some(Self { buffer: vec![0; max] })
+            arguments.resize(usize::try_from(c_int::from_ne_bytes(max)).ok()?, 0);
         }
+        Some(())
+    }
 
-        /// `None` for a process whose arguments are not ours to read — any
-        /// other user's — and the caller falls back to its name.
-        fn argv(&mut self, pid: c_int) -> Option<Vec<String>> {
-            let written = sysctl(&mut [libc::CTL_KERN, libc::KERN_PROCARGS2, pid], &mut self.buffer)?;
-            super::parse_procargs(&self.buffer[..written])
-        }
+    /// `None` for a process whose arguments are not ours to read — any other
+    /// user's — and the caller falls back to its name.
+    fn argv(pid: c_int, arguments: &mut [u8]) -> Option<Vec<String>> {
+        let written = sysctl(&mut [libc::CTL_KERN, libc::KERN_PROCARGS2, pid], arguments)?;
+        super::parse_procargs(&arguments[..written])
+    }
+
+    /// How many bytes a sysctl would write.
+    fn sysctl_size(name: &mut [c_int]) -> Option<usize> {
+        let mut needed = 0;
+        let depth = libc::c_uint::try_from(name.len()).ok()?;
+        // SAFETY: a null buffer asks the kernel for the size alone, which it
+        // writes into `needed`.
+        let status = unsafe {
+            libc::sysctl(
+                name.as_mut_ptr(),
+                depth,
+                std::ptr::null_mut(),
+                &mut needed,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        (status == 0).then_some(needed)
     }
 
     /// Read a sysctl into `buffer`, returning how much of it was written.
@@ -334,6 +363,10 @@ mod kernel {
 /// The words of a `KERN_PROCARGS2` area: `argc`, the executable's path, NUL
 /// padding, then `argc` NUL-terminated arguments, environment after them.
 ///
+/// Exactly `argc` entries are read, empty ones included: `git commit -m ""`
+/// has an empty argument, and skipping it would take the first environment
+/// variable — a token, as often as not — onto a card a phone can see.
+///
 /// Split on whitespace once joined, because that is what a `ps` row is split
 /// on: the same process reads the same on a card whichever reader saw it.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -341,12 +374,15 @@ fn parse_procargs(area: &[u8]) -> Option<Vec<String>> {
     let (argc, rest) = area.split_first_chunk::<{ std::mem::size_of::<i32>() }>()?;
     let argc = usize::try_from(i32::from_ne_bytes(*argc)).ok()?;
     let after_the_path = rest.iter().position(|byte| *byte == 0)?;
-    let args: Vec<String> = rest[after_the_path..]
-        .split(|byte| *byte == 0)
-        .filter(|arg| !arg.is_empty())
-        .take(argc)
-        .map(|arg| String::from_utf8_lossy(arg).into_owned())
-        .collect();
+    let padded = &rest[after_the_path..];
+    let first_argument = padded.iter().position(|byte| *byte != 0)?;
+    let mut args: Vec<String> = Vec::with_capacity(argc);
+    let mut remaining = &padded[first_argument..];
+    while args.len() < argc {
+        let end = remaining.iter().position(|byte| *byte == 0)?;
+        args.push(String::from_utf8_lossy(&remaining[..end]).into_owned());
+        remaining = &remaining[end + 1..];
+    }
     let words: Vec<String> = args.join(" ").split_whitespace().map(str::to_string).collect();
     (!words.is_empty()).then_some(words)
 }
@@ -728,6 +764,29 @@ mod tests {
         assert_eq!(parse_procargs(&area).unwrap(), ["cargo", "test", "--quiet"]);
     }
 
+    /// An empty argument is an argument: skipping it pulled the first
+    /// environment variable into what a card shows.
+    #[test]
+    fn an_empty_argument_never_lets_the_environment_into_argv() {
+        let cases: &[(&[&str], &[&str], &[&str])] = &[
+            (&["git", "commit", "-m", ""], &["ANTHROPIC_API_KEY=sk-secret"], &["git", "commit", "-m"]),
+            (&["sh", "-c", "", "x"], &["TOKEN=abc"], &["sh", "-c", "x"]),
+            (&["ssh", "host", ""], &["ENV0=value"], &["ssh", "host"]),
+        ];
+        for &(args, environment, expected) in cases {
+            let area = args_area("/usr/bin/tool", args, environment);
+            assert_eq!(parse_procargs(&area).unwrap(), expected, "argv {args:?}");
+        }
+    }
+
+    /// An area cut short before `argc` arguments is not read as fewer.
+    #[test]
+    fn an_area_short_of_its_arguments_is_nothing() {
+        let mut area = args_area("/bin/echo", &["echo", "one"], &[]);
+        area.truncate(area.len() - "one".len() - 1);
+        assert!(parse_procargs(&area).is_none());
+    }
+
     /// The same words `ps` would have printed, so a card reads the same
     /// whichever reader saw the process.
     #[test]
@@ -743,12 +802,21 @@ mod tests {
         assert!(parse_procargs(&[]).is_none());
     }
 
+    /// A placeholder's pid 0 is no root: a walk from it would reach launchd
+    /// and read the whole machine.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_pid_that_is_no_process_is_no_root() {
+        let children = HashMap::from([(0, vec![1]), (1, vec![i32::try_from(TOOL_CALL).unwrap()])]);
+        assert!(kernel::under(&[0, -1], &children).is_empty());
+    }
+
     /// The real kernel, against a child this test starts: it is found under
     /// its parent with its own arguments and a start time of about now, and
     /// what is not under the root is left out.
     #[cfg(target_os = "macos")]
     #[tokio::test]
-    async fn the_kernel_reader_finds_a_child_under_its_root_and_nothing_else() {
+    async fn inv4_the_kernel_reader_finds_a_child_under_its_root_and_nothing_else() {
         const SLEEP_SECONDS: &str = "30";
         const CLOCK_SLACK_MS: i64 = 5_000;
         let mut child = std::process::Command::new("sleep").arg(SLEEP_SECONDS).spawn().unwrap();
@@ -759,7 +827,7 @@ mod tests {
             .unwrap()
             .as_millis() as i64;
 
-        let table = KernelProcs.table(now, &[own]).await.unwrap();
+        let table = KernelProcs::default().table(now, &[own]).await.unwrap();
         let _ = child.kill();
         let _ = child.wait();
 
@@ -767,7 +835,8 @@ mod tests {
         assert_eq!(found.ppid, own);
         assert_eq!(found.argv, ["sleep", SLEEP_SECONDS]);
         assert!((found.started_at - now).abs() < CLOCK_SLACK_MS, "started {} vs now {now}", found.started_at);
-        assert!(table.get(own).is_some(), "the root itself is in the table");
+        let root = table.get(own).expect("the root itself is in the table");
+        assert_eq!(root.ppid, i64::from(std::os::unix::process::parent_id()));
         assert!(table.get(INIT).is_none(), "the rest of the machine was read in");
     }
 }

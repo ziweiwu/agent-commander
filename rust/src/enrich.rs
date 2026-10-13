@@ -280,9 +280,10 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// Where each busy agent's walk starts: its own process.
+/// Where each busy agent's walk starts: its own process. A placeholder's pid
+/// 0 is not one — a walk from it reaches init, and the whole machine with it.
 fn busy_roots(agents: &[Agent]) -> Vec<i64> {
-    agents.iter().filter(|a| a.status == AgentStatus::Busy).map(|a| a.pid).collect()
+    agents.iter().filter(|a| a.status == AgentStatus::Busy && a.pid > 0).map(|a| a.pid).collect()
 }
 
 /// Only a busy agent is running anything; an idle one's claim is cleared.
@@ -296,8 +297,10 @@ fn next_running(agent: &Agent, table: Option<&ProcTable>) -> Option<RunningProce
 /// The same process, so nothing to re-send.
 ///
 /// `since` is deliberately not compared: `ps` reports elapsed time to the
-/// second, so a start time recomputed each pass drifts by up to a second and
-/// would re-broadcast the fleet every tick for a process that has not changed.
+/// second, so where it is the reader a start time recomputed each pass drifts
+/// by up to a second and would re-broadcast the fleet every tick for a process
+/// that has not changed. The kernel reader's start does not drift, but the
+/// card must read the same whichever reader saw it.
 /// The pid says whether it is the same process; the first reading's `since`
 /// stands for as long as it is.
 fn same_process(current: &Option<RunningProcess>, next: &Option<RunningProcess>) -> bool {
@@ -880,8 +883,9 @@ mod tests {
         }
     }
 
-    /// How far apart the fake puts two passes. Real `ps` reports elapsed time
-    /// to the second, so a start time recomputed a pass later *drifts* — and a
+    /// How far apart the fake puts two passes. `ps`, the reader off macOS,
+    /// reports elapsed time to the second, so a start time recomputed a pass
+    /// later *drifts* — and a
     /// fake that answers every pass against the same instant makes the drift
     /// impossible, which is what a test for `since` stability must see.
     /// Without this, reverting `same_process` to compare `since` passed 19 runs
@@ -974,8 +978,9 @@ mod tests {
         assert_eq!(procs.reads(), 0);
     }
 
-    /// INV-4: the same process a pass later is not news. `ps` reports elapsed
-    /// time to the second, so a start time recomputed each pass drifts; the
+    /// INV-4: the same process a pass later is not news. `ps`, the reader off
+    /// macOS, reports elapsed time to the second, so a start time recomputed
+    /// each pass drifts; the
     /// pid is what says it is the same process, and the first `since` stands.
     #[tokio::test]
     async fn inv4_the_same_process_is_not_rebroadcast() {

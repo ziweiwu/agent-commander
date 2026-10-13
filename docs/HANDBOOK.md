@@ -614,8 +614,8 @@ memory rather than a reading (INV-11).
 
 | Source | Used for |
 |---|---|
-| `~/.claude/sessions/<pid>.json` | Session list, status, cwd, and the tmux pane id. Read every 2s. |
-| `claude agents --json` | Authoritative presence check. Costs ~680ms, so it runs every 30s to reconcile. |
+| `~/.claude/sessions/<pid>.json` | Session list, status, cwd, and the tmux pane id. Read when a file is written, plus every 30s; every 2s only checks that each listed process is still the one that started. |
+| `claude agents --json` | Authoritative presence check. Costs ~680ms, so it runs only while a session's own file cannot settle whether it is live — every 30s until the CLI answers — and otherwise every 5 minutes. |
 | `~/.claude/projects/*/<sessionId>.jsonl` | The timeline, tailed incrementally by byte offset. |
 | `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the fleet list is mounted. |
 | `tmux capture-pane` / `send-keys` | The Attach tab, and delivering your input. |
