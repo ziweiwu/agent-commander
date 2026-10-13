@@ -2276,9 +2276,14 @@ async fn tail_once_it_exists(
 /// Read this viewer's conversation to it until the tab looks somewhere else.
 ///
 /// The TS arms a `setInterval` and guards it with a `tailBusy` flag, because a
-/// read can outlast the interval. A task that sleeps *after* each read cannot
+/// read can outlast the interval. A task that waits *after* each read cannot
 /// overlap with itself at all, so the flag has nothing left to guard; the cost
 /// is that the period is measured from the end of a read rather than its start.
+///
+/// The wait ends early when the transcript is written. The tick alone put a
+/// turn on screen up to a second after the agent wrote it — on the one view
+/// whose whole job is to be watched as it happens — while the cost of knowing
+/// sooner is one filesystem watch per open conversation.
 fn spawn_timeline_pump(
     viewer: &Arc<Viewer>,
     app: &Arc<App>,
@@ -2289,11 +2294,66 @@ fn spawn_timeline_pump(
     tokio::spawn(async move {
         let Conversation { agent, session_id, ready } = conversation;
         let mut tail = tail_once_it_exists(&app, &agent, ready).await;
+        let mut writes: Option<FileWrites> = None;
         loop {
             pump_timeline(&mut tail, &viewer, &app, &session_id).await;
-            tokio::time::sleep(Duration::from_millis(TIMELINE_MS)).await;
+            // The path is known only after the first read has found the file.
+            if writes.is_none() {
+                writes = tail.path().and_then(|path| FileWrites::watch(&path));
+            }
+            until_written_or_a_tick(&mut writes).await;
         }
     })
+}
+
+/// Writes to one file, reported for as long as this is held.
+struct FileWrites {
+    /// Held for its `Drop`: the watch ends with it.
+    _watcher: notify::RecommendedWatcher,
+    arrivals: mpsc::UnboundedReceiver<()>,
+}
+
+impl FileWrites {
+    /// `None` where the platform or the filesystem cannot watch, which leaves
+    /// the tick to do the work alone, as it always did.
+    fn watch(path: &Path) -> Option<Self> {
+        use notify::Watcher;
+        let (events, arrivals) = mpsc::unbounded_channel();
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                if event.is_ok() {
+                    let _ = events.send(());
+                }
+            })
+            .ok()?;
+        watcher.watch(path, notify::RecursiveMode::NonRecursive).ok()?;
+        Some(Self { _watcher: watcher, arrivals })
+    }
+}
+
+/// Wait for the next write or the next tick, whichever comes first.
+///
+/// The tick stays even with a watch: a watch can miss a write, and the pane
+/// can move a question on with nothing written to disk at all.
+///
+/// A watch whose events have stopped for good is dropped, so a closed channel
+/// cannot turn this into a loop that reads as fast as it can.
+async fn until_written_or_a_tick(writes: &mut Option<FileWrites>) {
+    let tick = tokio::time::sleep(Duration::from_millis(TIMELINE_MS));
+    tokio::pin!(tick);
+    let Some(watch) = writes.as_mut() else { return tick.await };
+    let ended = tokio::select! {
+        arrived = watch.arrivals.recv() => {
+            // One append can arrive as several events; they all want one read.
+            while watch.arrivals.try_recv().is_ok() {}
+            arrived.is_none()
+        }
+        _ = &mut tick => false,
+    };
+    if ended {
+        *writes = None;
+        tick.await;
+    }
 }
 
 /// The conversation a viewer has just focused, and the reader for it if one
@@ -3255,7 +3315,7 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     let procs: Option<Arc<dyn crate::procs::ProcApi>> = if opts.mock {
         None
     } else {
-        Some(Arc::new(crate::procs::PsReader::new(Arc::new(crate::env::ExecRunner))))
+        Some(crate::procs::machine_reader())
     };
     let enricher =
         crate::enrich::FleetEnricher::new(deps.source.clone(), deps.tail_for.clone(), procs);
@@ -3933,6 +3993,74 @@ mod tests {
             let _ = run(app, listener).await;
         });
         port
+    }
+
+    /// A tail over a real file: one event per line written since the last
+    /// read, and the file's path, so the pump can watch it.
+    struct FileTail {
+        path: PathBuf,
+        read_lines: usize,
+        reads: usize,
+    }
+
+    #[async_trait]
+    impl TailApi for FileTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            self.reads += 1;
+            let text = std::fs::read_to_string(&self.path)?;
+            let lines: Vec<&str> = text.lines().collect();
+            let events = lines[self.read_lines..]
+                .iter()
+                .map(|line| TimelineEvent {
+                    id: (*line).to_string(),
+                    at: 0,
+                    kind: TimelineKind::User,
+                    text: (*line).to_string(),
+                    tool: None,
+                    sidechain: None,
+                    notice: None,
+                    tokens_before: None,
+                    tokens_after: None,
+                })
+                .collect();
+            self.read_lines = lines.len();
+            Ok(TailRead { events, first: self.reads == 1, ..Default::default() })
+        }
+
+        fn path(&self) -> Option<PathBuf> {
+            Some(self.path.clone())
+        }
+    }
+
+    /// A turn the agent writes reaches the open conversation on the write,
+    /// not on the next tick: the tick alone put it there up to a second late.
+    #[tokio::test]
+    async fn a_written_turn_reaches_the_focused_tab_before_the_tick() {
+        // Long enough for the watch to be registered before the write, which
+        // macOS otherwise drops; well short of the tick it must beat.
+        const WATCH_SETTLES: Duration = Duration::from_millis(150);
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("fresh.jsonl");
+        std::fs::write(&transcript, "first\n").unwrap();
+        let parts = harness_parts(FakePanes::new());
+        add_agent(&parts.source, "fresh", crate::agent_kinds::CLAUDE_KIND);
+        let path = transcript.clone();
+        let tails = Arc::new(move |_agent: &Agent| {
+            Some(Box::new(FileTail { path: path.clone(), read_lines: 0, reads: 0 }) as Box<dyn TailApi>)
+        });
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"fresh"})).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "timeline")).await.is_some());
+        tokio::time::sleep(WATCH_SETTLES).await;
+
+        let written = std::time::Instant::now();
+        std::fs::write(&transcript, "first\nsecond\n").unwrap();
+        let has_second = |m: &serde_json::Value| is_type(m, "timeline") && m["events"][0]["text"] == "second";
+        assert!(next_msg(&mut client, has_second).await.is_some(), "the turn never arrived");
+        let took = written.elapsed();
+        assert!(took < Duration::from_millis(TIMELINE_MS / 2), "the turn waited {took:?} for the tick");
     }
 
     /// A freshly started agent has no transcript until its first prompt is

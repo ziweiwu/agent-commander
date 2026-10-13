@@ -3,14 +3,26 @@
 //! Port of `src/server/registry.ts`.
 //!
 //! Two sources, deliberately:
-//!   - `~/.claude/sessions/<pid>.json` is the fast path. It is read on a short
-//!     tick because it is a local file read (sub-millisecond) and it carries the
-//!     `tmux` pane id, which the supported CLI does not expose.
+//!   - `~/.claude/sessions/<pid>.json` is the fast path. A write to it is
+//!     pushed by a directory watch; the short tick checks what no write
+//!     announces — a process that died or a pid handed on — and re-reads the
+//!     directory only when that, a waiting spawn or the watch's youth says to.
+//!     It carries the `tmux` pane id, which the supported CLI does not expose.
 //!   - `claude agents --json` is authoritative for *presence*, but costs ~680ms
-//!     per call, so it only runs as a periodic reconcile (INV-4). Collapsing the
-//!     two into one poll is the mistake this comment exists to prevent: the
-//!     fleet list would then refresh at best twice a second on a good machine
-//!     and would serialise behind a subprocess on a loaded one.
+//!     per call, so it is never on the fast path (INV-4). Collapsing the two
+//!     into one poll is the mistake this comment exists to prevent: the fleet
+//!     list would then refresh at best twice a second on a good machine and
+//!     would serialise behind a subprocess on a loaded one.
+//!
+//! The CLI is asked when there is a question for it — an id it has not
+//! vouched for, or a pid it vouched for that a different process now holds —
+//! and otherwise only as a slow backstop. See `process_start`.
+//!
+//! Most new sessions never become a question at all. Claude Code writes the
+//! start of its own process into the file as `procStart`, and a file naming
+//! the process that holds its pid now is the answer the CLI would give; one
+//! naming another process is a ghost until the CLI says otherwise, and is
+//! held back from the first fleet onwards. See `Evidence`.
 //!
 //! INV-5: the session file is an internal format. If it disappears or changes
 //! shape, agents still list — they just lose the attach capability.
@@ -26,16 +38,49 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
-/// The cheap tick: a directory listing plus a few hundred bytes per session.
+/// The cheap tick: a liveness check per session, and the directory read when
+/// that check or `must_read` asks for it.
 const TICK: Duration = Duration::from_secs(2);
+
+/// The longest the tick goes without reading the directory while the watch
+/// is armed and every process is still the one it was.
+///
+/// The read was every tick, and it was most of what an idle server spent: a
+/// millisecond of CPU per pass, measured, for a directory whose every change
+/// the watch already reports. What a write cannot announce — a process dying
+/// without removing its file, or the kernel handing its pid on — the tick
+/// still checks every period, in two syscalls a session. This is the backstop
+/// for a watch that lost an event anyway.
+const REREAD: Duration = Duration::from_secs(30);
+
+/// How long after the watch is armed every tick still reads.
+///
+/// macOS drops change events for writes landing within a few ms of a watch
+/// being registered (see `limits.rs`), and the server starting is exactly
+/// when live sessions write.
+const SETTLING: Duration = Duration::from_secs(10);
 
 /// The expensive one. `claude agents --json` costs ~680ms, measured, so it runs
 /// here and nowhere near the fast path.
+///
+/// This is the cadence while a question is open — an id on disk the CLI has
+/// not vouched for, or a last call that failed — and the whole cadence on a
+/// platform where `process_start` cannot tell one process from another.
 const RECONCILE: Duration = Duration::from_secs(30);
+
+/// How often the CLI is asked when nothing is open.
+///
+/// Its periodic answer used to be the only thing that noticed a session file
+/// outliving its process on a pid something else now holds. `process_start`
+/// notices that on the cheap tick instead, so what is left for the poll is
+/// what no local evidence can show: the CLI ceasing to list a process that is
+/// still the one it vouched for. Two calls a minute — over a minute of CPU an
+/// hour — was the price of a check that now runs in a syscall.
+const BACKSTOP: Duration = Duration::from_secs(300);
 
 /// `claude agents --json` gets this long before it is written off, matching the
 /// `execFile` timeout in `registry.ts`.
@@ -166,6 +211,161 @@ fn is_alive(pid: i64) -> bool {
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
+/// When the process holding `pid` started, in microseconds since the Unix
+/// epoch: equal for the same process and different for a pid the kernel has
+/// since handed to another. `None` when there is no such process or this
+/// platform cannot say.
+///
+/// This is what tells a reused pid apart without asking the CLI: `is_alive`
+/// answers "is something there", and a session file outliving its process is
+/// precisely the case where something is — just not the agent.
+#[cfg(target_os = "macos")]
+pub fn process_start(pid: i64) -> Option<u64> {
+    let pid = libc::c_int::try_from(pid).ok().filter(|pid| *pid > 0)?;
+    // SAFETY: an all-zero `proc_bsdinfo` is a valid value of a plain C struct.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdinfo>()).ok()?;
+    // SAFETY: the buffer is a `proc_bsdinfo` of exactly the size passed, and
+    // the kernel writes at most that many bytes into it.
+    let written = unsafe {
+        libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size)
+    };
+    (written == size).then(|| info.pbi_start_tvsec * MICROS_PER_SECOND + info.pbi_start_tvusec)
+}
+
+/// Linux: field 22 of `/proc/<pid>/stat`, in clock ticks since boot, put on
+/// the epoch by the boot time.
+///
+/// The boot time is read once. `btime` is recomputed from the wall clock on
+/// every read, so a stepped clock would otherwise move the start of a process
+/// that has not changed.
+#[cfg(target_os = "linux")]
+pub fn process_start(pid: i64) -> Option<u64> {
+    // Counted from the field after the command name, which is parenthesised
+    // and may itself hold spaces or parentheses — hence the last `)`.
+    const START_TIME_AFTER_THE_NAME: usize = 19;
+    static BOOTED: std::sync::OnceLock<Option<u64>> = std::sync::OnceLock::new();
+    let booted = (*BOOTED.get_or_init(|| {
+        let stat = std::fs::read_to_string("/proc/stat").ok()?;
+        stat.lines().find_map(|line| line.strip_prefix("btime "))?.trim().parse::<u64>().ok()
+    }))?;
+    // SAFETY: `sysconf` reads a system constant and has no preconditions.
+    let ticks_per_second = u64::try_from(unsafe { libc::sysconf(libc::_SC_CLK_TCK) }).ok()?;
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_the_name = &stat[stat.rfind(')')? + 1..];
+    let ticks: u64 =
+        after_the_name.split_whitespace().nth(START_TIME_AFTER_THE_NAME)?.parse().ok()?;
+    (ticks_per_second > 0)
+        .then(|| booted * MICROS_PER_SECOND + ticks * MICROS_PER_SECOND / ticks_per_second)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn process_start(_pid: i64) -> Option<u64> {
+    None
+}
+
+/// What a session file's own `procStart` says about the process holding its
+/// pid now.
+///
+/// Claude Code writes `ps -o lstart` of its own process into the file, which
+/// is what the CLI's presence answer turns on: a file naming the process that
+/// holds its pid is a live session, and one naming another is a file that
+/// outlived its process on a pid the kernel has handed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Evidence {
+    /// The file names the process holding its pid: listed without asking.
+    Same,
+    /// The file names some other process: held back until the CLI vouches.
+    Another,
+    /// No `procStart`, one this cannot read, or a pid whose start the kernel
+    /// would not give: the CLI decides, as it always has.
+    Silent,
+}
+
+/// Microseconds in a second, for the kernel's process starts.
+const MICROS_PER_SECOND: u64 = 1_000_000;
+
+/// How far apart, in seconds, a written start and the kernel's may be and
+/// still name one process. `lstart` drops the fraction, and a pid cannot be
+/// handed on twice inside a second.
+const SAME_START_SLACK: i64 = 1;
+
+/// Weigh a file's `procStart` against the kernel's start for its pid.
+fn evidence(claim: Option<&str>, start: Option<u64>) -> Evidence {
+    let (Some(claimed), Some(start)) = (claim.and_then(claimed_start), start) else {
+        return Evidence::Silent;
+    };
+    let Ok(started) = i64::try_from(start / MICROS_PER_SECOND) else { return Evidence::Silent };
+    if names_this_start(claimed, started, local_offset(started)) {
+        Evidence::Same
+    } else {
+        Evidence::Another
+    }
+}
+
+/// Whether a wall-clock `claimed` start, read as if it were UTC, is the
+/// process that `started` (seconds since the epoch).
+///
+/// `lstart` carries no zone. The builds seen here write UTC, and `ps` left to
+/// itself writes local time, so either reading of the same second is the same
+/// process.
+fn names_this_start(claimed: i64, started: i64, local_offset: Option<i64>) -> bool {
+    let near = |expected: i64| (claimed - expected).abs() <= SAME_START_SLACK;
+    near(started) || local_offset.is_some_and(|offset| near(started + offset))
+}
+
+/// The local zone's offset from UTC at `epoch_seconds`, in seconds east.
+fn local_offset(epoch_seconds: i64) -> Option<i64> {
+    let at = libc::time_t::try_from(epoch_seconds).ok()?;
+    // SAFETY: an all-zero `tm` is a valid value of a plain C struct.
+    let mut local: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: both pointers are to live values of the types `localtime_r`
+    // takes, and it writes nothing beyond the `tm` it is given.
+    let filled = unsafe { libc::localtime_r(&raw const at, &raw mut local) };
+    // `c_long`, which is `i64` only where a long is 64 bits.
+    (!filled.is_null()).then_some(local.tm_gmtoff as i64)
+}
+
+/// `ps -o lstart` — `Mon Oct 12 01:43:15 2026` — as seconds since the epoch,
+/// reading the wall clock as UTC. `None` for anything else, including a
+/// month name in another language.
+fn claimed_start(lstart: &str) -> Option<i64> {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const SECONDS_PER_DAY: i64 = 86_400;
+    const SECONDS_PER_HOUR: i64 = 3_600;
+    const SECONDS_PER_MINUTE: i64 = 60;
+    let [_weekday, month, day, clock, year] =
+        <[&str; 5]>::try_from(lstart.split_whitespace().collect::<Vec<_>>()).ok()?;
+    let month = MONTHS.iter().position(|name| *name == month)? + 1;
+    let day: u32 = day.parse().ok()?;
+    let year: i64 = year.parse().ok()?;
+    let [hours, minutes, seconds] = <[i64; 3]>::try_from(
+        clock.split(':').map(str::parse).collect::<Result<Vec<i64>, _>>().ok()?,
+    )
+    .ok()?;
+    let days = days_since_the_epoch(year, u32::try_from(month).ok()?, day)?;
+    Some(days * SECONDS_PER_DAY + hours * SECONDS_PER_HOUR + minutes * SECONDS_PER_MINUTE + seconds)
+}
+
+/// Days from 1970-01-01 to a proleptic Gregorian date — Howard Hinnant's
+/// `days_from_civil`. `None` for a month or day no calendar has.
+fn days_since_the_epoch(year: i64, month: u32, day: u32) -> Option<i64> {
+    const DAYS_IN_AN_ERA: i64 = 146_097;
+    const YEARS_IN_AN_ERA: i64 = 400;
+    const DAYS_BEFORE_THE_EPOCH: i64 = 719_468;
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(YEARS_IN_AN_ERA);
+    let year_of_era = year - era * YEARS_IN_AN_ERA;
+    let shifted_month = i64::from((month + 9) % 12);
+    let day_of_year = (153 * shifted_month + 2) / 5 + i64::from(day) - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    Some(era * DAYS_IN_AN_ERA + day_of_era - DAYS_BEFORE_THE_EPOCH)
+}
+
 /// Read a string field, treating an empty one as absent.
 ///
 /// That matches the `||` fallbacks in the TS. A session file with `"name": ""`
@@ -242,6 +442,12 @@ fn why_it_cannot_be_attached(file: &serde_json::Value) -> &'static str {
 
 /// Read every session record, keeping only those whose process is still alive.
 pub async fn read_session_files(dir: &Path) -> Vec<Agent> {
+    read_session_records(dir).await.into_iter().map(|(agent, _)| agent).collect()
+}
+
+/// `read_session_files`, with the `procStart` each record wrote about its own
+/// process beside it.
+async fn read_session_records(dir: &Path) -> Vec<(Agent, Option<String>)> {
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
         // No directory at all is the ordinary state on a machine that has never
         // run Claude Code. Empty fleet, no error.
@@ -260,7 +466,7 @@ pub async fn read_session_files(dir: &Path) -> Vec<Agent> {
         let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) else { continue };
         if let Some(agent) = to_agent(&parsed) {
             if is_alive(agent.pid) {
-                agents.push(agent);
+                agents.push((agent, non_empty_field(&parsed, "procStart").map(str::to_string)));
             }
         }
     }
@@ -376,6 +582,13 @@ fn changed(before: &HashMap<String, Agent>, after: &HashMap<String, Agent>) -> b
 #[async_trait]
 pub trait PendingMerge: Send + Sync + 'static {
     async fn merge(&self, real: Vec<Agent>) -> Vec<Agent>;
+
+    /// Whether any spawn is still waiting to register. A waiting one is
+    /// shown, and dropped, only by a read — so while there is one, every tick
+    /// reads. Unknown counts as waiting.
+    fn waiting(&self) -> bool {
+        true
+    }
 }
 
 /// The real store satisfies the seam directly.
@@ -388,6 +601,10 @@ pub trait PendingMerge: Send + Sync + 'static {
 impl PendingMerge for crate::pending::PendingStore {
     async fn merge(&self, real: Vec<Agent>) -> Vec<Agent> {
         crate::pending::PendingStore::merge(self, real).await
+    }
+
+    fn waiting(&self) -> bool {
+        self.size() > 0
     }
 }
 
@@ -404,9 +621,21 @@ struct Inner {
     agents: Mutex<HashMap<String, Agent>>,
     /// Session ids the CLI last confirmed, or `None` if it has never answered.
     known: Mutex<Option<HashSet<String>>>,
-    /// Re-entrancy guard. A refresh triggered by the filesystem watch while a
-    /// tick is mid-flight is dropped, not queued.
+    /// Re-entrancy guard. A refresh asked for while one is mid-flight does not
+    /// start a second: it sets `wanted`, and the one in flight reads again
+    /// once it is done.
     refreshing: AtomicBool,
+    /// A refresh was asked for while one was in flight. Not dropped: that pass
+    /// may have read the directory before the change landed, and with the tick
+    /// no longer re-reading every period nothing else would read it for
+    /// `REREAD`.
+    wanted: AtomicBool,
+    /// How long the tick may skip the directory read; `None` reads every tick.
+    reread: Option<Duration>,
+    /// When the directory watch was armed; `None` while there is none.
+    armed_at: Mutex<Option<Instant>>,
+    /// When the directory was last read.
+    read_at: Mutex<Option<Instant>>,
     /// The same guard for the expensive pass. `registry.ts` leaves this one
     /// implicit — only `#refreshing` exists there, and a 30s interval against a
     /// ~680ms call never collides in practice. "Never in practice" is not the
@@ -424,9 +653,33 @@ struct Inner {
     /// So an unrecognised id triggers a reconcile now. This set is what keeps
     /// that from becoming a 2s `claude agents --json` loop: a ghost is asked
     /// about once, not once per scan. An id leaves the set when the CLI
-    /// confirms it or when its session file goes away, so a pid genuinely
+    /// confirms it, when it declines one whose file names another process (see
+    /// `declined`), or when its session file goes away, so a pid genuinely
     /// reused later is asked about again.
     asked: Mutex<HashSet<String>>,
+    /// When the process behind each session id started, as `process_start`
+    /// read it the first time that id was seen on that pid. A start that has
+    /// moved means the kernel handed the pid to somebody else, and whatever
+    /// the CLI said about the session is no longer about the process there.
+    started: Mutex<HashMap<String, (i64, u64)>>,
+    /// `process_start`, as a seam: a test cannot make the kernel reuse a pid.
+    start_of: Arc<StartReader>,
+    /// Ids on disk whose file names another process than the one holding its
+    /// pid, as of the last pass.
+    contradicted: Mutex<HashSet<String>>,
+    /// Contradicted ids the CLI has since declined to list. Settled rather
+    /// than open: the file cannot start naming the right process, so asking
+    /// again every period would be a poll on a certainty. A new start on the
+    /// pid, or the file going away, reopens it.
+    declined: Mutex<HashSet<String>>,
+    /// When the CLI last answered. `None` before its first answer and after a
+    /// call that failed, both of which leave a question open.
+    answered_at: Mutex<Option<std::time::Instant>>,
+    /// How long the periodic pass may go without asking while no question is
+    /// open. `None` asks every period, which is what a platform without
+    /// `process_start` needs: there the poll is the only thing that notices a
+    /// reused pid.
+    backstop: Option<Duration>,
     /// Set by `stop`, so a refresh already in flight cannot start a subprocess
     /// after the server has been told to shut down.
     stopped: AtomicBool,
@@ -434,6 +687,9 @@ struct Inner {
     tasks: Mutex<Vec<JoinHandle<()>>>,
     watcher: Mutex<Option<notify::RecommendedWatcher>>,
 }
+
+/// Reads a process's start, as `process_start` does.
+type StartReader = dyn Fn(i64) -> Option<u64> + Send + Sync;
 
 /// Resets an in-flight flag however the work exits, standing in for the TS
 /// `finally`.
@@ -453,22 +709,70 @@ impl Inner {
     }
 
     async fn refresh(self: &Arc<Self>) {
-        if self
-            .refreshing
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-            .is_err()
-        {
-            return;
+        loop {
+            if self
+                .refreshing
+                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                .is_err()
+            {
+                self.wanted.store(true, Ordering::SeqCst);
+                return;
+            }
+            {
+                let _guard = InFlightGuard(&self.refreshing);
+                self.wanted.store(false, Ordering::SeqCst);
+                self.read_the_directory().await;
+            }
+            // Checked after the guard is released, so a request that saw the
+            // pass still in flight is either this re-read or its own pass.
+            if !self.wanted.load(Ordering::SeqCst) {
+                return;
+            }
         }
-        let _guard = InFlightGuard(&self.refreshing);
+    }
 
-        let real = read_session_files(&self.dir).await;
+    /// Whether this tick has to read the directory, or can trust that the
+    /// watch would have said so.
+    ///
+    /// It reads while the watch is unarmed or still settling, once `REREAD`
+    /// has passed, while a spawn waits to register, and when a process behind
+    /// a listed session has died or been replaced — the one change no write
+    /// announces.
+    fn must_read(&self) -> bool {
+        let Some(reread) = self.reread else { return true };
+        let settled = self.armed_at.lock().unwrap().is_some_and(|at| at.elapsed() >= SETTLING);
+        let fresh = self.read_at.lock().unwrap().is_some_and(|at| at.elapsed() < reread);
+        let waiting = self.pending.as_ref().is_some_and(|pending| pending.waiting());
+        !(settled && fresh) || waiting || self.a_process_moved()
+    }
+
+    /// A listed session whose process has exited, or whose pid a process with
+    /// another start now holds. Two syscalls a session, against a directory
+    /// read and a parse of every file.
+    fn a_process_moved(&self) -> bool {
+        let agents = self.agents.lock().unwrap();
+        let started = self.started.lock().unwrap();
+        agents.values().filter(|agent| !crate::pending::is_placeholder(agent)).any(|agent| {
+            let was = started.get(&agent.session_id).filter(|(pid, _)| *pid == agent.pid);
+            !is_alive(agent.pid)
+                || was.is_some_and(|(pid, start)| (self.start_of)(*pid) != Some(*start))
+        })
+    }
+
+    async fn read_the_directory(self: &Arc<Self>) {
+        *self.read_at.lock().unwrap() = Some(Instant::now());
+        let records = read_session_records(&self.dir).await;
+        let claims: HashMap<String, String> = records
+            .iter()
+            .filter_map(|(agent, claim)| Some((agent.session_id.clone(), claim.clone()?)))
+            .collect();
+        let real = records.into_iter().map(|(agent, _)| agent).collect();
         let found = match &self.pending {
             Some(pending) => pending.merge(real).await,
             None => real,
         };
 
-        let pass = self.absorb(found);
+        let pass = self.absorb(found, &claims);
         if pass.published {
             let list = self.list();
             self.listeners.emit(&list);
@@ -489,39 +793,77 @@ impl Inner {
     /// the middle would silently discard whatever enrichment landed in the gap.
     /// The TS got this for free from the event loop; here it has to be asked
     /// for.
-    fn absorb(&self, found: Vec<Agent>) -> PassOutcome {
+    fn absorb(&self, found: Vec<Agent>, claims: &HashMap<String, String>) -> PassOutcome {
         let mut agents = self.agents.lock().unwrap();
-        let mut known = self.known.lock().unwrap();
-        let mut asked = self.asked.lock().unwrap();
+        let mut ledger = self.ledger();
+        ledger.contradicted.clear();
         let mut next: HashMap<String, Agent> = HashMap::with_capacity(found.len());
         let on_disk: HashSet<String> =
             found.iter().map(|agent| agent.session_id.clone()).collect();
-        let mut met_an_unrecognised_id = false;
         for agent in found {
-            let unconfirmed = is_unconfirmed(&agent, &known);
-            if unconfirmed && !succeeds_a_confirmed_session(&agent, &agents, &on_disk) {
-                // Not a ghost yet — just unconfirmed. Ask the authority now
-                // rather than at the next 30s reconcile; `asked` is what keeps
-                // that from becoming a loop.
-                met_an_unrecognised_id |= asked.insert(agent.session_id.clone());
-                continue;
+            let start = self.start_of_process(&agent);
+            ledger.forget_a_moved_start(&agent, start);
+            let claim = claims.get(&agent.session_id).map(String::as_str);
+            let listed = match evidence(claim, start) {
+                Evidence::Same => ledger.vouch(&agent),
+                Evidence::Another => ledger.hold_unless_listed(&agent),
+                Evidence::Silent => ledger.admit_on_the_clis_word(&agent, &agents, &on_disk),
+            };
+            if listed {
+                ledger.asked.remove(&agent.session_id);
+                carry_enrichment_forward(&agents, &mut next, agent);
             }
-            if unconfirmed {
-                // `/clear` in flight: vouch for the new id ourselves until the
-                // CLI's next answer replaces this set — see the fn.
-                vouch_for(&mut known, &agent.session_id);
-            }
-            asked.remove(&agent.session_id);
-            carry_enrichment_forward(&agents, &mut next, agent);
         }
-        // A session file that has gone away may come back on a reused pid, and
-        // that one deserves a fresh question.
-        asked.retain(|id| on_disk.contains(id));
+        ledger.forget_what_left(&on_disk);
         let published = changed(&agents, &next);
         if published {
             *agents = next;
         }
-        PassOutcome { published, met_an_unrecognised_id }
+        PassOutcome { published, met_an_unrecognised_id: ledger.met_an_unrecognised_id }
+    }
+
+    /// The presence bookkeeping, locked in the one order every pass takes it.
+    fn ledger(&self) -> Ledger<'_> {
+        Ledger {
+            known: self.known.lock().unwrap(),
+            asked: self.asked.lock().unwrap(),
+            started: self.started.lock().unwrap(),
+            contradicted: self.contradicted.lock().unwrap(),
+            declined: self.declined.lock().unwrap(),
+            met_an_unrecognised_id: false,
+        }
+    }
+
+    /// When the process behind `agent` started. A placeholder has no process
+    /// of its own to vouch for.
+    fn start_of_process(&self, agent: &Agent) -> Option<u64> {
+        if crate::pending::is_placeholder(agent) {
+            return None;
+        }
+        (self.start_of)(agent.pid)
+    }
+
+    /// Close the questions a contradicted file put to the CLI once it has
+    /// declined to list them. Only questions put before this call count: a
+    /// file written while it ran may simply have been too late for it.
+    fn settle(&self, put: &HashSet<String>, listed: &HashSet<String>) {
+        let mut asked = self.asked.lock().unwrap();
+        let contradicted = self.contradicted.lock().unwrap();
+        let mut declined = self.declined.lock().unwrap();
+        for id in put.iter().filter(|id| contradicted.contains(*id) && !listed.contains(*id)) {
+            asked.remove(id);
+            declined.insert(id.clone());
+        }
+    }
+
+    /// Whether the periodic pass has nothing to put to the CLI: no id on disk
+    /// is waiting on its word, its last call answered, and that answer is
+    /// younger than the backstop.
+    fn nothing_to_ask(&self) -> bool {
+        let Some(backstop) = self.backstop else { return false };
+        let answered_at = *self.answered_at.lock().unwrap();
+        self.asked.lock().unwrap().is_empty()
+            && answered_at.is_some_and(|at| at.elapsed() < backstop)
     }
 
     /// Put the question to the authority, without waiting for the answer.
@@ -555,14 +897,99 @@ impl Inner {
         }
         let _guard = InFlightGuard(&self.reconciling);
 
+        let put = self.asked.lock().unwrap().clone();
         let known = read_cli_session_ids(self.runner.as_ref()).await;
+        *self.answered_at.lock().unwrap() = known.as_ref().map(|_| std::time::Instant::now());
         // A CLI that did not answer leaves the previous answer in place rather
         // than dropping the filter — losing the authority must not silently
         // resurrect ghosts, and must not empty the fleet either.
-        if known.is_some() {
-            *self.known.lock().unwrap() = known;
-            self.refresh().await;
+        let Some(listed) = known else { return };
+        self.settle(&put, &listed);
+        *self.known.lock().unwrap() = Some(listed);
+        self.refresh().await;
+    }
+}
+
+/// What one `absorb` pass holds locked while it decides who is listed.
+struct Ledger<'a> {
+    known: MutexGuard<'a, Option<HashSet<String>>>,
+    asked: MutexGuard<'a, HashSet<String>>,
+    started: MutexGuard<'a, HashMap<String, (i64, u64)>>,
+    contradicted: MutexGuard<'a, HashSet<String>>,
+    declined: MutexGuard<'a, HashSet<String>>,
+    /// The pass met a session id nobody has asked the CLI about yet.
+    met_an_unrecognised_id: bool,
+}
+
+impl Ledger<'_> {
+    /// Record when the process behind `agent` started. A start that has moved
+    /// since its id was last seen on the same pid means the kernel handed the
+    /// pid on: the CLI's word was about whoever held it before, so it is taken
+    /// back, and so is any question settled about it.
+    fn forget_a_moved_start(&mut self, agent: &Agent, start: Option<u64>) {
+        let Some(start) = start else { return };
+        let before = self.started.insert(agent.session_id.clone(), (agent.pid, start));
+        if before.is_some_and(|(pid, then)| pid == agent.pid && then != start) {
+            if let Some(confirmed) = self.known.as_mut() {
+                confirmed.remove(&agent.session_id);
+            }
+            self.declined.remove(&agent.session_id);
         }
+    }
+
+    /// The file names the process holding its pid: the answer the CLI would
+    /// give, read from the kernel rather than from a ~680ms subprocess.
+    fn vouch(&mut self, agent: &Agent) -> bool {
+        vouch_for(&mut self.known, &agent.session_id);
+        true
+    }
+
+    /// The file names another process: a ghost until the CLI lists it. Held
+    /// back from the very first fleet, not only once the CLI has first
+    /// answered, and asked about once rather than every period.
+    fn hold_unless_listed(&mut self, agent: &Agent) -> bool {
+        let id = &agent.session_id;
+        if self.known.as_ref().is_some_and(|confirmed| confirmed.contains(id)) {
+            return true;
+        }
+        self.contradicted.insert(id.clone());
+        if !self.declined.contains(id) {
+            self.met_an_unrecognised_id |= self.asked.insert(id.clone());
+        }
+        false
+    }
+
+    /// Nothing to weigh: listed on the CLI's word, as before `procStart` was
+    /// read.
+    fn admit_on_the_clis_word(
+        &mut self,
+        agent: &Agent,
+        current: &HashMap<String, Agent>,
+        on_disk: &HashSet<String>,
+    ) -> bool {
+        if !is_unconfirmed(agent, &self.known) {
+            return true;
+        }
+        if succeeds_a_confirmed_session(agent, current, on_disk) {
+            // `/clear` in flight: vouch for the new id ourselves until the
+            // CLI's next answer replaces this set — see the fn.
+            vouch_for(&mut self.known, &agent.session_id);
+            return true;
+        }
+        // Not a ghost yet — just unconfirmed. Ask the authority now rather
+        // than at the next 30s reconcile; `asked` is what keeps that from
+        // becoming a loop.
+        self.met_an_unrecognised_id |= self.asked.insert(agent.session_id.clone());
+        false
+    }
+
+    /// A session file that has gone away may come back on a reused pid, and
+    /// that one deserves a fresh question.
+    fn forget_what_left(&mut self, on_disk: &HashSet<String>) {
+        self.asked.retain(|id| on_disk.contains(id));
+        self.started.retain(|id, _| on_disk.contains(id));
+        let contradicted = &self.contradicted;
+        self.declined.retain(|id| contradicted.contains(id));
     }
 }
 
@@ -735,19 +1162,34 @@ impl LiveSource {
     }
 
     fn shipped(pending: Option<Arc<dyn PendingMerge>>) -> Arc<dyn AgentSource> {
-        Self::configured(SourceConfig {
+        let config = SourceConfig {
             dir: sessions_dir(),
             runner: exec_runner(),
             pending,
             tick: TICK,
             reconcile_every: RECONCILE,
-        })
+        };
+        // Our own start is readable exactly when every agent's is.
+        let backstop = process_start(i64::from(std::process::id())).map(|_| BACKSTOP);
+        Self::assembled(config, Arc::new(process_start), backstop, Some(REREAD))
     }
 
     /// Fully injected, for tests: a temp directory of session files, a stubbed
     /// command runner, and intervals short enough to observe. Nothing in the
     /// test suite may require a real `claude` binary.
     pub fn configured(config: SourceConfig) -> Arc<LiveSource> {
+        Self::assembled(config, Arc::new(process_start), None, None)
+    }
+
+    /// `configured`, plus how a process's start is read, how long the
+    /// periodic pass may stay quiet with no question open, and how long the
+    /// tick may go without reading the directory (`None`: every tick).
+    fn assembled(
+        config: SourceConfig,
+        start_of: Arc<StartReader>,
+        backstop: Option<Duration>,
+        reread: Option<Duration>,
+    ) -> Arc<LiveSource> {
         Arc::new(LiveSource {
             inner: Arc::new(Inner {
                 dir: config.dir,
@@ -758,8 +1200,18 @@ impl LiveSource {
                 agents: Mutex::new(HashMap::new()),
                 known: Mutex::new(None),
                 refreshing: AtomicBool::new(false),
+                wanted: AtomicBool::new(false),
+                reread,
+                armed_at: Mutex::new(None),
+                read_at: Mutex::new(None),
                 reconciling: AtomicBool::new(false),
                 asked: Mutex::new(HashSet::new()),
+                started: Mutex::new(HashMap::new()),
+                contradicted: Mutex::new(HashSet::new()),
+                declined: Mutex::new(HashSet::new()),
+                start_of,
+                answered_at: Mutex::new(None),
+                backstop,
                 stopped: AtomicBool::new(false),
                 listeners: Listeners::new(),
                 tasks: Mutex::new(Vec::new()),
@@ -773,8 +1225,9 @@ impl LiveSource {
     /// Low-latency path: a session file appearing or changing refreshes at once
     /// instead of waiting out the tick. Not the guarantee — macOS drops change
     /// events for writes landing within a few ms of the watch being registered,
-    /// and some filesystems support no watching at all — which is what the tick
-    /// is for. `None` on any of those, which is not an error.
+    /// and some filesystems support no watching at all — which is why the tick
+    /// reads every period until the watch has settled, and every `REREAD` after.
+    /// `None` on any of those, which is not an error.
     fn watch_the_sessions_directory(&self) -> Option<JoinHandle<()>> {
         let (events, mut arrivals) = tokio::sync::mpsc::unbounded_channel::<()>();
         let mut watcher =
@@ -786,6 +1239,7 @@ impl LiveSource {
             .ok()?;
         watcher.watch(&self.inner.dir, RecursiveMode::NonRecursive).ok()?;
         *self.inner.watcher.lock().unwrap() = Some(watcher);
+        *self.inner.armed_at.lock().unwrap() = Some(Instant::now());
 
         let inner = Arc::clone(&self.inner);
         Some(tokio::spawn(async move {
@@ -809,18 +1263,24 @@ impl LiveSource {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(tick).await;
-                inner.refresh().await;
+                if inner.must_read() {
+                    inner.refresh().await;
+                }
             }
         })
     }
 
-    /// The expensive poll, guarded the same way.
+    /// The expensive poll, guarded the same way. It wakes every period but
+    /// asks only when there is something to ask — see `nothing_to_ask`.
     fn spawn_the_expensive_reconcile(&self) -> JoinHandle<()> {
         let inner = Arc::clone(&self.inner);
         let every = self.inner.reconcile_every;
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(every).await;
+                if inner.nothing_to_ask() {
+                    continue;
+                }
                 // Sleep-then-work means the next ~680ms call cannot start until
                 // this one has finished; the gap between calls is the interval,
                 // never less.
@@ -1716,6 +2176,420 @@ mod tests {
         settle().await;
 
         assert_eq!(cli.calls.load(Ordering::SeqCst), asked_so_far + 1);
+    }
+
+    /* ---- INV-4: the CLI is asked when there is a question for it ---- */
+
+    /// A process start the test can move, standing in for the kernel handing
+    /// a pid to somebody else.
+    fn movable_start() -> (Arc<AtomicU64>, Arc<StartReader>) {
+        let start = Arc::new(AtomicU64::new(1));
+        let reader = start.clone();
+        (start, Arc::new(move |_pid| Some(reader.load(Ordering::SeqCst))))
+    }
+
+    /// `presence_source`, reading process starts from `start_of` and allowed
+    /// to stay quiet for `backstop` with nothing to ask.
+    fn anchored_source(
+        dir: &Path,
+        cli: Arc<FakeCli>,
+        start_of: Arc<StartReader>,
+        reconcile_every: Duration,
+    ) -> Arc<LiveSource> {
+        let config = SourceConfig {
+            dir: dir.into(),
+            runner: cli,
+            pending: None,
+            tick: LONGER_THAN_THE_TEST,
+            reconcile_every,
+        };
+        LiveSource::assembled(config, start_of, Some(LONGER_THAN_THE_TEST), None)
+    }
+
+    /// `anchored_source`, with a tick allowed to skip the read for longer than
+    /// the test and a watch armed long enough ago to have settled.
+    fn quiet_source(
+        dir: &Path,
+        start_of: Arc<StartReader>,
+        pending: Option<Arc<dyn PendingMerge>>,
+    ) -> Arc<LiveSource> {
+        let config = SourceConfig {
+            dir: dir.into(),
+            runner: FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO),
+            pending,
+            tick: LONGER_THAN_THE_TEST,
+            reconcile_every: LONGER_THAN_THE_TEST,
+        };
+        let quiet = Some(LONGER_THAN_THE_TEST);
+        let src = LiveSource::assembled(config, start_of, quiet, quiet);
+        *src.inner.armed_at.lock().unwrap() = Some(Instant::now() - SETTLING);
+        src
+    }
+
+    /// INV-4: an idle fleet costs a liveness check a tick, not a read and a
+    /// parse of every session file — and only once the watch can be trusted.
+    #[tokio::test]
+    async fn inv4_a_settled_tick_skips_the_read_while_nothing_moved() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_start, start_of) = movable_start();
+        let src = quiet_source(dir.path(), start_of, None);
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 1);
+        assert!(!src.inner.must_read());
+
+        *src.inner.armed_at.lock().unwrap() = Some(Instant::now());
+        assert!(src.inner.must_read(), "a watch this young may have missed a write");
+        *src.inner.armed_at.lock().unwrap() = None;
+        assert!(src.inner.must_read(), "with no watch, every tick reads");
+    }
+
+    /// The change no write announces: the kernel handing the pid on. The quiet
+    /// tick sees it on the next period, not at `REREAD`.
+    #[tokio::test]
+    async fn inv4_a_pid_handed_on_makes_the_quiet_tick_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let (start, start_of) = movable_start();
+        let src = quiet_source(dir.path(), start_of, None);
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        Arc::clone(&src.inner).reconcile().await;
+        assert!(!src.inner.must_read());
+
+        start.store(2, Ordering::SeqCst);
+        assert!(src.inner.must_read());
+    }
+
+    /// A process that dies without removing its file changes nothing on disk.
+    #[tokio::test]
+    async fn inv4_a_process_that_died_makes_the_quiet_tick_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut record = live_session("live-one");
+        record["pid"] = child.id().into();
+        let src = quiet_source(dir.path(), Arc::new(process_start), None);
+        write_session(dir.path(), "live-one.json", record);
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 1);
+        assert!(!src.inner.must_read());
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(src.inner.must_read());
+    }
+
+    /// A spawn waiting to register is shown, and dropped, only by a read.
+    #[tokio::test]
+    async fn inv4_a_spawn_waiting_to_register_keeps_the_tick_reading() {
+        struct StillStarting;
+        #[async_trait]
+        impl PendingMerge for StillStarting {
+            async fn merge(&self, real: Vec<Agent>) -> Vec<Agent> {
+                real
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (_start, start_of) = movable_start();
+        let src = quiet_source(dir.path(), start_of, Some(Arc::new(StillStarting)));
+        Arc::clone(&src.inner).reconcile().await;
+        assert!(src.inner.must_read());
+    }
+
+    /// A refresh asked for while one is in flight is owed, not dropped: that
+    /// pass may have read the directory before the change landed, and the
+    /// quiet tick will not read it again for `REREAD`.
+    #[tokio::test]
+    async fn inv4_a_refresh_asked_for_mid_flight_reads_again() {
+        #[derive(Default)]
+        struct Held {
+            passes: AtomicUsize,
+            entered: tokio::sync::Notify,
+            release: tokio::sync::Notify,
+        }
+        #[async_trait]
+        impl PendingMerge for Held {
+            async fn merge(&self, real: Vec<Agent>) -> Vec<Agent> {
+                if self.passes.fetch_add(1, Ordering::SeqCst) == 0 {
+                    self.entered.notify_one();
+                    self.release.notified().await;
+                }
+                real
+            }
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let held = Arc::new(Held::default());
+        let src = LiveSource::configured(SourceConfig {
+            dir: dir.path().into(),
+            runner: FakeCli::new(Some("[]"), Duration::ZERO),
+            pending: Some(held.clone()),
+            tick: LONGER_THAN_THE_TEST,
+            reconcile_every: LONGER_THAN_THE_TEST,
+        });
+        let inner = Arc::clone(&src.inner);
+        let in_flight = tokio::spawn(async move { inner.refresh().await });
+        held.entered.notified().await;
+
+        src.inner.refresh().await;
+        assert_eq!(held.passes.load(Ordering::SeqCst), 1, "no second pass alongside");
+        held.release.notify_one();
+        in_flight.await.unwrap();
+        assert_eq!(held.passes.load(Ordering::SeqCst), 2, "the pass in flight read again");
+    }
+
+    /// What the 30s reconcile used to be the only defence against: the
+    /// session file outlives its process and the pid goes to somebody else.
+    /// `is_alive` says yes; the start says it is not the same process, and the
+    /// agent leaves the fleet on that pass rather than at the next poll.
+    #[tokio::test]
+    async fn inv4_a_pid_another_process_now_holds_is_dropped_and_asked_about() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let (start, start_of) = movable_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 1);
+        let asked_so_far = cli.calls.load(Ordering::SeqCst);
+
+        *cli.out.lock().unwrap() = Some("[]".into());
+        start.fetch_add(1, Ordering::SeqCst);
+        src.inner.refresh().await;
+        assert!(src.list().is_empty(), "a reused pid stayed in the fleet");
+        settle().await;
+
+        assert_eq!(cli.calls.load(Ordering::SeqCst), asked_so_far + 1, "the CLI was not asked");
+        src.inner.refresh().await;
+        assert!(src.list().is_empty());
+    }
+
+    /// The same process seen again is the ordinary case, and asks nothing.
+    #[tokio::test]
+    async fn inv4_an_unmoved_start_asks_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let (_start, start_of) = movable_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        Arc::clone(&src.inner).reconcile().await;
+        let asked_so_far = cli.calls.load(Ordering::SeqCst);
+        for _ in 0..5 {
+            src.inner.refresh().await;
+            settle().await;
+        }
+
+        assert_eq!(cli.calls.load(Ordering::SeqCst), asked_so_far);
+        assert_eq!(src.list().len(), 1);
+    }
+
+    /// With every agent vouched for and the pids still theirs, the periodic
+    /// pass has nothing to put to a ~680ms subprocess and does not.
+    #[tokio::test]
+    async fn inv4_the_periodic_pass_is_quiet_with_nothing_to_ask() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let (_start, start_of) = movable_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, PROMPT_RECONCILE);
+
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        src.start().await.unwrap();
+        wait_until(|| cli.calls.load(Ordering::SeqCst) >= 1).await;
+        tokio::time::sleep(SEVERAL_QUIET_TICKS).await;
+
+        assert_eq!(cli.calls.load(Ordering::SeqCst), 1, "only the startup pass should have asked");
+        src.stop();
+    }
+
+    /// An open question keeps the old cadence: a ghost the CLI refused, or an
+    /// agent it has not caught up with yet, is asked about every period.
+    #[tokio::test]
+    async fn inv4_an_open_question_is_asked_every_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let (_start, start_of) = movable_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, PROMPT_RECONCILE);
+
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        write_session(dir.path(), "ghost.json", live_session("ghost"));
+        src.start().await.unwrap();
+        tokio::time::sleep(SEVERAL_QUIET_TICKS).await;
+
+        // Startup, the ask on sight, then one per period for the ghost.
+        let calls = cli.calls.load(Ordering::SeqCst);
+        assert!(calls > 2, "the open question was asked {calls} times");
+        assert_eq!(src.list().len(), 1, "a ghost reached the fleet");
+        src.stop();
+    }
+
+    /// A CLI that failed has not answered anything, so the question stays
+    /// open and the next period asks again.
+    #[tokio::test]
+    async fn inv4_a_failed_call_is_retried_on_the_next_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(None, Duration::ZERO);
+        let (_start, start_of) = movable_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, PROMPT_RECONCILE);
+
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        src.start().await.unwrap();
+        tokio::time::sleep(SEVERAL_QUIET_TICKS).await;
+
+        let calls = cli.calls.load(Ordering::SeqCst);
+        assert!(calls > 1, "a failed call was asked {calls} times");
+        src.stop();
+    }
+
+    /* ---- INV-4: a file naming its own process is its own answer ---- */
+
+    /// `procStart` as Claude Code writes it, and the kernel's start of the same
+    /// process, a quarter of a second in.
+    const OWN_START: &str = "Mon Oct 12 01:43:15 2026";
+    const OWN_START_SECS: u64 = 1_791_769_395;
+    const OWN_START_MICROS: u64 = OWN_START_SECS * MICROS_PER_SECOND + 250_000;
+    /// A start no process on the pid has: the file outlived the one it names.
+    const STALE_START: &str = "Mon Jan  5 09:00:00 2026";
+
+    fn claiming(session_id: &str, proc_start: &str) -> serde_json::Value {
+        let mut session = live_session(session_id);
+        session["procStart"] = proc_start.into();
+        session
+    }
+
+    /// Every pid started at `OWN_START`, until the test moves it.
+    fn own_start() -> (Arc<AtomicU64>, Arc<StartReader>) {
+        let start = Arc::new(AtomicU64::new(OWN_START_MICROS));
+        let reader = start.clone();
+        (start, Arc::new(move |_pid| Some(reader.load(Ordering::SeqCst))))
+    }
+
+    #[test]
+    fn lstart_is_read_as_a_utc_wall_clock() {
+        assert_eq!(claimed_start(OWN_START), i64::try_from(OWN_START_SECS).ok());
+        assert_eq!(claimed_start(STALE_START), Some(1_767_603_600));
+        assert_eq!(claimed_start("Thu Feb 29 23:59:59 2024"), Some(1_709_251_199));
+        for unreadable in ["", "yesterday", "Mo 12 Okt 01:43:15 2026", "Mon Oct 12 01:43 2026"] {
+            assert_eq!(claimed_start(unreadable), None, "{unreadable:?}");
+        }
+    }
+
+    /// `lstart` names no zone, so a start written in local time is the same
+    /// process as one written in UTC — and nothing else is.
+    #[test]
+    fn either_reading_of_a_zoneless_start_is_the_same_process() {
+        const EAST_OF_UTC: i64 = -4 * 3_600;
+        let started = 1_000_000;
+        assert!(names_this_start(started, started, None));
+        assert!(names_this_start(started + EAST_OF_UTC, started, Some(EAST_OF_UTC)));
+        assert!(!names_this_start(started + EAST_OF_UTC, started, None));
+        assert!(!names_this_start(started - 2, started, Some(0)));
+    }
+
+    #[test]
+    fn evidence_is_silent_without_both_sides() {
+        assert_eq!(evidence(None, Some(OWN_START_MICROS)), Evidence::Silent);
+        assert_eq!(evidence(Some(OWN_START), None), Evidence::Silent);
+        assert_eq!(evidence(Some("not a date"), Some(OWN_START_MICROS)), Evidence::Silent);
+        assert_eq!(evidence(Some(OWN_START), Some(OWN_START_MICROS)), Evidence::Same);
+        assert_eq!(evidence(Some(STALE_START), Some(OWN_START_MICROS)), Evidence::Another);
+    }
+
+    /// An agent started in a terminal is listed on the pass that finds its
+    /// file, without a ~680ms call: the file names the process on its pid.
+    #[tokio::test]
+    async fn inv4_a_file_naming_its_own_process_is_listed_without_asking() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let (_start, start_of) = own_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+
+        write_session(dir.path(), "live-one.json", claiming("live-one", OWN_START));
+        Arc::clone(&src.inner).reconcile().await;
+        let asked_so_far = cli.calls.load(Ordering::SeqCst);
+
+        write_session(dir.path(), "newcomer.json", claiming("newcomer", OWN_START));
+        src.inner.refresh().await;
+        settle().await;
+
+        let mut ids: Vec<String> = src.list().into_iter().map(|a| a.session_id).collect();
+        ids.sort();
+        assert_eq!(ids, ["live-one", "newcomer"]);
+        assert_eq!(cli.calls.load(Ordering::SeqCst), asked_so_far, "the CLI was asked");
+    }
+
+    /// A file naming another process is a ghost from the first pass, not
+    /// only once the CLI has first answered: the first fleet a tab is sent
+    /// used to carry it.
+    #[tokio::test]
+    async fn inv4_a_file_naming_another_process_never_reaches_the_fleet() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), ONE_RECONCILE);
+        let (_start, start_of) = own_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+
+        write_session(dir.path(), "live-one.json", claiming("live-one", OWN_START));
+        write_session(dir.path(), "ghost.json", claiming("ghost", STALE_START));
+        src.inner.refresh().await;
+        let first: Vec<String> = src.list().into_iter().map(|a| a.session_id).collect();
+        assert_eq!(first, ["live-one"], "a ghost reached the first fleet");
+
+        wait_until(|| cli.calls.load(Ordering::SeqCst) == 1).await;
+        settle().await;
+        assert_eq!(src.list().len(), 1);
+    }
+
+    /// Once the CLI has declined a file that names another process, the
+    /// question is settled: the file cannot start naming the right one, and
+    /// asking every period was two calls a minute for a certainty.
+    #[tokio::test]
+    async fn inv4_a_declined_ghost_is_not_asked_about_every_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
+        let (_start, start_of) = own_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, PROMPT_RECONCILE);
+
+        write_session(dir.path(), "live-one.json", claiming("live-one", OWN_START));
+        write_session(dir.path(), "ghost.json", claiming("ghost", STALE_START));
+        src.start().await.unwrap();
+        tokio::time::sleep(SEVERAL_QUIET_TICKS).await;
+
+        assert_eq!(cli.calls.load(Ordering::SeqCst), 1, "the settled ghost was asked again");
+        assert_eq!(src.list().len(), 1, "a ghost reached the fleet");
+        src.stop();
+    }
+
+    /// The CLI keeps the last word over a file that seems to name another
+    /// process — a zone neither reading expects, say.
+    #[tokio::test]
+    async fn inv4_a_contradicted_file_the_cli_lists_is_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some(r#"[{"sessionId":"odd-zone"}]"#), Duration::ZERO);
+        let (_start, start_of) = own_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+
+        write_session(dir.path(), "odd-zone.json", claiming("odd-zone", STALE_START));
+        src.inner.refresh().await;
+        assert!(src.list().is_empty());
+        settle().await;
+
+        assert_eq!(src.list().len(), 1, "the CLI's word was overruled");
+    }
+
+    /// A pid handed to another process after its session was listed: the file
+    /// now names a process that is not there, and the agent leaves the fleet.
+    #[tokio::test]
+    async fn inv4_a_listed_session_whose_pid_is_handed_on_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let cli = FakeCli::new(Some("[]"), Duration::ZERO);
+        let (start, start_of) = own_start();
+        let src = anchored_source(dir.path(), cli.clone(), start_of, LONGER_THAN_THE_TEST);
+
+        write_session(dir.path(), "live-one.json", claiming("live-one", OWN_START));
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 1);
+
+        start.fetch_add(3_600 * MICROS_PER_SECOND, Ordering::SeqCst);
+        src.inner.refresh().await;
+        assert!(src.list().is_empty(), "a reused pid stayed in the fleet");
     }
 
     async fn wait_until(mut check: impl FnMut() -> bool) {

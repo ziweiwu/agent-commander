@@ -233,7 +233,8 @@ impl FleetEnricher {
     /*
      * What each busy agent is running, from one read of the process table.
      *
-     * INV-4: one `ps` per pass however many agents there are, none at all when
+     * INV-4: one read per pass however many agents there are, of only what
+     * runs under the busy ones where the platform allows, none at all when
      * nothing is busy — an idle agent has no tool call to name — and none while
      * no browser is connected, because this runs inside the same pass the
      * `watched` flag already gates.
@@ -249,7 +250,7 @@ impl FleetEnricher {
         let Some(procs) = &self.procs else { return false };
         let anything_busy = agents.iter().any(|a| a.status == AgentStatus::Busy);
         let table = match anything_busy {
-            true => procs.table(now_ms()).await,
+            true => procs.table(now_ms(), &busy_roots(agents)).await,
             false => None,
         };
         let unreadable = anything_busy && table.is_none();
@@ -277,6 +278,11 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// Where each busy agent's walk starts: its own process.
+fn busy_roots(agents: &[Agent]) -> Vec<i64> {
+    agents.iter().filter(|a| a.status == AgentStatus::Busy).map(|a| a.pid).collect()
 }
 
 /// Only a busy agent is running anything; an idle one's claim is cleared.
@@ -884,7 +890,7 @@ mod tests {
 
     #[async_trait]
     impl ProcApi for FakeProcs {
-        async fn table(&self, now: i64) -> Option<ProcTable> {
+        async fn table(&self, now: i64, _roots: &[i64]) -> Option<ProcTable> {
             let reads = {
                 let mut reads = self.reads.lock().unwrap();
                 *reads += 1;
