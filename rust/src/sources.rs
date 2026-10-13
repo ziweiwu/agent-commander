@@ -207,6 +207,12 @@ pub struct TailRead {
 #[async_trait]
 pub trait TailApi: Send + Sync + 'static {
     async fn read(&mut self) -> anyhow::Result<TailRead>;
+
+    /// The file the reads come from, once one has been found, so a reader
+    /// can be woken by a write rather than only by a tick.
+    fn path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// Account-level quota, watched from the file the statusLine bridge writes.

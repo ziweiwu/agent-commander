@@ -24,7 +24,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use axum::body::{Body, Bytes};
@@ -312,6 +312,10 @@ pub struct App {
     /// beats to observe, and a test that spends a minute of wall clock waiting
     /// for them is one that gets marked `#[ignore]` within the month.
     pub heartbeat: Duration,
+    /// How often an open conversation is read with nothing written to it.
+    /// `TIMELINE_MS` outside tests, which need a tick that cannot be what
+    /// delivered a turn.
+    pub timeline_every: Duration,
 }
 
 /// How many browsers are connected, and what to do when that changes.
@@ -2266,7 +2270,7 @@ async fn tail_once_it_exists(
         return tail;
     }
     loop {
-        tokio::time::sleep(Duration::from_millis(TIMELINE_MS)).await;
+        tokio::time::sleep(app.timeline_every).await;
         if let Some(tail) = (app.deps.tail_for)(agent) {
             return tail;
         }
@@ -2276,9 +2280,14 @@ async fn tail_once_it_exists(
 /// Read this viewer's conversation to it until the tab looks somewhere else.
 ///
 /// The TS arms a `setInterval` and guards it with a `tailBusy` flag, because a
-/// read can outlast the interval. A task that sleeps *after* each read cannot
+/// read can outlast the interval. A task that waits *after* each read cannot
 /// overlap with itself at all, so the flag has nothing left to guard; the cost
 /// is that the period is measured from the end of a read rather than its start.
+///
+/// The wait ends early when the transcript is written. The tick alone put a
+/// turn on screen up to a second after the agent wrote it — on the one view
+/// whose whole job is to be watched as it happens — while the cost of knowing
+/// sooner is one filesystem watch per open conversation.
 fn spawn_timeline_pump(
     viewer: &Arc<Viewer>,
     app: &Arc<App>,
@@ -2289,11 +2298,122 @@ fn spawn_timeline_pump(
     tokio::spawn(async move {
         let Conversation { agent, session_id, ready } = conversation;
         let mut tail = tail_once_it_exists(&app, &agent, ready).await;
+        let mut writes = TranscriptWatch::default();
         loop {
             pump_timeline(&mut tail, &viewer, &app, &session_id).await;
-            tokio::time::sleep(Duration::from_millis(TIMELINE_MS)).await;
+            // The path is known only after the first read has found the file,
+            // and moves when the tail follows the session to a new one.
+            writes.follow(tail.path());
+            writes.until_written_or(app.timeline_every).await;
         }
     })
+}
+
+/// How long a watch that could not be set up waits before it is tried again:
+/// a filesystem that refuses one refuses the next, and each try is a syscall
+/// or several on every tick for as long as the tab stays open.
+const WATCH_RETRY: Duration = Duration::from_secs(30);
+
+/// The least time between two reads that writes woke. An agent streaming a
+/// long answer appends many times a second, and each read parses what was
+/// appended and sends it; a turn is still on screen well inside the tick.
+const WRITE_GAP: Duration = Duration::from_millis(150);
+
+/// The watch on the transcript a pump reads, kept on the file it reads now.
+#[derive(Default)]
+struct TranscriptWatch {
+    writes: Option<FileWrites>,
+    /// The file `writes` watches, or failed to.
+    path: Option<PathBuf>,
+    /// When a watch that could not be set up may be tried again.
+    retry_at: Option<Instant>,
+    /// When a write last ended the wait.
+    woke_at: Option<Instant>,
+}
+
+impl TranscriptWatch {
+    /// Watch `path`, the file the tail reads now. A watch on the file it read
+    /// before — a resumed or `/clear`ed session moves on to another — would
+    /// never fire again, and the tick would be all that was left.
+    fn follow(&mut self, path: Option<PathBuf>) {
+        if path != self.path {
+            self.writes = None;
+            self.retry_at = None;
+            self.path = path;
+        }
+        let due = self.retry_at.is_none_or(|at| Instant::now() >= at);
+        if self.writes.is_some() || !due {
+            return;
+        }
+        let Some(path) = &self.path else { return };
+        self.writes = FileWrites::watch(path);
+        self.retry_at = self.writes.is_none().then(|| Instant::now() + WATCH_RETRY);
+    }
+
+    /// Wait for the next write or the next tick, whichever comes first.
+    ///
+    /// The tick stays even with a watch: a watch can miss a write, and the
+    /// pane can move a question on with nothing written to disk at all.
+    ///
+    /// A watch that failed, or whose events have stopped for good, is dropped
+    /// for `follow` to set up again, and this waits out the tick: a closed
+    /// channel must not turn into a loop that reads as fast as it can.
+    async fn until_written_or(&mut self, every: Duration) {
+        let tick = tokio::time::sleep(every);
+        tokio::pin!(tick);
+        let gap = self.woke_at.map_or(Duration::ZERO, |at| WRITE_GAP.saturating_sub(at.elapsed()));
+        tokio::select! {
+            () = tokio::time::sleep(gap) => {}
+            () = &mut tick => return,
+        }
+        let Some(watch) = self.writes.as_mut() else { return tick.await };
+        let healthy = tokio::select! {
+            arrived = watch.arrivals.recv() => {
+                // One append can arrive as several events; they all want one read.
+                let mut healthy = matches!(arrived, Some(crate::registry::Watched::Changed));
+                while let Ok(next) = watch.arrivals.try_recv() {
+                    healthy &= matches!(next, crate::registry::Watched::Changed);
+                }
+                healthy
+            }
+            () = &mut tick => return,
+        };
+        if healthy {
+            self.woke_at = Some(Instant::now());
+        } else {
+            self.writes = None;
+            tick.await;
+        }
+    }
+}
+
+/// Writes to one file, reported for as long as this is held.
+struct FileWrites {
+    /// Held for its `Drop`: the watch ends with it.
+    _watcher: notify::RecommendedWatcher,
+    arrivals: mpsc::UnboundedReceiver<crate::registry::Watched>,
+}
+
+impl FileWrites {
+    /// `None` where the platform or the filesystem cannot watch, which leaves
+    /// the tick to do the work alone, as it always did.
+    fn watch(path: &Path) -> Option<Self> {
+        use crate::registry::{announces_a_change, Watched};
+        use notify::Watcher;
+        let (events, arrivals) = mpsc::unbounded_channel();
+        let mut watcher =
+            notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+                let report = match event {
+                    Ok(event) if announces_a_change(&event) => Watched::Changed,
+                    Ok(_) => return,
+                    Err(_) => Watched::Lost,
+                };
+                let _ = events.send(report);
+            })
+            .ok()?;
+        watcher.watch(path, notify::RecursiveMode::NonRecursive).ok()?;
+        Some(Self { _watcher: watcher, arrivals })
+    }
 }
 
 /// The conversation a viewer has just focused, and the reader for it if one
@@ -3164,6 +3284,7 @@ async fn build_app(
         viewers: Viewers::default(),
         pictures: Arc::new(crate::pictures::PictureStore::new()),
         heartbeat: Duration::from_millis(HEARTBEAT_MS),
+        timeline_every: Duration::from_millis(TIMELINE_MS),
     })
 }
 
@@ -3255,7 +3376,7 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     let procs: Option<Arc<dyn crate::procs::ProcApi>> = if opts.mock {
         None
     } else {
-        Some(Arc::new(crate::procs::PsReader::new(Arc::new(crate::env::ExecRunner))))
+        Some(crate::procs::machine_reader())
     };
     let enricher =
         crate::enrich::FleetEnricher::new(deps.source.clone(), deps.tail_for.clone(), procs);
@@ -3925,14 +4046,95 @@ mod tests {
         parts: &HarnessParts,
         tails: Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>,
     ) -> u16 {
+        serve_with_tails_every(parts, tails, Duration::from_millis(TIMELINE_MS)).await
+    }
+
+    /// A conversation tick no test outlasts.
+    const TICK_LONGER_THAN_THE_TEST: Duration = Duration::from_secs(3600);
+
+    /// `serve_with_tails`, reading an open conversation every `timeline_every`
+    /// with nothing written to it.
+    async fn serve_with_tails_every(
+        parts: &HarnessParts,
+        tails: Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>,
+        timeline_every: Duration,
+    ) -> u16 {
         let mut app = harness_app(parts, Fixtures::Real, None);
-        Arc::get_mut(&mut app).expect("sole owner").deps.tail_for = tails;
+        let owned = Arc::get_mut(&mut app).expect("sole owner");
+        owned.deps.tail_for = tails;
+        owned.timeline_every = timeline_every;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
             let _ = run(app, listener).await;
         });
         port
+    }
+
+    /// A tail over a real file: one event per line written since the last
+    /// read, and the file's path, so the pump can watch it.
+    struct FileTail {
+        path: PathBuf,
+        read_lines: usize,
+        reads: usize,
+    }
+
+    #[async_trait]
+    impl TailApi for FileTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            self.reads += 1;
+            let text = std::fs::read_to_string(&self.path)?;
+            let lines: Vec<&str> = text.lines().collect();
+            let events = lines[self.read_lines..]
+                .iter()
+                .map(|line| TimelineEvent {
+                    id: (*line).to_string(),
+                    at: 0,
+                    kind: TimelineKind::User,
+                    text: (*line).to_string(),
+                    tool: None,
+                    sidechain: None,
+                    notice: None,
+                    tokens_before: None,
+                    tokens_after: None,
+                })
+                .collect();
+            self.read_lines = lines.len();
+            Ok(TailRead { events, first: self.reads == 1, ..Default::default() })
+        }
+
+        fn path(&self) -> Option<PathBuf> {
+            Some(self.path.clone())
+        }
+    }
+
+    /// A turn the agent writes reaches the open conversation on the write,
+    /// not on the next tick: the tick alone put it there up to a second late.
+    #[tokio::test]
+    async fn inv4_a_written_turn_reaches_the_focused_tab_before_the_tick() {
+        // Long enough for the watch to be registered before the write, which
+        // macOS otherwise drops; well short of the tick it must beat.
+        const WATCH_SETTLES: Duration = Duration::from_millis(150);
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("fresh.jsonl");
+        std::fs::write(&transcript, "first\n").unwrap();
+        let parts = harness_parts(FakePanes::new());
+        add_agent(&parts.source, "fresh", crate::agent_kinds::CLAUDE_KIND);
+        let path = transcript.clone();
+        let tails = Arc::new(move |_agent: &Agent| {
+            Some(Box::new(FileTail { path: path.clone(), read_lines: 0, reads: 0 }) as Box<dyn TailApi>)
+        });
+        let port = serve_with_tails_every(&parts, tails, TICK_LONGER_THAN_THE_TEST).await;
+        let mut client = open(port).await;
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"fresh"})).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "timeline")).await.is_some());
+        tokio::time::sleep(WATCH_SETTLES).await;
+
+        // The tick is an hour away, so only the write can deliver this.
+        std::fs::write(&transcript, "first\nsecond\n").unwrap();
+        let has_second = |m: &serde_json::Value| is_type(m, "timeline") && m["events"][0]["text"] == "second";
+        assert!(next_msg(&mut client, has_second).await.is_some(), "the turn waited for the tick");
     }
 
     /// A freshly started agent has no transcript until its first prompt is
@@ -4016,6 +4218,7 @@ mod tests {
                 parts.web_root.path().join("pictures"),
             )),
             heartbeat: Duration::from_millis(HEARTBEAT_MS),
+            timeline_every: Duration::from_millis(TIMELINE_MS),
         })
     }
 

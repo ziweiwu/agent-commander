@@ -1710,6 +1710,10 @@ impl TailApi for TranscriptTail {
     async fn read(&mut self) -> anyhow::Result<TailRead> {
         Ok(self.read_next().await)
     }
+
+    fn path(&self) -> Option<PathBuf> {
+        self.path.clone()
+    }
 }
 
 /// Build a tail reader for one session's transcript, or None when it has no
