@@ -102,8 +102,9 @@ success.
 
 ```sh
 npm run typecheck
-npm run lint
-npm test              # 1514 tests: 701 Rust (the server) + 813 vitest (the web app)
+npm run lint          # oxlint, then the clippy ratchet (see "Guardrails" below)
+npm test              # 1514 tests: 701 Rust under nextest (the server) + 813 vitest
+npm run deps          # cargo-deny, cargo-vet, cargo-machete over rust/
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 406 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -144,7 +145,7 @@ with every gate green. A `cargo update` that needs a newer compiler fails
 there: run it with `CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS=fallback`, or
 raise `rust-version` and the handbook's line together.
 
-The first three also run as a `Stop` hook, so a turn that leaves the tree
+The first four also run as a `Stop` hook, so a turn that leaves the tree
 failing is refused rather than summarised. The hook lives in the `harness`
 plugin and reads its list from **`.claude/gates.json`** here — `watch`
 pathspecs, `gates` as `[name, argv]` pairs, and a per-gate `timeout`. It skips
@@ -153,8 +154,9 @@ blocks at most once per tree state so a failure it cannot fix never traps the
 session.
 
 `build`, `e2e`, `audit:*`, `qa`, `verify:inv1` and `app` are deliberately
-**not** in that list. Measured on this machine: typecheck 5.0s, lint 0.9s, test ~40s,
-build 3.4s — the three that are in it already cost ~46s, and a Stop hook slow
+**not** in that list. Measured on this machine with warm caches: typecheck 3s,
+lint 2s, test 28s, deps 1s, build 3.4s — the four that are in it cost ~34s (a
+cold Rust build adds minutes to lint and test), and a Stop hook slow
 enough to resent is one that gets deleted. The others need a browser, a running
 server, or a live tmux session with a real agent in it, none of which a hook can
 assume. CI and a deliberate local run own them. `app` is the same argument in a
@@ -167,7 +169,40 @@ existing `scripts/` watch entry.
 components, so the manifests are spelled out individually. `scripts/` is on the
 list because three generated files are held to their generators by tests there,
 and because `scripts/cargo.sh` is how every gate reaches the Rust toolchain.
-`rust/` is on it for the obvious reason: it is the server.
+`rust/` is on it for the obvious reason: it is the server — and it holds every
+file the Rust gates read, `deny.toml`, `clippy.toml`, `supply-chain/`,
+`.config/nextest.toml` and `.cargo/mutants.toml` included.
+
+### Guardrails
+
+The Rust half of the gate is `npm run lint && npm test && npm run deps`; CI
+runs the same three, and `.claude/gates.json` runs them as the `Stop` hook.
+
+- **Lints.** `[lints]` in `rust/Cargo.toml` denies `unsafe_code`, `unwrap`,
+  `expect`, `panic!`, `todo!`, `let _ =` on a `#[must_use]` value and a bare
+  `#[allow]`. A site that genuinely cannot fail keeps its call under
+  `#[expect(lint, reason = "...")]`, which says why and fails the build once it
+  stops being needed. The two `libc::kill(pid, 0)` probes are the only
+  `unsafe`, each with a `// SAFETY:` comment.
+- **The ratchet.** `npm run lint:server` is `scripts/clippy_ratchet.py`: clippy
+  with the lints above as errors everywhere, plus `indexing_slicing` and
+  `arithmetic_side_effects` on the lines your change touches (from the merge
+  base with `main`). Old code is left alone until someone edits it; a line you
+  touch is held to the stricter bar. Do not edit the script — it is shared
+  byte-for-byte with three other repos.
+- **Supply chain.** `npm run deps` is `cargo deny check` (RustSec advisories,
+  licences, banned crates, crates.io only — `rust/deny.toml`), `cargo vet`
+  (`rust/supply-chain/`) and `cargo machete` (unused dependencies). A new crate,
+  or a new version of one, fails `cargo vet` until it is either audited
+  (`cargo vet certify`) or exempted (`cargo vet add-exemption`). Which of the
+  two is **the user's decision**, not an agent's: say the vet gate failed and
+  name the crate.
+- **Mutation testing** runs on pull requests only, against the Rust the PR
+  changes (the `mutants` job in `ci.yml`); a mutant no test catches fails it.
+  `npm run mutants` is the same check against your branch's merge base. Never
+  run a full pass — it is hours.
+- **Release builds** go through `cargo auditable`, so a shipped binary carries
+  its dependency list and `cargo audit bin` can check it after the fact.
 
 ## Three things are generated, and each has a test that says so
 

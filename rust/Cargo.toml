@@ -14,9 +14,7 @@ path = "src/main.rs"
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "fs", "io-util", "net", "sync", "time", "signal"] }
 axum = { version = "0.7", features = ["ws"] }
-tower = "0.5"
 tower-http = { version = "0.6", features = ["fs", "set-header"] }
-hyper = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 anyhow = "1"
@@ -47,9 +45,28 @@ ts-rs = "12"
 proptest = "1.9.0"
 proptest-state-machine = "0.6.0"
 
+# Guardrails. clippy::arithmetic_side_effects and clippy::indexing_slicing are
+# not listed: scripts/clippy_ratchet.py applies them to touched lines only.
+[lints.rust]
+# "deny" rather than "forbid": two `kill(pid, 0)` liveness probes (registry.rs,
+# pane.rs) call libc, and each opts out with a reasoned #[expect(unsafe_code)].
+unsafe_code = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+let_underscore_must_use = "deny"
+allow_attributes = "deny"
+allow_attributes_without_reason = "deny"
+undocumented_unsafe_blocks = "deny"
+
 [profile.release]
 opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
 panic = "abort"
+overflow-checks = true

@@ -29,7 +29,7 @@ use std::panic::AssertUnwindSafe;
 use std::sync::atomic::{AtomicU64, Ordering};
 #[cfg(test)]
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Notify;
@@ -183,7 +183,7 @@ impl PaneLoop {
 
     /// The most recent read, so a tab that attaches mid-flight paints at once.
     fn last(&self) -> Option<Arc<Sample>> {
-        self.state.lock().unwrap().last.clone()
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).last.clone()
     }
 
     /// Go back to full speed now, cancelling any backoff already being slept off.
@@ -199,7 +199,7 @@ impl PaneLoop {
     /// full speed through reads that find nothing.
     fn wake(&self, reason: Wake) {
         {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.stopped {
                 return;
             }
@@ -230,7 +230,7 @@ impl PaneLoop {
 
     fn start(self: &Arc<Self>) {
         {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.stopped || st.active {
                 return;
             }
@@ -241,7 +241,7 @@ impl PaneLoop {
     }
 
     fn stop(&self) {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         st.stopped = true;
         st.active = false;
         st.listeners.clear();
@@ -251,7 +251,7 @@ impl PaneLoop {
     }
 
     fn listener_live(&self, id: u64) -> bool {
-        self.state.lock().unwrap().listeners.iter().any(|(i, _)| *i == id)
+        self.state.lock().unwrap_or_else(PoisonError::into_inner).listeners.iter().any(|(i, _)| *i == id)
     }
 
     async fn run(self: Arc<Self>) {
@@ -286,7 +286,7 @@ impl PaneLoop {
     /// Whether the chain should end here, marking it over on the way out so
     /// that a later `start` may begin a new one.
     fn finished(&self) -> bool {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if !st.stopped {
             return false;
         }
@@ -308,7 +308,7 @@ impl PaneLoop {
             // good over a transient EAGAIN.
             Err(err) => return HubEvent::Error(Arc::new(err)),
         };
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let changed = match st.last.as_ref() {
             None => true,
             Some(prev) => !unchanged(prev, &sample),
@@ -335,7 +335,7 @@ impl PaneLoop {
         // mid-delivery (the tab that answers a dead pane by releasing its
         // neighbour) still stops that one being called. That is what iterating
         // a live `Set` gives the TS.
-        let snapshot: Vec<(u64, Listener)> = self.state.lock().unwrap().listeners.clone();
+        let snapshot: Vec<(u64, Listener)> = self.state.lock().unwrap_or_else(PoisonError::into_inner).listeners.clone();
         for (id, listener) in snapshot {
             if !self.listener_live(id) {
                 continue;
@@ -345,6 +345,7 @@ impl PaneLoop {
             // `panic = "abort"` (the release profile) nothing can catch that —
             // so this holds in dev and test, and listeners are expected not to
             // panic in the first place.
+            #[expect(clippy::let_underscore_must_use, reason = "a panicking listener is contained, per the comment above")]
             let _ = std::panic::catch_unwind(AssertUnwindSafe(|| listener(event)));
         }
     }
@@ -352,7 +353,7 @@ impl PaneLoop {
     /// How long to wait before the next read, or `None` when the chain ends
     /// here because nobody is watching any more.
     fn next_delay(&self, started: Instant) -> Option<Duration> {
-        let mut st = self.state.lock().unwrap();
+        let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.stopped || st.listeners.is_empty() {
             // The chain ends here; the next `start` may begin a new one.
             st.active = false;
@@ -402,13 +403,13 @@ impl PaneHub {
     /// Nothing is read to answer this: a pane nobody watches has no loop and
     /// no cache, and the caller makes its own read then (INV-4).
     pub fn cached(&self, pane_id: &str) -> Option<Arc<Sample>> {
-        let loop_ = self.inner.loops.lock().unwrap().get(pane_id).cloned();
+        let loop_ = self.inner.loops.lock().unwrap_or_else(PoisonError::into_inner).get(pane_id).cloned();
         loop_.and_then(|loop_| loop_.last())
     }
 
     /// How many panes are being polled. Read by the tests and the benchmark.
     pub fn size(&self) -> usize {
-        self.inner.loops.lock().unwrap().len()
+        self.inner.loops.lock().unwrap_or_else(PoisonError::into_inner).len()
     }
 
     /// Poll this pane at full speed again, because something just changed it.
@@ -420,7 +421,7 @@ impl PaneHub {
     /// before the character appeared, which is the latency this whole file
     /// exists to remove.
     pub fn wake(&self, pane_id: &str) {
-        let loop_ = self.inner.loops.lock().unwrap().get(pane_id).cloned();
+        let loop_ = self.inner.loops.lock().unwrap_or_else(PoisonError::into_inner).get(pane_id).cloned();
         if let Some(loop_) = loop_ {
             loop_.wake(Wake::ExpectingEcho);
         }
@@ -435,7 +436,7 @@ impl PaneHub {
         let id = self.inner.next_id.fetch_add(1, Ordering::Relaxed);
 
         let loop_ = self.loop_for(pane_id);
-        loop_.state.lock().unwrap().listeners.push((id, listener.clone()));
+        loop_.state.lock().unwrap_or_else(PoisonError::into_inner).listeners.push((id, listener.clone()));
         loop_.wake(Wake::Attaching);
 
         // A tab joining a pane someone else is already watching gets the last
@@ -451,7 +452,7 @@ impl PaneHub {
 
     /// The loop for this pane, created if this is the first tab to ask for it.
     fn loop_for(&self, pane_id: &str) -> Arc<PaneLoop> {
-        let mut loops = self.inner.loops.lock().unwrap();
+        let mut loops = self.inner.loops.lock().unwrap_or_else(PoisonError::into_inner);
         loops
             .entry(pane_id.to_string())
             .or_insert_with(|| Arc::new(PaneLoop::new(pane_id, self.inner.panes.clone())))
@@ -465,10 +466,10 @@ impl PaneHub {
         let pane_id = pane_id.to_string();
         Box::new(move || {
             let Some(inner) = Weak::upgrade(&inner) else { return };
-            let mut loops = inner.loops.lock().unwrap();
+            let mut loops = inner.loops.lock().unwrap_or_else(PoisonError::into_inner);
             let Some(current) = loops.get(&pane_id).cloned() else { return };
             let empty = {
-                let mut st = current.state.lock().unwrap();
+                let mut st = current.state.lock().unwrap_or_else(PoisonError::into_inner);
                 st.listeners.retain(|(i, _)| *i != id);
                 st.listeners.is_empty()
             };
@@ -484,7 +485,7 @@ impl PaneHub {
     }
 
     pub fn stop(&self) {
-        let mut loops = self.inner.loops.lock().unwrap();
+        let mut loops = self.inner.loops.lock().unwrap_or_else(PoisonError::into_inner);
         for loop_ in loops.values() {
             loop_.stop();
         }

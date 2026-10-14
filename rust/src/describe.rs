@@ -94,16 +94,21 @@ const STOP_WORDS: &[&str] = &[
 static STOP_WORD_SET: LazyLock<HashSet<&'static str>> =
     LazyLock::new(|| STOP_WORDS.iter().copied().collect());
 
+#[expect(clippy::unwrap_used, reason = "a literal pattern, compiled by the describe tests")]
 static FENCED_CODE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s)```.*?```").unwrap());
 
+#[expect(clippy::unwrap_used, reason = "a literal pattern, compiled by the describe tests")]
 static MARKUP_TAG: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"<[^>\n]{{0,{MAX_TAG_CHARS}}}>")).unwrap());
 
+#[expect(clippy::unwrap_used, reason = "a literal pattern, compiled by the describe tests")]
 static LEADING_SLASH_COMMAND: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^/(\w[\w-]*)\s*").unwrap());
 
+#[expect(clippy::unwrap_used, reason = "a literal pattern, compiled by the describe tests")]
 static WEB_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://\S+").unwrap());
 
+#[expect(clippy::unwrap_used, reason = "a literal pattern, compiled by the describe tests")]
 static FILE_PATH: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(&format!(r"[/~][\w./-]{{{MIN_PATH_CHARS},}}")).unwrap());
 

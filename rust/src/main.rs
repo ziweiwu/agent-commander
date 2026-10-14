@@ -1,5 +1,5 @@
 /*
- * Two lint families are allowed crate-wide, each for a stated reason.
+ * Two lint families are expected crate-wide, each for a stated reason.
  *
  * `dead_code`: this is a port, and several modules keep the shape of the
  * TypeScript they replace — `PaneHub::size`, `Poller::active`,
@@ -15,8 +15,14 @@
  * which is what a TypeScript callback parameter becomes in Rust. Naming each
  * one would add six aliases that say nothing the signature does not.
  */
-#![allow(dead_code)]
-#![allow(clippy::type_complexity)]
+#![expect(
+    dead_code,
+    reason = "a port that keeps the shape of the TypeScript it replaces (see above)"
+)]
+#![expect(
+    clippy::type_complexity,
+    reason = "each site is an Arc<dyn Fn(..) -> Pin<Box<dyn Future>>> injection point (see above)"
+)]
 
 //! agent-commander — Rust backend.
 //!

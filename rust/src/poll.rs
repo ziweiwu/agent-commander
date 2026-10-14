@@ -25,7 +25,7 @@
 
 use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use tokio::sync::Notify;
@@ -107,7 +107,7 @@ impl Poller {
     /// a *rejected promise*, which in Rust is a `work` closure that has already
     /// handled its own error. INV-5 lives in the closure, not here.
     pub fn start(&self, first: FirstPass) {
-        let mut chain = self.inner.chain.lock().unwrap();
+        let mut chain = self.inner.chain.lock().unwrap_or_else(PoisonError::into_inner);
         if self.inner.running.load(Ordering::SeqCst) {
             return;
         }
@@ -139,7 +139,7 @@ impl Drop for Poller {
 
 /// True when the chain should still be running under `generation`.
 fn alive(inner: &PollerInner, generation: u64) -> bool {
-    inner.running.load(Ordering::SeqCst) && *inner.chain.lock().unwrap() == generation
+    inner.running.load(Ordering::SeqCst) && *inner.chain.lock().unwrap_or_else(PoisonError::into_inner) == generation
 }
 
 async fn run(inner: Arc<PollerInner>, generation: u64, first: FirstPass) {
@@ -324,6 +324,7 @@ mod tests {
                     // The Rust analogue of the TS's rejected promise: the work
                     // fails and says nothing, exactly as every real caller's
                     // closure does.
+                    #[expect(clippy::let_underscore_must_use, reason = "the work fails and says nothing, as every real caller's closure does")]
                     let _: Result<(), &str> = Err("nope");
                 }
             })

@@ -26,13 +26,12 @@
 //! browser hides those controls; `assert_slash_commandable` is the boundary
 //! that makes it true, because a UI is not one (INV-6).
 
-#![allow(dead_code)]
 
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 
@@ -41,7 +40,7 @@ use crate::options::is_model_alias;
 use crate::sources::{PaneApi, Submit};
 use crate::types::{is_allowed_key, is_destructive_key, now_ms, Agent, AgentStatus, GoalState};
 
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "the port keeps control.ts's re-export of the mode cycle")]
 pub use crate::options::{is_cyclable_mode, MODE_CYCLE};
 
 /// A refusal the caller is expected to render to the user as a 400.
@@ -83,13 +82,18 @@ type Act<T> = Result<T, ControlFailure>;
 
 /* ----------------------------------------------------------------- guards */
 
+/// The agent, or the refusal every guard gives once it has gone.
+fn present(agent: Option<&Agent>) -> Res<&Agent> {
+    agent.ok_or_else(|| ControlError::new("agent is no longer available"))
+}
+
 /// There is an agent, and there is a pane to reach it through.
 ///
 /// Returns the pane id rather than narrowing a type the way TypeScript's
 /// `asserts agent is Controllable` does — Rust has no such assertion, and
 /// every caller immediately wants the pane this proves exists.
 pub fn assert_attachable(agent: Option<&Agent>) -> Res<&str> {
-    let agent = agent.ok_or_else(|| ControlError::new("agent is no longer available"))?;
+    let agent = present(agent)?;
     agent.pane_id.as_deref().ok_or_else(|| {
         ControlError::new(
             agent
@@ -109,7 +113,7 @@ pub fn assert_attachable(agent: Option<&Agent>) -> Res<&str> {
 /// deliberately use [`assert_attachable`] instead; each says why.
 pub fn assert_controllable(agent: Option<&Agent>) -> Res<&str> {
     let pane = assert_attachable(agent)?;
-    let agent = agent.expect("assert_attachable proved this is Some");
+    let agent = present(agent)?;
     if agent.status == AgentStatus::Busy {
         return Err(ControlError::new("agent is busy — wait until it is idle before changing it"));
     }
@@ -135,14 +139,14 @@ pub fn assert_slash_commandable(agent: &Agent) -> Res<()> {
 /// Both guards in the order every typing action wants them, returning the pane.
 fn typing_target(agent: Option<&Agent>) -> Res<&str> {
     let pane = assert_controllable(agent)?;
-    assert_slash_commandable(agent.expect("assert_controllable proved this is Some"))?;
+    assert_slash_commandable(present(agent)?)?;
     Ok(pane)
 }
 
 /// The same for the two actions that stay available mid-run.
 fn reachable_target(agent: Option<&Agent>) -> Res<&str> {
     let pane = assert_attachable(agent)?;
-    assert_slash_commandable(agent.expect("assert_attachable proved this is Some"))?;
+    assert_slash_commandable(present(agent)?)?;
     Ok(pane)
 }
 
@@ -275,7 +279,7 @@ pub async fn set_model(
     if !is_model_alias(alias) {
         return Err(ControlError::new(format!("unknown model: {alias}")).into());
     }
-    let queued = agent.expect("guarded above").status == AgentStatus::Busy;
+    let queued = present(agent)?.status == AgentStatus::Busy;
     deps.paste(pane, &format!("/model {alias}"), Submit::Yes).await.map_err(ControlFailure::Failed)?;
     Ok(ModelResult { queued })
 }
@@ -360,7 +364,7 @@ pub async fn clear_context(
     verify_ms: u64,
 ) -> Act<ClearResult> {
     let pane = typing_target(agent)?;
-    let pid = agent.expect("guarded above").pid;
+    let pid = present(agent)?.pid;
 
     let before = deps.read_session_id(pid).await;
     deps.paste(pane, "/clear", Submit::Yes).await.map_err(ControlFailure::Failed)?;
@@ -573,7 +577,7 @@ pub struct CloseResult {
 /// what makes this work on the machine that needs it most.
 pub async fn close_agent(agent: Option<&Agent>, deps: &dyn ControlDeps) -> Act<CloseResult> {
     let pane = assert_controllable(agent)?;
-    let agent = agent.expect("assert_controllable proved this is Some");
+    let agent = present(agent)?;
 
     if !allows_slash_commands(&agent.agent_kind) {
         let Some(session) = agent.tmux_session.as_deref() else {
@@ -745,7 +749,7 @@ impl WriteBudget {
 
     /// True when this message may proceed.
     pub fn take_at(&self, now: i64) -> bool {
-        let mut state = self.state.lock().expect("write budget poisoned");
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
         let (ref mut tokens, ref mut last) = *state;
         let elapsed = (now - *last).max(0) as f64 / MILLIS_PER_SECOND;
         *tokens = (*tokens + elapsed * WRITE_PER_SECOND).min(WRITE_BURST);
@@ -1650,6 +1654,6 @@ mod tests {
 
     #[test]
     fn inv12_the_two_size_limits_cannot_disagree_about_the_same_paste() {
-        assert!(MAX_FRAME_BYTES > MAX_PASTE, "the frame cap must sit well above the paste cap");
+        const { assert!(MAX_FRAME_BYTES > MAX_PASTE, "the frame cap must sit well above the paste cap") };
     }
 }

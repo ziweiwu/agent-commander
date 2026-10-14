@@ -1,6 +1,6 @@
 # The deterministic gates, on every change rather than only at release.
 #
-# These same four commands already run in `npm-publish.yml`. Running them only
+# These same five commands already run in `npm-publish.yml`. Running them only
 # there meant they fired when a `v*` tag was pushed — that is, at the moment it
 # is most expensive to learn something is broken, with a version number already
 # committed to and npm versions immutable once they land. This workflow moves
@@ -44,6 +44,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # Full history: the clippy ratchet in `npm run lint` holds the lines a
+          # change touches to two extra lints, and finds them from the merge
+          # base with main.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -63,10 +69,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      # `npm test` runs the Rust suite under nextest; `npm run deps` is
+      # cargo-deny, cargo-vet and cargo-machete.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest,cargo-deny,cargo-vet,cargo-machete
 
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+        env:
+          # Run every test rather than stopping at the first failure.
+          NEXTEST_PROFILE: ci
+      - run: npm run deps
       - run: npm run build
 
   floor:
@@ -114,6 +129,41 @@ jobs:
           test -n "$floor" || { echo "no rust-version in rust/Cargo.toml" >&2; exit 1; }
           rustup toolchain install "$floor" --profile minimal
           RUSTUP_TOOLCHAIN="$floor" ./scripts/cargo.sh check --locked --manifest-path rust/Cargo.toml
+
+  # Mutation testing, on the Rust a pull request touches and nothing else: a
+  # mutant no test catches fails the PR. A full pass takes far too long to run
+  # anywhere; `npm run mutants` is the same check against your own branch.
+  mutants:
+    name: cargo-mutants on the PR diff
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: rust
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-mutants,cargo-nextest
+
+      # Relative to rust/, because cargo-mutants matches the diff's paths
+      # against the crate's own.
+      - name: Diff against the base branch
+        run: git diff --relative=rust "origin/${GITHUB_BASE_REF}...HEAD" > "$RUNNER_TEMP/pr.diff"
+      - name: Mutants that no test catches fail the PR
+        run: ./scripts/cargo.sh mutants --dir rust --in-place --no-shuffle --in-diff "$RUNNER_TEMP/pr.diff"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: failure()
+        with:
+          name: mutants.out
+          path: rust/mutants.out
+          retention-days: 14
 
   e2e:
     runs-on: ubuntu-latest

@@ -1,0 +1,3 @@
+# CI sets NEXTEST_PROFILE=ci: run every test rather than stopping at the first failure.
+[profile.ci]
+fail-fast = false

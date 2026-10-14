@@ -1,0 +1,8 @@
+# cargo-mutants: CI runs it on each pull request's diff (`npm run mutants` locally).
+test_tool = "nextest"
+exclude_globs = ["tests/**", "benches/**", "examples/**", "fuzz/**", "**/build.rs"]
+timeout_multiplier = 3.0
+# The wire-contract test reads ../src/shared/wire.ts, outside the crate, so it
+# fails in the copy of rust/ cargo-mutants tests in. It checks `#[cfg(test)]`
+# code that is never mutated, so leaving it out loses nothing.
+additional_cargo_test_args = ["-E", "not test(types::tests::the_checked_in_wire_contract_is_current)"]

@@ -12,7 +12,7 @@
 use crate::control::SendableKey;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 
 use async_trait::async_trait;
 
@@ -787,7 +787,7 @@ struct SourceInner {
 
 impl SourceInner {
     fn list(&self) -> Vec<Agent> {
-        self.agents.lock().unwrap().clone()
+        self.agents.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn notify(&self) {
@@ -795,7 +795,7 @@ impl SourceInner {
         let subs: Vec<_> = self
             .listeners
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .map(|(_, listener)| listener.clone())
             .collect();
@@ -825,7 +825,7 @@ async fn flip_the_blocked_fixture_forever(inner: Arc<SourceInner>) {
     let mut ticker = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
     loop {
         ticker.tick().await;
-        let mut agents = inner.agents.lock().unwrap();
+        let mut agents = inner.agents.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(agent) = agents.iter_mut().find(|a| a.session_id == "mock-waiting") else {
             return;
         };
@@ -853,7 +853,7 @@ impl MockSource {
         self.inner
             .agents
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .find(|a| a.pane_id.as_deref() == Some(pane_id))
             .cloned()
@@ -901,7 +901,7 @@ impl MockSource {
     /// Move the agent to the end of the list under `new_id`, stripped of
     /// everything the old conversation knew. False when there is no such agent.
     fn reopen_under_a_new_id(&self, old_id: &str, new_id: &str) -> bool {
-        let mut agents = self.inner.agents.lock().unwrap();
+        let mut agents = self.inner.agents.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(at) = agents.iter().position(|a| a.session_id == old_id) else {
             return false;
         };
@@ -964,7 +964,7 @@ impl AgentSource for MockSource {
         self.inner
             .agents
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .find(|a| a.session_id == session_id)
             .cloned()
@@ -975,16 +975,16 @@ impl AgentSource for MockSource {
         self.inner
             .listeners
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .push((id, Arc::from(listener)));
         let inner = self.inner.clone();
         Box::new(move || {
-            inner.listeners.lock().unwrap().retain(|(i, _)| *i != id);
+            inner.listeners.lock().unwrap_or_else(PoisonError::into_inner).retain(|(i, _)| *i != id);
         })
     }
 
     fn enrich(&self, session_id: &str, patch: AgentPatch) {
-        let mut agents = self.inner.agents.lock().unwrap();
+        let mut agents = self.inner.agents.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(agent) = agents.iter_mut().find(|a| a.session_id == session_id) {
             patch.apply(agent);
         }
@@ -999,12 +999,12 @@ impl AgentSource for MockSource {
             return Ok(());
         }
         let handle = tokio::spawn(flip_the_blocked_fixture_forever(self.inner.clone()));
-        *self.timer.lock().unwrap() = Some(handle);
+        *self.timer.lock().unwrap_or_else(PoisonError::into_inner) = Some(handle);
         Ok(())
     }
 
     fn stop(&self) {
-        if let Some(h) = self.timer.lock().unwrap().take() {
+        if let Some(h) = self.timer.lock().unwrap_or_else(PoisonError::into_inner).take() {
             h.abort();
         }
     }
@@ -1081,7 +1081,8 @@ impl LimitsInner {
     /// so the countdown reads sensibly however long the mock server has been up.
     fn emit(&self) {
         let steps = limit_steps();
-        let base = steps[*self.step.lock().unwrap()].clone();
+        let step = *self.step.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(base) = steps.get(step).cloned() else { return };
         let now = now_ms();
         let next = RateLimits {
             five_hour: base.five_hour.map(|w| UsageWindow {
@@ -1094,11 +1095,11 @@ impl LimitsInner {
             }),
             at: now,
         };
-        *self.limits.lock().unwrap() = Some(next.clone());
+        *self.limits.lock().unwrap_or_else(PoisonError::into_inner) = Some(next.clone());
         let subs: Vec<_> = self
             .listeners
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .iter()
             .map(|(_, listener)| listener.clone())
             .collect();
@@ -1126,7 +1127,7 @@ impl MockLimits {
 
 impl LimitsApi for MockLimits {
     fn current(&self) -> Option<RateLimits> {
-        self.inner.limits.lock().unwrap().clone()
+        self.inner.limits.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn on_change(&self, listener: Box<dyn Fn(Option<RateLimits>) + Send + Sync>) -> Unsubscribe {
@@ -1134,11 +1135,11 @@ impl LimitsApi for MockLimits {
         self.inner
             .listeners
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .push((id, Arc::from(listener)));
         let inner = self.inner.clone();
         Box::new(move || {
-            inner.listeners.lock().unwrap().retain(|(i, _)| *i != id);
+            inner.listeners.lock().unwrap_or_else(PoisonError::into_inner).retain(|(i, _)| *i != id);
         })
     }
 
@@ -1161,20 +1162,20 @@ impl LimitsApi for MockLimits {
             loop {
                 ticker.tick().await;
                 {
-                    let mut step = inner.step.lock().unwrap();
+                    let mut step = inner.step.lock().unwrap_or_else(PoisonError::into_inner);
                     *step = (*step + 1) % len;
                 }
                 inner.emit();
             }
         });
-        *self.timer.lock().unwrap() = Some(handle);
+        *self.timer.lock().unwrap_or_else(PoisonError::into_inner) = Some(handle);
     }
 
     fn stop(&self) {
-        if let Some(h) = self.timer.lock().unwrap().take() {
+        if let Some(h) = self.timer.lock().unwrap_or_else(PoisonError::into_inner).take() {
             h.abort();
         }
-        self.inner.listeners.lock().unwrap().clear();
+        self.inner.listeners.lock().unwrap_or_else(PoisonError::into_inner).clear();
     }
 }
 
@@ -1287,7 +1288,7 @@ impl PaneApi for MockPanes {
                     .to_string(),
                 "   3. No, and tell Claude what to do differently (esc)".to_string(),
             ]),
-            SET_PANE => lines.extend(picker_frame(&PICKER.lock().unwrap().settle().clone())),
+            SET_PANE => lines.extend(picker_frame(&PICKER.lock().unwrap_or_else(PoisonError::into_inner).settle().clone())),
             // A shell prompt, not a TUI: the terminal fixture is the one pane
             // here with no agent drawing into it.
             TERMINAL_PANE => lines.extend([
@@ -1367,7 +1368,7 @@ impl PaneApi for MockPanes {
         }
         ECHOES
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .entry(session_id.clone())
             .or_default()
             .push(Echo {
@@ -1379,7 +1380,7 @@ impl PaneApi for MockPanes {
 
     async fn key(&self, pane_id: &str, key: &SendableKey) -> anyhow::Result<()> {
         if pane_id == SET_PANE {
-            PICKER.lock().unwrap().press(key.as_str());
+            PICKER.lock().unwrap_or_else(PoisonError::into_inner).press(key.as_str());
         }
         Ok(())
     }
@@ -1465,7 +1466,7 @@ impl MockTail {
     fn echoes_since_last_read(&mut self) -> TailRead {
         let log = ECHOES
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .get(&self.session_id)
             .cloned()
             .unwrap_or_default();
@@ -1525,7 +1526,7 @@ impl MockTail {
     /// prompt that happens to resemble one. Gone once the picker has been
     /// submitted, the way a `tool_result` closes the real call.
     fn question_set() -> Option<PendingPrompt> {
-        if PICKER.lock().unwrap().settle().submitted {
+        if PICKER.lock().unwrap_or_else(PoisonError::into_inner).settle().submitted {
             return None;
         }
         let input = serde_json::json!({ "questions": [
@@ -1707,6 +1708,255 @@ pub fn mock_deps(fleet: Fleet) -> (Deps, Arc<MockSource>) {
         }),
     };
     (deps, source)
+}
+
+/* -------------------------------------------------------------------------
+ * The fixture fleet's delegation trees (INV-13).
+ *
+ * Deliberately awkward, for the same reason the fleet itself is: a depth-3
+ * chain, a delegate the user stopped, one node in each of the three states, an
+ * orphan whose parent is not on disk, a whole family that has gone silent
+ * together, an agent that has delegated nothing, and a CLI that cannot say
+ * either way. Every one of those is a case the view has to render correctly and
+ * none of them is the happy path.
+ * ---------------------------------------------------------------------- */
+
+const MINUTE_MS: i64 = 60_000;
+const STOPPED_AUDIT_AGE_MS: i64 = 18 * MINUTE_MS;
+const UNCLAIMED_TRIAGE_AGE_MS: i64 = 14 * MINUTE_MS;
+const FINISHED_RESEARCH_AGE_MS: i64 = 11 * MINUTE_MS;
+const FINISHED_CROSS_CHECK_AGE_MS: i64 = 13 * MINUTE_MS;
+const ORPHANED_SWEEP_AGE_MS: i64 = 22 * MINUTE_MS;
+const SILENT_MIGRATION_AGE_MS: i64 = 16 * MINUTE_MS;
+/// What a fixture delegate reports having done. Any plausible pair works; what
+/// matters is that most nodes carry one and one deliberately does not.
+const FIXTURE_CALLS: u32 = 12;
+const FIXTURE_WORKED_MS: i64 = 4 * MINUTE_MS;
+const SILENT_CALLERS_AGE_MS: i64 = 19 * MINUTE_MS;
+
+/// The defaults every fixture node starts from, so each one below states only
+/// what makes it interesting — the same shape as `fixtureNodes` in `mock.ts`.
+fn node(agent_id: &str, description: &str, wrote_ms_ago: i64, now: i64) -> SubagentNode {
+    SubagentNode {
+        agent_id: agent_id.into(),
+        agent_type: "general-purpose".into(),
+        description: description.into(),
+        depth: 1,
+        parent_agent_id: None,
+        last_write_at: now.saturating_sub(wrote_ms_ago),
+        bytes: 40_000,
+        // Effort is what separates seven identical `quiet` rows from each
+        // other, so the fixtures carry it. One node below deliberately does
+        // not, because a transcript this app cannot read has to be on screen
+        // too (INV-11).
+        calls: Some(FIXTURE_CALLS),
+        worked_ms: Some(FIXTURE_WORKED_MS),
+        state: SubagentState::Quiet,
+        state_inferred: None,
+        stopped_by_user: None,
+        reparented: None,
+        children: Vec::new(),
+    }
+}
+
+/// One agent's delegates, or the honest absence of an answer.
+pub fn mock_tree(agent: &Agent, now: i64) -> AgentTree {
+    // A CLI that keeps no transcript cannot be said to have delegated nothing:
+    // the evidence lives in files it does not write (INV-13).
+    if !has_transcripts(&agent.agent_kind) {
+        return AgentTree {
+            session_id: agent.session_id.clone(),
+            children: Vec::new(),
+            unknown: Some(true),
+        };
+    }
+    AgentTree {
+        session_id: agent.session_id.clone(),
+        children: match agent.session_id.as_str() {
+            "mock-busy" => vec![
+                stopped_ux_audit(now),
+                running_qa_sweep(now),
+                wrapping_triage_brief(now),
+            ],
+            "mock-busy-2" => vec![kissa_listening_list(now), orphaned_vault_sweep(now)],
+            "mock-quiet-family" => silent_migration(now),
+            "mock-long-name" => vec![review_of_the_diff(now)],
+            _ => Vec::new(),
+        },
+        unknown: None,
+    }
+}
+
+/// The user stopped it: the one delegate here with evidence of an ending.
+fn stopped_ux_audit(now: i64) -> SubagentNode {
+    SubagentNode {
+        agent_type: "ux-bar-raiser".into(),
+        bytes: 412_000,
+        state: SubagentState::Done,
+        stopped_by_user: Some(true),
+        ..node(
+            "a58ddcc3c4b6b8989",
+            "UX audit of the terminal system monitor",
+            STOPPED_AUDIT_AGE_MS,
+            now,
+        )
+    }
+}
+
+/// A sweep and the check it handed down, both `active` only by inference.
+///
+/// Two of them, at two depths, so the dashed edge and the word the view marks a
+/// guess with are on screen somewhere other than a root.
+fn running_qa_sweep(now: i64) -> SubagentNode {
+    let contrast_check = SubagentNode {
+        depth: 2,
+        parent_agent_id: Some("ac4c01953dfb1440f".into()),
+        bytes: 71_000,
+        state: SubagentState::Active,
+        state_inferred: Some(true),
+        ..node(
+            "ad49ce3a43efeaa2b",
+            "Check contrast at 20 columns in both themes",
+            9_000,
+            now,
+        )
+    };
+    SubagentNode {
+        agent_type: "qa-bar-raiser".into(),
+        bytes: 188_000,
+        state: SubagentState::Active,
+        state_inferred: Some(true),
+        children: vec![contrast_check],
+        ..node(
+            "ac4c01953dfb1440f",
+            "Adversarial QA sweep across every terminal size",
+            4_000,
+            now,
+        )
+    }
+}
+
+/// A brief long enough to need wrapping — the widest thing in this view, and
+/// widths break in the awkward case rather than the tidy one.
+fn wrapping_triage_brief(now: i64) -> SubagentNode {
+    SubagentNode {
+        agent_type: "qa-triage".into(),
+        bytes: 52_000,
+        // The unreadable one: no effort at all, so the row renders without it
+        // rather than claiming it did nothing.
+        calls: None,
+        worked_ms: None,
+        ..node(
+            "a6c07bfd53044168f",
+            "Independent second pass over the QA report, verifying every \
+             claimed finding against the source before it is believed",
+            UNCLAIMED_TRIAGE_AGE_MS,
+            now,
+        )
+    }
+}
+
+/// A depth-3 chain: a delegate whose delegate delegated again.
+fn kissa_listening_list(now: i64) -> SubagentNode {
+    let opening_hours = SubagentNode {
+        depth: 3,
+        parent_agent_id: Some("a69275682c401ef83".into()),
+        bytes: 96_000,
+        state: SubagentState::Done,
+        ..node(
+            "ab481603df0bb2d1d",
+            "Cross-check opening hours against the venues",
+            FINISHED_CROSS_CHECK_AGE_MS,
+            now,
+        )
+    };
+    let regional_research = SubagentNode {
+        depth: 2,
+        parent_agent_id: Some("a9b1181eab51efaf0".into()),
+        bytes: 244_000,
+        state: SubagentState::Done,
+        children: vec![opening_hours],
+        ..node(
+            "a69275682c401ef83",
+            "Research Benelux, Italy and Spain bars",
+            FINISHED_RESEARCH_AGE_MS,
+            now,
+        )
+    };
+    SubagentNode {
+        agent_type: "find-music".into(),
+        bytes: 301_000,
+        state: SubagentState::Active,
+        state_inferred: Some(true),
+        children: vec![regional_research],
+        ..node(
+            "a9b1181eab51efaf0",
+            "Kissa listening list for Tokyo and Yokohama",
+            2_000,
+            now,
+        )
+    }
+}
+
+/// Its parent is not on disk. Raised to the top and marked, rather than dropped
+/// along with anything below it — see `assemble` in `subagents.rs` and INV-13.
+fn orphaned_vault_sweep(now: i64) -> SubagentNode {
+    SubagentNode {
+        agent_type: "Explore".into(),
+        depth: 2,
+        parent_agent_id: Some("a-parent-that-is-gone".into()),
+        bytes: 31_000,
+        reparented: Some(true),
+        ..node(
+            "ab21ff3003f5f193c",
+            "Sweep the vault for existing kissa notes",
+            ORPHANED_SWEEP_AGE_MS,
+            now,
+        )
+    }
+}
+
+/// Two delegates that have both stopped writing, under a parent that has too.
+///
+/// Neither is `done` — nothing recorded an ending for either — so the honest
+/// reading of the whole family is that nobody has checked on it, which is the
+/// question INV-15 puts on the card.
+fn silent_migration(now: i64) -> Vec<SubagentNode> {
+    vec![
+        SubagentNode {
+            bytes: 87_000,
+            ..node(
+                "a3f81c0b7d2e45a19",
+                "Rewrite migration 0042 against the new schema",
+                SILENT_MIGRATION_AGE_MS,
+                now,
+            )
+        },
+        SubagentNode {
+            agent_type: "Explore".into(),
+            bytes: 24_000,
+            ..node(
+                "a7d20e91fc8b3a604",
+                "Find every caller of the old billing columns",
+                SILENT_CALLERS_AGE_MS,
+                now,
+            )
+        },
+    ]
+}
+
+/// The sole delegate of the agent whose name is too long for its card.
+fn review_of_the_diff(now: i64) -> SubagentNode {
+    SubagentNode {
+        agent_type: "code-reviewer".into(),
+        bytes: 118_000,
+        ..node(
+            "af0e1cdf1ec262236",
+            "Review the diff for correctness",
+            8_000,
+            now,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -2275,254 +2525,5 @@ mod tests {
         // A patch for an unknown session is a no-op, not a new agent.
         s.enrich("ghost", AgentPatch::default());
         assert_eq!(s.list().len(), fixtures().len());
-    }
-}
-
-/* -------------------------------------------------------------------------
- * The fixture fleet's delegation trees (INV-13).
- *
- * Deliberately awkward, for the same reason the fleet itself is: a depth-3
- * chain, a delegate the user stopped, one node in each of the three states, an
- * orphan whose parent is not on disk, a whole family that has gone silent
- * together, an agent that has delegated nothing, and a CLI that cannot say
- * either way. Every one of those is a case the view has to render correctly and
- * none of them is the happy path.
- * ---------------------------------------------------------------------- */
-
-const MINUTE_MS: i64 = 60_000;
-const STOPPED_AUDIT_AGE_MS: i64 = 18 * MINUTE_MS;
-const UNCLAIMED_TRIAGE_AGE_MS: i64 = 14 * MINUTE_MS;
-const FINISHED_RESEARCH_AGE_MS: i64 = 11 * MINUTE_MS;
-const FINISHED_CROSS_CHECK_AGE_MS: i64 = 13 * MINUTE_MS;
-const ORPHANED_SWEEP_AGE_MS: i64 = 22 * MINUTE_MS;
-const SILENT_MIGRATION_AGE_MS: i64 = 16 * MINUTE_MS;
-/// What a fixture delegate reports having done. Any plausible pair works; what
-/// matters is that most nodes carry one and one deliberately does not.
-const FIXTURE_CALLS: u32 = 12;
-const FIXTURE_WORKED_MS: i64 = 4 * MINUTE_MS;
-const SILENT_CALLERS_AGE_MS: i64 = 19 * MINUTE_MS;
-
-/// The defaults every fixture node starts from, so each one below states only
-/// what makes it interesting — the same shape as `fixtureNodes` in `mock.ts`.
-fn node(agent_id: &str, description: &str, wrote_ms_ago: i64, now: i64) -> SubagentNode {
-    SubagentNode {
-        agent_id: agent_id.into(),
-        agent_type: "general-purpose".into(),
-        description: description.into(),
-        depth: 1,
-        parent_agent_id: None,
-        last_write_at: now - wrote_ms_ago,
-        bytes: 40_000,
-        // Effort is what separates seven identical `quiet` rows from each
-        // other, so the fixtures carry it. One node below deliberately does
-        // not, because a transcript this app cannot read has to be on screen
-        // too (INV-11).
-        calls: Some(FIXTURE_CALLS),
-        worked_ms: Some(FIXTURE_WORKED_MS),
-        state: SubagentState::Quiet,
-        state_inferred: None,
-        stopped_by_user: None,
-        reparented: None,
-        children: Vec::new(),
-    }
-}
-
-/// One agent's delegates, or the honest absence of an answer.
-pub fn mock_tree(agent: &Agent, now: i64) -> AgentTree {
-    // A CLI that keeps no transcript cannot be said to have delegated nothing:
-    // the evidence lives in files it does not write (INV-13).
-    if !has_transcripts(&agent.agent_kind) {
-        return AgentTree {
-            session_id: agent.session_id.clone(),
-            children: Vec::new(),
-            unknown: Some(true),
-        };
-    }
-    AgentTree {
-        session_id: agent.session_id.clone(),
-        children: match agent.session_id.as_str() {
-            "mock-busy" => vec![
-                stopped_ux_audit(now),
-                running_qa_sweep(now),
-                wrapping_triage_brief(now),
-            ],
-            "mock-busy-2" => vec![kissa_listening_list(now), orphaned_vault_sweep(now)],
-            "mock-quiet-family" => silent_migration(now),
-            "mock-long-name" => vec![review_of_the_diff(now)],
-            _ => Vec::new(),
-        },
-        unknown: None,
-    }
-}
-
-/// The user stopped it: the one delegate here with evidence of an ending.
-fn stopped_ux_audit(now: i64) -> SubagentNode {
-    SubagentNode {
-        agent_type: "ux-bar-raiser".into(),
-        bytes: 412_000,
-        state: SubagentState::Done,
-        stopped_by_user: Some(true),
-        ..node(
-            "a58ddcc3c4b6b8989",
-            "UX audit of the terminal system monitor",
-            STOPPED_AUDIT_AGE_MS,
-            now,
-        )
-    }
-}
-
-/// A sweep and the check it handed down, both `active` only by inference.
-///
-/// Two of them, at two depths, so the dashed edge and the word the view marks a
-/// guess with are on screen somewhere other than a root.
-fn running_qa_sweep(now: i64) -> SubagentNode {
-    let contrast_check = SubagentNode {
-        depth: 2,
-        parent_agent_id: Some("ac4c01953dfb1440f".into()),
-        bytes: 71_000,
-        state: SubagentState::Active,
-        state_inferred: Some(true),
-        ..node(
-            "ad49ce3a43efeaa2b",
-            "Check contrast at 20 columns in both themes",
-            9_000,
-            now,
-        )
-    };
-    SubagentNode {
-        agent_type: "qa-bar-raiser".into(),
-        bytes: 188_000,
-        state: SubagentState::Active,
-        state_inferred: Some(true),
-        children: vec![contrast_check],
-        ..node(
-            "ac4c01953dfb1440f",
-            "Adversarial QA sweep across every terminal size",
-            4_000,
-            now,
-        )
-    }
-}
-
-/// A brief long enough to need wrapping — the widest thing in this view, and
-/// widths break in the awkward case rather than the tidy one.
-fn wrapping_triage_brief(now: i64) -> SubagentNode {
-    SubagentNode {
-        agent_type: "qa-triage".into(),
-        bytes: 52_000,
-        // The unreadable one: no effort at all, so the row renders without it
-        // rather than claiming it did nothing.
-        calls: None,
-        worked_ms: None,
-        ..node(
-            "a6c07bfd53044168f",
-            "Independent second pass over the QA report, verifying every \
-             claimed finding against the source before it is believed",
-            UNCLAIMED_TRIAGE_AGE_MS,
-            now,
-        )
-    }
-}
-
-/// A depth-3 chain: a delegate whose delegate delegated again.
-fn kissa_listening_list(now: i64) -> SubagentNode {
-    let opening_hours = SubagentNode {
-        depth: 3,
-        parent_agent_id: Some("a69275682c401ef83".into()),
-        bytes: 96_000,
-        state: SubagentState::Done,
-        ..node(
-            "ab481603df0bb2d1d",
-            "Cross-check opening hours against the venues",
-            FINISHED_CROSS_CHECK_AGE_MS,
-            now,
-        )
-    };
-    let regional_research = SubagentNode {
-        depth: 2,
-        parent_agent_id: Some("a9b1181eab51efaf0".into()),
-        bytes: 244_000,
-        state: SubagentState::Done,
-        children: vec![opening_hours],
-        ..node(
-            "a69275682c401ef83",
-            "Research Benelux, Italy and Spain bars",
-            FINISHED_RESEARCH_AGE_MS,
-            now,
-        )
-    };
-    SubagentNode {
-        agent_type: "find-music".into(),
-        bytes: 301_000,
-        state: SubagentState::Active,
-        state_inferred: Some(true),
-        children: vec![regional_research],
-        ..node(
-            "a9b1181eab51efaf0",
-            "Kissa listening list for Tokyo and Yokohama",
-            2_000,
-            now,
-        )
-    }
-}
-
-/// Its parent is not on disk. Raised to the top and marked, rather than dropped
-/// along with anything below it — see `assemble` in `subagents.rs` and INV-13.
-fn orphaned_vault_sweep(now: i64) -> SubagentNode {
-    SubagentNode {
-        agent_type: "Explore".into(),
-        depth: 2,
-        parent_agent_id: Some("a-parent-that-is-gone".into()),
-        bytes: 31_000,
-        reparented: Some(true),
-        ..node(
-            "ab21ff3003f5f193c",
-            "Sweep the vault for existing kissa notes",
-            ORPHANED_SWEEP_AGE_MS,
-            now,
-        )
-    }
-}
-
-/// Two delegates that have both stopped writing, under a parent that has too.
-///
-/// Neither is `done` — nothing recorded an ending for either — so the honest
-/// reading of the whole family is that nobody has checked on it, which is the
-/// question INV-15 puts on the card.
-fn silent_migration(now: i64) -> Vec<SubagentNode> {
-    vec![
-        SubagentNode {
-            bytes: 87_000,
-            ..node(
-                "a3f81c0b7d2e45a19",
-                "Rewrite migration 0042 against the new schema",
-                SILENT_MIGRATION_AGE_MS,
-                now,
-            )
-        },
-        SubagentNode {
-            agent_type: "Explore".into(),
-            bytes: 24_000,
-            ..node(
-                "a7d20e91fc8b3a604",
-                "Find every caller of the old billing columns",
-                SILENT_CALLERS_AGE_MS,
-                now,
-            )
-        },
-    ]
-}
-
-/// The sole delegate of the agent whose name is too long for its card.
-fn review_of_the_diff(now: i64) -> SubagentNode {
-    SubagentNode {
-        agent_type: "code-reviewer".into(),
-        bytes: 118_000,
-        ..node(
-            "af0e1cdf1ec262236",
-            "Review the diff for correctness",
-            8_000,
-            now,
-        )
     }
 }

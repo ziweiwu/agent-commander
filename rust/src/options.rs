@@ -11,7 +11,6 @@
 //! so `spawn` can validate without pulling `control` in — the same separation
 //! `options.ts` exists for.
 
-#![allow(dead_code)]
 
 use std::path::{Component, Path, PathBuf};
 
@@ -25,7 +24,7 @@ use std::path::{Component, Path, PathBuf};
 /// What lives here is the *checking* — the part only the server does, and the
 /// only part that is load-bearing (INV-7: "model and permission mode are
 /// checked against the fixed allow-lists", not "the UI only offers good ones").
-#[allow(unused_imports)]
+#[expect(unused_imports, reason = "the port keeps options.ts's re-export of the allow-lists")]
 pub use crate::types::{
     is_cyclable_mode, is_model_alias, MODEL_ALIASES, MODE_CYCLE, SPAWN_MODES,
 };

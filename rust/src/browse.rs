@@ -291,6 +291,7 @@ mod tests {
         .unwrap();
         // A sibling of the root that merely shares its textual prefix.
         let sibling = PathBuf::from(format!("{}-evil", path.display()));
+        #[expect(clippy::let_underscore_must_use, reason = "the sibling is optional: the test that needs it checks it exists")]
         let _ = fs::create_dir(&sibling);
 
         Root { _dir: dir, path, outside }
@@ -394,6 +395,7 @@ mod tests {
             let err = resolve_inside_root(Some(&sibling), &r.path).await.unwrap_err();
             assert!(err.to_string().contains("outside"), "{err}");
         }
+        #[expect(clippy::let_underscore_must_use, reason = "best-effort cleanup of a directory outside the temp root")]
         let _ = fs::remove_dir_all(&sibling);
     }
 

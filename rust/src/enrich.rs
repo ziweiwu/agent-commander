@@ -8,7 +8,6 @@
 //!
 //! INV-4: this runs on a slow tick and each read is an incremental byte-offset
 //! tail, so the steady-state cost is a few hundred bytes per agent per cycle.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -80,6 +79,7 @@ impl FleetEnricher {
 
     /// Read context-window usage and cost for every Claude agent from here.
     pub fn read_usage_from(&self, reader: Arc<crate::usage::UsageReader>) {
+        #[expect(clippy::let_underscore_must_use, reason = "set once at startup; a repeat call keeps the reader already set")]
         let _ = self.usage.set(reader);
     }
 
@@ -89,6 +89,7 @@ impl FleetEnricher {
     /// than a timer of its own: the set of live sessions is exactly what a
     /// tick holds, and a second loop would be a second thing to get wrong.
     pub fn clear_pictures_in(&self, store: Arc<crate::pictures::PictureStore>) {
+        #[expect(clippy::let_underscore_must_use, reason = "set once at startup; a repeat call keeps the store already set")]
         let _ = self.pictures.set(store);
     }
 
@@ -201,7 +202,7 @@ impl FleetEnricher {
                 let Some(tail) = (self.tail_for)(agent) else { continue };
                 tails.insert(agent.session_id.clone(), tail);
             }
-            let tail = tails.get_mut(&agent.session_id).expect("inserted above");
+            let Some(tail) = tails.get_mut(&agent.session_id) else { continue };
             // INV-5: one unreadable transcript must not stall the other agents.
             let Ok(read) = tail.read().await else { continue };
             let mut card = card_fields(read.patch);

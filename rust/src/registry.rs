@@ -26,7 +26,7 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 
@@ -59,7 +59,6 @@ pub fn sessions_dir() -> PathBuf {
 /// module list and this is the module that already owns the fleet fan-out;
 /// `limits.rs` borrows it.
 pub struct Listeners<T> {
-    #[allow(clippy::type_complexity)]
     fns: Arc<Mutex<Vec<(u64, Arc<dyn Fn(T) + Send + Sync>)>>>,
     next: AtomicU64,
 }
@@ -71,10 +70,10 @@ impl<T: Clone + Send + 'static> Listeners<T> {
 
     pub fn add(&self, listener: Box<dyn Fn(T) + Send + Sync>) -> Unsubscribe {
         let id = self.next.fetch_add(1, Ordering::Relaxed);
-        self.fns.lock().unwrap().push((id, Arc::from(listener)));
+        self.fns.lock().unwrap_or_else(PoisonError::into_inner).push((id, Arc::from(listener)));
         let fns = Arc::clone(&self.fns);
         Box::new(move || {
-            fns.lock().unwrap().retain(|(subscription, _)| *subscription != id);
+            fns.lock().unwrap_or_else(PoisonError::into_inner).retain(|(subscription, _)| *subscription != id);
         })
     }
 
@@ -84,14 +83,14 @@ impl<T: Clone + Send + 'static> Listeners<T> {
     /// deadlock on the mutex.
     pub fn emit(&self, value: &T) {
         let subscribed: Vec<_> =
-            self.fns.lock().unwrap().iter().map(|(_, listener)| Arc::clone(listener)).collect();
+            self.fns.lock().unwrap_or_else(PoisonError::into_inner).iter().map(|(_, listener)| Arc::clone(listener)).collect();
         for listener in subscribed {
             listener(value.clone());
         }
     }
 
     pub fn clear(&self) {
-        self.fns.lock().unwrap().clear();
+        self.fns.lock().unwrap_or_else(PoisonError::into_inner).clear();
     }
 }
 
@@ -159,8 +158,11 @@ fn is_alive(pid: i64) -> bool {
     if pid <= 0 || pid > i64::from(i32::MAX) {
         return false;
     }
-    // SAFETY: `kill` with signal 0 has no effect beyond the errno it sets.
-    if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+    #[expect(unsafe_code, reason = "libc::kill is FFI; signal 0 is the only liveness probe POSIX offers")]
+    // SAFETY: `kill` with signal 0 has no effect beyond the errno it sets, and
+    // the pid was range-checked into a `pid_t` above.
+    let status = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if status == 0 {
         return true;
     }
     std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -446,7 +448,7 @@ impl Drop for InFlightGuard<'_> {
 
 impl Inner {
     fn list(&self) -> Vec<Agent> {
-        let agents = self.agents.lock().unwrap();
+        let agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
         let snapshot: Vec<Agent> = agents.values().cloned().collect();
         drop(agents);
         sort_agents(&snapshot)
@@ -490,9 +492,9 @@ impl Inner {
     /// The TS got this for free from the event loop; here it has to be asked
     /// for.
     fn absorb(&self, found: Vec<Agent>) -> PassOutcome {
-        let mut agents = self.agents.lock().unwrap();
-        let mut known = self.known.lock().unwrap();
-        let mut asked = self.asked.lock().unwrap();
+        let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut known = self.known.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut asked = self.asked.lock().unwrap_or_else(PoisonError::into_inner);
         let mut next: HashMap<String, Agent> = HashMap::with_capacity(found.len());
         let on_disk: HashSet<String> =
             found.iter().map(|agent| agent.session_id.clone()).collect();
@@ -560,7 +562,7 @@ impl Inner {
         // than dropping the filter — losing the authority must not silently
         // resurrect ghosts, and must not empty the fleet either.
         if known.is_some() {
-            *self.known.lock().unwrap() = known;
+            *self.known.lock().unwrap_or_else(PoisonError::into_inner) = known;
             self.refresh().await;
         }
     }
@@ -722,7 +724,7 @@ pub struct LiveSource {
 
 impl LiveSource {
     /// The shipped configuration.
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self, reason = "the factory hands out the trait object the wiring takes")]
     pub fn new() -> Arc<dyn AgentSource> {
         Self::shipped(None)
     }
@@ -780,12 +782,13 @@ impl LiveSource {
         let mut watcher =
             notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
                 if event.is_ok() {
+                    #[expect(clippy::let_underscore_must_use, reason = "an Err means the watch loop has ended and nothing is listening")]
                     let _ = events.send(());
                 }
             })
             .ok()?;
         watcher.watch(&self.inner.dir, RecursiveMode::NonRecursive).ok()?;
-        *self.inner.watcher.lock().unwrap() = Some(watcher);
+        *self.inner.watcher.lock().unwrap_or_else(PoisonError::into_inner) = Some(watcher);
 
         let inner = Arc::clone(&self.inner);
         Some(tokio::spawn(async move {
@@ -837,7 +840,7 @@ impl AgentSource for LiveSource {
     }
 
     fn get(&self, session_id: &str) -> Option<Agent> {
-        self.inner.agents.lock().unwrap().get(session_id).cloned()
+        self.inner.agents.lock().unwrap_or_else(PoisonError::into_inner).get(session_id).cloned()
     }
 
     fn on_change(&self, listener: Box<dyn Fn(Vec<Agent>) + Send + Sync>) -> Unsubscribe {
@@ -846,7 +849,7 @@ impl AgentSource for LiveSource {
 
     /// Merge transcript-derived detail onto an agent without a full refresh.
     fn enrich(&self, session_id: &str, patch: AgentPatch) {
-        let mut agents = self.inner.agents.lock().unwrap();
+        let mut agents = self.inner.agents.lock().unwrap_or_else(PoisonError::into_inner);
         // Silently ignore an unknown session: the tailer can outlive the agent
         // by one tick, and that is not worth an error path.
         if let Some(agent) = agents.get_mut(session_id) {
@@ -872,7 +875,7 @@ impl AgentSource for LiveSource {
             tokio::spawn(async move { inner.reconcile().await });
         }
 
-        let mut tasks = self.inner.tasks.lock().unwrap();
+        let mut tasks = self.inner.tasks.lock().unwrap_or_else(PoisonError::into_inner);
         tasks.extend(self.watch_the_sessions_directory());
         tasks.push(self.spawn_the_cheap_tick());
         tasks.push(self.spawn_the_expensive_reconcile());
@@ -883,10 +886,10 @@ impl AgentSource for LiveSource {
         // Set before the tasks are aborted, so a refresh already in flight
         // cannot spawn a `claude agents --json` on the way out.
         self.inner.stopped.store(true, Ordering::SeqCst);
-        for t in self.inner.tasks.lock().unwrap().drain(..) {
+        for t in self.inner.tasks.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
             t.abort();
         }
-        *self.inner.watcher.lock().unwrap() = None;
+        *self.inner.watcher.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.inner.listeners.clear();
     }
 }

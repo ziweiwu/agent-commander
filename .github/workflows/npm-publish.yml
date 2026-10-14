@@ -69,11 +69,15 @@ jobs:
   # that has nothing to do with the release.
   # ---------------------------------------------------------------------------
   gates:
-    name: typecheck, lint, test, build
+    name: typecheck, lint, test, deps, build
     needs: guard
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          # The clippy ratchet in `npm run lint` needs the merge base with main.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -82,9 +86,9 @@ jobs:
 
       - run: npm ci
 
-      # `npm run lint` shells out to `cargo clippy` and `npm test` to
-      # `cargo test`, both via `scripts/cargo.sh`. Without a toolchain here they
-      # do not fail an assertion — they die with `cargo: command not found`,
+      # `npm run lint` shells out to the clippy ratchet and `npm test` to
+      # `cargo nextest`, both via `scripts/cargo.sh`. Without a toolchain here
+      # they do not fail an assertion — they die with `cargo: command not found`,
       # which is exactly how this workflow was broken before the port landed.
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -92,10 +96,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest,cargo-deny,cargo-vet,cargo-machete
 
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
+        env:
+          NEXTEST_PROFILE: ci
+      - run: npm run deps
       - run: npm run build
 
   # ---------------------------------------------------------------------------
@@ -179,12 +189,23 @@ jobs:
           # the key they would fight over one cache entry.
           key: ${{ matrix.target }}
 
+      # cargo-auditable embeds the dependency list in the binary, so
+      # `cargo audit bin` can check a shipped copy against RustSec later.
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-auditable,cargo-audit
+
       # `--locked` because a release must build the dependency versions that
       # were tested, not whatever resolves on the day. `scripts/cargo.sh`
       # rather than bare `cargo` for the reason AGENTS.md gives: every other
       # path into the toolchain in this repo goes through it.
-      - name: cargo build --release --target ${{ matrix.target }}
-        run: ./scripts/cargo.sh build --release --locked --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+      - name: cargo auditable build --release --target ${{ matrix.target }}
+        run: ./scripts/cargo.sh auditable build --release --locked --target ${{ matrix.target }} --manifest-path rust/Cargo.toml
+
+      # Proves the list is embedded; it reads the binary, so it works for the
+      # one target this runner cannot execute too.
+      - name: the built binary carries its dependency list
+        run: ./scripts/cargo.sh audit bin rust/target/${{ matrix.target }}/release/agent-commander
 
       - name: the built binary starts
         if: matrix.smoke

@@ -30,7 +30,7 @@
 //! that a second time rather than trusting it.
 
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::types::{Agent, AgentStatus};
 
@@ -139,7 +139,7 @@ impl Notifier {
             .filter(|a| a.status == AgentStatus::Waiting && a.status_inferred != Some(true))
             .map(|a| a.session_id.clone())
             .collect();
-        let before = self.seen.lock().unwrap().replace(blocked.clone())?;
+        let before = self.seen.lock().unwrap_or_else(PoisonError::into_inner).replace(blocked.clone())?;
         let crossed = agents
             .iter()
             .filter(|a| blocked.contains(&a.session_id) && !before.contains(&a.session_id))
@@ -180,7 +180,7 @@ const PUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl HttpPusher {
     /// Handed out as the trait object the notifier takes, like `FileLimits`.
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self, reason = "the factory hands out the trait object the notifier takes")]
     pub fn new(channel: Channel) -> Arc<dyn Pusher> {
         let client = reqwest::Client::builder()
             .timeout(PUSH_TIMEOUT)
