@@ -73,7 +73,19 @@ jobs:
       # cargo-deny, cargo-vet and cargo-machete.
       - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
         with:
-          tool: cargo-nextest,cargo-deny,cargo-vet@0.10.2,cargo-machete
+          tool: cargo-nextest,cargo-deny,cargo-machete
+      # cargo-vet from crates.io, pinned to the version that writes the
+      # store locally: install-action's manifest stops at 0.10.0, which
+      # cannot read the imports.lock 0.10.2 writes (vet exits 255).
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        id: cargo-tools
+        with:
+          path: ~/.cargo-tools
+          key: cargo-tools-${{ runner.os }}-${{ runner.arch }}-cargo-vet-0.10.2
+      - name: Install cargo-vet
+        if: steps.cargo-tools.outputs.cache-hit != 'true'
+        run: cargo install --locked --root ~/.cargo-tools cargo-vet@0.10.2
+      - run: echo "$HOME/.cargo-tools/bin" >> "$GITHUB_PATH"
 
       - run: npm run typecheck
       - run: npm run lint
