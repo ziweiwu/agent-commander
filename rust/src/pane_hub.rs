@@ -552,6 +552,9 @@ mod tests {
     const THREE_INTERVALS_MS: u64 = BASE_MS * 3;
     /// Four intervals: enough to measure a steady rate rather than a burst.
     const FOUR_INTERVALS_MS: u64 = BASE_MS * 4;
+    /// How long [`wait_for`] waits for a first read before the test fails:
+    /// generous, because only a loaded machine gets anywhere near it.
+    const PATIENCE_MS: u64 = BASE_MS * 40;
     /// Long enough for the backoff to have reached its ceiling.
     const FULLY_BACKED_OFF_MS: u64 = MAX_MS * 3;
     /// Past the ceiling, so the loop is as slow as it is ever allowed to get.
@@ -1218,11 +1221,23 @@ mod tests {
         assert_eq!(seen.lock().unwrap()[0], vec!["x"]);
     }
 
+    /// Waits on the real clock until `ready` holds, giving up after
+    /// [`PATIENCE_MS`]. A paused clock would make a fixed tick exact, but a
+    /// mutant that zeroes the loop's delay then spins without ever yielding
+    /// to the clock, and cargo-mutants reports a hang instead of a catch.
+    async fn wait_for(ready: impl Fn() -> bool) {
+        let mut waited = 0;
+        while !ready() && waited < PATIENCE_MS {
+            tick(BASE_MS).await;
+            waited += BASE_MS;
+        }
+    }
+
     #[tokio::test]
     async fn caches_the_last_read_of_a_watched_pane_only() {
         let hub = PaneHub::new(Arc::new(FakePanes::new()));
         let off = hub.subscribe("%1", Box::new(|_: &HubEvent| {}));
-        tick(A_FEW_INTERVALS_MS).await;
+        wait_for(|| hub.cached("%1").is_some()).await;
         let cached = hub.cached("%1").expect("a watched pane keeps its last read");
         assert_eq!(cached.lines, lines("a").lines);
         assert!(hub.cached("%2").is_none(), "a pane nobody watches has no cache");
@@ -1236,9 +1251,12 @@ mod tests {
         let hub = PaneHub::new(Arc::new(FakePanes::new()));
         let neighbour: Arc<Mutex<Option<Unsubscribe>>> = Arc::new(Mutex::new(None));
         let release = Arc::clone(&neighbour);
+        let deliveries = Arc::new(AtomicUsize::new(0));
+        let delivered = Arc::clone(&deliveries);
         let first = hub.subscribe(
             "%1",
             Box::new(move |_: &HubEvent| {
+                delivered.fetch_add(1, Ordering::Relaxed);
                 if let Some(off) = release.lock().unwrap().take() {
                     off();
                 }
@@ -1246,7 +1264,12 @@ mod tests {
         );
         let (calls, listener) = counter();
         *neighbour.lock().unwrap() = Some(hub.subscribe("%1", listener));
+        wait_for(|| deliveries.load(Ordering::Relaxed) > 0).await;
         tick(A_FEW_INTERVALS_MS).await;
+        assert!(
+            deliveries.load(Ordering::Relaxed) > 0,
+            "nothing was delivered, so the neighbour's silence proves nothing"
+        );
         assert_eq!(calls.load(Ordering::Relaxed), 0);
         first();
     }
