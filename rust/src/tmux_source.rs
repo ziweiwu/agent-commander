@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -124,7 +124,7 @@ impl ProviderInner {
         if let Ok(rows) = (self.read)().await {
             let next = agents_from_panes(&rows, now_ms());
             let moved = {
-                let mut agents = self.agents.lock().unwrap();
+                let mut agents = self.agents.lock().unwrap_or_else(PoisonError::into_inner);
                 let moved = differs(&agents, &next);
                 *agents = next;
                 moved
@@ -190,7 +190,7 @@ impl TmuxProvider {
 #[async_trait]
 impl AgentProvider for TmuxProvider {
     fn list(&self) -> Vec<Agent> {
-        self.inner.agents.lock().unwrap().clone()
+        self.inner.agents.lock().unwrap_or_else(PoisonError::into_inner).clone()
     }
 
     fn on_change(&self, listener: Box<dyn Fn(()) + Send + Sync>) -> Unsubscribe {
@@ -323,7 +323,7 @@ impl CompositeInner {
     /// fires when the *Claude* list claims the session, which for a shell it
     /// never does.
     fn list(&self) -> Vec<Agent> {
-        let patches = self.patches.lock().unwrap();
+        let patches = self.patches.lock().unwrap_or_else(PoisonError::into_inner);
         let mut out: Vec<Agent> = Vec::new();
         let mut claimed: HashSet<String> = HashSet::new();
         let mut placeholders: Vec<Agent> = Vec::new();
@@ -383,7 +383,7 @@ impl AgentSource for CompositeSource {
     }
 
     fn enrich(&self, session_id: &str, patch: AgentPatch) {
-        let mut patches = self.inner.patches.lock().unwrap();
+        let mut patches = self.inner.patches.lock().unwrap_or_else(PoisonError::into_inner);
         merge_patch(patches.entry(session_id.to_string()).or_default(), patch);
     }
 
@@ -404,7 +404,7 @@ impl AgentSource for CompositeSource {
                     inner.listeners.emit(&agents);
                 }
             }));
-            self.inner.unsubscribes.lock().unwrap().push(off);
+            self.inner.unsubscribes.lock().unwrap_or_else(PoisonError::into_inner).push(off);
         }
         // One provider failing to start must not stop the others (INV-5), and
         // they start together: each costs a round trip nobody else is waiting
@@ -419,7 +419,7 @@ impl AgentSource for CompositeSource {
     }
 
     fn stop(&self) {
-        for off in self.inner.unsubscribes.lock().unwrap().drain(..) {
+        for off in self.inner.unsubscribes.lock().unwrap_or_else(PoisonError::into_inner).drain(..) {
             off();
         }
         for provider in &self.inner.providers {

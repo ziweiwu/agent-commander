@@ -19,11 +19,10 @@
 //!     task, so the pane-hub listener and the transcript pump both stay
 //!     synchronous at the point they produce a message.
 
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -359,16 +358,23 @@ impl Viewers {
         // Saturating: a socket that never said "visible" cannot take the
         // count below zero on its way out.
         //
-        // Rust 1.99 deprecated `fetch_update` in favour of `try_update`, which
-        // is only stable since 1.95; `rust-version` is older than that, so
-        // clippy's `incompatible_msrv` refuses the new name. Same method,
-        // older spelling, until the floor moves past 1.95.
-        #[allow(deprecated)]
-        let _ = self.visible.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
+        // Spelled as the compare-exchange loop `fetch_update` runs: Rust 1.99
+        // deprecated that name for `try_update`, stable only since 1.95, and
+        // `rust-version` is older, so neither name builds clean on both.
+        let mut seen = self.visible.load(Ordering::SeqCst);
+        while let Err(actual) = self.visible.compare_exchange_weak(
+            seen,
+            seen.saturating_sub(1),
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        ) {
+            seen = actual;
+        }
     }
 
     /// Run this whenever the fleet goes from unwatched to watched, or back.
     pub fn on_change(&self, listener: Box<dyn Fn(Watched) + Send + Sync>) {
+        #[expect(clippy::let_underscore_must_use, reason = "one listener for the server's life; a second call keeps the first")]
         let _ = self.listener.set(listener);
     }
 
@@ -703,6 +709,7 @@ fn now_unix() -> u64 {
 
 fn session_mac(token: &str, expires: u64, nonce: &str) -> String {
     use hmac::{Hmac, Mac};
+    #[expect(clippy::expect_used, reason = "HMAC-SHA256 takes a key of any length, so this cannot fail")]
     let mut mac = Hmac::<sha2::Sha256>::new_from_slice(token.as_bytes())
         .expect("HMAC takes a key of any length");
     mac.update(format!("{SESSION_CONTEXT}.{expires}.{nonce}").as_bytes());
@@ -1724,6 +1731,7 @@ impl Viewer {
     fn send(&self, msg: ServerMessage) {
         // A closed channel means the writer task is gone, which means the
         // socket is gone. Nothing to report and nobody to report it to.
+        #[expect(clippy::let_underscore_must_use, reason = "a closed channel means the socket is gone, per the comment above")]
         let _ = self.tx.send(msg);
     }
 
@@ -1737,7 +1745,7 @@ impl Viewer {
 
     fn clear_timers(&self) {
         self.clear_frame_timer();
-        let task = self.state.lock().unwrap().tail_task.take();
+        let task = self.state.lock().unwrap_or_else(PoisonError::into_inner).tail_task.take();
         if let Some(task) = task {
             task.abort();
         }
@@ -1750,7 +1758,7 @@ impl Viewer {
     /// timer down with it, so answering "pane has exited" left the chat frozen
     /// for that tab until the agent was re-opened — and nothing said why.
     fn clear_frame_timer(&self) {
-        let unwatch = self.state.lock().unwrap().unwatch.take();
+        let unwatch = self.state.lock().unwrap_or_else(PoisonError::into_inner).unwatch.take();
         if let Some(unwatch) = unwatch {
             unwatch();
         }
@@ -1762,13 +1770,13 @@ impl Viewer {
     /// false when the tab has already moved on to another agent.
     fn retarget(&self, session_id: &str, view: Terminal) -> bool {
         {
-            let st = self.state.lock().unwrap();
+            let st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.focused.as_deref() != Some(session_id) {
                 return false;
             }
         }
         {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             st.attached = view == Terminal::Open;
             st.reset_pane();
         }
@@ -2188,7 +2196,7 @@ const CHOICE_NOT_ON_SCREEN: &str =
 /// viewer's frame diff, so the live capture underneath carries on unchanged.
 async fn on_history(session_id: &str, window: (u32, u32), viewer: &Arc<Viewer>, app: &Arc<App>) {
     let (before, lines) = crate::pane::clamp_history(window.0, window.1);
-    if viewer.state.lock().unwrap().focused.as_deref() != Some(session_id) {
+    if viewer.state.lock().unwrap_or_else(PoisonError::into_inner).focused.as_deref() != Some(session_id) {
         return;
     }
     // An agent that never had a pane and one that has gone are different
@@ -2221,7 +2229,7 @@ async fn on_history(session_id: &str, window: (u32, u32), viewer: &Arc<Viewer>, 
 fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
     viewer.clear_timers();
     {
-        let mut st = viewer.state.lock().unwrap();
+        let mut st = viewer.state.lock().unwrap_or_else(PoisonError::into_inner);
         st.attached = false;
         st.reset_pane();
         st.focused = session_id.clone();
@@ -2246,7 +2254,7 @@ fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
     }
 
     let task = spawn_timeline_pump(viewer, app, Conversation { agent, session_id, ready: tail });
-    let old = viewer.state.lock().unwrap().tail_task.replace(task);
+    let old = viewer.state.lock().unwrap_or_else(PoisonError::into_inner).tail_task.replace(task);
     if let Some(old) = old {
         old.abort();
     }
@@ -2452,7 +2460,7 @@ async fn pump_timeline(
     session_id: &str,
 ) {
     {
-        let st = viewer.state.lock().unwrap();
+        let st = viewer.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.focused.as_deref() != Some(session_id) {
             return;
         }
@@ -2478,7 +2486,7 @@ async fn pump_timeline(
      */
     let prompt_id = prompt.as_ref().map(|p| p.id.clone());
     let prompt_moved = {
-        let mut st = viewer.state.lock().unwrap();
+        let mut st = viewer.state.lock().unwrap_or_else(PoisonError::into_inner);
         // Only a prompt that *is* there counts as having moved here: a read
         // with none says either that the call closed — which the tail itself
         // reports as `prompt_changed` — or that nothing could be read this
@@ -2542,7 +2550,7 @@ fn watch_pane(viewer: &Arc<Viewer>, app: &Arc<App>, pane_id: &str, session_id: &
     // during this call, and that listener takes the same lock.
     let unwatch = app.hub.subscribe(pane_id, listener);
 
-    let mut st = viewer.state.lock().unwrap();
+    let mut st = viewer.state.lock().unwrap_or_else(PoisonError::into_inner);
     if !st.attached {
         // The listener already fired and gave up — a dead pane answered from
         // the hub's cache. Storing the handle now would leak the subscription
@@ -2561,7 +2569,7 @@ fn watch_pane(viewer: &Arc<Viewer>, app: &Arc<App>, pane_id: &str, session_id: &
 /// The lock is taken once and handed on, because the checks below and the
 /// action they guard have to be the same view of this tab's state.
 fn on_hub_event(viewer: &Arc<Viewer>, session_id: &str, event: &HubEvent) {
-    let st = viewer.state.lock().unwrap();
+    let st = viewer.state.lock().unwrap_or_else(PoisonError::into_inner);
     if !st.attached || st.focused.as_deref() != Some(session_id) {
         return;
     }
@@ -2962,7 +2970,7 @@ mod mock_control {
 
         /// The id this pid is running now, seeded from the fleet on first ask.
         fn session_of(&self, pid: i64) -> String {
-            let mut map = self.sessions.lock().unwrap();
+            let mut map = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(known) = map.get(&pid) {
                 return known.clone();
             }
@@ -2993,16 +3001,16 @@ mod mock_control {
                 // pane holds a session the fixture table never named.
                 if let Some(agent) = self.source.agent_in_pane(_pane_id) {
                     let next = format!("mock-session-{}", now_ms());
-                    self.sessions.lock().unwrap().insert(agent.pid, next.clone());
+                    self.sessions.lock().unwrap_or_else(PoisonError::into_inner).insert(agent.pid, next.clone());
                     self.source.rotate(&agent.session_id, &next);
                 }
-                *self.goal.lock().unwrap() = None;
+                *self.goal.lock().unwrap_or_else(PoisonError::into_inner) = None;
                 return Ok(());
             }
             if text == "/goal clear" {
-                *self.goal.lock().unwrap() = None;
+                *self.goal.lock().unwrap_or_else(PoisonError::into_inner) = None;
             } else if let Some(condition) = text.strip_prefix("/goal ") {
-                *self.goal.lock().unwrap() = Some(GoalState {
+                *self.goal.lock().unwrap_or_else(PoisonError::into_inner) = Some(GoalState {
                     condition: condition.to_string(),
                     met: false,
                     at: now_ms(),
@@ -3026,7 +3034,7 @@ mod mock_control {
         }
 
         async fn read_goal(&self) -> Option<GoalState> {
-            self.goal.lock().unwrap().clone()
+            self.goal.lock().unwrap_or_else(PoisonError::into_inner).clone()
         }
 
         /// Nothing is alive, so `/exit` always looks like it worked and no
@@ -3054,6 +3062,43 @@ mod mock_control {
         let session: Arc<MockSession> = Arc::new(MockSession::new(source));
         super::live::Control {
             make: Arc::new(move |_session_id: &str| session.clone() as Arc<dyn ControlDeps>),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::sources::AgentSource;
+
+        fn session() -> (Arc<crate::mock::MockSource>, MockSession) {
+            let source = Arc::new(crate::mock::MockSource::new(false));
+            (Arc::clone(&source), MockSession::new(source))
+        }
+
+        #[test]
+        fn a_pid_runs_the_fixture_session_until_told_otherwise() {
+            let (source, session) = session();
+            let pid = source.get("mock-idle-kb").unwrap().pid;
+            assert_eq!(session.session_of(pid), "mock-idle-kb");
+            assert_eq!(session.session_of(-1), "mock-session--1");
+        }
+
+        #[tokio::test]
+        async fn the_goal_round_trips_and_clear_replaces_the_session() {
+            let (source, session) = session();
+            session.paste("%72", "/goal ship it", Submit::Yes).await.unwrap();
+            assert_eq!(session.read_goal().await.map(|g| g.condition), Some("ship it".to_string()));
+            session.paste("%72", "/goal clear", Submit::Yes).await.unwrap();
+            assert!(session.read_goal().await.is_none());
+
+            let pid = source.get("mock-idle-kb").unwrap().pid;
+            session.paste("%72", "/goal again", Submit::Yes).await.unwrap();
+            session.paste("%72", "/clear", Submit::Yes).await.unwrap();
+            let now = session.session_of(pid);
+            assert!(now.starts_with("mock-session-"), "{now}");
+            assert!(source.get("mock-idle-kb").is_none(), "the old session is still in the fleet");
+            assert!(source.get(&now).is_some(), "the fleet does not hold the new session");
+            assert!(session.read_goal().await.is_none(), "a cleared session kept its goal");
         }
     }
 }
@@ -3106,18 +3151,17 @@ async fn start_tmux_control() {
 
 /// Mock mode advertises the whole flow but must never start a real process or
 /// type into anything.
+///
+/// `fleet_for` hands back a mock source exactly when `--mock` is set, so the
+/// source itself is what picks the mock wiring.
 fn spawn_and_control(
-    opts: &Options,
     panes: Arc<dyn PaneApi>,
     mock_source: Option<Arc<crate::mock::MockSource>>,
 ) -> (Arc<dyn SpawnApi>, Arc<dyn ControlApi>) {
-    if !opts.mock {
+    let Some(source) = mock_source else {
         return (Arc::new(live::Spawn), Arc::new(live::Control::live(panes)));
-    }
-    (
-        Arc::new(mock_control::Spawn),
-        Arc::new(mock_control::control(mock_source.expect("mock deps built above"))),
-    )
+    };
+    (Arc::new(mock_control::Spawn), Arc::new(mock_control::control(source)))
 }
 
 /// Mock mode reads its own fixture forest; live mode reads the sidecars.
@@ -3139,7 +3183,7 @@ async fn build_app(
     let env = crate::env::server_env(opts.port).await;
     // One poller per pane for the whole server, not one per tab (INV-4).
     let hub: Arc<dyn HubApi> = Arc::new(crate::pane_hub::PaneHub::new(deps.panes.clone()));
-    let (spawn, control) = spawn_and_control(opts, deps.panes.clone(), mock_source);
+    let (spawn, control) = spawn_and_control(deps.panes.clone(), mock_source);
 
     // Read once, before `env` is moved into the App: the CLI probe is a
     // subprocess and this cannot change under us.
@@ -3370,6 +3414,7 @@ async fn shut_down(opts: &Options, app: &Arc<App>, enricher: &crate::enrich::Fle
 /// SIGINT or SIGTERM, whichever arrives first.
 async fn shutdown_signal() {
     let ctrl_c = async {
+        #[expect(clippy::let_underscore_must_use, reason = "an Err (no handler) ends the wait too, as it always has")]
         let _ = tokio::signal::ctrl_c().await;
     };
     #[cfg(unix)]
@@ -3415,7 +3460,7 @@ mod tests {
         AgentStatus, PendingPrompt, PromptOption, RateLimits, TimelineEvent, TimelineKind,
     };
     use std::collections::HashMap;
-    use std::sync::atomic::AtomicI64;
+    use std::sync::atomic::{AtomicBool, AtomicI64};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -3930,6 +3975,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
+            #[expect(clippy::let_underscore_must_use, reason = "the test server's exit is not under test")]
             let _ = run(app, listener).await;
         });
         port
@@ -4046,6 +4092,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
+            #[expect(clippy::let_underscore_must_use, reason = "the test server's exit is not under test")]
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
@@ -4068,6 +4115,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
+            #[expect(clippy::let_underscore_must_use, reason = "the test server's exit is not under test")]
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
@@ -4080,6 +4128,7 @@ mod tests {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         stream.write_all(request.as_bytes()).await.unwrap();
         let mut out = String::new();
+        #[expect(clippy::let_underscore_must_use, reason = "the server may reset after replying; what was read is the answer")]
         let _ = stream.read_to_string(&mut out).await;
         out
     }
@@ -4782,6 +4831,7 @@ mod tests {
             assert!(!body(&res).contains("TOP SECRET"), "escaped with {path}");
             assert!(!body(&res).contains("root:"), "escaped with {path}");
         }
+        #[expect(clippy::let_underscore_must_use, reason = "best-effort cleanup of a file outside the temp root")]
         let _ = std::fs::remove_file(outside);
     }
 
@@ -5015,6 +5065,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
+            #[expect(clippy::let_underscore_must_use, reason = "the test server's exit is not under test")]
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
@@ -5171,6 +5222,7 @@ mod tests {
         let mut client = open(h.port).await;
         assert!(next_msg(&mut client, |m| is_type(m, "fleet")).await.is_some());
         let text = "x".repeat(MAX_FRAME_BYTES + 1_000_000);
+        #[expect(clippy::let_underscore_must_use, reason = "the server may close the socket mid-send, which this test checks")]
         let _ = client
             .send(WsMessage::Text(
                 serde_json::json!({"type":"paste","sessionId":SESSION,"text":text,"submit":false})
@@ -5214,6 +5266,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
+            #[expect(clippy::let_underscore_must_use, reason = "the test server's exit is not under test")]
             let _ = run(app, listener).await;
         });
         let HarnessParts { panes, source, control, web_root } = parts;
@@ -5352,6 +5405,7 @@ mod tests {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
         stream.write_all(&request).await.unwrap();
         let mut out = String::new();
+        #[expect(clippy::let_underscore_must_use, reason = "the server may reset after replying; what was read is the answer")]
         let _ = stream.read_to_string(&mut out).await;
         out
     }
@@ -5443,6 +5497,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         tokio::spawn(async move {
+            #[expect(clippy::let_underscore_must_use, reason = "the test server's exit is not under test")]
             let _ = run(app, listener).await;
         });
         let mut client = open(port).await;
@@ -6039,5 +6094,54 @@ mod tests {
         assert_eq!(control_route("/api/agents//close"), None);
         assert_eq!(control_route("/api/agents/abc/kill"), None);
         assert_eq!(control_route("/api/agents"), None);
+    }
+
+    #[test]
+    fn the_visible_count_falls_with_each_hidden_tab_and_never_below_zero() {
+        let viewers = Viewers::default();
+        viewers.shown();
+        viewers.shown();
+        viewers.hidden();
+        assert!(viewers.any_visible(), "one tab is still on screen");
+        viewers.hidden();
+        assert!(!viewers.any_visible());
+        viewers.hidden();
+        viewers.shown();
+        assert!(viewers.any_visible(), "a hidden at zero wrapped the count");
+        viewers.hidden();
+        assert!(!viewers.any_visible());
+    }
+
+    /// A viewer holding a pane subscription and a transcript task.
+    fn watching_viewer() -> (Viewer, Arc<AtomicBool>) {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let viewer = Viewer::new(tx);
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&released);
+        {
+            let mut st = viewer.state.lock().unwrap();
+            st.unwatch = Some(Box::new(move || flag.store(true, Ordering::SeqCst)));
+            st.tail_task = Some(tokio::spawn(std::future::pending::<()>()));
+        }
+        (viewer, released)
+    }
+
+    #[tokio::test]
+    async fn clearing_the_frame_timer_releases_the_pane_and_keeps_the_transcript() {
+        let (viewer, released) = watching_viewer();
+        viewer.clear_frame_timer();
+        assert!(released.load(Ordering::SeqCst), "the pane subscription was kept");
+        let st = viewer.state.lock().unwrap();
+        assert!(st.unwatch.is_none());
+        assert!(st.tail_task.is_some(), "a dead pane took the transcript down with it");
+    }
+
+    #[tokio::test]
+    async fn clearing_all_timers_releases_the_pane_and_ends_the_transcript_task() {
+        let (viewer, released) = watching_viewer();
+        viewer.clear_timers();
+        assert!(released.load(Ordering::SeqCst));
+        let st = viewer.state.lock().unwrap();
+        assert!(st.unwatch.is_none() && st.tail_task.is_none());
     }
 }

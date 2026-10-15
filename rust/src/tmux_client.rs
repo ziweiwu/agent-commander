@@ -41,7 +41,7 @@
 
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -158,12 +158,14 @@ impl ControlStream {
     fn line(&mut self, line: &str, out: &mut Vec<Block>) {
         if let Some((id, lines)) = self.block.as_mut() {
             if closes(line, "%end", id) {
-                let (_, lines) = self.block.take().expect("block present");
+                let lines = std::mem::take(lines);
+                self.block = None;
                 out.push(Block::Output(lines.join("\n")));
                 return;
             }
             if closes(line, "%error", id) {
-                let (_, lines) = self.block.take().expect("block present");
+                let lines = std::mem::take(lines);
+                self.block = None;
                 let msg = lines.join("\n").trim().to_string();
                 out.push(Block::Error(if msg.is_empty() {
                     "tmux error".to_string()
@@ -288,6 +290,11 @@ pub struct ControlChannel {
 
 pub struct LiveTransport;
 
+/// The error for a child that came back without a pipe `spawn` asked for.
+fn unpiped(stream: &str) -> std::io::Error {
+    std::io::Error::other(format!("tmux started without a piped {stream}"))
+}
+
 /// Forward every chunk tmux writes, decoded and never split mid-character.
 ///
 /// Dropping the sender when the pipe closes is how the client reports that it
@@ -334,6 +341,7 @@ fn forward_input(
             if stdin.write_all(line.as_bytes()).await.is_err() {
                 break;
             }
+            #[expect(clippy::let_underscore_must_use, reason = "a broken pipe fails the next write, which ends the loop")]
             let _ = stdin.flush().await;
         }
     });
@@ -344,7 +352,9 @@ fn reap(mut child: tokio::process::Child, mut kills: mpsc::UnboundedReceiver<()>
     tokio::spawn(async move {
         tokio::select! {
             _ = kills.recv() => {
+                #[expect(clippy::let_underscore_must_use, reason = "the child may already have exited; reaping is best effort")]
                 let _ = child.start_kill();
+                #[expect(clippy::let_underscore_must_use, reason = "the child may already have exited; reaping is best effort")]
                 let _ = child.wait().await;
             }
             _ = child.wait() => {}
@@ -378,9 +388,9 @@ impl TmuxTransport for LiveTransport {
             .kill_on_drop(true)
             .spawn()?;
 
-        let stdin = child.stdin.take().expect("piped stdin");
-        let stdout = child.stdout.take().expect("piped stdout");
-        let stderr = child.stderr.take().expect("piped stderr");
+        let stdin = child.stdin.take().ok_or_else(|| unpiped("stdin"))?;
+        let stdout = child.stdout.take().ok_or_else(|| unpiped("stdout"))?;
+        let stderr = child.stderr.take().ok_or_else(|| unpiped("stderr"))?;
 
         let (out_tx, out_rx) = mpsc::unbounded_channel::<String>();
         let (in_tx, in_rx) = mpsc::unbounded_channel::<String>();
@@ -395,6 +405,7 @@ impl TmuxTransport for LiveTransport {
             input: in_tx,
             output: out_rx,
             kill: Arc::new(move || {
+                #[expect(clippy::let_underscore_must_use, reason = "an Err means the reaper has already seen the child exit")]
                 let _ = kill_tx.send(());
             }),
         })
@@ -496,7 +507,7 @@ impl TmuxControl {
 
     /// True when a command can be sent right now. Callers spawn instead if not.
     pub fn ready(&self) -> bool {
-        let st = self.inner.state.lock().unwrap();
+        let st = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         st.ready && st.input.is_some()
     }
 
@@ -509,7 +520,7 @@ impl TmuxControl {
     /// once it answers.
     pub fn start(&self) {
         {
-            let mut st = self.inner.state.lock().unwrap();
+            let mut st = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.stopped || st.input.is_some() || st.starting {
                 return;
             }
@@ -521,7 +532,7 @@ impl TmuxControl {
 
     pub fn stop(&self) {
         let (kill, waiters) = {
-            let mut st = self.inner.state.lock().unwrap();
+            let mut st = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             st.stopped = true;
             st.ready = false;
             let waiters: Vec<Waiter> = st.waiters.drain(..).collect();
@@ -529,6 +540,7 @@ impl TmuxControl {
             (st.kill.take(), waiters)
         };
         for w in waiters {
+            #[expect(clippy::let_underscore_must_use, reason = "a waiter that gave up has dropped its receiver")]
             let _ = w.tx.send(Err(TmuxControlError::new("stopped")));
         }
         if let Some(kill) = kill {
@@ -559,7 +571,7 @@ impl Inner {
     async fn spawn_client(inner: Arc<Inner>) {
         let result = Inner::spawn_client_inner(&inner).await;
         {
-            let mut st = inner.state.lock().unwrap();
+            let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             st.starting = false;
         }
         if result.is_err() {
@@ -569,7 +581,7 @@ impl Inner {
 
     async fn spawn_client_inner(inner: &Arc<Inner>) -> Result<(), ()> {
         let session = inner.transport.first_session().await;
-        if inner.state.lock().unwrap().stopped {
+        if inner.state.lock().unwrap_or_else(PoisonError::into_inner).stopped {
             return Ok(());
         }
         // No session means nothing to attach to *and* nothing to read, so there
@@ -602,7 +614,7 @@ impl Inner {
         input: mpsc::UnboundedSender<String>,
         kill: Arc<dyn Fn() + Send + Sync>,
     ) -> Option<u64> {
-        let mut st = inner.state.lock().unwrap();
+        let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.stopped {
             return None;
         }
@@ -643,7 +655,7 @@ impl Inner {
         } else {
             tokio::task::yield_now().await;
         }
-        let mut st = inner.state.lock().unwrap();
+        let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.stopped || st.generation != generation {
             return false;
         }
@@ -663,7 +675,7 @@ impl Inner {
             Inner::on_exit(inner, generation);
             return;
         }
-        let mut st = inner.state.lock().unwrap();
+        let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         if st.generation == generation {
             st.ready = true;
             st.restart_delay_ms = RESTART_BASE_MS;
@@ -674,7 +686,7 @@ impl Inner {
         let mut sends: Vec<(oneshot::Sender<Result<String, TmuxControlError>>, Result<String, TmuxControlError>)> =
             Vec::new();
         {
-            let mut st = inner.state.lock().unwrap();
+            let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.stopped || st.generation != generation {
                 return;
             }
@@ -684,6 +696,7 @@ impl Inner {
             }
         }
         for (tx, msg) in sends {
+            #[expect(clippy::let_underscore_must_use, reason = "a waiter that gave up has dropped its receiver")]
             let _ = tx.send(msg);
         }
     }
@@ -716,19 +729,16 @@ impl Inner {
         }
         match block {
             Block::Error(msg) => {
-                let waiter = state.waiters.pop_front().expect("checked non-empty");
+                let Some(waiter) = state.waiters.pop_front() else { return };
                 sends.push((waiter.tx, Err(TmuxControlError::new(msg))));
             }
             Block::Output(out) => {
-                let done = {
-                    let waiter = state.waiters.front_mut().expect("checked non-empty");
-                    waiter.parts.push(out);
-                    waiter.parts.len() >= waiter.expected
-                };
-                if !done {
+                let Some(waiter) = state.waiters.front_mut() else { return };
+                waiter.parts.push(out);
+                if waiter.parts.len() < waiter.expected {
                     return;
                 }
-                let waiter = state.waiters.pop_front().expect("checked non-empty");
+                let Some(waiter) = state.waiters.pop_front() else { return };
                 // Commands that say nothing — `load-buffer`, `send-keys` —
                 // contribute no lines, so their empty replies are not joined in
                 // as blank ones. A read that is genuinely empty is padded by
@@ -746,7 +756,7 @@ impl Inner {
 
     fn on_exit(inner: &Arc<Inner>, generation: u64) {
         let waiters = {
-            let mut st = inner.state.lock().unwrap();
+            let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.generation != generation {
                 return;
             }
@@ -757,6 +767,7 @@ impl Inner {
             st.waiters.drain(..).collect::<Vec<_>>()
         };
         for w in waiters {
+            #[expect(clippy::let_underscore_must_use, reason = "a waiter that gave up has dropped its receiver")]
             let _ = w.tx.send(Err(TmuxControlError::new("tmux control client exited")));
         }
         Inner::schedule_restart(inner);
@@ -764,7 +775,7 @@ impl Inner {
 
     fn schedule_restart(inner: &Arc<Inner>) {
         let delay = {
-            let mut st = inner.state.lock().unwrap();
+            let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
             if st.stopped || st.restart_scheduled {
                 return;
             }
@@ -778,7 +789,7 @@ impl Inner {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(delay)).await;
             {
-                let mut st = inner.state.lock().unwrap();
+                let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
                 st.restart_scheduled = false;
                 if st.stopped || st.starting || st.input.is_some() {
                     return;
@@ -813,7 +824,7 @@ impl Inner {
         commands: &[String],
         line: &str,
     ) -> Result<PendingReply, TmuxControlError> {
-        let mut st = inner.state.lock().unwrap();
+        let mut st = inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(input) = st.input.clone() else {
             return Err(TmuxControlError::new("no tmux control client"));
         };
@@ -846,7 +857,7 @@ impl Inner {
     /// `on_exit`.
     fn lost(inner: &Arc<Inner>, line: &str) -> TmuxControlError {
         inner.stats.failures.fetch_add(1, Ordering::Relaxed);
-        let kill = inner.state.lock().unwrap().kill.clone();
+        let kill = inner.state.lock().unwrap_or_else(PoisonError::into_inner).kill.clone();
         if let Some(kill) = kill {
             kill();
         }
@@ -1047,6 +1058,7 @@ mod tests {
             };
             let msg = format!("%begin {id} 1\n{body}%{terminator} {id} 1\n");
             if let Some(tx) = self.out.lock().unwrap().as_ref() {
+                #[expect(clippy::let_underscore_must_use, reason = "the client under test may have stopped listening")]
                 let _ = tx.send(msg);
             }
         }
@@ -1386,5 +1398,74 @@ mod tests {
         assert!(!client.ready());
         assert!(client.stats().restarts >= 1);
         client.stop();
+    }
+
+    /// Stopping answers every command still waiting, kills the client, and
+    /// stops calling it ready.
+    #[tokio::test]
+    async fn stop_fails_waiting_commands_at_once_and_kills_the_client() {
+        let (fake, client) = connected().await;
+        let pending = sending(&client, &["list-panes"]);
+        for _ in 0..400 {
+            if !fake.written().is_empty() {
+                break;
+            }
+            pause(2).await;
+        }
+        client.stop();
+        const FAR_SOONER_THAN_A_COMMAND_TIMES_OUT: Duration = Duration::from_secs(1);
+        let answer = tokio::time::timeout(FAR_SOONER_THAN_A_COMMAND_TIMES_OUT, pending)
+            .await
+            .expect("a waiting command outlived stop")
+            .unwrap();
+        assert!(answer.is_err());
+        assert!(!client.ready());
+        assert!(fake.out.lock().unwrap().is_none(), "the client process was not killed");
+    }
+
+    /// Nothing is asked of tmux while the attach is still settling.
+    #[tokio::test]
+    async fn sends_no_probe_until_the_attach_has_settled() {
+        const SETTLE_LONGER_THAN_THE_TEST_MS: u64 = 60_000;
+        const WELL_AFTER_THE_SPAWN_MS: u64 = 50;
+        let last: Arc<Mutex<Option<Arc<FakeTmux>>>> = Arc::new(Mutex::new(None));
+        let client = TmuxControl::new(Arc::new(FakeTransport {
+            session: Some("work".to_string()),
+            last: last.clone(),
+        }));
+        client.set_settle_ms(SETTLE_LONGER_THAN_THE_TEST_MS);
+        client.start();
+        let mut fake = None;
+        for _ in 0..400 {
+            fake = last.lock().unwrap().clone();
+            if fake.is_some() {
+                break;
+            }
+            pause(2).await;
+        }
+        let fake = fake.expect("the client was never spawned");
+        pause(WELL_AFTER_THE_SPAWN_MS).await;
+        assert!(fake.written().is_empty(), "probed before settling: {:?}", fake.written());
+        client.stop();
+    }
+
+    /// Through a real pipe, to `cat`: queued lines arrive in order.
+    #[tokio::test]
+    async fn forwards_queued_lines_to_the_clients_stdin_in_order() {
+        use tokio::io::AsyncReadExt;
+        let mut child = Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (lines, queue) = mpsc::unbounded_channel();
+        forward_input(child.stdin.take().unwrap(), queue);
+        lines.send("first\n".to_string()).unwrap();
+        lines.send("second\n".to_string()).unwrap();
+        drop(lines);
+        let mut out = String::new();
+        child.stdout.take().unwrap().read_to_string(&mut out).await.unwrap();
+        assert_eq!(out, "first\nsecond\n");
+        child.wait().await.unwrap();
     }
 }

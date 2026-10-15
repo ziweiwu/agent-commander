@@ -19,11 +19,10 @@
 //! what INV-2 forbids. Two mechanisms, because they are answering two
 //! different questions.
 
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 
 use async_trait::async_trait;
 
@@ -187,7 +186,7 @@ impl PendingStore {
             .map(str::to_string)
             .or_else(|| basename(spawned.cwd))
             .unwrap_or_else(|| spawned.tmux_session.to_string());
-        self.sessions.lock().expect("pending store poisoned").insert(
+        self.sessions.lock().unwrap_or_else(PoisonError::into_inner).insert(
             spawned.tmux_session.to_string(),
             PendingSession {
                 tmux_session: spawned.tmux_session.to_string(),
@@ -200,7 +199,7 @@ impl PendingStore {
     }
 
     pub fn size(&self) -> usize {
-        self.sessions.lock().expect("pending store poisoned").len()
+        self.sessions.lock().unwrap_or_else(PoisonError::into_inner).len()
     }
 
     pub async fn merge(&self, real: Vec<Agent>) -> Vec<Agent> {
@@ -252,7 +251,7 @@ impl PendingStore {
     /// `std::sync::Mutex` held across a suspension point is how an async
     /// program deadlocks itself.
     fn snapshot(&self) -> Vec<PendingSession> {
-        let sessions = self.sessions.lock().expect("pending store poisoned");
+        let sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
         sessions.values().cloned().collect()
     }
 
@@ -260,7 +259,7 @@ impl PendingStore {
         if tmux_sessions.is_empty() {
             return;
         }
-        let mut sessions = self.sessions.lock().expect("pending store poisoned");
+        let mut sessions = self.sessions.lock().unwrap_or_else(PoisonError::into_inner);
         for tmux_session in tmux_sessions {
             sessions.remove(&tmux_session);
         }

@@ -17,7 +17,7 @@ use crate::sources::{LimitsApi, Unsubscribe};
 use crate::types::{RateLimits, UsageWindow};
 use notify::{RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime};
 use tokio::task::JoinHandle;
 
@@ -154,7 +154,7 @@ impl Inner {
     /// Read, and tell listeners only when the reading actually moved.
     fn reload(&self) {
         let next = {
-            let mut st = self.state.lock().unwrap();
+            let mut st = self.state.lock().unwrap_or_else(PoisonError::into_inner);
             // Cheap gate: on the poll path this is the only syscall most of
             // the time.
             let Ok(mtime) = std::fs::metadata(&self.file).and_then(|m| m.modified()) else {
@@ -195,7 +195,7 @@ pub struct FileLimits {
 
 impl FileLimits {
     /// The shipped configuration: the bridge's path, the 2s backstop poll.
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self, reason = "the factory hands out the trait object the wiring takes")]
     pub fn new() -> Arc<dyn LimitsApi> {
         Self::with_file(limits_file(), POLL)
     }
@@ -237,6 +237,7 @@ impl FileLimits {
                 // Unbounded and non-blocking on purpose: this runs on the
                 // watcher's own OS thread, and blocking it would back up every
                 // other event the platform is trying to deliver.
+                #[expect(clippy::let_underscore_must_use, reason = "an Err means the watch loop has ended and nothing is listening")]
                 let _ = tx.send(());
             }
         });
@@ -278,7 +279,7 @@ impl FileLimits {
 
 impl LimitsApi for FileLimits {
     fn current(&self) -> Option<RateLimits> {
-        self.inner.state.lock().unwrap().limits.clone()
+        self.inner.state.lock().unwrap_or_else(PoisonError::into_inner).limits.clone()
     }
 
     fn on_change(&self, listener: Box<dyn Fn(Option<RateLimits>) + Send + Sync>) -> Unsubscribe {
@@ -291,13 +292,13 @@ impl LimitsApi for FileLimits {
         // background task.
         self.inner.reload();
 
-        let mut state = self.inner.state.lock().unwrap();
+        let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         self.watch_the_directory(&mut state);
         self.poll_as_a_backstop(&mut state);
     }
 
     fn stop(&self) {
-        let mut state = self.inner.state.lock().unwrap();
+        let mut state = self.inner.state.lock().unwrap_or_else(PoisonError::into_inner);
         for task in state.tasks.drain(..) {
             task.abort();
         }
@@ -379,11 +380,10 @@ mod tests {
         );
         let reading = parse_limits(r#"{"at":5,"fiveHour":{"pct":10,"resetsAt":1e999}}"#);
         // The window survives; only the unusable reset time is dropped.
-        match reading {
-            Some(reading) => assert!(reading.five_hour.unwrap().resets_at.is_none()),
-            // Rust's parser refuses the overflowing literal outright, which is
-            // an acceptable stricter answer: either way no Infinity escapes.
-            None => {}
+        // Rust's parser may refuse the overflowing literal outright, which is
+        // an acceptable stricter answer: either way no Infinity escapes.
+        if let Some(reading) = reading {
+            assert!(reading.five_hour.unwrap().resets_at.is_none());
         }
     }
 
@@ -545,5 +545,26 @@ mod tests {
         wait_for(move || polling.current().map(|reading| reading.at) == Some(2)).await;
         assert_eq!(seen.load(Ordering::SeqCst), 0);
         watcher.stop();
+    }
+
+    /// After `stop` nothing reads the file and nobody is called, however long
+    /// the poll that used to run would have taken.
+    #[tokio::test]
+    async fn a_stopped_watcher_reads_nothing_and_calls_nobody() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("rate-limits.json");
+        persist(dir.path(), &file, r#"{"at":1,"fiveHour":{"pct":10}}"#);
+        let watcher = FileLimits::with_file(file.clone(), FAST_POLL);
+        watcher.start();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&seen);
+        let _keep = watcher.on_change(Box::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        watcher.stop();
+        persist(dir.path(), &file, r#"{"at":2,"fiveHour":{"pct":20}}"#);
+        tokio::time::sleep(LONG_ENOUGH_FOR_A_NOTIFICATION).await;
+        assert_eq!(watcher.current().map(|reading| reading.at), Some(1));
+        assert_eq!(seen.load(Ordering::SeqCst), 0);
     }
 }

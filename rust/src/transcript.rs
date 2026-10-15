@@ -7,7 +7,6 @@
 //! corpus on a working machine is 413 files / 303 MB / 98k records, so
 //! re-parsing from the top on every tick would be the single most expensive
 //! thing this process does.
-#![allow(dead_code)]
 
 use std::collections::HashSet;
 use std::sync::LazyLock;
@@ -71,6 +70,7 @@ const SUBAGENT_TOOLS: &[&str] = &["Task", "Agent", "Workflow"];
 /// The newline each tag sits on goes with it: Claude Code lays the envelope
 /// out on lines of its own, and leaving them behind turns one blank line into
 /// two in the conversation.
+#[expect(clippy::unwrap_used, reason = "a literal pattern, compiled by the paste-envelope tests")]
 static PASTE_ENVELOPE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:<pasted_content[^>\n]{0,64}>\n?)|(?:\n?</pasted_content[^>\n]{0,64}>)")
         .unwrap()
@@ -821,6 +821,7 @@ fn numbered_row(line: &str) -> Option<(usize, &str)> {
 /// (`ESC ] … BEL`), which is all a `capture-pane -e` carries.
 pub fn strip_ansi(text: &str) -> String {
     static ESCAPES: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    #[expect(clippy::expect_used, reason = "a literal pattern, compiled by the strip_ansi tests")]
     let re = ESCAPES.get_or_init(|| {
         regex::Regex::new(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*(?:\x07|\x1b\\)").expect("valid")
     });

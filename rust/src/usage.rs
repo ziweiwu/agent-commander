@@ -19,7 +19,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, PoisonError};
 use std::time::SystemTime;
 
 use crate::types::SessionUsage;
@@ -87,7 +87,7 @@ impl UsageReader {
     /// The session's latest reading, or the last good one, or nothing.
     pub fn read(&self, session_id: &str) -> Option<SessionUsage> {
         let file = self.file_of(session_id)?;
-        let mut cache = self.cache.lock().unwrap();
+        let mut cache = self.cache.lock().unwrap_or_else(PoisonError::into_inner);
         let known = cache.get(session_id).cloned();
         let Ok(mtime) = std::fs::metadata(&file).and_then(|m| m.modified()) else {
             // Missing or unreadable: the last good reading stands (INV-5).
@@ -110,7 +110,7 @@ impl UsageReader {
 
     /// Forget sessions that are gone, so the cache is bounded by the fleet.
     pub fn retain(&self, live: &[String]) {
-        self.cache.lock().unwrap().retain(|id, _| live.iter().any(|l| l == id));
+        self.cache.lock().unwrap_or_else(PoisonError::into_inner).retain(|id, _| live.iter().any(|l| l == id));
     }
 }
 
@@ -181,6 +181,8 @@ mod tests {
         assert_eq!(reader.read("s1").unwrap().cost_usd, Some(0.5), "junk keeps the last value");
         std::fs::remove_file(dir.path().join("s1.json")).unwrap();
         assert_eq!(reader.read("s1").unwrap().cost_usd, Some(0.5), "so does a vanished file");
+        reader.retain(&["s1".to_string()]);
+        assert_eq!(reader.read("s1").unwrap().cost_usd, Some(0.5), "a live session keeps its reading");
         reader.retain(&[]);
         assert!(reader.read("s1").is_none(), "until the session itself is gone");
     }

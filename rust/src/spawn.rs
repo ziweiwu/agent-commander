@@ -20,7 +20,6 @@
 //! takes no model and no permission mode: those are Claude's, and a shape that
 //! cannot be handed them cannot forward them by accident.
 
-#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;

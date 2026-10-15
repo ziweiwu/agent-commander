@@ -21,7 +21,6 @@
 //!
 //! The directory is flat: a grandchild sits beside its parent. The tree is
 //! rebuilt from `parentAgentId`, never from the path.
-#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -428,24 +427,25 @@ fn assemble(entries: &[Entry], parent_status: AgentStatus, now: i64) -> Vec<Suba
     roots.sort_by_key(|&i| nodes[i].last_write_at);
 
     let mut taken: Vec<Option<SubagentNode>> = nodes.into_iter().map(Some).collect();
-    roots.into_iter().map(|i| build(i, &mut taken, &children_of)).collect()
+    roots.into_iter().filter_map(|i| build(i, &mut taken, &children_of)).collect()
 }
 
 /// Move one node and everything under it out of the flat arena.
 ///
 /// `assemble` has already refused every edge that would close a loop, so the
-/// child graph is a forest and this terminates.
+/// child graph is a forest and this terminates, and moves each node once: the
+/// `None` for a node already moved is never reached.
 fn build(
     index: usize,
     taken: &mut Vec<Option<SubagentNode>>,
     children_of: &[Vec<usize>],
-) -> SubagentNode {
-    let mut node = taken[index].take().expect("each node is built exactly once");
+) -> Option<SubagentNode> {
+    let mut node = taken.get_mut(index)?.take()?;
     node.children = children_of[index]
         .iter()
-        .map(|&child| build(child, taken, children_of))
+        .filter_map(|&child| build(child, taken, children_of))
         .collect();
-    node
+    Some(node)
 }
 
 /// One agent's delegates, given the agent's own transcript path.
@@ -527,7 +527,6 @@ mod tests {
     use super::*;
     use crate::agent_kinds::CLAUDE_KIND;
     use serde_json::json;
-    use std::sync::Mutex as StdMutex;
 
     const NOW: i64 = 1_786_600_000_000;
 
@@ -535,13 +534,10 @@ mod tests {
     /// directories can be handed the same path by the OS after a cleanup. The
     /// TS suite clears it in a `beforeEach`; Rust runs tests in threads, so the
     /// clear has to be paired with a lock or one test wipes another's cache
-    /// mid-read.
-    fn isolated() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
-        let guard = LOCK
-            .get_or_init(|| StdMutex::new(()))
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+    /// mid-read. An async lock, because every caller holds it across awaits.
+    async fn isolated() -> tokio::sync::MutexGuard<'static, ()> {
+        static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+        let guard = LOCK.lock().await;
         forget_sidecars();
         forget_efforts();
         guard
@@ -633,7 +629,7 @@ mod tests {
         // delegate's delegate's delegate reports three.
         const GRANDCHILD_DEPTH: u32 = 3;
 
-        let _guard = isolated();
+        let _guard = isolated().await;
         let sweep = json!({ "agentType": "qa-bar-raiser", "description": "sweep", "spawnDepth": 1 });
         let dig = json!({
             "agentType": "general-purpose",
@@ -673,7 +669,7 @@ mod tests {
      */
     #[tokio::test]
     async fn inv13_orphan_is_reparented_not_dropped() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[fixture(
             "a9",
             json!({ "agentType": "Explore", "description": "sweep", "spawnDepth": 2, "parentAgentId": "gone" }),
@@ -697,7 +693,7 @@ mod tests {
      */
     #[tokio::test]
     async fn inv13_a_parent_loop_is_raised_rather_than_losing_both_nodes() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[
             fixture("x", json!({ "agentType": "a", "description": "x", "spawnDepth": 2, "parentAgentId": "y" })),
             fixture("y", json!({ "agentType": "b", "description": "y", "spawnDepth": 2, "parentAgentId": "x" })),
@@ -721,7 +717,7 @@ mod tests {
 
     #[tokio::test]
     async fn inv13_does_not_attach_a_delegate_to_itself() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[fixture(
             "self",
             json!({ "agentType": "a", "description": "x", "spawnDepth": 2, "parentAgentId": "self" }),
@@ -736,7 +732,7 @@ mod tests {
 
     #[tokio::test]
     async fn inv5_keeps_the_rest_of_a_tree_when_one_sidecar_is_malformed() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[
             fixture("good", json!({ "agentType": "qa-triage", "description": "check", "spawnDepth": 1 })),
             Fixture {
@@ -756,7 +752,7 @@ mod tests {
     /// failure wearing a different shape, and costs the same one node.
     #[tokio::test]
     async fn inv5_ignores_a_sidecar_that_is_not_an_object() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[
             fixture("good", json!({ "agentType": "qa-triage", "description": "check", "spawnDepth": 1 })),
             Fixture { id: "odd", meta: Some("\"a string\"".into()), wrote_ago: None, bytes: 10 },
@@ -771,7 +767,7 @@ mod tests {
     /// describe, so it is not one this app claims.
     #[tokio::test]
     async fn inv13_skips_a_transcript_with_no_sidecar() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[
             fixture("good", json!({ "agentType": "qa-triage", "description": "check", "spawnDepth": 1 })),
             Fixture { id: "bare", meta: None, wrote_ago: None, bytes: 10 },
@@ -786,7 +782,7 @@ mod tests {
     // killed delegate carries `stoppedByUser`.
     #[tokio::test]
     async fn inv13_reads_a_forked_skill_and_a_stopped_delegate() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[
             fixture(
                 "fork",
@@ -822,7 +818,7 @@ mod tests {
     /// A node with neither `agentType` nor `name` is still a node.
     #[tokio::test]
     async fn inv13_an_unlabelled_delegate_is_still_a_node() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[fixture("bare", json!({ "toolUseId": "t1" }))]);
 
         let tree = read_tree_at(&agent(), Some(&transcript), NOW).await;
@@ -838,7 +834,7 @@ mod tests {
 
     #[tokio::test]
     async fn inv13_returns_an_empty_tree_when_nothing_was_delegated() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let root = tempfile::tempdir().expect("temp dir");
         let transcript = root.path().join("sess-1.jsonl");
         std::fs::write(&transcript, b"").expect("transcript");
@@ -859,7 +855,7 @@ mod tests {
      */
     #[tokio::test]
     async fn inv13_reports_unknown_not_empty_for_a_cli_with_no_transcript() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let shell = Agent { agent_kind: crate::agent_kinds::TERMINAL_KIND.into(), ..agent() };
 
         let tree = read_tree_at(&shell, None, NOW).await;
@@ -872,7 +868,7 @@ mod tests {
     /// that keeps none. The answer is `unknown` before any path is resolved.
     #[tokio::test]
     async fn inv4_no_transcript_lookup_for_a_cli_with_no_transcripts() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let shell = Agent { agent_kind: crate::agent_kinds::TERMINAL_KIND.into(), ..agent() };
 
         // A root that does not exist: reaching the filesystem at all would be
@@ -887,7 +883,7 @@ mod tests {
     /// every other capability lookup denies it.
     #[tokio::test]
     async fn inv13_an_unknown_cli_is_unknown_not_empty() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let odd = Agent { agent_kind: "gemini".into(), ..agent() };
 
         let tree = read_tree_at(&odd, None, NOW).await;
@@ -899,7 +895,7 @@ mod tests {
     /// all, which is an empty tree rather than an error (INV-5).
     #[tokio::test]
     async fn inv5_a_missing_subagents_directory_is_an_empty_tree() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let root = tempfile::tempdir().expect("temp dir");
         let transcript = root.path().join("sess-1.jsonl");
         std::fs::write(&transcript, b"").expect("transcript");
@@ -919,7 +915,7 @@ mod tests {
      */
     #[tokio::test]
     async fn inv13_marks_a_recently_written_delegate_of_a_busy_agent_as_inferred() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[Fixture {
             id: "a1",
             meta: Some(json!({ "agentType": "x", "description": "y", "spawnDepth": 1 }).to_string()),
@@ -944,7 +940,7 @@ mod tests {
         // is left to judge is the silence itself.
         const SILENT_FOR_MS: i64 = 30 * 60_000;
 
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[Fixture {
             id: "a1",
             meta: Some(json!({ "agentType": "x", "description": "y", "spawnDepth": 1 }).to_string()),
@@ -965,7 +961,7 @@ mod tests {
     // recently that delegate's file was touched.
     #[tokio::test]
     async fn inv13_does_not_call_a_delegate_active_while_its_parent_is_idle() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[Fixture {
             id: "a1",
             meta: Some(json!({ "agentType": "x", "description": "y", "spawnDepth": 1 }).to_string()),
@@ -983,7 +979,7 @@ mod tests {
     /// is outside it.
     #[tokio::test]
     async fn inv13_the_active_window_is_ninety_seconds() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let meta = json!({ "agentType": "x", "description": "y", "spawnDepth": 1 }).to_string();
         let (_root, transcript) = project(&[
             Fixture { id: "inside", meta: Some(meta.clone()), wrote_ago: Some(89_999), bytes: 10 },
@@ -1000,7 +996,7 @@ mod tests {
     /// a second ago under a busy parent is `done`, not `active`.
     #[tokio::test]
     async fn inv13_stopped_by_user_wins_over_a_recent_write() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[Fixture {
             id: "a1",
             meta: Some(
@@ -1023,7 +1019,7 @@ mod tests {
         // the file's own rather than a default nobody set.
         const WROTE_BYTES: usize = 4096;
 
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (_root, transcript) = project(&[Fixture {
             id: "a1",
             meta: Some(json!({ "agentType": "x", "description": "y", "spawnDepth": 1 }).to_string()),
@@ -1039,7 +1035,7 @@ mod tests {
     /// Oldest first, so a tree reads in the order the work was handed out.
     #[tokio::test]
     async fn inv13_orders_a_tree_oldest_first() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let meta = |parent: Option<&str>| match parent {
             Some(p) => json!({ "agentType": "x", "spawnDepth": 2, "parentAgentId": p }).to_string(),
             None => json!({ "agentType": "x", "spawnDepth": 1 }).to_string(),
@@ -1106,7 +1102,7 @@ mod tests {
     /// re-`stat`ed, which is what keeps this cheap enough to poll (INV-4).
     #[tokio::test]
     async fn inv4_a_sidecar_is_read_once_and_cached_by_path() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (root, transcript) = project(&[fixture(
             "a1",
             json!({ "agentType": "first", "description": "y", "spawnDepth": 1 }),
@@ -1178,7 +1174,7 @@ mod tests {
 
     #[tokio::test]
     async fn inv13_counts_tool_calls_rather_than_turns() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         // One turn that called nine tools and one that called none are not the
         // same amount of work, and counting messages would say they were.
         let node = only_delegate(&[
@@ -1191,7 +1187,7 @@ mod tests {
 
     #[tokio::test]
     async fn inv13_measures_the_span_between_first_and_last_record() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let node = only_delegate(&[
             json!({ "timestamp": "2026-08-30T12:00:00.000Z", "type": "user" }).to_string(),
             turn("2026-08-30T12:13:00.000Z", 1),
@@ -1206,7 +1202,7 @@ mod tests {
     /// may have done a great deal.
     #[tokio::test]
     async fn inv11_says_nothing_for_a_transcript_it_cannot_parse() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let node =
             only_delegate(&["this is not json".to_string(), "neither is this".to_string()]).await;
         assert_eq!(node.calls, None);
@@ -1215,7 +1211,7 @@ mod tests {
 
     #[tokio::test]
     async fn inv11_still_reports_zero_when_zero_was_read() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let node = only_delegate(&[
             json!({ "timestamp": "2026-08-30T12:00:00.000Z", "type": "user" }).to_string(),
         ])
@@ -1226,7 +1222,7 @@ mod tests {
     /// A half-written last line is the normal state of a file being appended to.
     #[tokio::test]
     async fn inv11_survives_a_partial_trailing_line() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let node = only_delegate(&[
             turn("2026-08-30T12:00:00.000Z", TOOLS_BEFORE_A_TRUNCATED_LINE),
             "{\"type\":\"assis".to_string(),
@@ -1240,7 +1236,7 @@ mod tests {
     /// rewriting the file without disturbing either half of the cache key.
     #[tokio::test]
     async fn inv4_answers_from_cache_while_mtime_and_size_are_unchanged() {
-        let _guard = isolated();
+        let _guard = isolated().await;
         let (keep, transcript) = with_transcript(&[turn("2026-08-30T12:00:00.000Z", TOOLS_IN_A_CACHED_TURN)]);
         let jsonl = keep.path().join("sess-1").join("subagents").join("agent-a1.jsonl");
         // Pinned before anything reads it: a file written normally gets a

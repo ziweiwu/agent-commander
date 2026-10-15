@@ -1,0 +1,23 @@
+# cargo-mutants: CI runs it on each pull request's diff (`npm run mutants` locally).
+test_tool = "nextest"
+exclude_globs = ["tests/**", "benches/**", "examples/**", "fuzz/**", "**/build.rs"]
+timeout_multiplier = 3.0
+# The wire-contract test reads ../src/shared/wire.ts, outside the crate, so it
+# fails in the copy of rust/ cargo-mutants tests in. It checks `#[cfg(test)]`
+# code that is never mutated, so leaving it out loses nothing.
+additional_cargo_test_args = ["-E", "not test(types::tests::the_checked_in_wire_contract_is_current)"]
+
+# Only what a unit test would need a real OS resource to catch, each with why.
+exclude_re = [
+    # Waits for a real SIGINT or SIGTERM to this process; a test would have to
+    # signal the test runner itself. No harness covers it: e2e runs `--mock`
+    # and is torn down by Playwright, not by these signals.
+    "replace shutdown_signal with \\(\\)",
+    # Kills and reaps the real `tmux -C` child; a test would signal a real
+    # process. Under `--mock` no tmux client is spawned, so e2e does not reach it.
+    "replace reap with \\(\\)",
+    # One line handing the process-wide slot to `clear_stage`, which is tested
+    # over a slot of its own. Testing this line would delete the staging
+    # directory live paste tests share under plain `cargo test`.
+    "replace cleanup with \\(\\)",
+]

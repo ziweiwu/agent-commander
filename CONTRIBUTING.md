@@ -43,8 +43,9 @@ tmux session, so they stay local.
 
 ```sh
 npm run typecheck
-npm run lint          # oxlint, then clippy with warnings as errors
-npm test              # vitest, then cargo test
+npm run lint          # oxlint, then the clippy ratchet
+npm test              # vitest, then cargo nextest
+npm run deps          # cargo-deny, cargo-vet, cargo-machete
 npm run build         # the Vite bundle, then cargo build --release
 npm run e2e           # five projects: desktop/tablet/phone on Chromium,
                       # phone/tablet again on WebKit
@@ -56,6 +57,21 @@ npm run verify:inv1   # attaching never resizes a real pane — needs a live tmu
 
 Say which of these you ran in the pull request. If you did not run one, say so
 rather than implying it passed.
+
+### Guardrails
+
+- **Gate:** `npm run lint && npm test && npm run deps` is the whole Rust gate,
+  locally, in CI and in the `Stop` hook.
+- **Ratchet:** clippy denies `unwrap`, `expect`, `panic!`, `unsafe` and bare
+  `#[allow]` everywhere, and additionally holds the lines your change touches to
+  `indexing_slicing` and `arithmetic_side_effects`. Old code is left alone
+  until it is edited. A site that cannot fail takes
+  `#[expect(lint, reason = "...")]`, never `#[allow]`.
+- **Vet:** a new or upgraded crate fails `cargo vet` until it is audited
+  (`cargo vet certify`) or exempted (`cargo vet add-exemption`). Which one is the
+  maintainer's call — say so in the pull request rather than choosing.
+- **Mutants:** pull requests run `cargo mutants` on the Rust they change; a
+  surviving mutant fails the PR. `npm run mutants` runs the same check locally.
 
 ## Ports
 

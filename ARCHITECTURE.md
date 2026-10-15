@@ -729,7 +729,7 @@ Five gates, each answering a question the others cannot.
 
 | Gate | What it can see | Where it runs |
 |---|---|---|
-| `npm test` | the server's modules (`cargo test`), and the browser's in jsdom (vitest) | CI, Node 20 and 22 |
+| `npm test` | the server's modules (`cargo nextest`), and the browser's in jsdom (vitest) | CI, Node 20 and 22 |
 | `npm run e2e` | the joins: a real browser against a real `--mock` server | CI, Chromium |
 | `npm run audit` | contrast across all sixteen palettes, WCAG 2.2 AA at five device profiles, task flows, device layouts | local |
 | `npm run qa` | randomised exploration, deterministic per seed | local |

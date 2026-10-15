@@ -28,7 +28,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -478,7 +478,9 @@ async fn write_stdin(child: &mut tokio::process::Child, text: &str) {
     let Some(mut pipe) = child.stdin.take() else {
         return;
     };
+    #[expect(clippy::let_underscore_must_use, reason = "best effort, per the doc comment: the command itself reports the failure")]
     let _ = pipe.write_all(text.as_bytes()).await;
+    #[expect(clippy::let_underscore_must_use, reason = "best effort, per the doc comment: the command itself reports the failure")]
     let _ = pipe.shutdown().await;
 }
 
@@ -581,7 +583,7 @@ impl Ticket {
         let seq = QUEUE_SEQ.fetch_add(1, Ordering::Relaxed) + 1;
         let prior = write_queues()
             .lock()
-            .unwrap()
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(pane_id.to_string(), (seq, rx))
             .map(|(_, rx)| rx);
         Ticket { pane_id: pane_id.to_string(), seq, prior, _done: done }
@@ -592,6 +594,7 @@ impl Ticket {
             // `Err` means the previous writer was dropped without signalling,
             // which is exactly what a failed write does. Its turn is over
             // either way.
+            #[expect(clippy::let_underscore_must_use, reason = "an Err is a writer dropped without signalling; its turn is over either way")]
             let _ = prior.await;
         }
     }
@@ -599,7 +602,7 @@ impl Ticket {
 
 impl Drop for Ticket {
     fn drop(&mut self) {
-        let mut queues = write_queues().lock().unwrap();
+        let mut queues = write_queues().lock().unwrap_or_else(PoisonError::into_inner);
         if queues.get(&self.pane_id).map(|(seq, _)| *seq) == Some(self.seq) {
             queues.remove(&self.pane_id);
         }
@@ -625,7 +628,7 @@ fn stage_slot() -> &'static Mutex<Option<PathBuf>> {
 }
 
 fn staging_dir() -> std::io::Result<PathBuf> {
-    let mut slot = stage_slot().lock().unwrap();
+    let mut slot = stage_slot().lock().unwrap_or_else(PoisonError::into_inner);
     if let Some(dir) = slot.as_ref() {
         if dir.is_dir() {
             return Ok(dir.clone());
@@ -706,8 +709,15 @@ async fn stage(buffer: &str, text: &str) -> Option<PathBuf> {
 
 /// Clean up the staging directory on shutdown. Best effort by design.
 pub async fn cleanup() {
-    let dir = stage_slot().lock().unwrap().take();
+    clear_stage(stage_slot()).await;
+}
+
+/// The body of [`cleanup`], over whichever slot it is handed, so a test can
+/// clear a directory of its own rather than the one live pastes are using.
+async fn clear_stage(slot: &Mutex<Option<PathBuf>>) {
+    let dir = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
     if let Some(dir) = dir {
+        #[expect(clippy::let_underscore_must_use, reason = "best-effort cleanup on shutdown")]
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 }
@@ -742,19 +752,19 @@ pub async fn sweep_stale_staging(root: &Path) -> usize {
                 continue;
             }
         }
+        #[expect(clippy::let_underscore_must_use, reason = "best effort: a stale staging directory that will not go is harmless")]
         let _ = tokio::fs::remove_dir_all(entry.path()).await;
         removed += 1;
     }
     removed
 }
 
-extern "C" {
-    fn kill(pid: i32, sig: i32) -> i32;
-}
-
 fn pid_alive(pid: i32) -> bool {
-    // Signal 0 asks the kernel whether it could deliver, without delivering.
-    if unsafe { kill(pid, 0) } == 0 {
+    #[expect(unsafe_code, reason = "libc::kill is FFI; signal 0 is the only liveness probe POSIX offers")]
+    // SAFETY: signal 0 asks the kernel whether it could deliver, without
+    // delivering, so the call has no effect beyond the errno it sets.
+    let status = unsafe { libc::kill(pid, 0) };
+    if status == 0 {
         return true;
     }
     // EPERM means it exists and belongs to someone else.
@@ -1003,6 +1013,7 @@ impl Panes {
             Route::Spawned => self.run(&args, stdin).await,
         };
         if let Some(file) = staged {
+            #[expect(clippy::let_underscore_must_use, reason = "best effort: the staging directory is removed on shutdown anyway")]
             let _ = tokio::fs::remove_file(&file).await;
         }
         result.map(|_| ()).map_err(|error| Failed { route, buffer, error })
@@ -1020,9 +1031,11 @@ impl Panes {
         let Some(buffer) = buffer else { return error };
         match route {
             Route::Control => {
+                #[expect(clippy::let_underscore_must_use, reason = "best effort, per the doc comment: the caller gets the paste's own failure")]
                 let _ = self.control.run(&[format!("delete-buffer -b {buffer}")]).await;
             }
             Route::Spawned => {
+                #[expect(clippy::let_underscore_must_use, reason = "best effort, per the doc comment: the caller gets the paste's own failure")]
                 let _ = self.run(&strs(&["delete-buffer", "-b", &buffer]), None).await;
             }
         }
@@ -1299,7 +1312,7 @@ impl TmuxPanes {
     /// Returns the trait object every caller wants, not `Self`: this is the
     /// factory the `Deps` wiring uses, and there is no reason to hand out a
     /// concrete `Panes` anywhere.
-    #[allow(clippy::new_ret_no_self)]
+    #[expect(clippy::new_ret_no_self, reason = "the factory hands out the trait object the wiring takes")]
     pub fn new() -> Arc<dyn PaneApi> {
         Arc::new(Panes::live())
     }
@@ -2024,6 +2037,7 @@ mod tests {
     #[tokio::test]
     async fn sweeps_directories_from_runs_that_are_gone_and_spares_live_ones() {
         let root = std::env::temp_dir().join(format!("ac-sweep-test-{}", process::id()));
+        #[expect(clippy::let_underscore_must_use, reason = "the directory may not exist from an earlier run")]
         let _ = tokio::fs::remove_dir_all(&root).await;
         tokio::fs::create_dir_all(&root).await.unwrap();
         let dead = root.join(format!("{STAGE_PREFIX}999999-aaaaaa"));
@@ -2373,6 +2387,7 @@ mod tests {
         control.up.store(true, Ordering::Relaxed);
         control.keyed.lock().unwrap().push(("pane_current_command".into(), String::new()));
         control.keyed.lock().unwrap().push(("pane_current_path".into(), String::new()));
+        #[expect(clippy::let_underscore_must_use, reason = "the test reads the commands sent, not the answer")]
         let _ = panes.fleet_facts().await;
         for line in control.flat() {
             assert!(line.contains('\''), "{line}");
@@ -2448,5 +2463,47 @@ mod tests {
         for unknown in ["timed out", ""] {
             assert!(!is_missing_target(&PaneError::msg(unknown)), "{unknown}");
         }
+    }
+
+    /// Through a real pipe, to `cat`: what goes in is what comes back, and the
+    /// pipe is closed after it so the reader sees the end.
+    #[tokio::test]
+    async fn write_stdin_delivers_the_text_and_closes_the_pipe() {
+        let mut child = tokio::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        write_stdin(&mut child, "typed for the agent").await;
+        assert!(child.stdin.is_none(), "the pipe was not taken and closed");
+        let out = child.wait_with_output().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "typed for the agent");
+    }
+
+    /// The last writer out frees the pane's queue entry; an earlier one must
+    /// leave the later writer's place alone. The queue is process-wide, but it
+    /// is keyed by pane and no other test names this one.
+    #[test]
+    fn a_dropped_ticket_frees_only_its_own_place_in_the_queue() {
+        let pane = "%ticket-test";
+        let queued = || write_queues().lock().unwrap().contains_key(pane);
+        let first = Ticket::take(pane);
+        let second = Ticket::take(pane);
+        drop(first);
+        assert!(queued(), "an earlier writer cleared a later one's place");
+        drop(second);
+        assert!(!queued(), "the last writer left its place behind");
+    }
+
+    /// Over a slot of its own: clearing the shared one would pull the staging
+    /// directory out from under a paste test running on another thread.
+    #[tokio::test]
+    async fn cleanup_removes_the_staging_directory_and_forgets_it() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = create_stage_dir(root.path()).unwrap();
+        let slot = Mutex::new(Some(dir.clone()));
+        clear_stage(&slot).await;
+        assert!(!dir.exists(), "{} survived shutdown", dir.display());
+        assert!(slot.lock().unwrap().is_none(), "the slot still names a deleted directory");
     }
 }

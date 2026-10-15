@@ -31,6 +31,14 @@
         "npm",
         "test"
       ]
+    ],
+    [
+      "deps",
+      [
+        "npm",
+        "run",
+        "deps"
+      ]
     ]
   ],
   "timeout": 600
