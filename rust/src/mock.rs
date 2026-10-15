@@ -1962,6 +1962,22 @@ fn review_of_the_diff(now: i64) -> SubagentNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    /// How long ago each fixture delegate last wrote, in tree order, in milliseconds.
+    const EXPECTED_AGES: &[(&str, i64)] = &[
+        ("a58ddcc3c4b6b8989", 1_080_000),
+        ("ac4c01953dfb1440f", 4_000),
+        ("ad49ce3a43efeaa2b", 9_000),
+        ("a6c07bfd53044168f", 840_000),
+        ("a9b1181eab51efaf0", 2_000),
+        ("a69275682c401ef83", 660_000),
+        ("ab481603df0bb2d1d", 780_000),
+        ("ab21ff3003f5f193c", 1_320_000),
+        ("a3f81c0b7d2e45a19", 960_000),
+        ("a7d20e91fc8b3a604", 1_140_000),
+        ("af0e1cdf1ec262236", 8_000),
+    ];
 
     /// A name longer than this stops fitting a fleet card, which is the whole
     /// reason the over-long fixture exists.
@@ -2525,5 +2541,124 @@ mod tests {
         // A patch for an unknown session is a no-op, not a new agent.
         s.enrich("ghost", AgentPatch::default());
         assert_eq!(s.list().len(), fixtures().len());
+    }
+
+    /* ---- what the PR-diff mutants found nothing pinning ---- */
+
+    /// Count every fleet broadcast a subscription receives.
+    fn fleet_counter(s: &MockSource) -> (Arc<AtomicUsize>, Unsubscribe) {
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mine = Arc::clone(&seen);
+        let off = s.on_change(Box::new(move |_| {
+            mine.fetch_add(1, Ordering::SeqCst);
+        }));
+        (seen, off)
+    }
+
+    #[test]
+    fn notify_reaches_only_the_subscriptions_still_held() {
+        let s = MockSource::new(false);
+        let (dropped, off) = fleet_counter(&s);
+        let (kept, _keep) = fleet_counter(&s);
+        off();
+        s.notify();
+        assert_eq!(dropped.load(Ordering::SeqCst), 0, "an unsubscribed listener was still called");
+        assert_eq!(kept.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn finds_the_fixture_in_a_pane_and_nothing_in_an_empty_one() {
+        let s = MockSource::new(false);
+        let agent = s.agent_in_pane("%72").expect("%72 holds a fixture");
+        assert_eq!(agent.session_id, "mock-idle-kb");
+        assert!(s.agent_in_pane("%999").is_none());
+    }
+
+    #[test]
+    fn reopening_moves_the_agent_to_the_end_under_its_new_id() {
+        let s = MockSource::new(false);
+        assert!(s.reopen_under_a_new_id("mock-idle-kb", "mock-session-new"));
+        let list = s.list();
+        let last = list.last().expect("a fleet");
+        assert_eq!(last.session_id, "mock-session-new");
+        assert!(last.activity.is_none() && last.tokens.is_none());
+        assert!(s.get("mock-idle-kb").is_none());
+        assert!(!s.reopen_under_a_new_id("ghost", "never"), "there is no such agent to reopen");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stopped_source_stops_flipping_the_blocked_fixture() {
+        let s = MockSource::new(true);
+        let before = s.get("mock-waiting").unwrap().status;
+        s.start().await.unwrap();
+        s.stop();
+        tokio::time::sleep(std::time::Duration::from_millis(3_100)).await;
+        assert_eq!(s.get("mock-waiting").unwrap().status, before);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stopped_limits_neither_step_nor_call_anyone() {
+        let l = MockLimits::new(true);
+        l.start();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let mine = Arc::clone(&seen);
+        let _keep = l.on_change(Box::new(move |_| {
+            mine.fetch_add(1, Ordering::SeqCst);
+        }));
+        let before = serde_json::to_value(l.current()).unwrap();
+        l.stop();
+        const SEVERAL_STEPS: u64 = 3;
+        tokio::time::sleep(std::time::Duration::from_millis(LIMIT_STEP_PERIOD_MS * SEVERAL_STEPS)).await;
+        assert_eq!(seen.load(Ordering::SeqCst), 0);
+        assert_eq!(serde_json::to_value(l.current()).unwrap(), before);
+        assert!(l.inner.listeners.lock().unwrap().is_empty(), "stop keeps no subscriber");
+    }
+
+    #[test]
+    fn a_limits_unsubscribe_drops_only_its_own_listener() {
+        let l = MockLimits::new(false);
+        let dropped = Arc::new(AtomicUsize::new(0));
+        let kept = Arc::new(AtomicUsize::new(0));
+        let (d, k) = (Arc::clone(&dropped), Arc::clone(&kept));
+        let off = l.on_change(Box::new(move |_| {
+            d.fetch_add(1, Ordering::SeqCst);
+        }));
+        let _keep = l.on_change(Box::new(move |_| {
+            k.fetch_add(1, Ordering::SeqCst);
+        }));
+        off();
+        l.start();
+        assert_eq!(dropped.load(Ordering::SeqCst), 0);
+        assert_eq!(kept.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn the_permission_fixture_draws_the_dialog_it_is_blocked_on() {
+        const TALL_ENOUGH_FOR_THE_DIALOG: usize = 40;
+        let lines = MockPanes::default().capture(PERMISSION_PANE, TALL_ENOUGH_FOR_THE_DIALOG).await.unwrap();
+        let text = lines.join("\n");
+        assert!(text.contains("Bash command"), "{text}");
+        assert!(text.contains("Do you want to proceed?"), "{text}");
+    }
+
+    /// Every delegate in a tree, with how long ago it last wrote.
+    fn ages(nodes: &[SubagentNode], now: i64, out: &mut Vec<(String, i64)>) {
+        for n in nodes {
+            out.push((n.agent_id.clone(), now - n.last_write_at));
+            ages(&n.children, now, out);
+        }
+    }
+
+    /// The goldens strip `lastWriteAt`, so this is what pins each fixture's age.
+    /// Written out as numbers so it cannot share a mistake with the constants.
+    #[test]
+    fn each_fixture_delegate_last_wrote_when_it_says() {
+        const NOW: i64 = 1_000 * MINUTE_MS;
+        let mut got = Vec::new();
+        for agent in fixtures() {
+            ages(&mock_tree(&agent, NOW).children, NOW, &mut got);
+        }
+        let want: Vec<(String, i64)> = EXPECTED_AGES.iter().map(|(id, ms)| (id.to_string(), *ms)).collect();
+        assert_eq!(got, want);
     }
 }

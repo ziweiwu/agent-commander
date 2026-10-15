@@ -1217,4 +1217,37 @@ mod tests {
         assert_eq!(api.0.lock().unwrap()[..2], ["meta", "capture"]);
         assert_eq!(seen.lock().unwrap()[0], vec!["x"]);
     }
+
+    #[tokio::test]
+    async fn caches_the_last_read_of_a_watched_pane_only() {
+        let hub = PaneHub::new(Arc::new(FakePanes::new()));
+        let off = hub.subscribe("%1", Box::new(|_: &HubEvent| {}));
+        tick(A_FEW_INTERVALS_MS).await;
+        let cached = hub.cached("%1").expect("a watched pane keeps its last read");
+        assert_eq!(cached.lines, lines("a").lines);
+        assert!(hub.cached("%2").is_none(), "a pane nobody watches has no cache");
+        off();
+    }
+
+    /// A tab that releases its neighbour mid-delivery stops that neighbour
+    /// being called with the very event that is being delivered.
+    #[tokio::test]
+    async fn a_listener_released_mid_delivery_is_not_called() {
+        let hub = PaneHub::new(Arc::new(FakePanes::new()));
+        let neighbour: Arc<Mutex<Option<Unsubscribe>>> = Arc::new(Mutex::new(None));
+        let release = Arc::clone(&neighbour);
+        let first = hub.subscribe(
+            "%1",
+            Box::new(move |_: &HubEvent| {
+                if let Some(off) = release.lock().unwrap().take() {
+                    off();
+                }
+            }),
+        );
+        let (calls, listener) = counter();
+        *neighbour.lock().unwrap() = Some(hub.subscribe("%1", listener));
+        tick(A_FEW_INTERVALS_MS).await;
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        first();
+    }
 }

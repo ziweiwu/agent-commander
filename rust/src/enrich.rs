@@ -557,6 +557,26 @@ mod tests {
         assert_eq!(source.notifications(), before);
     }
 
+    /// A session that has left the fleet loses its pictures on the next pass;
+    /// one still in it keeps them.
+    #[tokio::test]
+    async fn a_tick_clears_the_pictures_of_sessions_that_have_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        for id in ["a", "gone"] {
+            std::fs::create_dir(dir.path().join(id)).unwrap();
+        }
+        let source = FakeSource::with(vec![agent("a")]);
+        let enricher = FleetEnricher::new(
+            source,
+            factory(|_| Some(Box::new(FakeTail(AgentPatch::default())))),
+            None,
+        );
+        enricher.clear_pictures_in(Arc::new(crate::pictures::PictureStore::in_dir(dir.path().to_path_buf())));
+        enricher.tick().await;
+        assert!(dir.path().join("a").exists(), "a live session's pictures were deleted");
+        assert!(!dir.path().join("gone").exists(), "an ended session's pictures were kept");
+    }
+
     /// INV-4: an unchanged fleet must not rebroadcast to every browser tab.
     #[tokio::test]
     async fn inv4_does_not_notify_when_nothing_changed() {

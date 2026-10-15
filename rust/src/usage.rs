@@ -181,6 +181,8 @@ mod tests {
         assert_eq!(reader.read("s1").unwrap().cost_usd, Some(0.5), "junk keeps the last value");
         std::fs::remove_file(dir.path().join("s1.json")).unwrap();
         assert_eq!(reader.read("s1").unwrap().cost_usd, Some(0.5), "so does a vanished file");
+        reader.retain(&["s1".to_string()]);
+        assert_eq!(reader.read("s1").unwrap().cost_usd, Some(0.5), "a live session keeps its reading");
         reader.retain(&[]);
         assert!(reader.read("s1").is_none(), "until the session itself is gone");
     }

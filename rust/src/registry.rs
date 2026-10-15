@@ -1731,4 +1731,56 @@ mod tests {
         }
         panic!("condition not met in time");
     }
+
+    #[test]
+    fn clearing_listeners_drops_every_subscription() {
+        let listeners: Listeners<u8> = Listeners::new();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&seen);
+        let _keep = listeners.add(Box::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        listeners.clear();
+        listeners.emit(&0);
+        assert_eq!(seen.load(Ordering::SeqCst), 0);
+    }
+
+    fn quiet_source(dir: &std::path::Path) -> Arc<LiveSource> {
+        LiveSource::configured(SourceConfig {
+            dir: dir.into(),
+            runner: FakeCli::new(Some("[]"), Duration::ZERO),
+            pending: None,
+            tick: RAPID_TICK,
+            reconcile_every: UNHURRIED_RECONCILE,
+        })
+    }
+
+    /// The low-latency path is really armed on a directory that can be
+    /// watched; the tick is the backstop, not the only path.
+    #[tokio::test]
+    async fn watches_a_sessions_directory_that_can_be_watched() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = quiet_source(dir.path());
+        let task = src.watch_the_sessions_directory().expect("a temp directory can be watched");
+        assert!(src.inner.watcher.lock().unwrap().is_some());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn stop_ends_every_task_and_drops_the_watch_and_the_listeners() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = quiet_source(dir.path());
+        src.start().await.unwrap();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&seen);
+        let _keep = src.on_change(Box::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        src.stop();
+        assert!(src.inner.stopped.load(Ordering::SeqCst));
+        assert!(src.inner.tasks.lock().unwrap().is_empty());
+        assert!(src.inner.watcher.lock().unwrap().is_none());
+        src.notify();
+        assert_eq!(seen.load(Ordering::SeqCst), 0, "a stopped source still called a listener");
+    }
 }

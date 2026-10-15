@@ -1621,10 +1621,21 @@ mod tests {
         }
     }
 
+    /// Spend the whole bucket at `now`. Bounded, so a budget that never says
+    /// no fails here instead of spinning forever.
+    fn drain(budget: &WriteBudget, now: i64) {
+        let most = WRITE_BURST as usize + 1;
+        let mut taken = 0;
+        while budget.take_at(now) {
+            taken += 1;
+            assert!(taken <= most, "the budget never refused");
+        }
+    }
+
     #[test]
     fn inv12_recovers_after_a_burst_rather_than_staying_shut() {
         let budget = WriteBudget::new(0);
-        while budget.take_at(0) {}
+        drain(&budget, 0);
         assert!(!budget.take_at(0));
         // The bucket refills; a user who let go of the key can type again.
         assert!(budget.take_at(1000));
@@ -1635,11 +1646,11 @@ mod tests {
     #[test]
     fn inv12_warns_again_after_the_flood_has_passed() {
         let budget = WriteBudget::new(0);
-        while budget.take_at(0) {}
+        drain(&budget, 0);
         assert!(budget.should_warn());
         assert!(!budget.should_warn());
         assert!(budget.take_at(10_000));
-        while budget.take_at(10_000) {}
+        drain(&budget, 10_000);
         assert!(budget.should_warn(), "a second, separate burst deserves its own warning");
     }
 
@@ -1648,7 +1659,7 @@ mod tests {
     #[test]
     fn inv12_a_clock_that_jumps_backwards_does_not_refill_the_bucket() {
         let budget = WriteBudget::new(10_000);
-        while budget.take_at(10_000) {}
+        drain(&budget, 10_000);
         assert!(!budget.take_at(0), "a backwards clock bought free tokens");
     }
 

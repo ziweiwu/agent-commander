@@ -2458,4 +2458,42 @@ mod tests {
             assert!(!is_missing_target(&PaneError::msg(unknown)), "{unknown}");
         }
     }
+
+    /// Through a real pipe, to `cat`: what goes in is what comes back, and the
+    /// pipe is closed after it so the reader sees the end.
+    #[tokio::test]
+    async fn write_stdin_delivers_the_text_and_closes_the_pipe() {
+        let mut child = tokio::process::Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        write_stdin(&mut child, "typed for the agent").await;
+        assert!(child.stdin.is_none(), "the pipe was not taken and closed");
+        let out = child.wait_with_output().await.unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout), "typed for the agent");
+    }
+
+    /// The last writer out frees the pane's queue entry; an earlier one must
+    /// leave the later writer's place alone.
+    #[test]
+    fn a_dropped_ticket_frees_only_its_own_place_in_the_queue() {
+        let pane = "%ticket-test";
+        let queued = || write_queues().lock().unwrap().contains_key(pane);
+        let first = Ticket::take(pane);
+        let second = Ticket::take(pane);
+        drop(first);
+        assert!(queued(), "an earlier writer cleared a later one's place");
+        drop(second);
+        assert!(!queued(), "the last writer left its place behind");
+    }
+
+    #[tokio::test]
+    async fn cleanup_removes_the_staging_directory() {
+        let file = stage("cleanup-test", "text").await.expect("staged");
+        let dir = file.parent().unwrap().to_path_buf();
+        assert!(dir.exists());
+        cleanup().await;
+        assert!(!dir.exists(), "{} survived shutdown", dir.display());
+    }
 }

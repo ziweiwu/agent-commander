@@ -3064,6 +3064,43 @@ mod mock_control {
             make: Arc::new(move |_session_id: &str| session.clone() as Arc<dyn ControlDeps>),
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::sources::AgentSource;
+
+        fn session() -> (Arc<crate::mock::MockSource>, MockSession) {
+            let source = Arc::new(crate::mock::MockSource::new(false));
+            (Arc::clone(&source), MockSession::new(source))
+        }
+
+        #[test]
+        fn a_pid_runs_the_fixture_session_until_told_otherwise() {
+            let (source, session) = session();
+            let pid = source.get("mock-idle-kb").unwrap().pid;
+            assert_eq!(session.session_of(pid), "mock-idle-kb");
+            assert_eq!(session.session_of(-1), "mock-session--1");
+        }
+
+        #[tokio::test]
+        async fn the_goal_round_trips_and_clear_replaces_the_session() {
+            let (source, session) = session();
+            session.paste("%72", "/goal ship it", Submit::Yes).await.unwrap();
+            assert_eq!(session.read_goal().await.map(|g| g.condition), Some("ship it".to_string()));
+            session.paste("%72", "/goal clear", Submit::Yes).await.unwrap();
+            assert!(session.read_goal().await.is_none());
+
+            let pid = source.get("mock-idle-kb").unwrap().pid;
+            session.paste("%72", "/goal again", Submit::Yes).await.unwrap();
+            session.paste("%72", "/clear", Submit::Yes).await.unwrap();
+            let now = session.session_of(pid);
+            assert!(now.starts_with("mock-session-"), "{now}");
+            assert!(source.get("mock-idle-kb").is_none(), "the old session is still in the fleet");
+            assert!(source.get(&now).is_some(), "the fleet does not hold the new session");
+            assert!(session.read_goal().await.is_none(), "a cleared session kept its goal");
+        }
+    }
 }
 
 /// The live fleet, seen through two providers at once.
@@ -3423,7 +3460,7 @@ mod tests {
         AgentStatus, PendingPrompt, PromptOption, RateLimits, TimelineEvent, TimelineKind,
     };
     use std::collections::HashMap;
-    use std::sync::atomic::AtomicI64;
+    use std::sync::atomic::{AtomicBool, AtomicI64};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
@@ -6057,5 +6094,54 @@ mod tests {
         assert_eq!(control_route("/api/agents//close"), None);
         assert_eq!(control_route("/api/agents/abc/kill"), None);
         assert_eq!(control_route("/api/agents"), None);
+    }
+
+    #[test]
+    fn the_visible_count_falls_with_each_hidden_tab_and_never_below_zero() {
+        let viewers = Viewers::default();
+        viewers.shown();
+        viewers.shown();
+        viewers.hidden();
+        assert!(viewers.any_visible(), "one tab is still on screen");
+        viewers.hidden();
+        assert!(!viewers.any_visible());
+        viewers.hidden();
+        viewers.shown();
+        assert!(viewers.any_visible(), "a hidden at zero wrapped the count");
+        viewers.hidden();
+        assert!(!viewers.any_visible());
+    }
+
+    /// A viewer holding a pane subscription and a transcript task.
+    fn watching_viewer() -> (Viewer, Arc<AtomicBool>) {
+        let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+        let viewer = Viewer::new(tx);
+        let released = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&released);
+        {
+            let mut st = viewer.state.lock().unwrap();
+            st.unwatch = Some(Box::new(move || flag.store(true, Ordering::SeqCst)));
+            st.tail_task = Some(tokio::spawn(std::future::pending::<()>()));
+        }
+        (viewer, released)
+    }
+
+    #[tokio::test]
+    async fn clearing_the_frame_timer_releases_the_pane_and_keeps_the_transcript() {
+        let (viewer, released) = watching_viewer();
+        viewer.clear_frame_timer();
+        assert!(released.load(Ordering::SeqCst), "the pane subscription was kept");
+        let st = viewer.state.lock().unwrap();
+        assert!(st.unwatch.is_none());
+        assert!(st.tail_task.is_some(), "a dead pane took the transcript down with it");
+    }
+
+    #[tokio::test]
+    async fn clearing_all_timers_releases_the_pane_and_ends_the_transcript_task() {
+        let (viewer, released) = watching_viewer();
+        viewer.clear_timers();
+        assert!(released.load(Ordering::SeqCst));
+        let st = viewer.state.lock().unwrap();
+        assert!(st.unwatch.is_none() && st.tail_task.is_none());
     }
 }

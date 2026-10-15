@@ -546,4 +546,25 @@ mod tests {
         assert_eq!(seen.load(Ordering::SeqCst), 0);
         watcher.stop();
     }
+
+    /// After `stop` nothing reads the file and nobody is called, however long
+    /// the poll that used to run would have taken.
+    #[tokio::test]
+    async fn a_stopped_watcher_reads_nothing_and_calls_nobody() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("rate-limits.json");
+        persist(dir.path(), &file, r#"{"at":1,"fiveHour":{"pct":10}}"#);
+        let watcher = FileLimits::with_file(file.clone(), FAST_POLL);
+        watcher.start();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&seen);
+        let _keep = watcher.on_change(Box::new(move |_| {
+            counter.fetch_add(1, Ordering::SeqCst);
+        }));
+        watcher.stop();
+        persist(dir.path(), &file, r#"{"at":2,"fiveHour":{"pct":20}}"#);
+        tokio::time::sleep(LONG_ENOUGH_FOR_A_NOTIFICATION).await;
+        assert_eq!(watcher.current().map(|reading| reading.at), Some(1));
+        assert_eq!(seen.load(Ordering::SeqCst), 0);
+    }
 }

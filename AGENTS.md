@@ -200,7 +200,9 @@ runs the same three, and `.claude/gates.json` runs them as the `Stop` hook.
 - **Mutation testing** runs on pull requests only, against the Rust the PR
   changes (the `mutants` job in `ci.yml`); a mutant no test catches fails it.
   `npm run mutants` is the same check against your branch's merge base. Never
-  run a full pass — it is hours.
+  run a full pass — it is hours. A mutant is excluded (`exclude_re` in
+  `rust/.cargo/mutants.toml`, with its reason) only when catching it would need
+  a real OS resource — a signal, a real tmux client; otherwise write the test.
 - **Release builds** go through `cargo auditable`, so a shipped binary carries
   its dependency list and `cargo audit bin` can check it after the fact.
 

@@ -1399,4 +1399,73 @@ mod tests {
         assert!(client.stats().restarts >= 1);
         client.stop();
     }
+
+    /// Stopping answers every command still waiting, kills the client, and
+    /// stops calling it ready.
+    #[tokio::test]
+    async fn stop_fails_waiting_commands_at_once_and_kills_the_client() {
+        let (fake, client) = connected().await;
+        let pending = sending(&client, &["list-panes"]);
+        for _ in 0..400 {
+            if !fake.written().is_empty() {
+                break;
+            }
+            pause(2).await;
+        }
+        client.stop();
+        const FAR_SOONER_THAN_A_COMMAND_TIMES_OUT: Duration = Duration::from_secs(1);
+        let answer = tokio::time::timeout(FAR_SOONER_THAN_A_COMMAND_TIMES_OUT, pending)
+            .await
+            .expect("a waiting command outlived stop")
+            .unwrap();
+        assert!(answer.is_err());
+        assert!(!client.ready());
+        assert!(fake.out.lock().unwrap().is_none(), "the client process was not killed");
+    }
+
+    /// Nothing is asked of tmux while the attach is still settling.
+    #[tokio::test]
+    async fn sends_no_probe_until_the_attach_has_settled() {
+        const SETTLE_LONGER_THAN_THE_TEST_MS: u64 = 60_000;
+        const WELL_AFTER_THE_SPAWN_MS: u64 = 50;
+        let last: Arc<Mutex<Option<Arc<FakeTmux>>>> = Arc::new(Mutex::new(None));
+        let client = TmuxControl::new(Arc::new(FakeTransport {
+            session: Some("work".to_string()),
+            last: last.clone(),
+        }));
+        client.set_settle_ms(SETTLE_LONGER_THAN_THE_TEST_MS);
+        client.start();
+        let mut fake = None;
+        for _ in 0..400 {
+            fake = last.lock().unwrap().clone();
+            if fake.is_some() {
+                break;
+            }
+            pause(2).await;
+        }
+        let fake = fake.expect("the client was never spawned");
+        pause(WELL_AFTER_THE_SPAWN_MS).await;
+        assert!(fake.written().is_empty(), "probed before settling: {:?}", fake.written());
+        client.stop();
+    }
+
+    /// Through a real pipe, to `cat`: queued lines arrive in order.
+    #[tokio::test]
+    async fn forwards_queued_lines_to_the_clients_stdin_in_order() {
+        use tokio::io::AsyncReadExt;
+        let mut child = Command::new("cat")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let (lines, queue) = mpsc::unbounded_channel();
+        forward_input(child.stdin.take().unwrap(), queue);
+        lines.send("first\n".to_string()).unwrap();
+        lines.send("second\n".to_string()).unwrap();
+        drop(lines);
+        let mut out = String::new();
+        child.stdout.take().unwrap().read_to_string(&mut out).await.unwrap();
+        assert_eq!(out, "first\nsecond\n");
+        child.wait().await.unwrap();
+    }
 }
