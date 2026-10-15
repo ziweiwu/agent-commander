@@ -709,7 +709,13 @@ async fn stage(buffer: &str, text: &str) -> Option<PathBuf> {
 
 /// Clean up the staging directory on shutdown. Best effort by design.
 pub async fn cleanup() {
-    let dir = stage_slot().lock().unwrap_or_else(PoisonError::into_inner).take();
+    clear_stage(stage_slot()).await;
+}
+
+/// The body of [`cleanup`], over whichever slot it is handed, so a test can
+/// clear a directory of its own rather than the one live pastes are using.
+async fn clear_stage(slot: &Mutex<Option<PathBuf>>) {
+    let dir = slot.lock().unwrap_or_else(PoisonError::into_inner).take();
     if let Some(dir) = dir {
         #[expect(clippy::let_underscore_must_use, reason = "best-effort cleanup on shutdown")]
         let _ = tokio::fs::remove_dir_all(dir).await;
@@ -2475,7 +2481,8 @@ mod tests {
     }
 
     /// The last writer out frees the pane's queue entry; an earlier one must
-    /// leave the later writer's place alone.
+    /// leave the later writer's place alone. The queue is process-wide, but it
+    /// is keyed by pane and no other test names this one.
     #[test]
     fn a_dropped_ticket_frees_only_its_own_place_in_the_queue() {
         let pane = "%ticket-test";
@@ -2488,12 +2495,15 @@ mod tests {
         assert!(!queued(), "the last writer left its place behind");
     }
 
+    /// Over a slot of its own: clearing the shared one would pull the staging
+    /// directory out from under a paste test running on another thread.
     #[tokio::test]
-    async fn cleanup_removes_the_staging_directory() {
-        let file = stage("cleanup-test", "text").await.expect("staged");
-        let dir = file.parent().unwrap().to_path_buf();
-        assert!(dir.exists());
-        cleanup().await;
+    async fn cleanup_removes_the_staging_directory_and_forgets_it() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = create_stage_dir(root.path()).unwrap();
+        let slot = Mutex::new(Some(dir.clone()));
+        clear_stage(&slot).await;
         assert!(!dir.exists(), "{} survived shutdown", dir.display());
+        assert!(slot.lock().unwrap().is_none(), "the slot still names a deleted directory");
     }
 }
