@@ -203,13 +203,15 @@ pub fn to_agent(file: &serde_json::Value) -> Option<Agent> {
     let cwd = non_empty_field(file, "cwd")?.to_string();
 
     let (session, pane) = parse_tmux_ref(file.get("tmux").and_then(|t| t.as_str()));
+    let status = file.get("status").and_then(|s| s.as_str());
     let mut agent = Agent {
         session_id,
         pid,
         name: non_empty_field(file, "name").map(str::to_string).unwrap_or_else(|| format!("pid {pid}")),
         folder: folder_of(&cwd),
         cwd,
-        status: to_status(file.get("status").and_then(|s| s.as_str())),
+        status: to_status(status),
+        background_shell: (status == Some("shell")).then_some(true),
         // Spelled out rather than left to `Default`, which would be `""` — a
         // kind that matches no spec and therefore denies every capability, with
         // no chat tab, no controls and nothing on screen to say why.
@@ -356,6 +358,7 @@ fn changed(before: &HashMap<String, Agent>, after: &HashMap<String, Agent>) -> b
     for (id, agent) in after {
         let Some(previous) = before.get(id) else { return true };
         if previous.status != agent.status
+            || previous.background_shell != agent.background_shell
             || previous.name != agent.name
             || previous.cwd != agent.cwd
             || previous.waiting_for != agent.waiting_for
@@ -664,6 +667,8 @@ fn overlay(prev: &mut Agent, next: Agent) {
     prev.cwd = next.cwd;
     prev.folder = next.folder;
     prev.status = next.status;
+    // Read off the same field as `status`, so it moves with it every pass.
+    prev.background_shell = next.background_shell;
     prev.kind = next.kind;
     prev.started_at = next.started_at;
     // Conditionally present: absent means "unchanged", not "cleared".
@@ -1164,6 +1169,36 @@ mod tests {
         }))
         .expect("agent");
         assert_eq!(a.status, AgentStatus::Busy);
+        assert_eq!(a.background_shell, Some(true));
+
+        let turn = to_agent(&serde_json::json!({
+            "sessionId": "b", "pid": UNCHECKED_PID, "cwd": "/x", "status": "busy",
+        }))
+        .expect("agent");
+        assert_eq!(turn.background_shell, None);
+    }
+
+    /// The command exiting wakes the agent into a turn, and its status stays
+    /// `busy` throughout. The flag is what moved, so it must not linger on the
+    /// "absent means unchanged" rule, and the fleet must hear about it: the
+    /// interrupt it was hiding means something again.
+    #[test]
+    fn a_background_shell_ending_in_a_turn_clears_the_flag_and_is_a_change() {
+        let record = |status: &str| {
+            to_agent(&serde_json::json!({
+                "sessionId": "a", "pid": UNCHECKED_PID, "cwd": "/x", "status": status,
+            }))
+            .expect("agent")
+        };
+        let mut merged = record("shell");
+        let before = HashMap::from([("a".to_string(), merged.clone())]);
+
+        overlay(&mut merged, record("busy"));
+        assert_eq!(merged.status, AgentStatus::Busy);
+        assert_eq!(merged.background_shell, None);
+
+        let after = HashMap::from([("a".to_string(), merged)]);
+        assert!(changed(&before, &after));
     }
 
     /// A session file is a Claude Code session, and the record has to say so.

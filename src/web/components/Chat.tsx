@@ -235,6 +235,12 @@ export function Chat({ agent }: { agent: Agent }) {
   const paneExited = useStore((s) => s.exited.includes(agent.sessionId))
   const busy = agent.status === 'busy'
   /*
+   * `Escape` stops a turn. An agent busy only with a background command has
+   * no turn to stop: one press does nothing, and a second opens the CLI's
+   * Rewind dialog. So it is offered only against a turn.
+   */
+  const interruptible = busy && agent.backgroundShell !== true
+  /*
    * INV-11, on the one screen where the user acts rather than reads.
    *
    * `transport.send()` returns without doing anything when the socket is not
@@ -273,7 +279,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * mode is armed, and the Send button then says what it will do.
    */
   /** Send itself stops the agent, so a separate stop would be the same act twice. */
-  const interrupting = busy && sendMode === 'interrupt'
+  const interrupting = interruptible && sendMode === 'interrupt'
 
   const chooseSendMode = (next: SendMode) => {
     if (next === sendMode) return
@@ -446,7 +452,7 @@ export function Chat({ agent }: { agent: Agent }) {
     draftRef.current = ''
     // Interrupting is only meaningful against an agent that is actually working;
     // on an idle one the two modes are the same act, so the Escape is not sent.
-    if (sendMode === 'interrupt' && busy) interruptAndSend(text)
+    if (interrupting) interruptAndSend(text)
     else sendMessage(text)
     setDraft('')
     setPinned(true)
@@ -834,7 +840,7 @@ export function Chat({ agent }: { agent: Agent }) {
               </Button>
             </div>
           )}
-          {busy && !interrupting && (
+          {interruptible && !interrupting && (
             <Button
               type="button"
               variant="compact"
@@ -865,7 +871,7 @@ export function Chat({ agent }: { agent: Agent }) {
           >
             {/* The button says what it will do, which is what makes asking once
                 at the toggle enough rather than asking on every send. */}
-            {sendMode === 'interrupt' && busy ? t('interruptAndSend') : t('send')}
+            {interrupting ? t('interruptAndSend') : t('send')}
           </Button>
         </div>
         {sendable ? (

@@ -866,7 +866,10 @@ A session whose turn has ended with a background Bash command still running is
 turn nobody typed, and text pasted into the prompt then lands on that turn
 starting. Seen live on Claude Code 2.1.302: `shell`, then `busy` within a second
 of the command exiting, then `idle` after its reply
-(`registry::a_session_with_a_background_shell_running_is_busy`).
+(`registry::a_session_with_a_background_shell_running_is_busy`). It is marked
+`backgroundShell` so the conversation offers no Escape: there is no turn for one
+to stop, and a second press opens the Rewind dialog
+(`test/ui/chat-interrupt.test.tsx`).
 
 **Two exceptions, for different reasons.**
 

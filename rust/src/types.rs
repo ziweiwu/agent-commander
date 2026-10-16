@@ -43,6 +43,13 @@ pub struct Agent {
     /// Why the agent is blocked, e.g. "dialog open". Only when status is waiting.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub waiting_for: Option<String>,
+    /// Busy only because a Bash command it started in the background is still
+    /// running: its turn is over. Claude Code writes this status as `shell`.
+    ///
+    /// `Escape` stops a turn, not that command, so nothing offers it here. One
+    /// press does nothing and a second opens the CLI's Rewind dialog.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background_shell: Option<bool>,
     /// Which agent CLI this is — see `agent_kinds.rs`.
     ///
     /// Not optional, so every construction site has to say: a silent default

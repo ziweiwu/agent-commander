@@ -108,7 +108,8 @@ app; every field is read from something else's record.
   and `unknown` MUST be the default for an unset or unrecognised value: an
   absent status is not a claim. Claude Code's `shell` (its turn is over, a
   background Bash command is still running) MUST read as `busy`, as `claude
-  agents --json` reports it. *`types.rs::AgentStatus`,
+  agents --json` reports it, marked `backgroundShell` (FR-CHAT-9).
+  *`types.rs::AgentStatus`,
   `registry::a_session_with_a_background_shell_running_is_busy`.*
 - **FR-STATUS-2** — `waitingFor` MUST only be present when status is `waiting`,
   and MUST come from the closed set the CLI writes: `dialog open`, `permission
@@ -359,6 +360,10 @@ over the list with a back control; on a wide one, a second column.
   in, not the language the interface is set to. *`test/promptLang.test.ts`.*
 - **FR-CHAT-9** — While the agent is working, the conversation MUST show that it
   is, and MUST offer a way to stop it from here rather than only from Attach.
+  The one exception is an agent busy only with a background command
+  (`backgroundShell`). It still shows as working, but MUST NOT be offered the
+  stop or *Interrupt & send*: `Escape` stops a turn, not that command, and a
+  second press opens the CLI's Rewind dialog.
   *`test/ui/chat-interrupt.test.tsx`.*
 - **FR-CHAT-10** — With the connection down, the composer MUST refuse rather
   than accept text it cannot deliver, and MUST say why. **(INV-2)**

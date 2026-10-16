@@ -142,8 +142,9 @@ terminal this app exists to avoid.
 Status is not derived for a Claude agent. `registry::to_status` is a whitelist
 over what Claude Code itself wrote — `busy`, `shell`, `idle`, `waiting`, otherwise
 `unknown`. `shell` (the turn is over, a background Bash command is still running)
-is read as `busy`, which is what `claude agents --json` reports for it too. See
-"Where it is fragile", item 8.
+is read as `busy`, which is what `claude agents --json` reports for it too, and
+marked `backgroundShell` so the chat does not offer an `Escape` that has no turn
+to stop. See "Where it is fragile", item 8.
 
 ### Transcript — what they are doing
 

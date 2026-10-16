@@ -31,6 +31,14 @@ statusInferred?: boolean,
  */
 waitingFor?: string, 
 /**
+ * Busy only because a Bash command it started in the background is still
+ * running: its turn is over. Claude Code writes this status as `shell`.
+ *
+ * `Escape` stops a turn, not that command, so nothing offers it here. One
+ * press does nothing and a second opens the CLI's Rewind dialog.
+ */
+backgroundShell?: boolean, 
+/**
  * Which agent CLI this is — see `agent_kinds.rs`.
  *
  * Not optional, so every construction site has to say: a silent default
