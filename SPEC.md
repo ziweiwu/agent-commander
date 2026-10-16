@@ -106,7 +106,10 @@ app; every field is read from something else's record.
 
 - **FR-STATUS-1** — Status MUST be one of `busy`, `waiting`, `idle`, `unknown`,
   and `unknown` MUST be the default for an unset or unrecognised value: an
-  absent status is not a claim. *`types.rs::AgentStatus`.*
+  absent status is not a claim. Claude Code's `shell` (its turn is over, a
+  background Bash command is still running) MUST read as `busy`, as `claude
+  agents --json` reports it. *`types.rs::AgentStatus`,
+  `registry::a_session_with_a_background_shell_running_is_busy`.*
 - **FR-STATUS-2** — `waitingFor` MUST only be present when status is `waiting`,
   and MUST come from the closed set the CLI writes: `dialog open`, `permission
   prompt`, `input needed`, `sandbox request`, `goal proposal`, `worker request`.

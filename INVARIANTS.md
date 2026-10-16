@@ -861,6 +861,13 @@ something nobody wrote — so every action that *types* refuses an agent whose
 status is `busy`. Idle and waiting are allowed: a waiting agent is precisely
 the one you may want to redirect.
 
+A session whose turn has ended with a background Bash command still running is
+`busy` too (Claude Code writes `shell`). The command finishing hands the agent a
+turn nobody typed, and text pasted into the prompt then lands on that turn
+starting. Seen live on Claude Code 2.1.302: `shell`, then `busy` within a second
+of the command exiting, then `idle` after its reply
+(`registry::a_session_with_a_background_shell_running_is_busy`).
+
 **Two exceptions, for different reasons.**
 
 *Model* is permitted at any point because refusing it was inconsistent with the

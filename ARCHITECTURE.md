@@ -139,9 +139,11 @@ stops on a workspace-trust prompt *first*. Without a synthetic entry the agent i
 invisible in the fleet and the prompt blocking it can only be answered from the
 terminal this app exists to avoid.
 
-Status is not derived for a Claude agent. `toStatus` (`registry.ts:41`) is a
-four-value whitelist over what Claude Code itself wrote — `busy`, `idle`, `waiting`,
-otherwise `unknown`. See "Where it is fragile", item 14.
+Status is not derived for a Claude agent. `registry::to_status` is a whitelist
+over what Claude Code itself wrote — `busy`, `shell`, `idle`, `waiting`, otherwise
+`unknown`. `shell` (the turn is over, a background Bash command is still running)
+is read as `busy`, which is what `claude agents --json` reports for it too. See
+"Where it is fragile", item 8.
 
 ### Transcript — what they are doing
 
@@ -635,9 +637,11 @@ backfill contains an older copy" from "this backfill contains mine" — and bein
 wrong that way sends a delivered message to a live agent twice. It is a real
 limitation, not an oversight, and it currently lives only in a source comment.
 
-**8. Status is trusted wholesale from Claude Code's session file.** `toStatus`
-(`registry.ts:41`) is a whitelist over a field this app does not write, with
-`unknown` as the only fallback. Knowing which agents are blocked is the entire
+**8. Status is trusted wholesale from Claude Code's session file.**
+`registry::to_status` is a whitelist over a field this app does not write, with
+`unknown` as the only fallback. It drifts when the CLI adds a value: `shell`
+arrived unannounced, and every session with a background command running read
+as `unknown` until the whitelist was taught it. Knowing which agents are blocked is the entire
 purpose of the dashboard, and that judgement has no independent corroboration —
 notably, the two liveness signals the app *does* compute, `delegating` and
 `attachBlockedReason`, are deliberately separate fields rather than statuses. This

@@ -108,6 +108,11 @@ impl<T: Clone + Send + 'static> Default for Listeners<T> {
 fn to_status(raw: Option<&str>) -> AgentStatus {
     match raw {
         Some("busy") => AgentStatus::Busy,
+        // The turn is over but a background Bash command it started is still
+        // running. `claude agents --json` reports this as `busy` itself, and it
+        // is busy in the sense INV-8 guards: the command finishing wakes the
+        // agent into a new turn of its own.
+        Some("shell") => AgentStatus::Busy,
         Some("idle") => AgentStatus::Idle,
         Some("waiting") => AgentStatus::Waiting,
         // Missing or unrecognised is an absence of evidence, and stays
@@ -1146,6 +1151,19 @@ mod tests {
         }))
         .expect("agent");
         assert_eq!(c.status, AgentStatus::Unknown);
+    }
+
+    /// Claude Code writes `shell` when its turn has ended but a Bash command it
+    /// started in the background is still running. That is a reported state,
+    /// not an absence of one: `claude agents --json` lists the same session as
+    /// `busy`, and the CLI's own fleet view draws it as working.
+    #[test]
+    fn a_session_with_a_background_shell_running_is_busy() {
+        let a = to_agent(&serde_json::json!({
+            "sessionId": "a", "pid": UNCHECKED_PID, "cwd": "/x", "status": "shell",
+        }))
+        .expect("agent");
+        assert_eq!(a.status, AgentStatus::Busy);
     }
 
     /// A session file is a Claude Code session, and the record has to say so.
