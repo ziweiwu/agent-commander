@@ -3,7 +3,7 @@
  * 150-column pane shrunk to fit a 390px screen renders at about 4.6px.
  */
 import { describe, expect, it } from 'vitest'
-import { chooseFont, computeScale } from '../src/web/lib/term.ts'
+import { chooseFont, computeScale, fontForScale } from '../src/web/lib/term.ts'
 
 // Roughly what a 150x47 pane measures at the 13px base font.
 const WIDE_PANE = 1174
@@ -246,7 +246,7 @@ describe('font choice (feedback loop)', () => {
       zoom: 'readable',
       maxScale: 2,
     })
-    return chooseFont(scale > 1 ? BASE * scale : BASE, font)
+    return fontForScale(scale, font)
   }
 
   it.each([14, 15])('settles when it starts at %ipx', (start) => {
@@ -264,5 +264,12 @@ describe('font choice (feedback loop)', () => {
     expect(chooseFont(14.24, 15)).toBe(15)
     expect(chooseFont(17, 14)).toBe(17)
     expect(chooseFont(13, 20)).toBe(13)
+  })
+
+  // A 14px render that now has to shrink: the transform is applied to the base
+  // font, so staying at 14px would draw the capture 14/13 too large and clipped.
+  it.each([14, 15, 20])('returns from %ipx to the base font when it must shrink', (font) => {
+    expect(fontForScale(0.9, font)).toBe(BASE)
+    expect(fontForScale(1, font)).toBe(BASE)
   })
 })

@@ -139,6 +139,16 @@ export function chooseFont(wantedFont: number, current: number): number {
   return Math.abs(wantedFont - current) > band ? Math.round(wantedFont) : current
 }
 
+/**
+ * The font for a scale decision. A shrink is always a transform of the base
+ * font, so it returns to the base outright: the dead band is for enlargement
+ * only, and keeping an enlarged font under `transform = k` would draw the
+ * capture larger than the host that was sized for it.
+ */
+export function fontForScale(k: number, current: number): number {
+  return k > 1 ? chooseFont(BASE_FONT * k, current) : BASE_FONT
+}
+
 /** Repaint a row: home the cursor, reset SGR, clear, then draw. */
 function rowSeq(row: number, text: string): string {
   return `\u001b[${row + 1};1H\u001b[0m\u001b[2K${text}`
@@ -462,7 +472,7 @@ export class PaneTerm {
     // to be continuous. Changing the font changes the cell metrics, so a
     // re-measure follows it — the same double frame a geometry change gets.
     const wantedFont = k > 1 ? BASE_FONT * k : BASE_FONT
-    const font = chooseFont(wantedFont, this.#font)
+    const font = fontForScale(k, this.#font)
     if (font !== this.#font) {
       this.#font = font
       this.term.options.fontSize = font
