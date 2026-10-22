@@ -193,9 +193,19 @@ export function sortAgents(agents: Agent[], sort: SortKey, dir: SortDir = 'desc'
         return byNameDirected(a, b)
       case 'recent':
       default:
-        return compare(a.lastActivityAt, b.lastActivityAt) || byName(a, b)
+        return compare(recencyOf(a), recencyOf(b)) || byName(a, b)
     }
   })
+}
+
+/**
+ * When a session last did anything: its last activity, or its start when it
+ * has done nothing since. Starting is itself the newest thing a just-opened
+ * session did, so it belongs at the top of "newest" rather than at the bottom
+ * with the sessions nobody knows anything about (FR-FLEET-5).
+ */
+function recencyOf(agent: Agent): number | undefined {
+  return agent.lastActivityAt ?? (agent.startedAt || undefined)
 }
 
 /** Age of a session, or undefined when it never reported a start time. */
