@@ -9,7 +9,7 @@ import { placeholderId } from '../lib/succession.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
 import type { Key } from '../lib/i18n.ts'
-import { MODE_KEY, NEW_AGENT_MODES } from '../lib/modes.ts'
+import { MODE_KEY, NEW_AGENT_DEFAULT_MODE, NEW_AGENT_MODES } from '../lib/modes.ts'
 import { MODEL_ALIASES } from '../../shared/types.ts'
 import { Button, Chip } from './ui/Button.tsx'
 import { FolderBrowser } from './FolderBrowser.tsx'
@@ -141,7 +141,13 @@ export function NewAgentDialog() {
    */
   const [terminal, setTerminal] = useState(false)
   const [model, setModel] = useState('default')
-  const [mode, setMode] = useState('default')
+  /*
+   * Auto rather than "whatever the CLI would do": the owner starts sessions
+   * from here to leave them working, often from a phone, and a session that
+   * stops at its first permission prompt is waiting on someone who is not
+   * there. Pinned as a flag so it holds even where settings say otherwise.
+   */
+  const [mode, setMode] = useState(NEW_AGENT_DEFAULT_MODE)
   const [browsing, setBrowsing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')

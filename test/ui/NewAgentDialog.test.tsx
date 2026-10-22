@@ -61,7 +61,7 @@ describe('NewAgentDialog', () => {
     await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/x')
     await user.click(screen.getByTestId('new-agent-submit'))
 
-    await waitFor(() => expect(startAgent).toHaveBeenCalledWith('~/Projects/x', {}))
+    await waitFor(() => expect(startAgent).toHaveBeenCalledWith('~/Projects/x', { permissionMode: 'auto' }))
     await waitFor(() => expect(useStore.getState().newAgentOpen).toBe(false))
   })
 
@@ -91,7 +91,7 @@ describe('NewAgentDialog', () => {
     await user.type(screen.getByTestId('new-agent-name'), 'scratch')
     await user.click(screen.getByTestId('new-agent-submit'))
 
-    await waitFor(() => expect(startAgent).toHaveBeenCalledWith('/x', { name: 'scratch' }))
+    await waitFor(() => expect(startAgent).toHaveBeenCalledWith('/x', { name: 'scratch', permissionMode: 'auto' }))
   })
 
   it('offers the directories of running agents as shortcuts', async () => {
@@ -124,15 +124,31 @@ describe('NewAgentDialog', () => {
     )
   })
 
+  // A session started from here is usually left to work alone, so it starts in
+  // auto mode unless the user picks otherwise.
+  it('starts in auto mode when the mode is left alone', async () => {
+    const user = userEvent.setup()
+    startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/x' })
+    useStore.setState({ newAgentOpen: true, env })
+
+    renderApp(<NewAgentDialog />)
+    expect(screen.getByTestId<HTMLSelectElement>('new-agent-mode').value).toBe('auto')
+    await user.type(screen.getByTestId('new-agent-dir'), '/x')
+    await user.click(screen.getByTestId('new-agent-submit'))
+
+    await waitFor(() => expect(startAgent).toHaveBeenCalledWith('/x', { permissionMode: 'auto' }))
+  })
+
   // "default" means "whatever the CLI would do", so it is omitted rather than
   // pinned — otherwise the app would override a configured default.
-  it('omits model and mode when left on default', async () => {
+  it('omits model and mode when both are set to default', async () => {
     const user = userEvent.setup()
     startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/x' })
     useStore.setState({ newAgentOpen: true, env })
 
     renderApp(<NewAgentDialog />)
     await user.type(screen.getByTestId('new-agent-dir'), '/x')
+    await user.selectOptions(screen.getByTestId('new-agent-mode'), 'default')
     await user.click(screen.getByTestId('new-agent-submit'))
 
     await waitFor(() => expect(startAgent).toHaveBeenCalledWith('/x', {}))

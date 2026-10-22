@@ -635,7 +635,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-SPAWN-1** — **New agent** MUST ask for a directory — typed, picked from a
   folder browser, or chosen from the directories already in use — plus an
   optional name, model and permission mode, and MUST start the CLI there in a
-  fresh *detached* tmux session.
+  fresh *detached* tmux session. The permission mode MUST start on `auto`;
+  choosing *Default* passes no flag, so the CLI's own setting applies.
 - **FR-SPAWN-2** — The new session MUST appear in the list within a couple of
   seconds through the same discovery path as every other session — never by
   being inserted client-side. *`e2e/fleet.spec.ts`.*
