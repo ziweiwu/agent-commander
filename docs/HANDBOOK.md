@@ -567,7 +567,9 @@ couple of seconds, because the new process registers itself the same way every
 other session does. Directories from running agents are offered as shortcuts.
 The server validates the directory before spawning, and checks the model and
 permission mode against fixed allow-lists so an unrecognised value is refused
-rather than becoming a flag — see INV-7.
+rather than becoming a flag — see INV-7. The permission mode starts on
+**Auto**, because a session started here is usually left to work on its own;
+pick *Default* to fall back to whatever your Claude Code settings say.
 
 ## Opening a plain terminal
 

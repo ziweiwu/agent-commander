@@ -17,6 +17,9 @@ export const MODES = MODE_CYCLE
 /** Modes offerable when starting a session; `dontAsk` is reachable by flag. */
 export const NEW_AGENT_MODES = SPAWN_MODES
 
+/** The mode the New agent dialog starts on (FR-SPAWN-1). */
+export const NEW_AGENT_DEFAULT_MODE = 'auto'
+
 /**
  * How to write a mode where a user reads it.
  *
