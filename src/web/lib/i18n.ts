@@ -195,6 +195,11 @@ const EN = {
   working: 'working…',
   chatLoading: 'Loading the conversation…',
   chatEmpty: 'Nothing said yet. Send this agent a message below and it will appear here.',
+  chatStarting:
+    '{name} is starting in {folder}. ' +
+    'If Claude stops to ask whether this folder is trusted, answer it on the Attach tab.',
+  chatFirstPrompt:
+    '{name} is ready in {folder} and has not been given anything to do yet. Type its first instruction below.',
   chatUnreachable:
     'Nothing has arrived for this conversation yet. An agent that has only just started has not written anything down — otherwise the server may have restarted since this page was opened.',
   messagePlaceholder: 'Message {name}',
@@ -468,7 +473,10 @@ const EN = {
   newTerminalStart: 'Open terminal',
   newTerminalFailed: 'Could not open the terminal: {error}',
   filterTerminals: 'terminals',
-  filterTerminalsHint: 'Terminals are hidden until you ask for them.',
+  filterKinds: 'Which sessions to show',
+  filterKindsHint: 'Show Claude sessions, plain terminals, or both.',
+  filterKindClaude: 'Claude',
+  filterKindAll: 'both',
   staleServer: 'this server does not know that request — it is probably still running an older version. Restart it and reload.',
 } as const
 
@@ -629,6 +637,8 @@ const ZH: Record<Key, string> = {
   working: '处理中…',
   chatLoading: '正在加载对话…',
   chatEmpty: '还没有任何对话。在下方给它发一条消息，就会显示在这里。',
+  chatStarting: '{name} 正在 {folder} 中启动。如果 Claude 询问是否信任这个文件夹，请在“终端”标签页中回答。',
+  chatFirstPrompt: '{name} 已在 {folder} 中就绪，还没有收到任何任务。在下方输入第一条指令。',
   chatUnreachable: '暂时没有收到这个对话的内容。刚启动的 agent 还没有写下任何东西——否则可能是服务器在此页面打开后重启过。',
   messagePlaceholder: '发消息给 {name}',
   quickPromptsLabel: '常用回复',
@@ -853,7 +863,10 @@ const ZH: Record<Key, string> = {
   newTerminalStart: '打开终端',
   newTerminalFailed: '无法打开终端：{error}',
   filterTerminals: '个终端',
-  filterTerminalsHint: '终端默认不显示，需要时可以打开。',
+  filterKinds: '显示哪些会话',
+  filterKindsHint: '只看 Claude 会话、只看终端，或两者都看。',
+  filterKindClaude: '个 Claude',
+  filterKindAll: '全部',
   staleServer: '这个服务端不认识该请求，多半仍在运行旧版本。重启服务端并刷新页面。',
 }
 

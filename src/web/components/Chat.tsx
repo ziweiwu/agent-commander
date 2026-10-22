@@ -2,7 +2,9 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { emptyNotice } from '../lib/chat.ts'
-import { dayMark } from '../lib/format.ts'
+import { dayMark, tildePath } from '../lib/format.ts'
+import { isUnused } from '../lib/filter.ts'
+import { PENDING_PREFIX } from '../lib/succession.ts'
 import { formatDay, translate } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { shortName } from '../lib/naming.ts'
@@ -87,6 +89,12 @@ const QUICK_PROMPTS = [
   'quickBlocked',
   'quickSummarise',
 ] as const
+
+/** Whether this conversation has not begun, by the evidence the card shows. */
+function freshness(agent: Agent): 'starting' | 'unprompted' | null {
+  if (agent.sessionId.startsWith(PENDING_PREFIX)) return 'starting'
+  return isUnused(agent) ? 'unprompted' : null
+}
 
 export function Chat({ agent }: { agent: Agent }) {
   const t = useTranslate()
@@ -530,7 +538,10 @@ export function Chat({ agent }: { agent: Agent }) {
           <div className={styles.list} data-testid="chat-list">
             {messages.length === 0 ? (
               <div className={styles.notice} data-testid="chat-notice">
-                {t(emptyNotice({ timelineAt, timelineStalledAt }))}
+                {t(emptyNotice({ timelineAt, timelineStalledAt, fresh: freshness(agent) }), {
+                  name: shortName(agent),
+                  folder: tildePath(agent.cwd),
+                })}
               </div>
             ) : (
               <>

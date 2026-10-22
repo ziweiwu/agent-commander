@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { loadEnv, startAgent, startTerminal } from '../store/transport.ts'
 import { tildePath } from '../lib/format.ts'
+import { admitting } from '../lib/filter.ts'
+import { placeholderId } from '../lib/succession.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
 import type { Key } from '../lib/i18n.ts'
@@ -119,7 +122,10 @@ export function NewAgentDialog() {
   const t = useTranslate()
   const open = useStore((s) => s.newAgentOpen)
   const setOpen = useStore((s) => s.setNewAgentOpen)
-  const setTerminals = useStore((s) => s.setTerminals)
+  const kinds = useStore((s) => s.fleet.kinds)
+  const setKinds = useStore((s) => s.setKinds)
+  const setExpectSession = useStore((s) => s.setExpectSession)
+  const navigate = useNavigate()
   const agents = useStore((s) => s.agents)
   const env = useStore((s) => s.env)
 
@@ -207,17 +213,26 @@ export function NewAgentDialog() {
     setBusy(false)
     if (result.ok) {
       /*
-       * Terminals are out of the fleet by default, and that default is about
-       * the sessions you did not ask for. This one you just asked for, so
-       * hiding it would read as the button having done nothing — which is
-       * exactly how this first shipped, and exactly how it was reported.
+       * The fleet's scope is about the sessions you did not ask for. This one
+       * you just asked for, so hiding it would read as the button having done
+       * nothing — which is exactly how terminals first shipped, and exactly
+       * how it was reported.
        */
-      if (terminal) setTerminals(true)
+      setKinds(admitting(kinds, terminal ? 'terminals' : 'claude'))
       rememberDir(result.cwd)
       setDir('')
       setName('')
+      /*
+       * Open what was just started. It is listed under a placeholder until it
+       * registers, which the route is told to wait for, and then followed to
+       * its real id by tmux session — so the panel stays on it rather than
+       * leaving the reader to find it in the list, or closing under them when
+       * the id changes.
+       */
+      const id = placeholderId(result.tmuxSession)
+      setExpectSession(id)
       close()
-      // The new process registers itself; the fleet picks it up on the next tick.
+      navigate(`/agent/${encodeURIComponent(id)}${terminal ? '/term' : ''}`)
     } else {
       setError(t(terminal ? 'newTerminalFailed' : 'newAgentFailed', { error: result.error }))
     }

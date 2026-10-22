@@ -635,6 +635,15 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-SPAWN-4** — On a machine that cannot spawn anything, the dialog MUST
   refuse to offer a form rather than presenting one that will fail.
   *`test/ui/NewAgentDialog.test.tsx`.*
+- **FR-SPAWN-5** — A successful start MUST open the session it started, on the
+  tab its kind has, and the panel MUST stay on it when its placeholder is
+  replaced by the registered session in the same tmux session. Focus MUST stay
+  in the opened session rather than return to **New agent**.
+  *`test/ui/terminals.test.tsx`, `test/succession.test.ts` (`claimantOf`).*
+- **FR-SPAWN-6** — A session that is starting, or is up and has never been
+  prompted, MUST say so on its Chat tab by name and folder, rather than
+  "loading" or "the server may have restarted": it keeps no transcript yet, so
+  neither of those is true. **(INV-11)** *`test/ui/chat-loading.test.tsx`.*
 
 ### 6.1a Opening a plain terminal
 
@@ -656,10 +665,12 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Shift+Tab. This follows from the capability table rather than from a check
   written a second time. **(INV-7)** *`test/ui/terminals.test.tsx`,
   `e2e/fleet.spec.ts`.*
-- **FR-TERM-4** — Terminals MUST be out of the fleet's scope by default, and the
-  chip that admits them MUST be visible whenever there is one to admit, so a
-  hidden session is a filter the user can see rather than a fleet with a hole in
-  it. The choice MUST survive a reload, like the status filter and the sort.
+- **FR-TERM-4** — Terminals MUST be out of the fleet's scope by default. The
+  scope control — Claude, terminals alone, or both, each with its count — MUST
+  be visible whenever there is a terminal to admit or terminals alone are
+  showing, so a hidden session is a filter the user can see rather than a fleet
+  with a hole in it. The choice MUST survive a reload, like the status filter
+  and the sort.
   **(INV-11)** *`test/fleet-ui.test.ts`, `e2e/fleet.spec.ts`.*
 
 ### 6.2 The folder browser

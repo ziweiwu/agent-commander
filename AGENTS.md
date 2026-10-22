@@ -217,7 +217,7 @@ the keys the answer card sends (`mock-set`, reserved for
 one whose pane has exited, so the Attach tab's
 dead-pane notice is a thing you can look at, and one plain terminal — which is
 *not* on screen at rest, because terminals are out of the fleet's scope until
-the chip admits them, and a filter with nothing behind it cannot be looked at. `--mock-empty` serves the
+the header's kind select admits them, and a filter with nothing behind it cannot be looked at. `--mock-empty` serves the
 same server with no agents in it, which is the only way to see the
 confirmed-empty screen rather than the loading one. The delegation trees behind them are
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node

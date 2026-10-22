@@ -441,7 +441,16 @@ export function plainText(text: string): string {
 export function emptyNotice(conversation: {
   timelineAt: number | null
   timelineStalledAt: number | null
-}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' {
+  /**
+   * What the fleet already knows about a session with nothing said in it:
+   * still starting up, or up and never prompted. Either way there is no
+   * transcript to wait for, so "loading" never ends and "unreachable" blames
+   * the server for a conversation that simply has not begun.
+   */
+  fresh?: 'starting' | 'unprompted' | null
+}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' | 'chatStarting' | 'chatFirstPrompt' {
+  if (conversation.fresh === 'starting') return 'chatStarting'
+  if (conversation.fresh === 'unprompted') return 'chatFirstPrompt'
   if (conversation.timelineAt !== null) return 'chatEmpty'
   return conversation.timelineStalledAt !== null ? 'chatUnreachable' : 'chatLoading'
 }
