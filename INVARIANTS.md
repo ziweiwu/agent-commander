@@ -2240,10 +2240,11 @@ carried while the generic arm looked only for a description or a path.
   Chat tab against the mock server, ticks, `→` and `Submit answers` included
 
 **The terminal has two verbs, and they are two controls rather than a mode.**
-The paste line stages text at the prompt without running it, which is what
-lets a reader see what actually landed before it executes — on a phone, typing
-into somebody's live shell, that is the whole point of the field existing.
-`Run` is the other verb: the same `paste` with `submit`, which the server
+`Stage` puts the paste line's text at the prompt without running it, which is
+what lets a reader see what actually landed before it executes. Plain Enter in
+the box used to be Stage; the owner asked for Enter to run, so it is now `Run`
+(and Cmd/Ctrl+Enter still is), and Stage is a button only, which keeps the one
+press from meaning two things. `Run` is the same `paste` with `submit`, which the server
 stages through a file and appends the newline to itself, so a multi-line
 script arrives as one write rather than as a race between its lines and its
 Enter. Both are explicit presses, so INV-2 is untouched; what is refused is a
@@ -2254,9 +2255,14 @@ Verified against a real `bash` pane rather than only a fixture: `Run` executed
 a one-liner and a three-line `for` loop as a block, and `Send` left its text at
 the prompt with the file it would have written absent from disk.
 
-- `test/ui/term-paste.test.tsx` — Run runs and Send stages, a multi-line script
-  keeps its newlines, a double press runs once (INV-2), and neither verb is
-  offered once the pane has exited
+- `test/ui/term-paste.test.tsx` — Run and Enter run, Stage stages, a multi-line
+  script keeps its newlines, a repeated Enter or double press runs once
+  (INV-2), Shift+Enter is a newline, an IME's Enter runs nothing, and neither
+  verb is offered once the pane has exited
+- `test/ui/term-tap.test.tsx` — a tap on the capture focuses xterm's input on a
+  touch screen only, never on mount, never for an exited pane; the input is 16px
+- `e2e/term-paste.spec.ts` — the same against a real server, plus a touch-emulated
+  tap whose typed keys reach the pane's send path
 
 ## INV-17 — Every shape is the whole app
 

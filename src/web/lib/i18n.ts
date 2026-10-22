@@ -155,7 +155,7 @@ const EN = {
   answerSending: 'sending…',
   termComposeRun: 'Run ⏎',
   termComposeSendTitle: 'Put this at the prompt without running it, so you can see what landed.',
-  termComposeRunTitle: 'Put this at the prompt and run it (Cmd/Ctrl+Enter).',
+  termComposeRunTitle: 'Put this at the prompt and run it (Enter).',
   answerSent: 'Answer sent. {name} is picking it up.',
   answerToggled: 'Ticked in {name}’s terminal. Nothing is submitted until you press → then Enter.',
   answerToggle: 'Tick {label}',
@@ -243,8 +243,8 @@ const EN = {
   termNotAttachable: 'This agent cannot be attached to.',
   paneExited: 'pane has exited',
   termComposeLabel: 'Text to put at this terminal\u2019s prompt',
-  termComposePlaceholder: 'Paste or type, then Send',
-  termComposeSend: 'Send',
+  termComposePlaceholder: 'Paste or type, then Enter to run',
+  termComposeSend: 'Stage',
   confirmInterrupt: 'Really interrupt this agent?',
   confirmInterruptMode:
     'Interrupt mode: sending while this agent is working will stop it mid-task ' +
@@ -604,7 +604,7 @@ const ZH: Record<Key, string> = {
   answerSending: '发送中…',
   termComposeRun: '运行 ⏎',
   termComposeSendTitle: '只把内容送到提示符，不执行，方便你先看清落下的是什么。',
-  termComposeRunTitle: '送到提示符并执行（Cmd/Ctrl+Enter）。',
+  termComposeRunTitle: '送到提示符并执行（回车）。',
   answerSent: '已发送回复，{name} 正在处理。',
   answerToggled: '已在 {name} 的终端里勾选。按 → 再按 Enter 之前不会提交任何内容。',
   answerToggle: '勾选 {label}',
@@ -677,8 +677,8 @@ const ZH: Record<Key, string> = {
   termNotAttachable: '该代理无法接入终端。',
   paneExited: '终端窗格已退出',
   termComposeLabel: '要送到该终端提示符的文本',
-  termComposePlaceholder: '粘贴或输入，然后发送',
-  termComposeSend: '发送',
+  termComposePlaceholder: '粘贴或输入，回车即执行',
+  termComposeSend: '暂存',
   confirmInterrupt: '确定要中断这个代理吗？',
   confirmInterruptMode:
     '中断模式：在该助手工作时发送消息，会先打断它并丢弃正在进行的工作。' +

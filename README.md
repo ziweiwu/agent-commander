@@ -32,8 +32,9 @@ a laptop or from a phone.
   whose process has exited. Under it is a line to paste into, because a capture
   is not something a phone can paste into — the paste is your OS's, so a script
   keeps its newlines. Two verbs, so the choice is yours rather than a setting's:
-  **Send** puts it at the prompt so you can see what landed, and **Run** puts it
-  there and runs it.
+  **Stage** puts it at the prompt so you can see what landed, and **Run**
+  (or plain Enter) puts it there and runs it. On a phone, tapping the capture
+  opens the keyboard and types straight into the shell.
 - **Plain terminals, not only agents.** **+ New agent** offers a **Terminal**
   as well: a tmux session running your own shell in a folder you pick. It gets
   an Attach tab and none of the controls that type Claude Code's slash commands
