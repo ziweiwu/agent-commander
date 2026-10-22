@@ -67,6 +67,32 @@
   margin-right: 3px;
   font-size: var(--text-xs);
 }
+/* Which kinds of session: a select dressed as the chips it sits beside. */
+.kinds {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  padding: 4px 8px;
+  min-height: 30px;
+  cursor: pointer;
+}
+.kinds:hover {
+  border-color: var(--text);
+}
+@media (max-width: 560px) {
+  .kinds {
+    min-height: 40px;
+  }
+}
+/* Under 16px, iOS zooms the page on focusing a select. */
+@media (pointer: coarse) {
+  .kinds {
+    font-size: 16px;
+  }
+}
 
 
 .spacer {

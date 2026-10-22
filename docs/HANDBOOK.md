@@ -577,9 +577,12 @@ commands into the pane. That is the same capability table Claude sessions are
 governed by, not a second set of checks.
 
 **Terminals stay out of the fleet until you ask for them.** The list answers
-"which agent needs me", and a shell never does — so a chip beside the status
-filters says how many there are and admits them when pressed, and the choice
-sticks across a reload. They are out of scope rather than hidden: a session
+"which agent needs me", and a shell never does — so a select beside the status
+filters scopes the fleet to Claude, to terminals alone, or to both, with
+each kind's count in its option, and the choice sticks across a reload. It is a
+select rather than three chips because the header has about one chip's width
+to spare at 1280px, and a wrapped header costs every screen below it a row.
+They are out of scope rather than hidden: a session
 this app knows about and shows nowhere would be a fleet with a hole in it.
 
 The session is marked with a tmux option as it is created, and that marker is

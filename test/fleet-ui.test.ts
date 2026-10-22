@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import {
+  admitting,
   countByGroup,
   grouped,
   inScope,
@@ -42,7 +43,7 @@ const state = (over: Partial<FleetState> = {}): FleetState => ({
   filter: 'all',
   sort: 'recent',
   dir: 'desc',
-  terminals: false,
+  kinds: 'claude',
   ...over,
 })
 
@@ -57,6 +58,19 @@ describe('countByGroup', () => {
  * none of the questions this list is asked. It is out of scope until the chip
  * admits it — and the chip is what keeps that a filter rather than a hole.
  */
+describe('admitting', () => {
+  it('keeps a scope that already shows the kind', () => {
+    expect(admitting('claude', 'claude')).toBe('claude')
+    expect(admitting('terminals', 'terminals')).toBe('terminals')
+    expect(admitting('all', 'terminals')).toBe('all')
+  })
+
+  it('widens to both rather than swapping one kind for the other', () => {
+    expect(admitting('claude', 'terminals')).toBe('all')
+    expect(admitting('terminals', 'claude')).toBe('all')
+  })
+})
+
 describe('terminals are out of the fleet until asked for', () => {
   const WITH_TERMINAL = [
     ...FLEET,
@@ -65,12 +79,12 @@ describe('terminals are out of the fleet until asked for', () => {
 
   it('drops them by default and keeps them when asked', () => {
     expect(inScope(WITH_TERMINAL, state()).map((a) => a.sessionId)).not.toContain('t')
-    expect(inScope(WITH_TERMINAL, state({ terminals: true })).map((a) => a.sessionId)).toContain('t')
+    expect(inScope(WITH_TERMINAL, state({ kinds: 'all' })).map((a) => a.sessionId)).toContain('t')
   })
 
   it('takes them out of the list as well as the scope', () => {
     expect(visibleAgents(WITH_TERMINAL, state())).toHaveLength(5)
-    expect(visibleAgents(WITH_TERMINAL, state({ terminals: true }))).toHaveLength(6)
+    expect(visibleAgents(WITH_TERMINAL, state({ kinds: 'all' }))).toHaveLength(6)
   })
 
   /*
@@ -79,9 +93,15 @@ describe('terminals are out of the fleet until asked for', () => {
    * is stored beside the filter rather than as one more value of it.
    */
   it('is still subject to the status filter once admitted', () => {
-    const idle = visibleAgents(WITH_TERMINAL, state({ terminals: true, filter: 'idle' }))
+    const idle = visibleAgents(WITH_TERMINAL, state({ kinds: 'all', filter: 'idle' }))
     expect(idle.map((a) => a.sessionId)).toContain('t')
-    expect(visibleAgents(WITH_TERMINAL, state({ terminals: true, filter: 'busy' })).map((a) => a.sessionId)).not.toContain('t')
+    expect(visibleAgents(WITH_TERMINAL, state({ kinds: 'all', filter: 'busy' })).map((a) => a.sessionId)).not.toContain('t')
+  })
+
+  it('shows terminals alone when asked, and nothing that is not one', () => {
+    const terminalsOnly = inScope(WITH_TERMINAL, state({ kinds: 'terminals' }))
+    expect(terminalsOnly.map((a) => a.sessionId)).toEqual(['t'])
+    expect(visibleAgents(WITH_TERMINAL, state({ kinds: 'terminals', filter: 'busy' }))).toHaveLength(0)
   })
 
   it('names one for what it is', () => {

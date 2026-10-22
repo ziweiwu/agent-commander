@@ -4,8 +4,15 @@ import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore, type Conn, type Reach } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
-import { countByGroup, inScope, isTerminal, type StatusFilter } from '../lib/filter.ts'
-import { successorOf } from '../lib/succession.ts'
+import {
+  KIND_SCOPES,
+  countByGroup,
+  inScope,
+  isTerminal,
+  type KindScope,
+  type StatusFilter,
+} from '../lib/filter.ts'
+import { claimantOf, successorOf } from '../lib/succession.ts'
 import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
 import { useVisualViewport } from '../hooks/useVisualViewport.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
@@ -261,7 +268,7 @@ function Filters() {
   const filter = useStore((s) => s.fleet.filter)
   const setFilter = useStore((s) => s.setFilter)
   const fleet = useStore((s) => s.fleet)
-  const setTerminals = useStore((s) => s.setTerminals)
+  const setKinds = useStore((s) => s.setKinds)
   // The status chips count what the list is actually about, so a hidden
   // terminal is missing from "8 idle" as well as from the list below it.
   const inFleet = inScope(agents, fleet)
@@ -292,6 +299,17 @@ function Filters() {
     </Chip>
   )
 
+  const kindCount: Record<KindScope, number> = {
+    claude: agents.length - terminals,
+    terminals,
+    all: agents.length,
+  }
+  const kindLabel: Record<KindScope, Key> = {
+    claude: 'filterKindClaude',
+    terminals: 'filterTerminals',
+    all: 'filterKindAll',
+  }
+
   return (
     <div className={styles.filters}>
       {chip('all', t('filterAll'), inFleet.length)}
@@ -299,25 +317,31 @@ function Filters() {
       {counts.busy > 0 && chip('busy', t('filterBusy'), counts.busy)}
       {counts.idle > 0 && chip('idle', t('filterIdle'), counts.idle)}
       {/*
-        * Rendered only when there are terminals to admit, and then always —
-        * including while they are showing, which is the press that puts them
-        * away again. A count of hidden sessions that appears nowhere would be
-        * a fleet with a hole in it (INV-11); this is a filter you can see.
+        * Rendered whenever there are terminals to tell apart from Claude, and
+        * while terminals alone are showing, so the way back never vanishes.
+        * Every kind carries its count, the ones out of scope included: a count
+        * of hidden sessions that appears nowhere would be a fleet with a hole
+        * in it (INV-11); this is a filter you can see.
+        *
+        * A select rather than three chips: this bar has about one chip's width
+        * to spare at 1280px, and wrapping it to a second row costs every
+        * screen below it the height of that row.
         */}
-      {terminals > 0 && (
-        <Chip
-          data-testid="terminal-chip"
-          aria-pressed={fleet.terminals}
-          title={t('filterTerminalsHint')}
-          onClick={() => setTerminals(!fleet.terminals)}
+      {(terminals > 0 || fleet.kinds === 'terminals') && (
+        <select
+          className={styles.kinds}
+          data-testid="kind-select"
+          aria-label={t('filterKinds')}
+          title={t('filterKindsHint')}
+          value={fleet.kinds}
+          onChange={(e) => setKinds(e.target.value as KindScope)}
         >
-          {fleet.terminals && (
-            <span className={styles.chipMark}>
-              <Icon name="check" size={ICON_MARK} />
-            </span>
-          )}
-          <b>{terminals}</b> {t('filterTerminals')}
-        </Chip>
+          {KIND_SCOPES.map((key) => (
+            <option key={key} value={key}>
+              {`${kindCount[key]} ${t(kindLabel[key])}`}
+            </option>
+          ))}
+        </select>
       )}
     </div>
   )
@@ -464,7 +488,10 @@ export function FleetRoute() {
    */
   useEffect(() => {
     if (!expectSession) return
-    if (agents.some((a) => a.sessionId === expectSession)) {
+    if (
+      agents.some((a) => a.sessionId === expectSession) ||
+      claimantOf(expectSession, agents)
+    ) {
       setExpectSession(null)
       return
     }
@@ -483,9 +510,19 @@ export function FleetRoute() {
    * agent that does not come back has ended. A frame that changes something
    * else must not restart that clock, which is why the deadline is kept
    * rather than the delay.
+   *
+   * A just-started session is the one case with no process to follow: its
+   * placeholder is replaced by whatever registers in the same tmux session
+   * (`claimantOf`), and that is checked first, because the replacement can
+   * arrive before the placeholder was ever listed.
    */
   useEffect(() => {
     if (!sessionId || agent || agents.length === 0) return
+    const claimant = claimantOf(sessionId, agents)
+    if (claimant) {
+      navigate(agentPath(claimant.sessionId, wantTab), { replace: true })
+      return
+    }
     if (sessionId === expectSession) return
     const prior = lastSeen.current
     if (!prior || prior.sessionId !== sessionId) {

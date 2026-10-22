@@ -37,7 +37,10 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   compactAgentContext: vi.fn(),
 }))
 
-const idle = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1' })
+// Prompted once, so it has a conversation to load: the cases below are about
+// one that exists and has not arrived, not one that has not begun.
+const idle = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1', lastPrompt: 'hi' })
+const unprompted = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1', name: 'scratch', cwd: '/tmp/scratch' })
 
 beforeEach(() => {
   resetStore()
@@ -64,6 +67,13 @@ describe('emptyNotice', () => {
    */
   it('prefers what it has read over what it failed to re-read', () => {
     expect(emptyNotice({ timelineAt: 1, timelineStalledAt: 1 })).toBe('chatEmpty')
+  })
+
+  it('says a conversation has not begun rather than that it is loading', () => {
+    for (const timelineStalledAt of [null, 1]) {
+      expect(emptyNotice({ timelineAt: null, timelineStalledAt, fresh: 'unprompted' })).toBe('chatFirstPrompt')
+      expect(emptyNotice({ timelineAt: null, timelineStalledAt, fresh: 'starting' })).toBe('chatStarting')
+    }
   })
 })
 
@@ -99,5 +109,25 @@ describe('the Chat tab', () => {
     expect(notice).toMatch(/Nothing has arrived/)
     expect(notice).toMatch(/only just started/)
     expect(notice).not.toMatch(/may have ended/)
+  })
+
+  /*
+   * A session started and never prompted keeps no transcript, so the loading
+   * notice never ended and then turned into "the server may have restarted".
+   * The card already says why; the chat says the same, by name and folder.
+   */
+  it('names an unprompted session and asks for its first instruction', () => {
+    useStore.setState({ conn: 'open', selected: 'a', timelineAt: null, timelineStalledAt: 1 })
+    renderApp(<Chat agent={unprompted()} />)
+    const notice = screen.getByTestId('chat-notice').textContent ?? ''
+    expect(notice).toMatch(/scratch is ready in \/tmp\/scratch/)
+    expect(notice).toMatch(/first instruction/)
+    expect(notice).not.toMatch(/server may have restarted/)
+  })
+
+  it('points a session still starting at the Attach tab', () => {
+    useStore.setState({ conn: 'open', selected: 'pending:claude-1', timelineAt: null, timelineStalledAt: null })
+    renderApp(<Chat agent={agent({ sessionId: 'pending:claude-1', status: 'waiting', paneId: '%2' })} />)
+    expect(screen.getByTestId('chat-notice').textContent).toMatch(/is starting in .*Attach tab/)
   })
 })

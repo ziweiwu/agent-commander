@@ -24,7 +24,7 @@ import {
   reconcile,
   type ChatMessage,
 } from '../lib/chat.ts'
-import type { FleetState, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
+import type { FleetState, KindScope, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
   applyLang,
@@ -33,7 +33,7 @@ import {
   clampSidebarWidth,
   loadDir,
   loadFilter,
-  loadTerminals,
+  loadKinds,
   loadLang,
   loadSort,
   loadScheme,
@@ -43,7 +43,7 @@ import {
   loadSidebarWidth,
   saveDir,
   saveFilter,
-  saveTerminals,
+  saveKinds,
   saveLang,
   saveSort,
   saveScheme,
@@ -242,7 +242,7 @@ export interface AppState {
   setLang: (lang: Lang) => void
   setQuery: (query: string) => void
   setFilter: (filter: StatusFilter) => void
-  setTerminals: (shown: boolean) => void
+  setKinds: (scope: KindScope) => void
   setSort: (sort: SortKey) => void
   setDir: (dir: SortDir) => void
   setFullscreen: (on: boolean) => void
@@ -363,7 +363,7 @@ export const useStore = create<AppState>()((set, get) => ({
     filter: loadFilter(),
     sort: loadSort(),
     dir: loadDir(),
-    terminals: loadTerminals() === 'on',
+    kinds: loadKinds(),
   },
   sidebar: loadSidebar(),
   sidebarWidth: loadSidebarWidth(),
@@ -430,9 +430,9 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setQuery: (query) => set((s) => ({ fleet: { ...s.fleet, query } })),
-  setTerminals: (terminals) => {
-    saveTerminals(terminals ? 'on' : 'off')
-    set((s) => ({ fleet: { ...s.fleet, terminals } }))
+  setKinds: (kinds) => {
+    saveKinds(kinds)
+    set((s) => ({ fleet: { ...s.fleet, kinds } }))
   },
   setFilter: (filter) => {
     saveFilter(filter)

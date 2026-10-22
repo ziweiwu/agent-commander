@@ -23,6 +23,38 @@ export type Identity = Pick<Agent, 'sessionId' | 'pid' | 'paneId'>
 const PLACEHOLDER_PID = 0
 
 /**
+ * The namespace `pending.rs` gives a session it has started and nobody has
+ * found yet. Its id is temporary by construction: the placeholder is dropped
+ * the moment the real session reports the same tmux session.
+ */
+export const PENDING_PREFIX = 'pending:'
+
+/** The id a just-started session is listed under until it registers. */
+export function placeholderId(tmuxSession: string): string {
+  return `${PENDING_PREFIX}${tmuxSession}`
+}
+
+/**
+ * The real session that has replaced a placeholder, if the fleet lists one.
+ *
+ * Followed by tmux session rather than by process: a placeholder has no pid to
+ * follow, which is why `successorOf` refuses it, and that refusal is what
+ * closed a just-started agent the moment it registered. A fast start can also
+ * register before the placeholder is ever listed, so this asks the fleet
+ * directly instead of waiting to have seen the placeholder first.
+ */
+export function claimantOf(sessionId: string, agents: readonly Agent[]): Agent | null {
+  if (!sessionId.startsWith(PENDING_PREFIX)) return null
+  const tmuxSession = sessionId.slice(PENDING_PREFIX.length)
+  return (
+    agents.find(
+      (candidate) =>
+        candidate.tmuxSession === tmuxSession && !candidate.sessionId.startsWith(PENDING_PREFIX),
+    ) ?? null
+  )
+}
+
+/**
  * The agent now running where `prior` was, if the fleet lists one.
  *
  * The process is the thread to follow: the id is what changed. The pane is

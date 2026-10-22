@@ -133,9 +133,10 @@ nothing is answered from the lock screen.
    Pasting a screenshot into the box does the same.
 6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
-Start a new agent — or a plain terminal — with **+ New agent**, and prune
-sessions you opened and never used with **Prune**. Terminals are kept out of
-the fleet at rest; the **terminals** chip in the header admits them.
+Start a new agent — or a plain terminal — with **+ New agent**; it opens as
+soon as it starts and stays open while it registers. Prune sessions you opened
+and never used with **Prune**. The fleet shows Claude sessions at rest; the
+select in the header switches it to **terminals** alone, or to **both**.
 
 ## Safety
 
