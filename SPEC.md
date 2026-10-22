@@ -470,8 +470,14 @@ epistemic rather than functional.
   hardware keyboard to send the chord with. A hardware Shift+Tab pressed in
   the terminal MUST do the same thing and MUST NOT send plain `Tab`, which is
   a different key — autocomplete — and was what it sent. Both go through the
-  control action the server composes, never as a key (INV-8).
-  *`test/ui/term-mode.test.tsx`, `test/ui/key-map.test.tsx`.*
+  control action the server composes, never as a key (INV-8). On a touch
+  screen a **tap on the capture** MUST focus xterm's input, so the phone's
+  keyboard opens and each key goes through the same path and key mapping as a
+  desktop keystroke; the pane MUST NOT take focus on mount there, a drag that
+  pans an overflowing capture MUST NOT count as a tap, and the input MUST
+  render at 16px or more so iOS does not zoom the page. **(INV-2)**
+  *`test/ui/term-mode.test.tsx`, `test/ui/key-map.test.tsx`,
+  `test/ui/term-tap.test.tsx`, `e2e/term-paste.spec.ts`.*
 - **FR-ATT-9** — `Ctrl-C`, `Ctrl-D` and `Escape` MUST require a confirmation
   step, and the server MUST refuse them unless the client states the user was
   asked. **(INV-6)** *`test/ui/key-map.test.tsx`, `control::tests`.*
@@ -503,11 +509,15 @@ epistemic rather than functional.
   system — reading the clipboard for the user is refused on WebKit, and
   therefore on every browser on iOS. It MUST be a textarea rather than an
   `<input>`, which strips CR and LF and so delivered a pasted snippet as one
-  run-together command. What it sends MUST be text and MUST NOT be submitted;
-  running it is the `Enter` key beside it, which is also what lets the reader
-  see what landed — so the field MUST grow to show a pasted snippet, up to a
-  bound past which it scrolls rather than pushing the pane off a phone. It
-  MUST send exactly once however many times the press is repeated. **(INV-2, INV-17)** *`test/ui/term-paste.test.tsx`,
+  run-together command. Plain `Enter` in it (and a phone keyboard's send key)
+  MUST put the text at the prompt and run it, as the **Run** button does;
+  Shift+Enter MUST type a newline, and an IME's committing `Enter` MUST NOT
+  run anything. A separate **Stage** button MUST put the text at the prompt
+  without submitting it, so the reader can still see what landed before it
+  runs — a second button rather than a mode, because one press must not mean
+  two things. The field MUST grow to show a pasted snippet, up to a bound past
+  which it scrolls rather than pushing the pane off a phone. Either verb MUST
+  send exactly once however many times the press is repeated. **(INV-2, INV-17)** *`test/ui/term-paste.test.tsx`,
   `e2e/term-paste.spec.ts`.*
 
 ---

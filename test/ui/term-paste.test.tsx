@@ -16,12 +16,12 @@
  * permission, no secure context and no clipboard API. These tests hold that
  * line — including that nothing here touches `navigator.clipboard` again.
  *
- * What is sent is text and not a submission (INV-2): Enter is the key beside
- * it, so a reader can see what landed before running it.
+ * Two verbs. Stage puts text at the prompt without submitting it (INV-2); Run,
+ * and plain Enter, put it there and run it. Either way, exactly once.
  */
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Terminal } from '../../src/web/components/Terminal.tsx'
 import { useStore } from '../../src/web/store/store.ts'
@@ -91,15 +91,17 @@ describe('the terminal takes text without a keyboard shortcut', () => {
     await waitFor(() => expect(sendText).toHaveBeenCalledTimes(1))
   })
 
-  it('sends once when the keyboard return key repeats', async () => {
+  it('runs it once when the keyboard return key repeats', async () => {
     const user = userEvent.setup()
     open()
 
     await user.type(input(), 'deploy')
     await user.keyboard('{Enter}{Enter}{Enter}')
 
-    await waitFor(() => expect(sendText).toHaveBeenCalledTimes(1))
-    expect(sendText).toHaveBeenCalledWith('deploy')
+    await waitFor(() => expect(runText).toHaveBeenCalledTimes(1))
+    expect(runText).toHaveBeenCalledWith('deploy')
+    // Enter no longer stages: the staged copy would be a second send (INV-2).
+    expect(sendText).not.toHaveBeenCalled()
   })
 
   /*
@@ -153,6 +155,7 @@ describe('the terminal takes text without a keyboard shortcut', () => {
     await user.keyboard('one{Shift>}{Enter}{/Shift}two')
 
     expect(sendText).not.toHaveBeenCalled()
+    expect(runText).not.toHaveBeenCalled()
     expect(input().value).toBe('one\ntwo')
   })
 
@@ -260,5 +263,68 @@ describe('running what was pasted, as a second and explicit verb', () => {
     open()
     expect(send().disabled).toBe(true)
     expect(run().disabled).toBe(true)
+  })
+})
+
+describe('plain Enter in the box runs the text', () => {
+  beforeEach(() => useStore.setState({ exited: [] }))
+
+  it('runs on Enter, not stages', async () => {
+    const user = userEvent.setup()
+    open()
+
+    await user.type(input(), 'npm test{Enter}')
+
+    await waitFor(() => expect(runText).toHaveBeenCalledExactlyOnceWith('npm test'))
+    expect(sendText).not.toHaveBeenCalled()
+    expect(input().value).toBe('')
+  })
+
+  it('still runs on Cmd+Enter', async () => {
+    const user = userEvent.setup()
+    open()
+
+    await user.type(input(), 'ls')
+    await user.keyboard('{Meta>}{Enter}{/Meta}')
+
+    await waitFor(() => expect(runText).toHaveBeenCalledExactlyOnceWith('ls'))
+  })
+
+  it('does not run while an IME composition is committing', () => {
+    open()
+    fireEvent.change(input(), { target: { value: 'ni' } })
+    fireEvent.keyDown(input(), { key: 'Enter', isComposing: true })
+
+    expect(runText).not.toHaveBeenCalled()
+    expect(input().value).toBe('ni')
+  })
+
+  /* Blank text is refused again in `runText` itself, which is mocked here. */
+  it('runs nothing from an empty line', async () => {
+    const user = userEvent.setup()
+    open()
+
+    await user.click(input())
+    await user.keyboard('{Enter}')
+
+    expect(runText).not.toHaveBeenCalled()
+  })
+
+  it('Stage still stages without running, once', async () => {
+    const user = userEvent.setup()
+    open()
+
+    await user.type(input(), 'git status')
+    await user.dblClick(send())
+
+    await waitFor(() => expect(sendText).toHaveBeenCalledExactlyOnceWith('git status'))
+    expect(runText).not.toHaveBeenCalled()
+  })
+
+  it('keeps the box closed to Enter once the pane has exited', () => {
+    open()
+    useStore.setState({ exited: ['a'] })
+    fireEvent.keyDown(input(), { key: 'Enter' })
+    expect(runText).not.toHaveBeenCalled()
   })
 })

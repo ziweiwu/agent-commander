@@ -262,11 +262,17 @@ to long-press for its own Paste menu. Reading the clipboard for you is not the
 answer either: on WebKit, and so on every browser on iOS, that is refused
 outright. So the line is an ordinary text field, the paste is your operating
 system's, and it keeps its newlines, which matters the moment you paste more
-than one line of shell. Enter sends what is in it to the prompt and does *not*
-run it — `Enter` in the key row above does that — so you can see what actually
-landed before it goes anywhere. The box grows to show a pasted snippet and
-scrolls past a few lines, rather than pushing the pane off the screen.
-Shift+Enter types a newline by hand.
+than one line of shell. Enter (or the phone keyboard's send key) puts what is
+in it at the prompt and runs it, as does **Run**; **Stage** puts it at the
+prompt without running it, so you can see what actually landed before it goes
+anywhere. The box grows to show a pasted snippet and scrolls past a few lines,
+rather than pushing the pane off the screen. Shift+Enter types a newline by
+hand.
+
+On a touch screen you can also type into the pane itself: tap the capture and
+the phone's keyboard opens, each key going to the shell exactly as on a desktop.
+Nothing is focused until you tap, and dragging to pan a wide pane does not count
+as a tap.
 
 **Earlier output**, beside Fit width, answers "what did it print before this":
 one press reads the 200 lines above the pane's visible screen out of tmux's

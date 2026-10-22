@@ -271,6 +271,11 @@ export class PaneTerm {
       textarea.setAttribute('autocomplete', 'off')
       textarea.setAttribute('spellcheck', 'false')
       textarea.setAttribute('enterkeyhint', 'enter')
+      // iOS zooms the page when a focused field renders under 16px, and a tap
+      // on the pane now focuses this one. It is invisible and 0x0, so the size
+      // costs nothing; it is set inline because xterm's own stylesheet loads
+      // after ours.
+      textarea.style.fontSize = '16px'
     }
     this.#observeContainer(host)
   }
