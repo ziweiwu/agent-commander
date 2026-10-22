@@ -105,7 +105,7 @@ npm run typecheck
 npm run lint
 npm test              # 1518 tests: 703 Rust (the server) + 815 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 406 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 407 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.

@@ -108,6 +108,33 @@ test.describe('the terminal', () => {
     expect(await rendered()).toBeLessThanOrEqual(600)
   })
 
+  test('settles at a size where two font steps disagree @desktop', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/\S/, {
+      timeout: 15_000,
+    })
+    // 1186x720 with the topbar wrapped: the capture measures 5% taller from a
+    // 15px render than from a 14px one, so each font wanted the other and
+    // term-wrap flipped between 823px and 867px on every frame, for ever.
+    await page.setViewportSize({ width: 1186, height: 720 })
+    await page.waitForTimeout(600)
+    const widths = await page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const seen: number[] = []
+          const wrap = document.querySelector('[data-testid="term-wrap"]')!
+          const tick = () => {
+            seen.push(Math.round(wrap.getBoundingClientRect().width))
+            if (seen.length < 40) requestAnimationFrame(tick)
+            else resolve(seen)
+          }
+          tick()
+        }),
+    )
+    expect(new Set(widths).size, `term-wrap widths ${[...new Set(widths)]}`).toBe(1)
+  })
+
   test('INV-6 asks before sending a key that discards work', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()

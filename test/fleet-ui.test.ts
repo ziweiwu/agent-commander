@@ -241,6 +241,17 @@ describe('sortAgents', () => {
     expect(sortAgents(list, 'recent').map((a) => a.name)).toEqual(['new', 'mid', 'old'])
   })
 
+  // A session started a moment ago has done nothing yet, and its start is the
+  // newest thing on the list — it must not sink below a session idle for hours.
+  it('counts a start with no activity since as recent', () => {
+    const list = [
+      make('quiet', { lastActivityAt: now - 3_600_000 }),
+      make('fresh', { startedAt: now - 1000 }),
+    ]
+    expect(sortAgents(list, 'recent').map((a) => a.name)).toEqual(['fresh', 'quiet'])
+    expect(sortAgents(list, 'recent', 'asc').map((a) => a.name)).toEqual(['quiet', 'fresh'])
+  })
+
   it('orders by token spend, biggest first', () => {
     const list = [make('small', { tokens: 100 }), make('big', { tokens: 90_000 })]
     expect(sortAgents(list, 'tokens').map((a) => a.name)).toEqual(['big', 'small'])
