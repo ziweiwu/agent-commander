@@ -177,7 +177,9 @@ the default for an unrecognised kind is deny.
   *`test/ui/SortControl.test.tsx`.*
 - **FR-FLEET-5** — An agent with no value for the active sort key MUST sort last
   in **both** directions. Unknown is not a claim that it is the smallest.
-  **(INV-11)** *`test/fleet-ui.test.ts`.*
+  **(INV-11)** `recent` reads a session's last activity, or its start when it
+  has done nothing since, so a session opened a moment ago is the newest rather
+  than unknown. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-6** — The search box MUST filter on name, folder, branch, activity
   and status, and MUST narrow the same list the status chips and sort do.
 - **FR-FLEET-7** — The active status filter, sort key and sort direction MUST
