@@ -3,7 +3,7 @@
  * 150-column pane shrunk to fit a 390px screen renders at about 4.6px.
  */
 import { describe, expect, it } from 'vitest'
-import { computeScale } from '../src/web/lib/term.ts'
+import { chooseFont, computeScale } from '../src/web/lib/term.ts'
 
 // Roughly what a 150x47 pane measures at the 13px base font.
 const WIDE_PANE = 1174
@@ -223,5 +223,46 @@ describe('computeScale (height)', () => {
       maxScale: 2.5,
     })
     expect(r.scale).toBeCloseTo(366 / 1174)
+  })
+})
+
+// The Attach terminal re-renders at a bigger font when it has room, then
+// re-measures. Row heights round to device pixels, so the same capture
+// normalised to the base font measured 374.4px tall from a 15px render and
+// 356.6px from a 14px render. Those are the numbers from 1186x720 with the
+// topbar wrapped (term-wrap flipped 823px <-> 867px every frame, for ever);
+// each font's own measurement wanted the other font.
+describe('font choice (feedback loop)', () => {
+  const NATURAL_HEIGHT: Record<number, number> = { 14: 356.57, 15: 374.4 }
+  const BASE = 13
+
+  const decide = (font: number): number => {
+    const { scale } = computeScale({
+      naturalWidth: 751.3,
+      available: 844,
+      naturalHeight: NATURAL_HEIGHT[font],
+      availableHeight: 534,
+      reservedHeight: 124,
+      zoom: 'readable',
+      maxScale: 2,
+    })
+    return chooseFont(scale > 1 ? BASE * scale : BASE, font)
+  }
+
+  it.each([14, 15])('settles when it starts at %ipx', (start) => {
+    let font = start
+    const seen: number[] = []
+    for (let i = 0; i < 12; i++) {
+      font = decide(font)
+      seen.push(font)
+    }
+    expect(new Set(seen.slice(-6)).size).toBe(1)
+  })
+
+  it('stays inside the dead band and leaves it when the room really changes', () => {
+    expect(chooseFont(14.6, 14)).toBe(14)
+    expect(chooseFont(14.24, 15)).toBe(15)
+    expect(chooseFont(17, 14)).toBe(17)
+    expect(chooseFont(13, 20)).toBe(13)
   })
 })

@@ -25,11 +25,16 @@ const DISPOSE_DELAY_MS = 250
 const SCALE_EPSILON = 0.001
 /**
  * How far the wanted font may drift from the rendered one before xterm is asked
- * to re-render. Cell widths round to device pixels, so a re-measure after a font
- * change never comes back exactly proportional; without a dead band the two
- * would chase each other by fractions of a pixel for ever.
+ * to re-render: the larger of this many pixels and `FONT_HYSTERESIS_RATIO` of
+ * the font. Cell widths and row heights round to device pixels, so a re-measure
+ * after a font change never comes back exactly proportional — the capture's
+ * height normalised from a 15px render was 374.4px and from a 14px render
+ * 356.6px, 5% apart. A band narrower than that disagreement makes 14px want 15
+ * and 15px want 14, one frame each, for ever (measured at 1186x720 with the
+ * topbar wrapped). The ratio keeps the band wider than the noise at any size.
  */
 const FONT_HYSTERESIS = 0.6
+const FONT_HYSTERESIS_RATIO = 0.08
 
 export type ZoomMode = 'readable' | 'fit'
 
@@ -121,6 +126,17 @@ export function computeScale({
     overflowing: Math.round(naturalWidth * scale) > available + 1,
     effectiveFont: Math.round(BASE_FONT * scale * 10) / 10,
   }
+}
+
+/**
+ * The font to render at, given the one in use and the one the last measurement
+ * wants. Stays put inside the dead band (see `FONT_HYSTERESIS`), so two
+ * measurements that disagree by pixel rounding cannot hand the decision back
+ * and forth.
+ */
+export function chooseFont(wantedFont: number, current: number): number {
+  const band = Math.max(FONT_HYSTERESIS, current * FONT_HYSTERESIS_RATIO)
+  return Math.abs(wantedFont - current) > band ? Math.round(wantedFont) : current
 }
 
 /** Repaint a row: home the cursor, reset SGR, clear, then draw. */
@@ -446,8 +462,8 @@ export class PaneTerm {
     // to be continuous. Changing the font changes the cell metrics, so a
     // re-measure follows it — the same double frame a geometry change gets.
     const wantedFont = k > 1 ? BASE_FONT * k : BASE_FONT
-    const font = Math.round(wantedFont)
-    if (font !== this.#font && Math.abs(wantedFont - this.#font) > FONT_HYSTERESIS) {
+    const font = chooseFont(wantedFont, this.#font)
+    if (font !== this.#font) {
       this.#font = font
       this.term.options.fontSize = font
       this.scheduleRescale()
