@@ -176,9 +176,11 @@ test.describe('the terminal', () => {
     await expect(page.getByTestId('toast')).toHaveCount(0)
   })
 
-  // The touch half of the two tests above: a phone has no Ctrl key, so the
-  // keybar sends it, and it asks first exactly as a typed one does (INV-6).
-  test('INV-6 asks before the keybar sends Ctrl-C, @phone', async ({ page }) => {
+  // The touch half of the two tests above, run on every touch project (phone
+  // and tablet): a touch screen has no Ctrl key, so the keybar sends it, and
+  // it asks first exactly as a typed one does (INV-6).
+  test('INV-6 asks before the keybar sends Ctrl-C', async ({ page, hasTouch }) => {
+    test.skip(!hasTouch, 'the keybar is the touch route; desktop is covered above')
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()

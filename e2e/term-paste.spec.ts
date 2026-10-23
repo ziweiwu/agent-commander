@@ -205,10 +205,12 @@ test.describe('tapping the pane on a touch screen', () => {
     expect(sent).toHaveLength(0)
 
     await page.keyboard.type('ls')
-    // Typing stays in the box until Enter: nothing reaches the pane per key.
-    expect(sent).toHaveLength(0)
     await page.keyboard.press('Enter')
-    await expect.poll(() => sent.filter((f) => f.text === 'ls').length).toBe(1)
-    expect(sent.filter((f) => f.text === 'ls')[0]?.submit).toBe(true)
+    // Typing stays in the box until Enter: the only frame is the submitted
+    // line, so a frame per key would fail the length check.
+    await expect.poll(() => sent.length).toBeGreaterThan(0)
+    await page.waitForTimeout(300)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ text: 'ls', submit: true })
   })
 })
