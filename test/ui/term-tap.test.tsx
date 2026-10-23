@@ -1,12 +1,12 @@
 /**
- * A tap on the pane opens the phone's keyboard (FR-ATT-8, INV-17).
+ * A tap on the pane opens the phone's keyboard in the composer box (FR-ATT-8,
+ * INV-17).
  *
- * xterm takes typing through a hidden textarea, and a phone raises its
- * keyboard only for a `focus()` made inside a user gesture. So the pane is not
- * focused on mount on a touch screen (that would pop the keyboard over the
- * capture unasked) and a tap is the one moment it is. Typed keys then take the
- * desktop path, which `term-ime.test.tsx` and the e2e spec hold; this file
- * holds who may focus, and when.
+ * A phone raises its keyboard only for a `focus()` made inside a user gesture,
+ * so nothing is focused on mount on a touch screen (that would pop the keyboard
+ * over the capture unasked) and a tap is the one moment it is. It goes to the
+ * box rather than xterm's hidden input, so the line is seen before Enter runs
+ * it; this file holds who may focus, and when.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen, waitFor } from '@testing-library/react'
@@ -39,34 +39,35 @@ beforeEach(() => {
 })
 
 describe('tapping the terminal on a touch screen', () => {
-  it('focuses the terminal input, and only on the tap', async () => {
+  const box = () => screen.getByTestId<HTMLTextAreaElement>('term-compose-input')
+
+  it('focuses the composer box, and only on the tap', async () => {
     setViewport((q) => q.includes('pointer: coarse'))
     open()
     // Mounting is deferred until the box has a width; give it its attempts.
     await waitFor(() => expect(document.querySelector('.xterm')).not.toBeNull())
-    expect(focus).not.toHaveBeenCalled()
+    expect(document.activeElement).not.toBe(box())
 
     fireEvent.click(screen.getByTestId('term-wrap'))
-    expect(focus).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).toBe(box())
+    // The box, not xterm's hidden input: that one sends each key unseen.
+    expect(focus).not.toHaveBeenCalled()
   })
 
-  it('does not focus on a fine pointer, where mount already did', async () => {
+  it('leaves a fine pointer to the pane, which mount already focused', async () => {
     setViewport(() => false)
     open()
-    fireEvent.click(screen.getByTestId('term-wrap'))
-    expect(focus).not.toHaveBeenCalledTimes(2)
     await waitFor(() => expect(document.querySelector('.xterm')).not.toBeNull())
-    // Mount focuses once on desktop; a click adds nothing of its own.
-    const afterMount = focus.mock.calls.length
     fireEvent.click(screen.getByTestId('term-wrap'))
-    expect(focus.mock.calls.length).toBe(afterMount)
+    expect(document.activeElement).not.toBe(box())
   })
 
-  it('does not focus a pane that has exited', () => {
+  it('does not focus anything for a pane that has exited', () => {
     setViewport((q) => q.includes('pointer: coarse'))
     useStore.setState({ exited: ['a'] })
     open()
     fireEvent.click(screen.getByTestId('term-wrap'))
+    expect(document.activeElement).not.toBe(box())
     expect(focus).not.toHaveBeenCalled()
   })
 })

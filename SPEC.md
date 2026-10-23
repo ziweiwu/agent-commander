@@ -473,11 +473,11 @@ epistemic rather than functional.
   the terminal MUST do the same thing and MUST NOT send plain `Tab`, which is
   a different key — autocomplete — and was what it sent. Both go through the
   control action the server composes, never as a key (INV-8). On a touch
-  screen a **tap on the capture** MUST focus xterm's input, so the phone's
-  keyboard opens and each key goes through the same path and key mapping as a
-  desktop keystroke; the pane MUST NOT take focus on mount there, a drag that
-  pans an overflowing capture MUST NOT count as a tap, and the input MUST
-  render at 16px or more so iOS does not zoom the page. **(INV-2)**
+  screen a **tap on the capture** MUST focus the composer box under it, so the
+  phone's keyboard opens on a visible line that Enter runs — not xterm's hidden
+  input, which sends each key unseen; nothing MUST take focus on mount there, a
+  drag that pans an overflowing capture MUST NOT count as a tap, and the tap
+  itself MUST send nothing. **(INV-2)**
   *`test/ui/term-mode.test.tsx`, `test/ui/key-map.test.tsx`,
   `test/ui/term-tap.test.tsx`, `e2e/term-paste.spec.ts`.*
 - **FR-ATT-9** — `Ctrl-C`, `Ctrl-D` and `Escape` MUST require a confirmation

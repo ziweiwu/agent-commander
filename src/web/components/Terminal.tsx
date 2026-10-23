@@ -478,19 +478,23 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       className={`${styles.wrap} ${term?.overflowing ? styles.pannable : ''}`}
       data-testid="term-wrap"
       /*
-       * A tap on a touch screen is what opens the phone's keyboard.
+       * A tap on a touch screen opens the phone's keyboard in the box below.
        *
-       * xterm takes typing through a hidden textarea, and a phone will only
-       * raise its keyboard for a `focus()` made inside a user gesture, so the
-       * pane is not focused on mount there (`openTerminal`) and a deliberate
-       * tap is the one moment it is. `click` rather than `pointerdown`: a click
-       * is only synthesised for a tap, never for the drag that pans a pannable
-       * pane, so reaching for the overflow does not pop the keyboard up. Keys
-       * typed after that take the desktop path, `mapKey` and `typed`, unchanged
-       * (INV-2: nothing is sent by the tap itself). A pane that has ended
-       * takes no focus, for the reason `useBlurAfterExit` gives.
+       * Not in xterm's own input. That is a hidden off-screen textarea with
+       * autocorrect off, and a phone keyboard is built around a visible field:
+       * typed characters leave one by one with nothing to read or fix before
+       * they reach a live shell, dictation and an IME's candidates have nowhere
+       * to show, and iOS scrolls the page to bring the hidden field into view.
+       * The box shows the whole line, runs it on Enter, and is where a paste
+       * goes anyway; the keybar beside it covers the keys a phone lacks.
+       *
+       * A phone raises its keyboard only for a `focus()` made inside a user
+       * gesture, so nothing is focused on mount there (`openTerminal`).
+       * `click` rather than `pointerdown`: a click is only synthesised for a
+       * tap, never for the drag that pans a pannable pane. The tap sends
+       * nothing (INV-2), and a pane that has ended takes no focus.
        */
-      onClick={coarse && !exited ? () => termRef.current?.focus() : undefined}
+      onClick={coarse && !exited ? () => boxRef.current?.focus() : undefined}
     >
       <div ref={scaleRef} className={styles.scale} data-testid="term-scale" />
     </div>

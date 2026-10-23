@@ -269,10 +269,11 @@ anywhere. The box grows to show a pasted snippet and scrolls past a few lines,
 rather than pushing the pane off the screen. Shift+Enter types a newline by
 hand.
 
-On a touch screen you can also type into the pane itself: tap the capture and
-the phone's keyboard opens, each key going to the shell exactly as on a desktop.
-Nothing is focused until you tap, and dragging to pan a wide pane does not count
-as a tap.
+On a touch screen, tapping the capture opens the phone's keyboard in that box,
+so a line is typed where you can read and correct it, then Enter runs it. The
+keys a phone lacks (arrows, Tab, Esc, Ctrl-C) are on the bar beside it. Nothing
+is focused until you tap, and dragging to pan a wide pane does not count as a
+tap. On a desktop the pane itself takes your keystrokes, one by one.
 
 **Earlier output**, beside Fit width, answers "what did it print before this":
 one press reads the 200 lines above the pane's visible screen out of tmux's
