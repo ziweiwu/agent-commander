@@ -168,15 +168,15 @@ test.describe('Enter in the box runs the text', () => {
 })
 
 /*
- * Typing in the pane itself on a touch screen. @phone: the phone projects have
- * `hasTouch` and `isMobile` (Chromium and WebKit); a pointer-fine desktop
- * focuses on mount, which is the other half of the contract. Playwright's
- * emulation delivers a real tap and a real focus, but it cannot raise iOS's
- * keyboard, so that last step remains a manual check on a device.
+ * A tap on the pane on a touch screen. @phone: the phone projects have
+ * `hasTouch` and `isMobile` (Chromium and WebKit). The tap opens the keyboard
+ * in the composer box, where the line is seen before Enter runs it. Playwright
+ * delivers a real tap and a real focus but cannot raise iOS's keyboard, so that
+ * last step remains a manual check on a device.
  */
 test.describe('tapping the pane on a touch screen', () => {
-  const helperFocused = (page: import('@playwright/test').Page) =>
-    page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea') ?? false)
+  const boxFocused = (page: import('@playwright/test').Page) =>
+    page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'term-compose-input')
 
   test('does not take focus on mount, @phone', async ({ page }) => {
     await openAgent(page, AGENT.idle)
@@ -184,10 +184,13 @@ test.describe('tapping the pane on a touch screen', () => {
     await expect(page.getByTestId('term-wrap')).toBeVisible()
     await expect(page.locator('.xterm-helper-textarea')).toHaveCount(1)
     await page.waitForTimeout(500)
-    expect(await helperFocused(page)).toBe(false)
+    expect(await boxFocused(page)).toBe(false)
+    expect(
+      await page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea') ?? false),
+    ).toBe(false)
   })
 
-  test('a tap focuses the terminal input and typed keys reach the pane, @phone', async ({
+  test('a tap focuses the composer box and Enter runs the typed line once, @phone', async ({
     page,
   }) => {
     const sent = watchFrames(page)
@@ -195,27 +198,17 @@ test.describe('tapping the pane on a touch screen', () => {
     await page.getByTestId('tab-attach').click()
     const wrap = page.getByTestId('term-wrap')
     await expect(wrap).toBeVisible()
-    await expect(page.locator('.xterm-helper-textarea')).toHaveCount(1)
 
     await wrap.tap()
-    await expect.poll(() => helperFocused(page)).toBe(true)
+    await expect.poll(() => boxFocused(page)).toBe(true)
     // The tap itself sends nothing (INV-2).
     expect(sent).toHaveLength(0)
 
-    // 16px, or iOS zooms the page when this takes focus.
-    const size = await page
-      .locator('.xterm-helper-textarea')
-      .evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize))
-    expect(size).toBeGreaterThanOrEqual(16)
-
     await page.keyboard.type('ls')
-    await expect
-      .poll(() => sent.filter((f) => f.type === 'paste').map((f) => f.text).join(''))
-      .toBe('ls')
-    expect(sent.every((f) => f.submit !== true)).toBe(true)
-
-    // The same key mapping as desktop: Enter is a key, not text.
+    // Typing stays in the box until Enter: nothing reaches the pane per key.
+    expect(sent).toHaveLength(0)
     await page.keyboard.press('Enter')
-    await expect.poll(() => sent.some((f) => f.type === 'key' && f.key === 'Enter')).toBe(true)
+    await expect.poll(() => sent.filter((f) => f.text === 'ls').length).toBe(1)
+    expect(sent.filter((f) => f.text === 'ls')[0]?.submit).toBe(true)
   })
 })

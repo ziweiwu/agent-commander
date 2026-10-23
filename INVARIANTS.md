@@ -2259,10 +2259,10 @@ the prompt with the file it would have written absent from disk.
   script keeps its newlines, a repeated Enter or double press runs once
   (INV-2), Shift+Enter is a newline, an IME's Enter runs nothing, and neither
   verb is offered once the pane has exited
-- `test/ui/term-tap.test.tsx` — a tap on the capture focuses xterm's input on a
-  touch screen only, never on mount, never for an exited pane; the input is 16px
+- `test/ui/term-tap.test.tsx` — a tap on the capture focuses the composer box on
+  a touch screen only, never on mount, never for an exited pane
 - `e2e/term-paste.spec.ts` — the same against a real server, plus a touch-emulated
-  tap whose typed keys reach the pane's send path
+  tap whose typed line runs on Enter, exactly once
 
 ## INV-17 — Every shape is the whole app
 
