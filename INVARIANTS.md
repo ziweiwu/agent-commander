@@ -1345,6 +1345,35 @@ ask, the last thing that happened *is* that it stopped — so nothing new is
 measured; what changes is only what the card calls it, and an agent with no
 recorded activity is given no such sentence at all.
 
+**And a working card's age counts from your prompt, not its last write.** A
+busy agent writes every few seconds, so its age read about now whether it had
+ground on one request for two hours or had just begun — the one card whose age
+said nothing. It now reads "47m since your prompt · 214 calls": when a person
+last typed a prompt, and this agent's own tool calls since, from the enricher's
+existing tail (INV-4: no new read). Three rules keep it inside what is known:
+
+- **The prompt is the one `describe` already trusts.** A task notification, an
+  SDK send and a compaction summary are machinery; a clock any of them
+  restarted would say a two-hour run had just begun.
+- **Counts only, and only its own.** A delegate's calls are its effort, counted
+  on its own node (INV-13's precedent); its records in the parent's file
+  neither restart the clock nor add to the count. What was said is never
+  carried.
+- **Absent when unknown, a floor when partial.** The tail backfills a bounded
+  window. A prompt older than that window gives no clock and "at least 214
+  calls in what was read" — a lower bound said as one. A transcript read whole
+  with no prompt in it has nothing to count from, and the card keeps the age
+  it had. The detail view's own tail starts later in the file, so it leaves
+  the figure to the enricher's rather than overwrite a clock with a floor.
+
+- `transcript::inv11_since_prompt_*` — machinery does not restart it,
+  delegates are excluded, a prompt never read gives nothing, a partial backfill
+  gives a floor that the next prompt replaces
+- `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`
+  — a count that moves on a tick where nothing else does must still broadcast
+- `test/ui/card-since-prompt.test.tsx` — busy Claude cards only, both
+  languages, the "at least" wording, the fallback, and no row added to the face
+
 - `test/status.test.ts` — what the two channels may claim, without a DOM: the
   hand refused to an inferred status, `gone` outranking `waiting`, delegation
   as a modifier rather than a fifth shape, reach independent of state, and the

@@ -14,7 +14,10 @@ a laptop or from a phone.
 ## What it does
 
 - **One list of every agent**, grouped **Needs you → Working → Idle**, with the
-  folder, branch, current activity and delegates on each card. A **status rail**
+  folder, branch, current activity and delegates on each card. A working card
+  says how long since your last prompt and how many tool calls the agent has
+  made since (`47m since your prompt · 214 calls`), because its last write is
+  always about now. A **status rail**
   down the left says which is which in one column of shapes — a raised hand for
   an agent waiting on you, a turning arc for one working, a ring for idle, a
   struck ring for a session whose terminal has gone. Beside it, whether this

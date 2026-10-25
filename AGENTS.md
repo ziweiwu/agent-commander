@@ -103,7 +103,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1688 tests: 736 Rust (the server) + 952 vitest (the web app)
+npm test              # 1701 tests: 741 Rust (the server) + 960 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -427,6 +427,22 @@ commit.
   which parses the struct and fails naming the field and the function that
   forgot it. Verified the way a guard has to be — by deleting `description`
   from `merge_patch` and watching it go red.
+
+  `differs` was the fifth place and nothing held it, so a field it forgot
+  still reached the card, but only on a tick where some other field moved.
+  `sincePrompt` would have been that field — its call count moves while
+  everything else on a working card stands still. It is held now by
+  `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
+  which reads every `field: patch.field` out of `card_fields` and fails naming
+  any `differs` does not compare. Seen red by deleting `since_prompt` from
+  `differs`.
+
+  **`sincePrompt` is the enricher's alone.** The detail view's tail opens when
+  an agent is opened, so its backfill starts later in the file than the
+  enricher's and can see a floor where the enricher sees a clock. `routes.rs`
+  clears the field from that tail's patch (`leave_the_prompt_count_to_the_enricher`)
+  rather than let the two overwrite each other on every read. `tokens` has the
+  same two-tail shape and was left as it is.
 - **A new wire type has to be named in `wire::render_once()` or `gen:types`
   emits nothing.** ts-rs exports from a *root list*, not from the `#[derive]`:
   `types.rs`'s `render_once` calls `export_all` on each root, and a type nobody

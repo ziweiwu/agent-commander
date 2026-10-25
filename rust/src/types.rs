@@ -119,6 +119,29 @@ pub struct Agent {
     /// once shown as spend (INV-11). Absent until the bridge has written.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<SessionUsage>,
+    /// When the person last typed a prompt, and how many tool calls this
+    /// agent's own transcript has made since — never a delegate's.
+    ///
+    /// A busy card's age counts from the last write, which for a working agent
+    /// is always about now; this is what tells two hours on one request from
+    /// a request that has just begun. Absent when the tail has read no prompt
+    /// and read the whole file, so there is nothing to count from (INV-11).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub since_prompt: Option<SincePrompt>,
+}
+
+/// The last prompt a person typed, as far as the transcript tail has read.
+///
+/// `at` is absent when that prompt is older than the backfill reached: the
+/// clock is then unknown, and `calls` is a floor — the calls in what was read —
+/// rather than a count (INV-11). Counts only, never what was said.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SincePrompt {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub at: Option<i64>,
+    pub calls: u32,
 }
 
 /// One session's context-window usage and cost, from Claude Code's statusLine.

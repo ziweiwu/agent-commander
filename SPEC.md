@@ -287,6 +287,23 @@ the default for an unrecognised kind is deny.
   the reported status, so a waiting agent whose pane has exited carries none
   of them. Idle and working cards carry no coloured edge. **(INV-11)**
   *`test/ui/card-diet.test.tsx`, `test/ui/status-rail.test.tsx`.*
+- **FR-CARD-9** — A **busy Claude** card's age MUST count from the last prompt
+  a person typed, not from the last write, and MUST say so with the agent's
+  own tool calls since: "47m since your prompt · 214 calls". A working agent
+  writes every few seconds, so the old age read about now for two hours on one
+  request as for a request just begun. The prompt is the one FR-CARD-7 already
+  trusts (`describe::is_typed_by_a_person`): system, SDK and compaction
+  prompts MUST NOT restart it, and a delegate's calls MUST NOT be counted —
+  they are its own effort, on its own node **(INV-13)**. A prompt older than
+  the transcript tail's backfill MUST give no clock and a floor, "at least 214
+  calls in what was read"; a transcript read whole with no prompt in it MUST
+  give the old age. Counts only, never what was said. The figures ride the
+  enricher's existing tail and add no read **(INV-4)**. Where the top line is
+  too narrow for the sentence beside the name it MUST shorten to "47m · 214
+  calls" or "≥214 calls" rather than add a row to the face. **(INV-11)**
+  *`transcript::inv11_since_prompt_*`,
+  `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
+  `test/ui/card-since-prompt.test.tsx`.*
 
 ### 3.3 Delegates
 
@@ -1178,7 +1195,7 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10 |

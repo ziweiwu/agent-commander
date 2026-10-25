@@ -25,7 +25,7 @@ use crate::transcript::drawn_choices;
 use crate::types::{
     SessionUsage,
     now_ms, Agent, AgentStatus, AgentTree, GoalState, PendingPrompt, PromptOption, RateLimits,
-    RunningProcess, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
+    RunningProcess, SincePrompt, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
 };
 
 /// Frozen clock. Every fixture timestamp is an offset from this, so two runs —
@@ -37,6 +37,17 @@ const START: i64 = 1_786_600_000_000;
 /// The real number is one scan interval — seconds. This is far shorter, because
 /// the only thing it has to be is *after* the reply that names the new session.
 const SCAN_LATENCY_MS: u64 = 50;
+
+/// How long before `START` the busy fixture's last prompt was typed: 47m, the
+/// card face's own example — a working card whose last write is always about
+/// now, and this is what says how long the work behind it has run.
+const PROMPTED_MS_AGO: i64 = 47 * 60_000;
+/// Its own tool calls since.
+const CALLS_SINCE_PROMPT: u32 = 214;
+/// The delegating fixture's calls in what the backfill read: its prompt is
+/// older than the backfill reached, so there is no clock and this is a floor
+/// rather than a count (INV-11).
+const CALLS_IN_WHAT_WAS_READ: u32 = 38;
 
 /// Real escape byte, so mock frames exercise the same ANSI path as live captures.
 const ESC: &str = "\u{001b}[";
@@ -337,6 +348,7 @@ fn working_towards_a_rejected_goal() -> Agent {
             command: "cargo test".into(),
             since: START - 660_000,
         }),
+        since_prompt: Some(SincePrompt { at: Some(START - PROMPTED_MS_AGO), calls: CALLS_SINCE_PROMPT }),
         ..Default::default()
     }
 }
@@ -367,6 +379,7 @@ fn parked_on_a_subagent() -> Agent {
         subagents: Some(2),
         tokens: Some(67_500),
         agent_kind: CLAUDE_KIND.into(),
+        since_prompt: Some(SincePrompt { at: None, calls: CALLS_IN_WHAT_WAS_READ }),
         ..Default::default()
     }
 }

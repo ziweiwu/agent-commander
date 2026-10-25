@@ -63,6 +63,14 @@ const EN = {
   notAttachable: 'not attachable',
   reachable: 'terminal reachable',
   ageBlockedTitle: 'How long this agent has been waiting on you, not when it last wrote.',
+  sincePrompt: '{t} since your prompt · {n} calls',
+  sincePromptShort: '{t} · {n} calls',
+  sincePromptTitle:
+    'How long since the last prompt you typed, and the tool calls this agent has made since. Its delegates’ calls are not counted.',
+  sincePromptFloor: 'at least {n} calls in what was read',
+  sincePromptFloorShort: '≥{n} calls',
+  sincePromptFloorTitle:
+    'Your last prompt is older than the part of the transcript this app read, so there is no clock: this counts the calls in what was read, and there were at least that many.',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
   descriptionTitle: 'What this session last asked for, in its own words.',
   statusFromPane: 'quiet',
@@ -543,6 +551,13 @@ const ZH: Record<Key, string> = {
   notAttachable: '无法接入',
   reachable: '终端可连接',
   ageBlockedTitle: '这是该 agent 等待你的时长，而不是它最后一次写入的时间。',
+  sincePrompt: '距你的提示 {t} · {n} 次调用',
+  sincePromptShort: '{t} · {n} 次调用',
+  sincePromptTitle: '距你上次输入提示过了多久，以及此后这个 agent 自己的工具调用次数。不计其子代理的调用。',
+  sincePromptFloor: '已读部分中至少 {n} 次调用',
+  sincePromptFloorShort: '≥{n} 次调用',
+  sincePromptFloorTitle:
+    '你上次的提示早于本应用读到的对话记录范围，所以没有计时：这里数的是已读部分中的调用，至少有这么多。',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
   descriptionTitle: '这个会话最近提出的要求，用它自己的话。',
   statusFromPane: '窗格静默',
