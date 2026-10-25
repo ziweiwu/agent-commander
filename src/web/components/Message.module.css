@@ -12,6 +12,9 @@
 }
 .you {
   background: var(--panel-2);
+  width: fit-content;
+  max-width: 100%;
+  align-self: flex-start;
 }
 .pending {
   opacity: 0.6;
@@ -35,7 +38,7 @@
   top: 6px;
   width: 42px;
   text-align: right;
-  font: 11px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
   color: var(--faint);
   opacity: 0;
   transition: opacity 0.1s;
@@ -51,7 +54,7 @@
   margin-bottom: 2px;
 }
 .who {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   font-size: var(--text-sm);
 }
 .whoYou {
@@ -62,7 +65,7 @@
 }
 .time {
   color: var(--faint);
-  font: 11px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
 }
 .state {
   color: var(--faint);
@@ -71,9 +74,12 @@
 }
 
 .text {
-  font-size: var(--text-base);
-  line-height: 1.5;
+  font-size: var(--text-md);
+  line-height: var(--leading-prose);
   overflow-wrap: anywhere;
+}
+.text:lang(zh) {
+  line-height: 1.75;
 }
 
 /*
@@ -103,7 +109,8 @@
   white-space: pre-wrap;
 }
 .text code {
-  font: 12px var(--font-mono);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
@@ -111,11 +118,11 @@
   overflow-wrap: anywhere;
 }
 .text strong {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 .text em {
   font-style: italic;
-  color: var(--dim);
+  color: inherit;
 }
 /* `--busy` rather than `--focus`: the contrast audit holds `busy` to 4.5:1 as
    text on both surfaces in every scheme, and `focus` only to 3:1 as a ring.
@@ -135,25 +142,29 @@
 .tools {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   margin-top: 5px;
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
 }
 .tool {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(5ch, max-content) minmax(0, 1fr) auto;
+  column-gap: 8px;
   align-items: baseline;
-  font: 12px/1.5 var(--font-mono);
+  font: var(--text-sm) / 1.6 var(--font-mono);
   color: var(--dim);
-  padding: 1px 0 1px 10px;
-  border-left: 2px solid var(--line);
+  border: 0;
+  padding: 0;
   min-width: 0;
 }
 .toolName {
-  color: var(--busy);
-  flex: none;
-}
-.subagent {
-  border-left-color: var(--edge-accent);
+  color: var(--text);
+  font-weight: var(--weight-strong);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .subagent .toolName {
   color: var(--accent);
@@ -179,9 +190,8 @@
   background: none;
   border: 0;
   color: var(--dim);
-  font: 12px var(--font-mono);
-  padding: 2px 0 2px 10px;
-  border-left: 2px solid var(--line);
+  font: var(--text-sm) var(--font-mono);
+  padding: 2px 0;
   cursor: pointer;
   text-align: left;
 }
@@ -304,6 +314,9 @@
  * it is hidden outright, as it always was — there is no pointer to hover with.
  */
 @media (min-width: 901px) {
+  .text {
+    line-height: 1.6;
+  }
   .gutter {
     left: auto;
     right: 4px;
@@ -344,7 +357,7 @@
   vertical-align: top;
 }
 .table th {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   color: var(--text);
   background: var(--panel-2);
   white-space: nowrap;

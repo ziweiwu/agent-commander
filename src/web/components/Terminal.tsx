@@ -503,27 +503,27 @@ export function Terminal({ agent, onExit }: TerminalProps) {
        * that announces these as ordinary controls is offering an action that
        * cannot happen.
        */}
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Enter')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Enter')}>
         Enter
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Up')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Up')}>
         ↑
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Down')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Down')}>
         ↓
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Tab')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Tab')}>
         Tab
       </Button>
       <Button
-        variant="compact"
+        variant="key"
         disabled={exited}
         onClick={() => guarded('Escape')}
         className={styles.danger}
       >
         Esc
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('C-c')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('C-c')}>
         Ctrl-C
       </Button>
       {/*

@@ -151,3 +151,25 @@ describe('FR-CTL-12 one control, one place', () => {
     expect(unlisted, `a control the list does not account for: ${unlisted.join(', ')}`).toEqual([])
   })
 })
+
+/**
+ * One place also means one *look* per action. The header's ⋯ held only Close
+ * agent and the composer's ⋯ held replies and send options, drawn identically
+ * a few hundred pixels apart; and the panel's `close` sat beside a row saying
+ * "Close agent", so the word read as ending the session.
+ */
+describe('look-alike controls that do different things', () => {
+  it('draws the settings disclosure differently from the composer menu', () => {
+    open()
+    const face = (id: string) => screen.getByTestId(id).querySelector('svg')?.innerHTML
+    expect(face('controls-toggle')).toBeTruthy()
+    expect(face('controls-toggle')).not.toBe(face('strip-toggle'))
+  })
+
+  it('names the panel close for the panel, not the agent', () => {
+    open()
+    const close = screen.getByTestId('close-button')
+    expect(close.getAttribute('aria-label')).toBe('Close panel')
+    expect(close.querySelector('svg')).not.toBeNull()
+  })
+})
