@@ -100,6 +100,13 @@ reason it's blocked, e.g. `waiting · dialog open`), the folder it's scoped to
 output tokens, and a live one-line summary of what it's doing — `Edit:
 src/app.ts`, `Task → Rerun the exhaustive sweep`.
 
+A card blocked on you is the only tinted card on the screen, a warm wash behind
+it with an amber edge, so it can be found out of the corner of an eye; idle and
+working cards are plain. The chevron down the card's right edge (*Details*)
+opens the fold: the token count, the full path, the session's original name and
+the delegation tree. A blocked agent whose terminal has gone loses the wash and
+the **Answer** button, because there is nothing left to answer from.
+
 An agent that has handed work to a subagent reads `busy · delegated`, and its
 last-activity clock follows the subagent's transcript rather than its own. Its
 own transcript stops growing the moment it delegates, so without both of those a
@@ -152,9 +159,10 @@ Settings carries an **Alerts** toggle: with it on, an agent that *starts*
 waiting raises an OS notification — but only while the tab is hidden (a
 visible fleet is already the notification), and never for agents that were
 already blocked when the page opened. Clicking the notification opens that
-agent. The toggle asks for the browser's permission when you turn it on; if
-the browser cannot show notifications at all (Safari on iOS outside an
-installed web app), the toggle says so instead of pretending.
+agent, and it is titled with the name the agent's card leads with. The toggle
+asks for the browser's permission when you turn it on; if the browser cannot
+show notifications at all (Safari on iOS outside an installed web app), the
+toggle says so instead of pretending.
 
 The app ships a web manifest, so on a phone it can be added to the Home Screen
 and opens full-screen like an installed app.
@@ -631,7 +639,9 @@ otherwise the fleet fills with husks that look merely quiet.
 Sessions accumulate: you open one in a directory, get distracted, and it sits
 there for a week holding a tmux pane and a `claude` process without ever having
 been asked anything. **Prune N unused** appears beside *New agent* whenever the
-fleet contains any, and closes them.
+fleet contains any, and closes them. On a phone it sits at the foot of the Idle
+group instead, under the sessions it would close, so it does not push the agents
+that need you down the screen.
 
 "Unused" is deliberately the narrowest claim the data supports: the session is
 `idle`, it has a pane, and it carries no activity line, no token spend, no
@@ -675,6 +685,10 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
     --print-url     print the full URL, token and all, then keep serving
     --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)
     --browse-root <d>  root the folder picker is confined to (default: home)
+    --notify <to>   push when an agent starts needing you: an ntfy topic URL
+                    (https://ntfy.sh/<topic>) or telegram:<chat_id>
+    --notify-link <url>  this app's address on the phone, so a push opens the card
+    --notify-lang <en|zh>  the language a push is written in (default en)
     --mock          serve fixture agents, touching nothing real
     --install-statusline
                     add the quota bridge to ~/.claude/settings.json and exit
@@ -694,6 +708,25 @@ agent-commander --rotate-token     # prints the new token; every old link now 40
 
 A literal `--token` is still an override for that run and is never written to
 the store.
+
+`--notify` sends a push off the machine when an agent *becomes* blocked, so a
+phone in a pocket hears about it: an ntfy topic, with an access token in
+`AGENT_COMMANDER_NTFY_TOKEN` if the server wants one, or `telegram:<chat_id>`
+with the bot token in `AGENT_COMMANDER_TELEGRAM_TOKEN` or
+`~/.claude/agent-commander/telegram-token`. `--notify-link` is this app's
+address on the phone, so tapping the push opens the card. A push is titled
+with the agent's name — or, for a name Claude Code made up such as
+`ziweiwu-35`, with its folder and branch (`kb-vault · main`) — and never with
+the conversation's title or a prompt, because it goes to ntfy.sh or Telegram
+(INV-3). Its body says what the agent is waiting for, in English or, with
+`--notify-lang zh`, in Chinese. That is a server flag and not the language
+menu, because no preference ever reaches the server (FR-UI-12).
+
+No push goes while you are at a browser tab: one that is on screen and has had
+a click, a key or a touch in the last three minutes is already the
+notification. A tab merely left on screen does not count, so a desk you walked
+away from does not silence the phone; at worst the phone buzzes beside a screen
+already showing the block.
 
 **The token only appears in a URL once.** Open the link and the server trades it
 for an `HttpOnly; SameSite=Strict` cookie and redirects to the same address
@@ -833,7 +866,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
+npm test           # 1632 tests: 736 Rust (the server) + 896 vitest (the web app)
 npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone

@@ -21,7 +21,7 @@
   justify-content: center;
   gap: 8px 12px;
   padding: 6px 12px;
-  background: color-mix(in srgb, var(--waiting) 18%, transparent);
+  background: var(--tint-banner);
   color: var(--text);
   font-size: var(--text-sm);
 }

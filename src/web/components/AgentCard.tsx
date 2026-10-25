@@ -10,7 +10,7 @@ import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { useStore } from '../store/store.ts'
 import { DelegationTree } from './DelegationTree.tsx'
-import { ICON_BUTTON, ICON_MARK, Icon } from './ui/Icon.tsx'
+import { ICON_BUTTON, ICON_INLINE, ICON_MARK, Icon } from './ui/Icon.tsx'
 import type { IconName } from './ui/Icon.tsx'
 import { ageFrom, ageIsTimeInState, railOf, reachOf, type RailState } from '../lib/status.ts'
 import styles from './AgentCard.module.css'
@@ -218,7 +218,12 @@ export const AgentCard = memo(function AgentCard({
     : ''
 
   return (
-    <div className={styles.wrap} data-testid="agent-entry" data-session-id={agent.sessionId}>
+    <div
+      className={styles.wrap}
+      data-testid="agent-entry"
+      data-session-id={agent.sessionId}
+      data-rail={rail.state}
+    >
       <button
         type="button"
         className={styles.card}
@@ -227,12 +232,11 @@ export const AgentCard = memo(function AgentCard({
         data-session-id={agent.sessionId}
         data-agent-kind={agent.agentKind}
         data-transcripts={transcripts}
-        data-attached="true"
         aria-current={selected}
-        /*
+        /**
          * Named deliberately rather than by whatever its text concatenates to.
          *
-         * The context line separates its parts with a `::after` middot, and
+         * The context line separates its parts with a `::before` middot, and
          * generated content is in the accessibility tree — so the card
          * announced as "waiting · dialog open· Bash: rm -rf dist· ~/Projects/
          * lego-deals· terminal reachable", dots and all, with the reach mark's
@@ -284,6 +288,24 @@ export const AgentCard = memo(function AgentCard({
                 {kindLabel}
               </span>
             )}
+            {/**
+              * Reachability, and it is a second channel rather than part of the
+              * state: an agent can be perfectly reachable and unknowable, or
+              * blocked on you and unreachable. The server's own reason rides on
+              * the title where it has one, which is where `attachBlockedReason`
+              * has wanted to live all along — it is not a status and never was.
+              */}
+            <span
+              className={styles.reach}
+              data-testid="agent-reach"
+              data-reach={reach.reach}
+              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
+            >
+              <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
+              <span className="sr-only">
+                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
+              </span>
+            </span>
             {/*
              * The age, and what it is the age *of*. For an agent that reported
              * itself waiting this is how long it has been blocked, not when it
@@ -348,20 +370,21 @@ export const AgentCard = memo(function AgentCard({
               </span>
             )}
 
-            <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
-              {tildePath(agent.cwd)}
-            </span>
-            {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
-
-            {contextHot && contextRounded !== undefined && (
-              <span
-                className={styles.context}
-                data-testid="agent-context"
-                title={t('contextFaceTitle', { pct: contextRounded })}
-              >
-                {t('contextFace', { pct: contextRounded })}
+            <span className={styles.place} data-testid="agent-place">
+              <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
+                {tildePath(agent.cwd)}
               </span>
-            )}
+              {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
+              {contextHot && contextRounded !== undefined && (
+                <span
+                  className={styles.context}
+                  data-testid="agent-context"
+                  title={t('contextFaceTitle', { pct: contextRounded })}
+                >
+                  {t('contextFace', { pct: contextRounded })}
+                </span>
+              )}
+            </span>
 
             {onFace && <DelegateLine agent={agent} claim={claim} />}
 
@@ -377,24 +400,6 @@ export const AgentCard = memo(function AgentCard({
               </span>
             )}
 
-            {/*
-              * Reachability, and it is a second channel rather than part of the
-              * state: an agent can be perfectly reachable and unknowable, or
-              * blocked on you and unreachable. The server's own reason rides on
-              * the title where it has one, which is where `attachBlockedReason`
-              * has wanted to live all along — it is not a status and never was.
-              */}
-            <span
-              className={styles.reach}
-              data-testid="agent-reach"
-              data-reach={reach.reach}
-              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
-            >
-              <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
-              <span className="sr-only">
-                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
-              </span>
-            </span>
           </div>
         </div>
       </button>
@@ -408,9 +413,11 @@ export const AgentCard = memo(function AgentCard({
         className={styles.disclosure}
         data-testid="details-toggle"
         aria-expanded={showDetails}
+        aria-label={t('detailsShow')}
+        title={showDetails ? t('detailsHide') : t('detailsShow')}
         onClick={() => setShowDetails((open) => !open)}
       >
-        {showDetails ? t('detailsHide') : t('detailsShow')}
+        <Icon name="chevron-down" size={ICON_INLINE} />
       </button>
       {showDetails && (
         <div className={styles.panel} data-testid="agent-details">

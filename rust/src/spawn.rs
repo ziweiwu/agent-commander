@@ -273,14 +273,14 @@ pub fn spawn_argv(session: &str, cwd: &Path, req: &NewAgentRequest, claude_bin: 
         "-s".into(),
         session.to_string(),
         "-c".into(),
-        cwd.to_string_lossy().into_owned(),
+        past_tmux_separator(&cwd.to_string_lossy()),
         claude_bin.to_string(),
     ];
     // INV-7: every value is its own argv entry, and model and mode were checked
     // against fixed allow-lists above, so nothing free-text becomes a flag.
     if let Some(name) = req.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         argv.push("-n".into());
-        argv.push(name.to_string());
+        argv.push(past_tmux_separator(name));
     }
     if let Some(model) = req.model.as_deref().filter(|s| !s.is_empty()) {
         argv.push("--model".into());
@@ -338,7 +338,7 @@ pub fn terminal_argv(session: &str, cwd: &Path) -> Vec<String> {
         "-s".into(),
         session.to_string(),
         "-c".into(),
-        cwd.to_string_lossy().into_owned(),
+        past_tmux_separator(&cwd.to_string_lossy()),
         ";".into(),
         "set-option".into(),
         "-t".into(),
@@ -862,5 +862,38 @@ mod tests {
         let r = NewAgentRequest { task: Some("doctor".into()), ..req("/definitely/not/here") };
         let err = check_spawn_request(&r).await.unwrap_err();
         assert!(err.to_string().contains("no such directory"), "{err}");
+    }
+
+    /// The name sat between `-n` and `--model`, so `x;` ended the tmux command
+    /// and tmux refused `--model` as an unknown command (measured on 3.6a).
+    #[test]
+    fn inv7_a_trailing_semicolon_in_the_name_reaches_claude_intact() {
+        let r = NewAgentRequest { name: Some("x;".into()), model: Some("opus".into()), ..with_task("go") };
+        let argv = spawn_argv("claude-1", Path::new("/w"), &r, "claude");
+        let at = argv.iter().position(|a| a == "-n").unwrap();
+        assert_eq!(as_tmux_delivers(&argv[at + 1]), "x;");
+        assert_eq!(argv[at + 2], "--model");
+    }
+
+    /// A folder ending in `;` made tmux read the program after `-c` as a tmux
+    /// command (measured on 3.6a), in both the agent and the terminal shape.
+    #[test]
+    fn inv7_a_trailing_semicolon_in_the_dir_reaches_tmux_intact() {
+        let dir = Path::new("/w/dir;");
+        let agent = spawn_argv("claude-1", dir, &with_task("go"), "claude");
+        let terminal = terminal_argv("term-1", dir);
+        for argv in [agent, terminal] {
+            let at = argv.iter().position(|a| a == "-c").unwrap();
+            assert_eq!(as_tmux_delivers(&argv[at + 1]), "/w/dir;", "{argv:?}");
+        }
+    }
+
+    /// A task already ending in `\;` is sent as `a\\;`; tmux 3.6a delivered
+    /// that as `a\;`, so the user's backslash survives.
+    #[test]
+    fn inv7_a_task_already_ending_in_an_escaped_semicolon_arrives_intact() {
+        let argv = spawn_argv("claude-1", Path::new("/w"), &with_task("a\\;"), "claude");
+        assert_eq!(argv.last().unwrap(), "a\\\\;");
+        assert_eq!(as_tmux_delivers(argv.last().unwrap()), "a\\;");
     }
 }

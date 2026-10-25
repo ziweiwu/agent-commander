@@ -107,3 +107,43 @@ describe('FR-CARD-3 the fold says what a figure is, in words', () => {
     expect(screen.getByTestId('details-toggle').getAttribute('aria-expanded')).toBe('false')
   })
 })
+
+/**
+ * The fold's toggle is a chevron column beside the card, not a strip of the same
+ * word under every card. What the word did, the name now does: it is still one
+ * named disclosure (FR-CARD-1), and it still says whether it is open.
+ */
+describe('FR-CARD-1 the fold has one named toggle', () => {
+  it('is named in words although it shows a chevron', () => {
+    card({ sessionId: 'a', ...busyFacts })
+    const toggle = screen.getByTestId('details-toggle')
+    expect(toggle.textContent).toBe('')
+    expect(toggle.querySelector('svg')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Details' })).toBe(toggle)
+    expect(toggle.getAttribute('title')).toBe('Details')
+  })
+
+  it('says whether it is open, and keeps its name when it is', () => {
+    card({ sessionId: 'a', ...busyFacts })
+    const toggle = screen.getByTestId('details-toggle')
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(toggle.getAttribute('aria-label')).toBe('Details')
+    expect(toggle.getAttribute('title')).toBe('Hide details')
+  })
+
+  /**
+   * The reach mark moved up beside the age, so the context line is the
+   * sentence and nothing else; the place line is one unit that clips rather
+   * than wrapping its folder and branch apart.
+   */
+  it('puts the reach mark on the name line and the place in one unit', () => {
+    card({ sessionId: 'a', ...busyFacts, cwd: '/Users/demo/Projects/lego-deals' })
+    const reach = screen.getByTestId('agent-reach')
+    expect(reach.parentElement).toBe(screen.getByTestId('agent-name').parentElement)
+    const place = screen.getByTestId('agent-place')
+    expect(place.parentElement).toBe(screen.getByTestId('agent-meta'))
+    expect(place.textContent).toContain('~/Projects/lego-deals')
+    expect(place.textContent).toContain('main')
+  })
+})

@@ -277,6 +277,16 @@ the default for an unrecognised kind is deny.
   *`describe::inv11_only_a_person_describes_a_session`,
   `transcript::inv11_the_description_follows_the_work_while_the_title_stays_put`,
   `test/ui/card-description.test.tsx`.*
+- **FR-CARD-8** — The fold's disclosure MUST be a column beside the card, as
+  tall as it, named in words (*Details* / *详情*) and carrying `aria-expanded`;
+  it was a strip under every card, the same word fourteen times, and its labels
+  sat at four heights across one row of cards. A **waiting** card that can be
+  reached MUST be the one tinted surface on the fleet (`--wash-waiting`, solved
+  per palette), and every waiting mark on a card — that tint, its coloured
+  edge, the amber status words, the Answer verb — MUST follow the rail, never
+  the reported status, so a waiting agent whose pane has exited carries none
+  of them. Idle and working cards carry no coloured edge. **(INV-11)**
+  *`test/ui/card-diet.test.tsx`, `test/ui/status-rail.test.tsx`.*
 
 ### 3.3 Delegates
 
@@ -735,6 +745,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   **(INV-11)**
 - **FR-PRUNE-5** — The control MUST be unavailable while the fleet view is not
   live: a card from a dropped connection is a memory, not a reading. **(INV-11)**
+- **FR-PRUNE-6** — On a phone the control MUST sit at the foot of the Idle
+  group, under the sessions it closes, rather than in a full-width row above
+  Needs you; with no Idle group on screen it MUST stay in the toolbar, so a
+  filter never takes it off the phone. **(INV-17)** *`test/ui/prune.test.tsx`.*
 
 ---
 
@@ -880,6 +894,23 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Notification API MUST get a disabled toggle that says so rather than one that
   silently does nothing. **(INV-11, INV-14)** *`test/ui/notify.test.tsx`.*
 - **FR-NOTIFY-7** — Clicking a notification MUST open that agent.
+- **FR-NOTIFY-8** — A notification and the live region MUST name an agent by
+  the name its card leads with. A push sent off the machine (`--notify`) MUST
+  carry no conversation text: a name Claude Code derived goes out as
+  `folder · branch`, never as the session's title, description or a prompt.
+  The push body's language MUST be a server flag (`--notify-lang`), never the
+  browser's preference. **(INV-3, INV-14, FR-UI-12)** *`push::tests`,
+  `test/ui/notify.test.tsx`.*
+- **FR-NOTIFY-9** — A push MUST be held back only while some tab is on screen
+  **and** has had a pointer, key or touch within `PRESENCE_WINDOW` (three
+  minutes). A visible tab with no recent input MUST NOT hold it back, and a
+  hidden tab never does: the failure this allows is a duplicate alert, never a
+  missed one. The tab MUST report input only on `pointerdown`, `keydown` and
+  `touchstart`, at most once per `PRESENCE_REPORT_MS` (30 seconds), never on a
+  timer. Amended from "any visible tab holds every push back", because a desk
+  tab left on screen silenced the phone. FR-NOTIFY-4, the browser's own
+  notification, is per-device and unchanged. **(INV-14, INV-4)**
+  *`presence::tests`, `routes::tests::inv14_*`, `test/ui/heartbeat.test.tsx`.*
 
 ---
 
@@ -974,7 +1005,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   each other. *`scripts/audit-contrast.py`, `test/scheme.test.ts`.*
 - **FR-UI-9** — Palettes MUST be generated, never hand-edited, and the generator's
   output MUST be checked byte-for-byte so a hand edit fails the suite rather than
-  surviving until the next regeneration. *`test/scheme.test.ts`.*
+  surviving until the next regeneration. Translucent washes and edges are
+  generated too (`--tint-*`, `--edge-*`): no stylesheet MAY write `color-mix(`
+  itself, and every tint MUST be measured by an `audit-contrast.py` composite
+  over the surface it is drawn on. *`test/scheme.test.ts`,
+  `test/overlays.test.ts`, `scripts/audit-contrast.py`.*
 - **FR-UI-10** — The scheme menu MUST stay open while a palette is picked, unlike
   the theme and language rows: choosing a palette means trying two or three.
   It MUST still close like every other layer: on Escape, handing focus back to
@@ -1112,13 +1147,13 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8, FR-NOTIFY-9 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
-| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14 |
+| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |
 | INV-18 — a link goes where the text says | FR-CHAT-11 |
 
 ---

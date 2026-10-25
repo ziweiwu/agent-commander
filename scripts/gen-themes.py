@@ -370,6 +370,33 @@ NEED_STATUS_WAITING = 7.0
 # merely present: it is what tells a keyboard user where they are.
 NEED_FOCUS = 5.0
 
+WASH_CHROMA = 0.035
+"""How much colour a waiting card's surface carries, at the scheme's own waiting hue.
+
+A waiting card is the one surface on the fleet that is tinted, because a filled
+area is found by peripheral vision and a 3px edge is not. It is solved here as
+an opaque colour rather than written as `color-mix(var(--waiting) 10%)` in the
+stylesheet, and both halves of that were measured: faint text on a 10% mix of
+Ember's dark waiting over its panel is 4.37:1, under the 4.5 a waiting card's
+separators need; and in light mode a 10% mix of a dark-brown waiting colour over
+a near-white panel comes out at chroma 0.007, which is grey. Lightness from the
+panel and chroma from here keeps it legibly a card and visibly amber in both
+modes.
+"""
+WASH_LIFT_DARK = 0.02
+"""How far above the panel's measured OKLab lightness the dark wash sits."""
+WASH_SINK_LIGHT = 0.025
+"""How far below the panel's measured OKLab lightness the light wash sits."""
+
+
+def waiting_wash(panel: str, hue: float, lift: float) -> str:
+    """The waiting card's surface: the panel moved by `lift`, at `WASH_CHROMA` in `hue`.
+
+    Measured from the panel's hex rather than its ramp constant, so the wash
+    follows the colour that is actually drawn beside it.
+    """
+    return oklch_to_hex(hex_to_oklab(panel)[0] + lift, WASH_CHROMA, hue)
+
 
 @dataclass(frozen=True)
 class Scheme:
@@ -467,6 +494,9 @@ class Scheme:
         # the send-mode segment sit. It landed at 4.42-4.62:1 there against a
         # stated demand of 5.0.
         out["focus"] = solve_lightness(self.hues["busy"], c_accent, on_everything, NEED_FOCUS)
+        out["wash-waiting"] = waiting_wash(
+            out["panel"], self.hues["waiting"], WASH_LIFT_DARK if dark else -WASH_SINK_LIGHT
+        )
 
         out["shadow"] = DARK_SHADOW if dark else LIGHT_SHADOW
         return out
@@ -661,6 +691,7 @@ ORDER = [
     "faint",
     "busy",
     "waiting",
+    "wash-waiting",
     "idle",
     "accent",
     "danger",
@@ -728,6 +759,7 @@ def _default_blocks(default: Scheme) -> list[str]:
         SWATCH_COMMENT,
         swatches(dark=True, indent="  "),
         SCALES,
+        overlays("  "),
         "  color-scheme: dark;",
         "}",
         "",
@@ -887,6 +919,73 @@ SCALES = """
 """
 
 
+@dataclass(frozen=True)
+class Overlay:
+    """A translucent token: `color-mix(in srgb, var(--of) percent%, transparent)`.
+
+    Emitted once on the bare `:root`, because the `var()` inside resolves on the
+    root element against whichever scheme and mode are applied there, so one
+    line serves all sixteen palettes. What it lands on is the surface under the
+    element that draws it, which is why `audit-contrast.py` names that surface
+    beside each use in its `COMPOSITES` rather than here.
+    """
+
+    name: str
+    of: str
+    percent: int
+
+
+STATUS_TINT = 12
+"""How strongly a status colour fills a box that carries text: a notice, a
+blocked banner, a pill. Three percentages were doing this one job (10, 12 and
+14); 12 is the middle of them, and `audit-contrast.py` measures every token
+drawn on it."""
+SELECTED_TINT = 16
+"""The fill that marks the chosen item, the pressed chip and the primary button.
+Stronger than a status tint because it is the only fill those controls change."""
+BANNER_TINT_PERCENT = 18
+"""The page-wide bands over `--bg`: the mock-mode banner and the notification
+nudge. Thinning it was measured and rejected in `App.module.css`: it only
+makes the banner harder to notice, and the text on it is `--text` either way."""
+EDGE_PERCENT = 45
+"""Decorative edges around a tinted box. A real control's edge is the full token
+instead (1.4.11), as `.primary`, Open terminal and the destructive button are."""
+SWATCH_EDGE_PERCENT = 55
+"""The hairline inside a settings-menu swatch, where a scheme's own colours can
+sit close to the menu's surface."""
+
+OVERLAYS = (
+    Overlay("tint-waiting", "waiting", STATUS_TINT),
+    Overlay("tint-accent", "accent", STATUS_TINT),
+    Overlay("tint-danger", "danger", STATUS_TINT),
+    Overlay("tint-focus", "focus", SELECTED_TINT),
+    Overlay("tint-banner", "waiting", BANNER_TINT_PERCENT),
+    Overlay("edge-busy", "busy", EDGE_PERCENT),
+    Overlay("edge-waiting", "waiting", EDGE_PERCENT),
+    Overlay("edge-accent", "accent", EDGE_PERCENT),
+    Overlay("edge-danger", "danger", EDGE_PERCENT),
+    Overlay("edge-neutral", "line-strong", SWATCH_EDGE_PERCENT),
+)
+"""Every translucent colour the stylesheets draw. A module writes `var(--tint-…)`
+or `var(--edge-…)`, never `color-mix(` itself — `test/overlays.test.ts` holds
+that — so every wash is one the audit can find and measure."""
+
+OVERLAY_DOC = """  /** Translucent tints and edges, generated from `OVERLAYS` in gen-themes.py.
+      Every wash a module draws is one of these, so audit-contrast.py can find
+      it; the opaque waiting-card surface is `--wash-waiting`, solved per palette
+      above. */"""
+
+
+def overlays(indent: str) -> str:
+    """The `--tint-*` and `--edge-*` declarations, one line each."""
+    lines = [
+        f"{indent}--{overlay.name}: color-mix(in srgb, var(--{overlay.of}) "
+        f"{overlay.percent}%, transparent);"
+        for overlay in OVERLAYS
+    ]
+    return "\n".join([OVERLAY_DOC, *lines, ""])
+
+
 # How far apart two schemes must look, in OKLab.
 #
 # Not a contrast requirement — a "did picking this do anything" requirement.
@@ -904,8 +1003,12 @@ SCHEME_DISTANCE_SURFACES = ("bg", "panel-2", "line")
 
 TEXT_TOKENS = ("text", "dim", "faint", "busy", "waiting", "idle", "accent", "danger")
 SURFACES = ("bg", "panel", "panel-2")
-#: How much of the page the mock-mode banner's amber wash covers its background.
-BANNER_TINT = 0.18
+WASH_TEXT_TOKENS = ("text", "dim", "faint", "waiting", "danger")
+"""What a waiting card draws on `--wash-waiting`: its words, its separators and
+age, the waiting status, and danger for anything on its face that turns red."""
+WASH_EDGE_TOKENS = ("line-strong", "focus")
+"""The edges drawn around it: the card's own and, when it is open, the focus."""
+PERCENT = 100
 
 
 def _contrast_pairs(palette: dict[str, str]) -> list[tuple[float, str, float]]:
@@ -932,7 +1035,13 @@ def _contrast_pairs(palette: dict[str, str]) -> list[tuple[float, str, float]]:
     for surface in SURFACES:
         pairs.append((contrast(palette["focus"], palette[surface]),
                       f"focus on {surface}", NEED_UI_AA))
-    banner = mix(palette["waiting"], palette["bg"], BANNER_TINT)
+    for foreground in WASH_TEXT_TOKENS:
+        pairs.append((contrast(palette[foreground], palette["wash-waiting"]),
+                      f"{foreground} on wash-waiting", NEED_TEXT_AA))
+    for foreground in WASH_EDGE_TOKENS:
+        pairs.append((contrast(palette[foreground], palette["wash-waiting"]),
+                      f"{foreground} on wash-waiting", NEED_UI_AA))
+    banner = mix(palette["waiting"], palette["bg"], BANNER_TINT_PERCENT / PERCENT)
     pairs.append((contrast(palette["text"], banner), "text on mock banner", NEED_TEXT_AA))
     return pairs
 

@@ -42,7 +42,7 @@
  */
 .primary {
   border-color: var(--focus);
-  background: color-mix(in srgb, var(--focus) 16%, transparent);
+  background: var(--tint-focus);
 }
 
 .compact {
@@ -94,7 +94,7 @@
 .chip[aria-pressed='true'] {
   border-color: var(--focus);
   color: var(--text);
-  background: color-mix(in srgb, var(--focus) 15%, transparent);
+  background: var(--tint-focus);
 }
 
 /* Sized by width as well as pointer type, so a narrowed desktop window gets the

@@ -1,6 +1,7 @@
 /* The card and anything hanging below it read as one object. */
 .wrap {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
   min-width: 0;
 }
 
@@ -9,10 +10,10 @@
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line-strong);
-  border-left: 3px solid var(--idle);
+  border-right: 0;
   background: var(--panel);
-  border-radius: var(--radius-lg);
-  padding: 10px 13px;
+  border-radius: var(--radius-lg) 0 0 var(--radius-lg);
+  padding: 10px 13px 10px 15px;
   cursor: pointer;
   color: inherit;
   font: inherit;
@@ -29,20 +30,42 @@
 .card:hover {
   background: var(--panel-2);
 }
-.card[data-status='busy'] {
-  border-left-color: var(--busy);
-}
-.card[data-status='waiting'] {
-  border-left-color: var(--waiting);
-}
-.card[data-attached='true'] {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
 .card[aria-current='true'] {
   border-color: var(--focus);
   background: var(--panel-2);
+}
+
+/**
+ * A waiting card, keyed on the rail rather than on `data-status`, so a waiting
+ * agent whose pane has exited (rail `gone`) gets no wash, no stripe and no verb.
+ *
+ * The wash is the one tinted surface on the fleet: a filled area is found in
+ * peripheral vision, which a 3px line and 12px words are not, and in light mode
+ * the waiting colour is dark enough to read as grey at that size. It stays
+ * under hover and when the card is open, where the other cards go to
+ * `--panel-2`, because those are exactly the moments it is being looked for.
+ * `--wash-waiting` is solved per palette by `gen-themes.py`, and every token the
+ * face draws on it is in `audit-contrast.py`'s PAIRS.
+ *
+ * Only this state keeps a coloured edge. A grey stripe on every idle card and
+ * a blue one on every working card were six and four heavy bars saying what
+ * the rail glyph beside them already said; the 1px base edge plus 2px more
+ * padding keeps every rail in the same column.
+ */
+.wrap[data-rail='waiting'] > .card {
+  border-left: 3px solid var(--waiting);
+  padding-left: 13px;
+}
+.wrap[data-rail='waiting'] > :is(.card, .disclosure) {
+  background: var(--wash-waiting);
+}
+@media (hover: hover) {
+  .wrap[data-rail='waiting'] > :is(.card, .disclosure):hover:not([aria-current='true']) {
+    border-color: var(--text);
+  }
+  .wrap[data-rail='waiting'] > .card:hover {
+    border-left-color: var(--waiting);
+  }
 }
 
 .top {
@@ -91,7 +114,7 @@
    how far along the work is, and nothing here can measure that (INV-11). */
 .spin {
   display: flex;
-  animation: railspin 2.4s linear infinite;
+  animation: railspin 4s linear infinite;
 }
 @keyframes railspin {
   to {
@@ -124,7 +147,6 @@
  * lines up down the fleet, which is the point of putting it there.
  */
 .age {
-  margin-left: auto;
   flex: none;
   font-size: var(--text-xs);
   font-family: var(--font-mono);
@@ -132,7 +154,7 @@
   color: var(--faint);
   white-space: nowrap;
 }
-.age[data-since='state'] {
+.wrap[data-rail='waiting'] .age[data-since='state'] {
   color: var(--waiting);
 }
 
@@ -166,7 +188,12 @@
 .status[data-status='busy'] {
   color: var(--busy);
 }
-.status[data-status='waiting'] {
+/**
+ * Amber words only beside the hand. A waiting agent whose pane has exited still
+ * says `waiting · dialog open`, because that is what it reported, but in the
+ * plain colour: nothing on a card the reader cannot act on asks to be acted on.
+ */
+.wrap[data-rail='waiting'] .status {
   color: var(--waiting);
   font-weight: 600;
 }
@@ -189,39 +216,87 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 2px 7px;
+  column-gap: 14px;
+  row-gap: 2px;
+  overflow: hidden;
   font-size: var(--text-sm);
   color: var(--dim);
   min-width: 0;
 }
-/*
- * The separator trails its own bit rather than leading the next one.
+/**
+ * A dot only ever sits *between* two items, whichever way the row wraps.
  *
- * Both put a dot between every pair on one line; they differ only when the row
- * wraps, which the widest card in the fleet always does. A leading dot then
- * opens each continuation line and the context line reads as a bullet list. A
- * trailing one ends the line above instead, where it reads as "continues".
- *
- * `:not(:last-child)` rather than a rule on the following sibling, so a bit
- * that does not render cannot leave a dangling dot behind it.
+ * Every item carries its separator in front of it and steps 14px back into the
+ * gap, so on the same row the dot fills that gap. The first item on each
+ * visual row steps back past the line's own edge, where `overflow: hidden`
+ * clips its dot. A trailing dot used to end every wrapped row and a leading one
+ * opened every continuation row; this leaves neither, with no rule for which
+ * item happens to be last.
  */
-.line > *:not(:last-child)::after {
+.line > * {
+  margin-inline-start: -14px;
+}
+.line > *::before {
   content: '·';
+  display: inline-block;
+  flex: none;
+  inline-size: 14px;
+  text-align: center;
   color: var(--faint);
-  margin-left: 7px;
+  font-style: normal;
+  font-weight: 400;
 }
-/* The two marks that sit apart from the sentence, and end it. */
-.cta::after,
-.reach::after {
-  content: none !important;
+.line > .cta {
+  margin-inline-start: 0;
 }
-/*
- * The reach mark is pushed to the far right, so whatever precedes it is the
- * visual end of the sentence and must not trail a separator into the gap.
- * `:last-child` cannot see this — the dot belongs to the element before it.
+.line > .cta::before {
+  content: none;
+}
+/**
+ * The delegate line wraps inside itself, so its dot is held in its own padding
+ * rather than as a flex item: its second row then starts where its first does,
+ * not 14px into the clip.
  */
-.line > *:has(+ .reach)::after {
-  content: none !important;
+.line > .delegates {
+  position: relative;
+  padding-inline-start: 14px;
+}
+.line > .delegates::before {
+  position: absolute;
+  inset-inline-start: 0;
+}
+
+/**
+ * Where the agent is, as one unit: folder, branch and, past the warning line,
+ * context. It shares a row with the activity when both fit and clips its parts
+ * rather than wrapping them apart, so a long branch cannot strand its folder.
+ */
+.place {
+  display: inline-flex;
+  align-items: baseline;
+  min-width: 0;
+  max-width: calc(100% + 14px);
+}
+.place > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.folder {
+  flex-shrink: 1;
+}
+.branch {
+  flex: none;
+  max-width: 50%;
+}
+.place > * + *::before {
+  content: '·';
+  display: inline-block;
+  inline-size: 14px;
+  text-align: center;
+  color: var(--faint);
+  font-weight: 400;
 }
 
 /*
@@ -233,6 +308,7 @@
 .reach {
   margin-left: auto;
   flex: none;
+  align-self: center;
   display: flex;
   align-items: center;
   color: var(--faint);
@@ -240,29 +316,23 @@
 .reach[data-reach='gone'] {
   color: var(--danger);
 }
-.reach::before {
-  content: none !important;
-}
 /*
  * The context mark, drawn only past `CONTEXT_WARN_PCT`. Words carry it — the
  * figure is in the text — and the weight, not a colour, is what lifts it off
  * the line (INV-13: never colour alone).
  */
 .context {
+  flex: none;
   color: var(--text);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .folder {
-  color: var(--text);
-  font-weight: 550;
+  color: var(--dim);
+  font-weight: 400;
   font-family: var(--font-mono);
   font-size: var(--text-sm);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 100%;
 }
 
 /* The auto-generated session name, kept as a hint once the AI title leads. */
@@ -286,8 +356,10 @@
 }
 
 .activity {
-  font: 12px/1.45 var(--font-mono);
-  color: var(--dim);
+  flex: 1 1 18ch;
+  max-width: max-content;
+  font: var(--text-sm)/1.5 var(--font-mono);
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -375,7 +447,7 @@
   margin: 0;
   font-size: var(--text-sm);
   color: var(--waiting);
-  border-left: 2px solid color-mix(in srgb, var(--waiting) 45%, transparent);
+  border-left: 2px solid var(--edge-waiting);
   padding-left: 7px;
 }
 
@@ -390,7 +462,7 @@
   font-weight: 600;
   color: var(--waiting);
   padding: 2px 10px;
-  border: 1px solid color-mix(in srgb, var(--waiting) 50%, transparent);
+  border: 1px solid var(--edge-waiting);
   border-radius: var(--radius-pill);
 }
 
@@ -418,26 +490,50 @@
   font-family: var(--font-mono);
 }
 
+/**
+ * The fold's toggle, as a column beside the card rather than a strip under it.
+ *
+ * The strip was 27px under every card at the desk and 43px on a touch screen,
+ * the same word fourteen times, and because `.wrap` split a row's spare height
+ * between its two auto rows the labels sat at four different heights across one
+ * row of cards. A column has neither problem: it is as tall as the card. Its
+ * name is in `aria-label`, its state in `aria-expanded`, and the chevron turns.
+ * 28px clears WCAG 2.5.8's 24 at the desk; a touch floor needs both queries
+ * (AGENTS.md), so a phone and a 1194px tablet both get FR-UI-2's 44.
+ */
 .disclosure {
+  grid-column: 2;
+  grid-row: 1;
+  display: grid;
+  place-items: center;
+  padding: 0;
   border: 1px solid var(--line-strong);
-  border-top: none;
+  border-left-color: var(--line);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   background: var(--panel);
   color: var(--dim);
-  font: inherit;
-  font-size: var(--text-xs);
-  text-align: left;
-  padding: 5px 13px;
   cursor: pointer;
 }
 .disclosure:hover {
   background: var(--panel-2);
+  color: var(--text);
 }
-.disclosure[aria-expanded='false'] {
-  border-bottom-left-radius: var(--radius-lg);
-  border-bottom-right-radius: var(--radius-lg);
+.card[aria-current='true'] + .disclosure {
+  border-color: var(--focus);
+  border-left-color: var(--line);
+}
+.disclosure[aria-expanded='true'] {
+  border-bottom-right-radius: 0;
+}
+.disclosure[aria-expanded='true'] svg {
+  rotate: 180deg;
+}
+.wrap:has(> .disclosure[aria-expanded='true']) > .card {
+  border-bottom-left-radius: 0;
 }
 
 .panel {
+  grid-column: 1 / -1;
   border: 1px solid var(--line-strong);
   border-top: none;
   border-bottom-left-radius: var(--radius-lg);
@@ -448,19 +544,16 @@
 
 @media (pointer: coarse) {
   .card {
-    padding: 13px;
+    padding: 13px 13px 13px 15px;
   }
-  .card:hover {
+  .card:hover,
+  .disclosure:hover {
     background: var(--panel);
-  }
-  /* A 44px target on a control that sits between two tappable cards. */
-  .disclosure {
-    padding: 12px 13px;
   }
 }
 
 @media (pointer: coarse), (max-width: 560px) {
-  .disclosure {
-    min-height: 44px;
+  .wrap {
+    grid-template-columns: minmax(0, 1fr) 44px;
   }
 }

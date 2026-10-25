@@ -105,7 +105,7 @@ unknown?: boolean, };
 
 export type ChangedRow = { row: number, text: string, };
 
-export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong", visible?: boolean | null, } | { "type": "ping" };
+export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong", visible?: boolean | null, } | { "type": "ping" } | { "type": "present" };
 
 /**
  * `{ ok: true, detail? } | { ok: false, error }`
