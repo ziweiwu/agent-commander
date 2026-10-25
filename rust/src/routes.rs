@@ -3281,8 +3281,11 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     if let Some(spec) = &opts.notify {
         let channel = crate::push::Channel::parse(spec, &|key| std::env::var(key).ok())
             .map_err(|why| anyhow::anyhow!(why))?;
-        let notifier =
-            crate::push::Notifier::new(crate::push::HttpPusher::new(channel), opts.notify_link.clone());
+        let notifier = crate::push::Notifier::new(
+            crate::push::HttpPusher::new(channel),
+            opts.notify_link.clone(),
+            opts.notify_lang.unwrap_or_default(),
+        );
         push_on_transitions(&app, notifier);
     }
     let count = app.deps.source.list().len();

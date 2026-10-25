@@ -302,7 +302,11 @@ commit.
   ntfy topic or a Telegram bot when an agent *becomes* waiting while no browser
   reports itself visible (INV-14, server-side); `--notify-link` is this app's
   address on the phone so the push opens the card. It is off unless the flag is
-  given, and there is no channel in mock mode to point a review agent at.
+  given, and there is no channel in mock mode to point a review agent at. A
+  push leaves the machine, so it never carries conversation text: a name Claude
+  Code made up goes out as `folder · branch`, not as the card's title, and
+  `--notify-lang zh` is how the body becomes Chinese (FR-UI-12 keeps the
+  browser's language off the server).
 - **`bin` points at a launcher, not at the server.** The server is a Rust
   binary, and `bin` has to name something node can run, so
   `scripts/launch.mjs` finds `rust/target/release/agent-commander` and execs it.

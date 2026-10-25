@@ -19,7 +19,7 @@ import type {
   ServerMessage,
 } from '../../shared/types.ts'
 import { translate } from '../lib/i18n.ts'
-import { notifyBlocked, shouldNudge } from '../lib/notify.ts'
+import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
 import { useStore } from './store.ts'
 
@@ -716,7 +716,7 @@ function announceBlocked(agents: Agent[]): void {
   document.title = blocked.length ? `(${blocked.length}) agent-commander` : 'agent-commander'
   if (fresh.length === 0) return
   const region = document.getElementById('live-region')
-  if (region) region.textContent = `${fresh.length}: ${fresh.map((a) => a.name).join(', ')}`
+  if (region) region.textContent = blockedAnnouncement(fresh)
 }
 
 /**

@@ -113,7 +113,11 @@ agent-commander --token auto \
 ```
 
 For Telegram use `--notify telegram:<chat_id>` with the bot token in
-`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`.
+`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`,
+and add `--notify-lang zh` for a push written in Chinese. A session Claude Code
+named itself is pushed as its folder and branch (`kb-vault · main`), never as
+anything said in the conversation, since the push goes through ntfy.sh or
+Telegram.
 A push fires only when an agent *becomes* blocked while no browser tab is on
 screen — the open tab is the notification otherwise — and only ever goes out;
 nothing is answered from the lock screen.

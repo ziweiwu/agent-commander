@@ -1802,6 +1802,19 @@ to a channel that reaches a phone on its own — an ntfy topic or a Telegram bot
 `--notify-link` a link to the card, so the answer still goes through the card
 and its pane check (INV-2, INV-16): nothing is answered from a lock screen.
 
+**What a push may say is narrower than what the card says.** The card leads a
+name Claude Code made up (`ziweiwu-35`) with the conversation's title, its
+description or its last prompt, and a push titled with the raw name named a
+session nobody had seen on screen. The push cannot borrow the card's choice:
+it leaves the machine for ntfy.sh or Telegram, and all three are conversation
+(INV-3). So a derived name goes out as `folder · branch` — both on the card's
+face and on `prefs.ts`'s list of what is not conversation — and a name
+somebody chose goes out as it is. The browser's own notification and the
+screen-reader live region stay on the device, so they use the card's name
+(`displayName`). The body is English unless the server is started with
+`--notify-lang zh`; a server flag, because the browser's language is a
+preference and preferences never reach the server (FR-UI-12).
+
 The four rules above bind it word for word. The first fleet the server sees is
 backlog; a standing block never re-fires; unblocked-then-blocked is news; and
 **a visible tab is the notification** — the client says on every heartbeat and
@@ -1815,8 +1828,15 @@ and not retried: the next transition sends its own.
   and again only after it clears; a visible tab consumes it; an inferred
   status never fires; a push without an address carries no link; the channel
   spec is parsed and refused in words; an ntfy push is one outbound POST with
-  the documented headers, against a local server
-- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`
+  the documented headers, against a local server; a derived name is pushed as
+  its folder and branch (`a_derived_name_is_pushed_as_its_folder_and_branch`);
+  seeded title, description, prompt and activity strings reach no push in
+  either language (`inv3_no_conversation_text_reaches_a_push`); and
+  `--notify-lang zh` writes the body in Chinese
+- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`,
+  `options::a_push_language_is_en_or_zh_and_needs_a_channel`
+- `test/ui/notify.test.tsx` — the notification is titled with `displayName`,
+  and the live region names agents the same way
 - `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
   connect, on every beat, and the moment that changes
 

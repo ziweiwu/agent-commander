@@ -859,6 +859,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Notification API MUST get a disabled toggle that says so rather than one that
   silently does nothing. **(INV-11, INV-14)** *`test/ui/notify.test.tsx`.*
 - **FR-NOTIFY-7** — Clicking a notification MUST open that agent.
+- **FR-NOTIFY-8** — A notification and the live region MUST name an agent by
+  the name its card leads with. A push sent off the machine (`--notify`) MUST
+  carry no conversation text: a name Claude Code derived goes out as
+  `folder · branch`, never as the session's title, description or a prompt.
+  The push body's language MUST be a server flag (`--notify-lang`), never the
+  browser's preference. **(INV-3, INV-14, FR-UI-12)** *`push::tests`,
+  `test/ui/notify.test.tsx`.*
 
 ---
 
@@ -1085,7 +1092,7 @@ unverified.
 | INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14 |
