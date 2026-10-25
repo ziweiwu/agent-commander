@@ -699,10 +699,10 @@ pub enum ClientMessage {
     /// (INV-4).
     ///
     /// `visible` is whether the tab is on screen, for the push channel: a
-    /// visible tab is already the notification (INV-14), so while any browser
-    /// says so nothing is pushed off the machine. Absent from a client older
-    /// than this field, which reads as not visible — a push nobody needed is
-    /// the cheaper mistake.
+    /// visible tab that somebody is using is already the notification
+    /// (INV-14; see `Present`). Absent from a client older than this field,
+    /// which reads as not visible — a push nobody needed is the cheaper
+    /// mistake.
     #[serde(rename = "pong")]
     Pong {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -718,6 +718,15 @@ pub enum ClientMessage {
     /// is dead now rather than a beat later (INV-4, the client's half).
     #[serde(rename = "ping")]
     Ping,
+    /// A person used this tab just now: a pointer, a key or a touch on it.
+    ///
+    /// Visible alone used to hold every push back, and a desk tab left on
+    /// screen then silenced the phone. A visible tab now counts as somebody
+    /// being there only within `PRESENCE_WINDOW` of one of these (INV-14).
+    /// Sent when an input event fires, at most once per `PRESENCE_REPORT_MS`,
+    /// never on a timer (INV-4). It asks for nothing and reaches no agent.
+    #[serde(rename = "present")]
+    Present,
 }
 
 /* ---- server -> client ---- */

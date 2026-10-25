@@ -371,6 +371,12 @@ a phone that went to sleep on the far side of Tailscale says nothing at all, and
 without a ping the server would go on polling for it until the OS noticed the
 dead connection — which can be hours.
 
+"Who is at a tab", which the push channel asks (INV-14), needs one more fact
+than "who is watching": that a visible tab is being used. That is pushed too,
+never polled: a `present` message on a pointer, key or touch, at most once per
+30 seconds (`PRESENCE_REPORT_MS`, `transport.ts`), held server-side as
+`last_input_at` per tab and read against `PRESENCE_WINDOW` (`presence.rs`).
+
 Every loop re-arms after its work rather than on a wall clock, through `Poller`
 (`poll.rs`); `PaneLoop` has its own copy of the same rule with the extra cadences
 the terminal needs. A re-entrancy guard on a `setInterval` is the shape this

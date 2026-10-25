@@ -159,9 +159,10 @@ Settings carries an **Alerts** toggle: with it on, an agent that *starts*
 waiting raises an OS notification — but only while the tab is hidden (a
 visible fleet is already the notification), and never for agents that were
 already blocked when the page opened. Clicking the notification opens that
-agent. The toggle asks for the browser's permission when you turn it on; if
-the browser cannot show notifications at all (Safari on iOS outside an
-installed web app), the toggle says so instead of pretending.
+agent, and it is titled with the name the agent's card leads with. The toggle
+asks for the browser's permission when you turn it on; if the browser cannot
+show notifications at all (Safari on iOS outside an installed web app), the
+toggle says so instead of pretending.
 
 The app ships a web manifest, so on a phone it can be added to the Home Screen
 and opens full-screen like an installed app.
@@ -672,6 +673,10 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
     --print-url     print the full URL, token and all, then keep serving
     --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)
     --browse-root <d>  root the folder picker is confined to (default: home)
+    --notify <to>   push when an agent starts needing you: an ntfy topic URL
+                    (https://ntfy.sh/<topic>) or telegram:<chat_id>
+    --notify-link <url>  this app's address on the phone, so a push opens the card
+    --notify-lang <en|zh>  the language a push is written in (default en)
     --mock          serve fixture agents, touching nothing real
     --install-statusline
                     add the quota bridge to ~/.claude/settings.json and exit
@@ -691,6 +696,25 @@ agent-commander --rotate-token     # prints the new token; every old link now 40
 
 A literal `--token` is still an override for that run and is never written to
 the store.
+
+`--notify` sends a push off the machine when an agent *becomes* blocked, so a
+phone in a pocket hears about it: an ntfy topic, with an access token in
+`AGENT_COMMANDER_NTFY_TOKEN` if the server wants one, or `telegram:<chat_id>`
+with the bot token in `AGENT_COMMANDER_TELEGRAM_TOKEN` or
+`~/.claude/agent-commander/telegram-token`. `--notify-link` is this app's
+address on the phone, so tapping the push opens the card. A push is titled
+with the agent's name — or, for a name Claude Code made up such as
+`ziweiwu-35`, with its folder and branch (`kb-vault · main`) — and never with
+the conversation's title or a prompt, because it goes to ntfy.sh or Telegram
+(INV-3). Its body says what the agent is waiting for, in English or, with
+`--notify-lang zh`, in Chinese. That is a server flag and not the language
+menu, because no preference ever reaches the server (FR-UI-12).
+
+No push goes while you are at a browser tab: one that is on screen and has had
+a click, a key or a touch in the last three minutes is already the
+notification. A tab merely left on screen does not count, so a desk you walked
+away from does not silence the phone; at worst the phone buzzes beside a screen
+already showing the block.
 
 **The token only appears in a URL once.** Open the link and the server trades it
 for an `HttpOnly; SameSite=Strict` cookie and redirects to the same address
@@ -830,7 +854,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
+npm test           # 1595 tests: 721 Rust (the server) + 874 vitest (the web app)
 npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
