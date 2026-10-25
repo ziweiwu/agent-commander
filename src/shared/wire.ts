@@ -364,7 +364,12 @@ tmux: boolean, port: number, platform: string,
  */
 version: string, };
 
-export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boolean, } | { "type": "limits", limits: RateLimits | null, } | { "type": "timeline", sessionId: string, events: Array<TimelineEvent>, reset: boolean, 
+export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boolean, 
+/**
+ * False while the transcript fields may be frozen: from the moment
+ * the enricher idles until its first full pass after resuming (F6).
+ */
+caughtUp: boolean, } | { "type": "limits", limits: RateLimits | null, } | { "type": "timeline", sessionId: string, events: Array<TimelineEvent>, reset: boolean, 
 /**
  * What this agent is blocked on, when its transcript says.
  *

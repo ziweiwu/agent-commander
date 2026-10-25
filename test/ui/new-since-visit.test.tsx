@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { connect, focusAgent } from '../../src/web/store/transport.ts'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, resetStore } from './helpers.tsx'
+import { buildMessages } from '../../src/web/lib/chat.ts'
+import { dividerFor } from '../../src/web/lib/newSince.ts'
 
 class FakeSocket {
   static last: FakeSocket | null = null
@@ -54,7 +56,26 @@ afterEach(() => {
   globalThis.WebSocket = original
 })
 
-const fleet = { type: 'fleet', mock: false, agents: [agent({ sessionId: 'x', lastActivityAt: REPLIED_AT })] }
+const frozenFleet = (lastActivityAt: number) => ({
+  type: 'fleet',
+  mock: false,
+  caughtUp: false,
+  agents: [agent({ sessionId: 'x', lastActivityAt })],
+})
+const caughtUpFleet = (lastActivityAt: number) => ({ ...frozenFleet(lastActivityAt), caughtUp: true })
+const fleet = caughtUpFleet(REPLIED_AT)
+
+/** A tab already connected to a caught-up server, then opening `x`, last shown through its latest activity. */
+const warmOpen = (): FakeSocket => {
+  connect()
+  const socket = FakeSocket.last!
+  socket.deliver(fleet)
+  socket.deliver({ type: 'seen', seenThrough: { x: REPLIED_AT } })
+  focusAgent('x')
+  return socket
+}
+
+const divider = (events: Parameters<typeof buildMessages>[0]) => dividerFor(buildMessages(events), useStore.getState().visit)
 
 describe('F6 the visit', () => {
   it('is how far the session had been shown when it was opened, not after', () => {
@@ -72,11 +93,32 @@ describe('F6 the visit', () => {
     focusAgent('x')
     connect()
     const socket = FakeSocket.last!
-    socket.deliver({ ...fleet, agents: [agent({ sessionId: 'x', lastActivityAt: SHOWN_AT })] })
+    socket.deliver(frozenFleet(SHOWN_AT))
     socket.deliver({ type: 'seen', seenThrough: { x: SHOWN_AT } })
-    socket.deliver(fleet)
     socket.deliver({ type: 'seen', seenThrough: { x: REPLIED_AT } })
-    expect(useStore.getState().visit).toMatchObject({ seenThrough: SHOWN_AT, activityAt: REPLIED_AT })
+    socket.deliver(frozenFleet(REPLIED_AT))
+    socket.deliver(caughtUpFleet(REPLIED_AT))
+    socket.deliver(caughtUpFleet(REPLIED_AT + 2_000))
+    expect(useStore.getState().visit).toMatchObject({ seenThrough: SHOWN_AT, activityAt: REPLIED_AT, following: false })
+    expect(divider([{ id: 'a', at: REPLIED_AT, kind: 'assistant', text: 'Done.' }])?.before).toBe('a')
+  })
+
+  it('on a warm open, takes the agent going on two seconds later as nothing new', () => {
+    const socket = warmOpen()
+    socket.deliver(caughtUpFleet(REPLIED_AT + 2_000))
+    expect(divider([
+      { id: 'old', at: REPLIED_AT, kind: 'assistant', text: 'Done.' },
+      { id: 'live', at: REPLIED_AT + 2_000, kind: 'assistant', text: 'And the tests pass.' },
+    ])).toBeNull()
+  })
+
+  it('on a warm open, takes the reader’s own send as nothing new', () => {
+    const socket = warmOpen()
+    socket.deliver(caughtUpFleet(REPLIED_AT + 1_000))
+    expect(divider([
+      { id: 'old', at: REPLIED_AT, kind: 'assistant', text: 'Done.' },
+      { id: 'mine', at: REPLIED_AT + 1_000, kind: 'user', text: 'now the docs' },
+    ])).toBeNull()
   })
 
   it('on a cold load, is taken from the first record to arrive after the selection', () => {

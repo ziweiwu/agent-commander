@@ -769,7 +769,14 @@ pub enum ClientMessage {
 #[serde(tag = "type")]
 pub enum ServerMessage {
     #[serde(rename = "fleet")]
-    Fleet { agents: Vec<Agent>, mock: bool },
+    Fleet {
+        agents: Vec<Agent>,
+        mock: bool,
+        /// False while the transcript fields may be frozen: from the moment
+        /// the enricher idles until its first full pass after resuming (F6).
+        #[serde(rename = "caughtUp")]
+        caught_up: bool,
+    },
     #[serde(rename = "limits")]
     Limits { limits: Option<RateLimits> },
     #[serde(rename = "timeline")]

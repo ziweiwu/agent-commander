@@ -436,12 +436,18 @@ over the list with a back control; on a wide one, a second column.
   last opened this · 3h ago — 2 replies, 41 tool calls*. It MUST be placed
   from `seenThrough` as it stood before this visit's own focus moved it, and
   held for the whole visit; its counts stop where the agent had got when the
-  visit began. When nothing read is at or before `seenThrough` the transcript
+  visit began. Where the agent had got MUST come from a caught-up fleet: every
+  fleet frame carries `caughtUp`, false from the moment the server idles its
+  enricher until that enricher's first full pass after resuming, so a visit
+  begun before it follows the agent's activity until the caught-up frame, and
+  one begun on a caught-up fleet never follows — what arrives while the reader
+  is here, their own sends included, is not news. When nothing read is at or before `seenThrough` the transcript
   tail did not reach that far, so it MUST go at the top and say *at least*.
   When the new part is taller than the view, the chat MUST open scrolled to the
   divider, with *Jump to latest* for the rest. Nothing newer MUST mean no
   divider. **(INV-11)** *`test/ui/new-since.test.tsx`,
-  `test/ui/new-since-visit.test.tsx`.*
+  `test/ui/new-since-visit.test.tsx`,
+  `enrich::tests::f6_caught_up_only_after_the_first_pass_following_a_resume`.*
 
 ### 4.2 Answering a blocked agent
 

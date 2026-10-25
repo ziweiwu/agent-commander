@@ -172,6 +172,11 @@ export interface AppState {
    * arrive after it, and held until the next selection.
    */
   visit: Visit | null
+  /**
+   * Whether the last fleet frame was caught up: false from when the server's
+   * enricher idled until its first pass after resuming, and until a frame says.
+   */
+  caughtUp: boolean
   /** Account-level quota, or null when nothing has reported it. */
   limits: RateLimits | null
   env: ServerEnv | null
@@ -420,6 +425,7 @@ export const useStore = create<AppState>()((set, get) => ({
   fleetAt: null,
   seenThrough: null,
   visit: null,
+  caughtUp: false,
   limits: null,
   env: null,
   // Read from the document rather than waiting for the first WebSocket frame.

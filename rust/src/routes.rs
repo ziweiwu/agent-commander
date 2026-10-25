@@ -350,6 +350,9 @@ pub struct Viewers {
     /// How far each session has been shown on a tab that was on screen, for
     /// "new since opened in this app" (F6). Fed by [`track_seen`].
     pub seen: crate::seen::SeenThrough,
+    /// Whether the enricher has caught up since it last idled; carried on
+    /// every fleet frame.
+    pub caught_up: Arc<crate::enrich::CaughtUp>,
     listener: std::sync::OnceLock<Box<dyn Fn(Watched) + Send + Sync>>,
 }
 
@@ -1940,12 +1943,17 @@ fn incoming(frame: Message) -> Incoming {
 /// needs the current one immediately — waiting for the next statusline render
 /// would leave the meters blank for however long the fleet is idle.
 fn subscribe_viewer(viewer: &Arc<Viewer>, app: &Arc<App>) -> (Unsubscribe, Unsubscribe) {
-    viewer.send(ServerMessage::Fleet { agents: app.deps.source.list(), mock: app.mock });
+    viewer.send(ServerMessage::Fleet {
+        agents: app.deps.source.list(),
+        mock: app.mock,
+        caught_up: app.viewers.caught_up.get(),
+    });
     let off = {
         let viewer = viewer.clone();
         let mock = app.mock;
+        let caught_up = app.viewers.caught_up.clone();
         app.deps.source.on_change(Box::new(move |agents| {
-            viewer.send(ServerMessage::Fleet { agents, mock });
+            viewer.send(ServerMessage::Fleet { agents, mock, caught_up: caught_up.get() });
         }))
     };
 
@@ -3384,6 +3392,7 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     if !opts.mock {
         enricher.clear_pictures_in(app.pictures.clone());
     }
+    enricher.report_catch_up_to(app.viewers.caught_up.clone());
     track_seen(&app);
     idle_the_enricher_on_viewers(&app, &enricher);
     if let Some(spec) = &opts.notify {

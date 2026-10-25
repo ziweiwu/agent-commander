@@ -40,45 +40,40 @@ export function isNewSinceOpened(agent: Agent, seen: SeenThrough | null): boolea
  *
  * Except `activityAt` while the fleet may still be frozen: with no tab
  * connected the server idles the enricher and keeps its last values, so a
- * cold open can begin on an agent whose news has not been read yet. Until
- * `followUntil`, the first move of the agent's activity is taken as where it
- * had got; after that, or once it has moved, the visit holds.
+ * cold open can begin on an agent whose news has not been read yet. A visit
+ * begun before the server said the fleet was caught up follows the agent's
+ * activity until the frame that says so, and holds from then on. A visit
+ * begun on a caught-up fleet never follows: what arrives while the reader is
+ * here is not news (INV-11).
  */
 export interface Visit {
   sessionId: string
   seenThrough: number
   activityAt: number
-  followUntil: number
+  following: boolean
 }
 
-/**
- * How long a visit waits for the enricher's first pass after it resumes.
- *
- * The pass runs the moment a tab connects and the loop then runs every five
- * seconds, so this is the pass plus slack for a slow transcript read.
- */
-export const CATCH_UP_MS = 15_000
+/** The fleet as the last frame left it, and whether that frame was caught up. */
+export interface FleetFrame {
+  agents: Agent[]
+  caughtUp: boolean
+}
 
 /** The visit beginning now, or null while the server has not said how far it was shown. */
-export function visitOf(
-  sessionId: string | null,
-  agents: Agent[],
-  seen: SeenThrough | null,
-  now: number = Date.now(),
-): Visit | null {
+export function visitOf(sessionId: string | null, fleet: FleetFrame, seen: SeenThrough | null): Visit | null {
   if (sessionId === null) return null
   const seenThrough = seen?.[sessionId]
-  const activityAt = agents.find((a) => a.sessionId === sessionId)?.lastActivityAt
+  const activityAt = fleet.agents.find((a) => a.sessionId === sessionId)?.lastActivityAt
   if (seenThrough === undefined || activityAt === undefined) return null
-  return { sessionId, seenThrough, activityAt, followUntil: now + CATCH_UP_MS }
+  return { sessionId, seenThrough, activityAt, following: !fleet.caughtUp }
 }
 
-/** The visit after a fleet frame: its first catch-up adopted, then held. */
-export function followVisit(visit: Visit | null, agents: Agent[], now: number = Date.now()): Visit | null {
-  if (visit === null || now > visit.followUntil) return visit
-  const activityAt = agents.find((a) => a.sessionId === visit.sessionId)?.lastActivityAt
-  if (activityAt === undefined || activityAt <= visit.activityAt) return visit
-  return { ...visit, activityAt, followUntil: 0 }
+/** The visit after a fleet frame: still following it until the frame that is caught up. */
+export function followVisit(visit: Visit | null, fleet: FleetFrame): Visit | null {
+  if (visit === null || !visit.following) return visit
+  const latest = fleet.agents.find((a) => a.sessionId === visit.sessionId)?.lastActivityAt
+  const activityAt = latest !== undefined && latest > visit.activityAt ? latest : visit.activityAt
+  return { ...visit, activityAt, following: !fleet.caughtUp }
 }
 
 /** Where the divider goes in the conversation, and what it counts. */

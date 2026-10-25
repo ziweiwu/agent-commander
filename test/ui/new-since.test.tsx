@@ -13,7 +13,7 @@ import { Chat } from '../../src/web/components/Chat.tsx'
 import { FleetList } from '../../src/web/components/FleetList.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { buildMessages } from '../../src/web/lib/chat.ts'
-import { CATCH_UP_MS, dividerFor, followVisit, isNewSinceOpened, visitOf } from '../../src/web/lib/newSince.ts'
+import { dividerFor, followVisit, isNewSinceOpened, visitOf } from '../../src/web/lib/newSince.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -140,7 +140,7 @@ describe('F6 the divider in Chat', () => {
   it('sits before the first message past what was shown, and counts what is new', () => {
     useStore.setState({
       messages: conversation(),
-      visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 },
+      visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false },
     })
     openChat()
     const line = screen.getByTestId('new-since')
@@ -153,7 +153,7 @@ describe('F6 the divider in Chat', () => {
 
   it('goes at the top and says "at least" when the read does not reach back that far', () => {
     const tail = conversation().filter((m) => m.at > SHOWN_AT)
-    useStore.setState({ messages: tail, visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 } })
+    useStore.setState({ messages: tail, visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false } })
     openChat()
     const line = screen.getByTestId('new-since')
     expect(line.textContent).toContain('at least 2 replies')
@@ -172,7 +172,7 @@ describe('F6 the divider in Chat', () => {
       const top = this.getAttribute('data-testid') === 'new-since' ? DIVIDER_TOP_PX - scrolled : 0
       return { top, bottom: top, left: 0, right: 0, width: 0, height: 0, x: 0, y: top, toJSON: () => ({}) }
     })
-    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 } })
+    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false } })
     openChat()
     expect(screen.getByTestId('chat-scroll').scrollTop).toBe(DIVIDER_TOP_PX)
     expect(screen.getByTestId('jump-to-latest')).toBeDefined()
@@ -184,7 +184,7 @@ describe('F6 the divider in Chat', () => {
     const VIEW_PX = 400
     const CONTENT_PX = 500
     laidOut(CONTENT_PX, VIEW_PX)
-    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 } })
+    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false } })
     openChat()
     expect(screen.getByTestId('chat-scroll').scrollTop).toBe(CONTENT_PX)
     expect(screen.queryByTestId('jump-to-latest')).toBeNull()
@@ -195,7 +195,7 @@ describe('F6 the divider in Chat', () => {
   it('draws nothing when nothing is newer than what was shown', () => {
     useStore.setState({
       messages: conversation(),
-      visit: { sessionId: 'x', seenThrough: LATER, activityAt: LATER, followUntil: 0 },
+      visit: { sessionId: 'x', seenThrough: LATER, activityAt: LATER, following: false },
     })
     openChat()
     expect(screen.queryByTestId('new-since')).toBeNull()
@@ -204,14 +204,14 @@ describe('F6 the divider in Chat', () => {
   it('draws nothing for a visit to another agent', () => {
     useStore.setState({
       messages: conversation(),
-      visit: { sessionId: 'other', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 },
+      visit: { sessionId: 'other', seenThrough: SHOWN_AT, activityAt: LATER, following: false },
     })
     openChat()
     expect(screen.queryByTestId('new-since')).toBeNull()
   })
 
   it('stays where it was while the server moves the record and the agent goes on', () => {
-    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 } })
+    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false } })
     openChat()
     act(() => {
       useStore.setState({
@@ -232,7 +232,7 @@ describe('F6 the divider in Chat', () => {
     useStore.setState({
       lang: 'zh-CN',
       messages: conversation(),
-      visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, followUntil: 0 },
+      visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false },
     })
     openChat()
     expect(screen.getByTestId('new-since').textContent).toBe('上次在此打开后的新内容 · 3 小时前 — 2 条回复，2 次工具调用')
@@ -240,36 +240,38 @@ describe('F6 the divider in Chat', () => {
 })
 
 describe('F6 a visit begun on a fleet the idle enricher left frozen', () => {
-  const OPENED = SHOWN_AT + 3_600_000
-  const frozen = () => visitOf('x', [agent({ sessionId: 'x', lastActivityAt: SHOWN_AT })], { x: SHOWN_AT }, OPENED)!
+  const frozen = () => visitOf('x', frozenAt(SHOWN_AT), { x: SHOWN_AT })!
+  const frozenAt = (lastActivityAt: number) => ({ agents: [agent({ sessionId: 'x', lastActivityAt })], caughtUp: false })
+  const caughtUpAt = (lastActivityAt: number) => ({ ...frozenAt(lastActivityAt), caughtUp: true })
 
-  it('draws the divider at the old record once the catch-up lands on a focused tab', () => {
+  it('draws the divider at the old record once the caught-up frame lands on a focused tab', () => {
     const visit = frozen()
     expect(dividerFor(conversation(), visit)).toBeNull()
-    const caughtUp = followVisit(visit, [agent({ sessionId: 'x', lastActivityAt: LATER })], OPENED + 2_000)
-    useStore.setState({ messages: conversation(), visit: caughtUp, seenThrough: { x: LATER } })
+    useStore.setState({ messages: conversation(), visit: followVisit(visit, caughtUpAt(LATER)), seenThrough: { x: LATER } })
     openChat()
     const line = screen.getByTestId('new-since')
     expect(line.nextElementSibling?.textContent).toContain('Done with the lexer.')
     expect(line.textContent).toContain('2 replies, 2 tool calls')
   })
 
-  it('takes only the first move, so what arrives after it is not news', () => {
-    const once = followVisit(frozen(), [agent({ sessionId: 'x', lastActivityAt: LATER })], OPENED + 1_000)
-    const again = followVisit(once, [agent({ sessionId: 'x', lastActivityAt: LATER + 9_000 })], OPENED + 2_000)
-    expect(again?.activityAt).toBe(LATER)
+  it('follows until the caught-up frame, and holds after it', () => {
+    const moving = followVisit(frozen(), frozenAt(LATER - 5_000))
+    expect(moving).toMatchObject({ activityAt: LATER - 5_000, following: true })
+    const caughtUp = followVisit(moving, caughtUpAt(LATER))
+    expect(caughtUp).toMatchObject({ activityAt: LATER, following: false })
+    expect(followVisit(caughtUp, caughtUpAt(LATER + 9_000))?.activityAt).toBe(LATER)
   })
 
-  it('stops following once a pass has had time to land, so live activity is not news', () => {
-    const late = followVisit(frozen(), [agent({ sessionId: 'x', lastActivityAt: LATER })], OPENED + CATCH_UP_MS + 1)
-    expect(late?.activityAt).toBe(SHOWN_AT)
+  it('never follows a visit begun on a caught-up fleet', () => {
+    const warm = visitOf('x', caughtUpAt(LATER), { x: LATER })!
+    expect(followVisit(warm, caughtUpAt(LATER + 2_000))).toBe(warm)
   })
 })
 
 describe('F6 the divider, without a DOM', () => {
   it('leaves out a message still being sent', () => {
     const sent = { ...conversation()[0]!, id: 'p', at: LATER + 1, pending: true }
-    const divider = dividerFor([...conversation(), sent], { sessionId: 'x', seenThrough: LATER, activityAt: LATER + 1, followUntil: 0 })
+    const divider = dividerFor([...conversation(), sent], { sessionId: 'x', seenThrough: LATER, activityAt: LATER + 1, following: false })
     expect(divider).toBeNull()
   })
 })
