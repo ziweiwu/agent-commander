@@ -21,7 +21,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { AGENT_SCREEN_ACTIONS } from '../src/shared/surfaces.ts'
-import { AGENT, openAgent, openFleet } from './helpers.ts'
+import { AGENT, controlsThatCannotBeHit, openAgent, openFleet } from './helpers.ts'
 
 /** WCAG 2.2 AA, 2.5.8. The audits hold the touch surfaces to 44. */
 const MIN_TARGET = 24
@@ -129,64 +129,6 @@ test.describe('INV-17 every shape is the whole app', () => {
     expect(bad, `controls too small, unnamed or cut off: ${JSON.stringify(bad)}`).toEqual([])
   })
 })
-
-/**
- * Every visible control that is too small, unnamed, or cut off.
- *
- * A link inside a sentence is sized by the line it sits in, and WCAG 2.5.8
- * exempts it for that reason (the inline exception). It still has to be named;
- * only the size floor is waived (INV-18). `data-inline` is the one marker
- * Message.tsx sets for this, and `scripts/lib/targets.mjs` gives the audit
- * scripts the same one.
- *
- * `checkVisibility()` is true for a control an `overflow: hidden` ancestor has
- * cut off, which is how ⤢ sat at x 325-369 inside a 320px sheet and passed
- * this sweep. So the control's centre is followed up through its ancestors: a
- * box that clips on an axis must contain it, and a box that scrolls on that
- * axis may hold it anywhere, since scrolling reaches it — past one of those,
- * what the outer boxes have to contain is the nearest point of the scroller.
- */
-async function controlsThatCannotBeHit(page: Page, floor: number) {
-  return page.$$eval(
-    'button:not([disabled]), a[href], select, [role="tab"]:not([disabled])',
-    (elements, floor) => {
-      const clips = (overflow: string) => overflow === 'hidden' || overflow === 'clip'
-      const scrolls = (overflow: string) => overflow === 'auto' || overflow === 'scroll'
-      const cutOff = (control: Element): boolean => {
-        const box = control.getBoundingClientRect()
-        let x = box.left + box.width / 2
-        let y = box.top + box.height / 2
-        if (getComputedStyle(control).position === 'fixed') return false
-        for (let up = control.parentElement; up; up = up.parentElement) {
-          const style = getComputedStyle(up)
-          const edge = up.getBoundingClientRect()
-          if (scrolls(style.overflowX)) x = Math.min(Math.max(x, edge.left), edge.right)
-          else if (clips(style.overflowX) && (x < edge.left || x > edge.right)) return true
-          if (scrolls(style.overflowY)) y = Math.min(Math.max(y, edge.top), edge.bottom)
-          else if (clips(style.overflowY) && (y < edge.top || y > edge.bottom)) return true
-          if (style.position === 'fixed') return false
-        }
-        return false
-      }
-      return elements
-        .filter((el) => el.checkVisibility())
-        .map((el) => {
-          const box = el.getBoundingClientRect()
-          const name =
-            el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.textContent?.trim() ?? ''
-          const inline = el.matches('[data-inline]')
-          return {
-            what: `${el.tagName.toLowerCase()}[${el.getAttribute('data-testid') ?? name.slice(0, 20)}]`,
-            tooSmall: !inline && (box.width < floor || box.height < floor),
-            unnamed: name === '',
-            cutOff: cutOff(el),
-          }
-        })
-        .filter((control) => control.tooSmall || control.unnamed || control.cutOff)
-    },
-    floor,
-  )
-}
 
 /**
  * The on-screen keyboard, which is a fourth shape nothing else measures.

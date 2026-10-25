@@ -90,7 +90,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
   /**
    * Before the tabs in the sheet, so that when the row runs out it is the tabs
    * that drop to a second line (FR-DET-2) and ⤢ stays on screen at 320px.
-   * After them on the desktop panel, whose header never wraps.
+   * After them on the desktop panel, in one `.controls` group with the tabs, so
+   * that when its row runs out the tabs and the actions drop together and the
+   * reading order of one row is kept.
    */
   const actions = (
     <HeadActions
@@ -135,6 +137,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         </span>
         {/* Elided to a cap, so `title` is the only place the whole path is
             still readable (see `.path` in the stylesheet). */}
+        <div className={styles.where} data-testid="detail-where">
         <span className={styles.path} title={subtitle}>
           {subtitle}
         </span>
@@ -158,6 +161,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           * shape has the room anyway.
           */}
         {!sheet && <StatusLine agent={agent} />}
+        </div>
         {sheet && actions}
 
         {/*
@@ -172,6 +176,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           * screen too narrow for both the tabs drop to their own line exactly
           * as they used to and nothing is lost.
           */}
+        <div className={styles.controls}>
         <div className={styles.tabs} role="tablist">
         {/*
           Hidden rather than empty. This agent's CLI keeps no transcript this
@@ -221,6 +226,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
 
         </div>
         {!sheet && actions}
+        </div>
       </div>
 
       {showControls && <AgentControls agent={agent} />}

@@ -128,3 +128,65 @@ export async function settled(page: Page): Promise<void> {
 /** Every message bubble whose text is exactly this. */
 export const said = (page: Page, text: string) =>
   page.getByTestId('message').filter({ hasText: text })
+
+/** What a sweep counts as a control a reader can press. */
+const CONTROLS = 'button:not([disabled]), a[href], select, [role="tab"]:not([disabled])'
+
+/**
+ * Every visible control that is too small, unnamed, or cut off.
+ *
+ * A link inside a sentence is sized by the line it sits in, and WCAG 2.5.8
+ * exempts it for that reason (the inline exception). It still has to be named;
+ * only the size floor is waived (INV-18). `data-inline` is the one marker
+ * Message.tsx sets for this, and `scripts/lib/targets.mjs` gives the audit
+ * scripts the same one.
+ *
+ * `checkVisibility()` is true for a control an `overflow: hidden` ancestor has
+ * cut off, which is how ⤢ sat at x 325-369 inside a 320px sheet and passed
+ * this sweep. So the control's centre is followed up through its ancestors: a
+ * box that clips on an axis must contain it, and a box that scrolls on that
+ * axis may hold it anywhere, since scrolling reaches it — past one of those,
+ * what the outer boxes have to contain is the nearest point of the scroller.
+ *
+ * `scope` narrows the sweep to one region, such as the agent header.
+ */
+export async function controlsThatCannotBeHit(page: Page, floor: number, scope = 'body') {
+  return page.$$eval(
+    `${scope} :is(${CONTROLS})`,
+    (elements, floor) => {
+      const clips = (overflow: string) => overflow === 'hidden' || overflow === 'clip'
+      const scrolls = (overflow: string) => overflow === 'auto' || overflow === 'scroll'
+      const cutOff = (control: Element): boolean => {
+        const box = control.getBoundingClientRect()
+        let x = box.left + box.width / 2
+        let y = box.top + box.height / 2
+        if (getComputedStyle(control).position === 'fixed') return false
+        for (let up = control.parentElement; up; up = up.parentElement) {
+          const style = getComputedStyle(up)
+          const edge = up.getBoundingClientRect()
+          if (scrolls(style.overflowX)) x = Math.min(Math.max(x, edge.left), edge.right)
+          else if (clips(style.overflowX) && (x < edge.left || x > edge.right)) return true
+          if (scrolls(style.overflowY)) y = Math.min(Math.max(y, edge.top), edge.bottom)
+          else if (clips(style.overflowY) && (y < edge.top || y > edge.bottom)) return true
+          if (style.position === 'fixed') return false
+        }
+        return false
+      }
+      return elements
+        .filter((el) => el.checkVisibility())
+        .map((el) => {
+          const box = el.getBoundingClientRect()
+          const name =
+            el.getAttribute('aria-label') ?? el.getAttribute('title') ?? el.textContent?.trim() ?? ''
+          return {
+            what: `${el.tagName.toLowerCase()}[${el.getAttribute('data-testid') ?? name.slice(0, 20)}]`,
+            tooSmall: !el.matches('[data-inline]') && (box.width < floor || box.height < floor),
+            unnamed: name === '',
+            cutOff: cutOff(el),
+          }
+        })
+        .filter((control) => control.tooSmall || control.unnamed || control.cutOff)
+    },
+    floor,
+  )
+}

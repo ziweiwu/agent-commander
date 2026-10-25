@@ -594,6 +594,9 @@ restarted in between.
   is the only thing that schedules a reconnect; a socket whose server never
   beat is left alone however quiet it goes; a socket replaced while it was
   dying does not take its successor down with it
+- `test/ui/connect-retry.test.tsx` — the reconnect chain survives a
+  constructor that throws, and a `connect()` made while a retry waits cancels
+  it, so one socket is live rather than two
 - `enrich::inv4_stops_tailing_while_no_browser_is_connected` — the enricher idles while no browser is connected, runs
   a pass the moment one arrives, and paces itself by the work rather than by a
   wall clock
@@ -2827,6 +2830,10 @@ anything laid out from it.
 - `e2e/mobile.spec.ts` — the sheet's header at 320, 375, 390 and 430px, for an
   idle agent and a blocked one: every header control inside the sheet, and at
   least 60px of the agent's name (FR-DET-2)
+- `e2e/header.spec.ts` — the desktop panel's header at 901, 1024 and 1180px
+  with the fleet column open, for the six fullest fixtures: at least 96px of
+  the agent's name, and every header control inside every box that clips it
+  (FR-DET-2)
 - `npm run audit:a11y` — WCAG 2.2 AA at five profiles (desktop, tablet both
   ways, phone both ways) in both themes, which is where contrast and naming
   are judged; `npm run audit:mobile` carries the 16px input rule and FR-UI-2's

@@ -531,7 +531,10 @@ and Attach tabs, and the header's own buttons. They used to be two, which came
 to 108px of a phone screen while the tab row was two-fifths full. If the name
 is long enough that they cannot share a line, the tabs drop to their own —
 which is a wrap rather than a breakpoint, because what decides it is the name
-and no breakpoint knows that.
+and no breakpoint knows that. On a desktop the name always keeps about twelve
+characters; when a narrow window cannot fit that beside the status, the tabs
+and the buttons, the tabs and the buttons move to a second row together rather
+than squeezing the name to an ellipsis.
 
 **Shift+Tab** sits in the composer's menu and in the terminal's key bar, since
 deciding that the next step should run in plan mode happens while watching the
@@ -931,8 +934,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1763 tests: 766 Rust (the server) + 997 vitest (the web app)
-npm run e2e        # 465 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1764 tests: 766 Rust (the server) + 998 vitest (the web app)
+npm run e2e        # 468 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

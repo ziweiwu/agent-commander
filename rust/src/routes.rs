@@ -6563,13 +6563,13 @@ mod tests {
     }
 
     /// The harness agent, now a Claude session whose transcript last moved at
-    /// `at`, told to every listener as the enricher does.
-    fn transcript_moves_to(source: &FakeSource, at: i64) {
+    /// `moved_at`, told to every listener as the enricher does.
+    fn transcript_moves_to(source: &FakeSource, moved_at: i64) {
         let agents = {
             let mut agents = source.agents.lock().unwrap();
             agents[0].agent_kind = crate::agent_kinds::CLAUDE_KIND.into();
             agents[0].status = AgentStatus::Idle;
-            agents[0].last_activity_at = Some(at);
+            agents[0].last_activity_at = Some(moved_at);
             agents.clone()
         };
         for listener in source.listeners.lock().unwrap().iter().flatten() {
