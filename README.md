@@ -48,6 +48,12 @@ a laptop or from a phone.
   as well: a tmux session running your own shell in a folder you pick. It gets
   an Attach tab and none of the controls that type Claude Code's slash commands
   at whatever is in the pane.
+- **Tool calls that say what happened.** Each call in the conversation reads
+  how it ended — `Edit src/app.ts  +12 −3`, `refused · auto mode ·
+  irreversible local destruction`, or `failed` — from the fields Claude Code
+  records for that, never from the wording of an error. Tap one to see the
+  diff or the end of its output as it was recorded; the card's fold counts
+  what auto mode refused.
 - **What a busy agent is running**, read from the process table: the tool
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.

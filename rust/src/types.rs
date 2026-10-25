@@ -119,6 +119,11 @@ pub struct Agent {
     /// once shown as spend (INV-11). Absent until the bridge has written.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<SessionUsage>,
+    /// The tool calls auto mode refused, counted only over the part of the
+    /// transcript this app has read and labelled with where that part starts —
+    /// the same bargain `tokens` makes (INV-11). Absent until one is read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refusals: Option<Refusals>,
     /// When the person last typed a prompt, and how many tool calls this
     /// agent's own transcript has made since — never a delegate's.
     ///
@@ -128,6 +133,21 @@ pub struct Agent {
     /// and read the whole file, so there is nothing to count from (INV-11).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since_prompt: Option<SincePrompt>,
+}
+
+/// Auto mode's refusals in the window of a transcript that was read.
+///
+/// `since` is the first record of that window, so "3 refused" can never read
+/// as the session's total when the backfill started part-way through it.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Refusals {
+    pub count: i64,
+    /// When the newest of them was written.
+    pub last_at: i64,
+    /// When the first record that was read was written.
+    pub since: i64,
 }
 
 /// The last prompt a person typed, as far as the transcript tail has read.
@@ -421,6 +441,91 @@ pub struct TimelineEvent {
     pub tokens_before: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tokens_after: Option<i64>,
+    /// For a tool call: the `tool_use` id its result will name, which is what
+    /// a `ToolOutcome` and a `toolResult` request are keyed on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_use_id: Option<String>,
+}
+
+/// How a tool call ended, as its result record says.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Outcome {
+    Ok,
+    /// The call ran, or tried to, and its result is an error.
+    Failed,
+    /// A permission decision rejected the call before it ran. Read only from
+    /// `permissionDecision`, never from the words of the error (INV-11).
+    Refused,
+}
+
+/// Who refused a call, as `permissionDecision` names it.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RefusedBy {
+    /// Auto mode's classifier: `reasonType: "classifier"`.
+    AutoMode,
+    /// A `PreToolUse` hook: `reasonType` or `source` is `"hook"`.
+    Hook,
+    /// The person at the prompt: a `source` that starts `user`.
+    You,
+}
+
+/// What became of one tool call, sent when its result record is read.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolOutcome {
+    pub tool_use_id: String,
+    pub outcome: Outcome,
+    /// Absent where the decision names nobody this app can put a word to —
+    /// a deny rule, a safety check — rather than guessed (INV-11).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub by: Option<RefusedBy>,
+    /// The classifier's own category, e.g. `irreversible_local_destruction`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Lines an edit added and removed, counted from the `+` and `-` prefixes
+    /// of its recorded hunks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub added: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub removed: Option<u32>,
+}
+
+/// One hunk of a recorded edit, as Claude Code's `structuredPatch` holds it.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Hunk {
+    pub old_start: i64,
+    pub new_start: i64,
+    /// Each line keeps its ` `, `+` or `-` prefix.
+    pub lines: Vec<String>,
+}
+
+/// A tool call's result as it was recorded, for the one row a reader opened.
+///
+/// Either the edit's hunks or the tail of what the tool returned, cut to a
+/// bound; `omitted` is how many bytes were left out, so the box can say there
+/// is more rather than pass a part off as the whole.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts", optional_fields))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolResultView {
+    /// When the result record was written.
+    pub at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hunks: Option<Vec<Hunk>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    pub omitted: u64,
+    /// The person changed the edit in the permission dialog before it was
+    /// applied. Present only when the record says `true`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_modified: Option<bool>,
 }
 
 /// One choice in a prompt the agent is blocked on.
@@ -760,6 +865,17 @@ pub enum ClientMessage {
     /// never on a timer (INV-4). It asks for nothing and reaches no agent.
     #[serde(rename = "present")]
     Present,
+    /// What one tool call returned, for a row the reader opened.
+    ///
+    /// One read per request, never polled, and only for the agent this tab is
+    /// focused on (INV-4) — the same terms `history` is served on.
+    #[serde(rename = "toolResult")]
+    ToolResult {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "toolUseId")]
+        tool_use_id: String,
+    },
 }
 
 /* ---- server -> client ---- */
@@ -793,6 +909,12 @@ pub enum ServerMessage {
         #[serde(rename = "prompt", skip_serializing_if = "Option::is_none")]
         #[cfg_attr(test, ts(optional))]
         prompt: Option<PendingPrompt>,
+        /// How the tool calls whose results this read reached ended. A result
+        /// is plumbing and draws no event of its own, so it travels beside the
+        /// events, keyed on the call's `toolUseId`.
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[cfg_attr(test, ts(as = "Option<Vec<ToolOutcome>>", optional))]
+        outcomes: Vec<ToolOutcome>,
     },
     #[serde(rename = "frame")]
     Frame { frame: Frame },
@@ -840,6 +962,19 @@ pub enum ServerMessage {
     /// The answer to a client's `ping`; carries nothing, proves the socket.
     #[serde(rename = "pong")]
     Pong,
+    /// The answer to a `toolResult` request. `result` is absent when the
+    /// record was not found within the stretch of the transcript the server
+    /// is willing to scan back through.
+    #[serde(rename = "toolResult")]
+    ToolResult {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "toolUseId")]
+        tool_use_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        #[cfg_attr(test, ts(optional))]
+        result: Option<ToolResultView>,
+    },
     /// How far each session has been shown in this app, as the agent's own
     /// transcript time (`seen.rs`, F6). An idle card whose `lastActivityAt`
     /// is past its entry is new since it was last opened here.

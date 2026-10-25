@@ -157,6 +157,7 @@
   border: 0;
   padding: 0;
   min-width: 0;
+  position: relative;
 }
 .toolName {
   color: var(--text);
@@ -174,6 +175,75 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.toolButton {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toolButton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.toolArg a {
+  position: relative;
+  z-index: 1;
+}
+
+.outcome {
+  grid-column: 3;
+  font: var(--text-sm) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  text-align: right;
+}
+.outcome[data-kind='refused'],
+.outcome[data-kind='failed'] {
+  color: var(--danger);
+}
+
+.result {
+  min-width: 0;
+  margin: 2px 0 6px;
+}
+.resultCaption,
+.resultMore {
+  margin: 0 0 4px;
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+.resultMore {
+  margin: 4px 0 0;
+}
+.resultBody {
+  max-height: min(40vh, 320px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.resultText {
+  margin: 0;
+  padding: 6px 8px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  font: var(--text-xs) / 1.5 var(--font-mono);
+  white-space: pre;
+  color: var(--text);
+}
+.hunkHead,
+.hunkLine[data-line='ctx'] {
+  color: var(--dim);
 }
 /*
  * A control, and held to a control's floor.
@@ -214,13 +284,21 @@
  * conversation rather than sitting in the fixed chrome.
  */
 @media (max-width: 560px) {
-  .toggle {
+  .toggle,
+  .toolButton {
     min-height: 44px;
+  }
+  .toolButton {
+    min-width: 44px;
   }
 }
 @media (pointer: coarse) {
-  .toggle {
+  .toggle,
+  .toolButton {
     min-height: 44px;
+  }
+  .toolButton {
+    min-width: 44px;
   }
 }
 

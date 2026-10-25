@@ -26,6 +26,7 @@ use crate::types::{
     SessionUsage,
     now_ms, Agent, AgentStatus, AgentTree, GoalState, PendingPrompt, PromptOption, RateLimits,
     RunningProcess, SincePrompt, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
+    Hunk, Outcome, RefusedBy, Refusals, ToolOutcome, ToolResultView,
 };
 
 /// Frozen clock. Every fixture timestamp is an offset from this, so two runs —
@@ -348,6 +349,7 @@ fn working_towards_a_rejected_goal() -> Agent {
             command: "cargo test".into(),
             since: START - 660_000,
         }),
+        refusals: Some(Refusals { count: 1, last_at: START - 239_000, since: START - 300_000 }),
         since_prompt: Some(SincePrompt { at: Some(START - PROMPTED_MS_AGO), calls: CALLS_SINCE_PROMPT }),
         ..Default::default()
     }
@@ -591,7 +593,147 @@ fn mock_timeline() -> Vec<TimelineFixture> {
     let mut conversation = getting_oriented();
     conversation.extend(auditing_the_theme());
     conversation.extend(a_long_run_and_a_skill());
+    conversation.extend(the_toggle_itself());
     conversation
+}
+
+/// The last reply: an edit that landed and a build that failed after it. With
+/// the refused `rm -rf` above, this puts each of the three ways a call can end
+/// on screen in `--mock`, and the edit is what e2e opens on a phone.
+fn the_toggle_itself() -> Vec<TimelineFixture> {
+    vec![
+        (START - 190_000, TimelineKind::Assistant, None, "Now the toggle itself."),
+        (START - 185_000, TimelineKind::Tool, Some("Edit"), "src/components/Header.astro"),
+        (START - 180_000, TimelineKind::Tool, Some("Bash"), "npm run build"),
+    ]
+}
+
+/// The `tool_use` id the fixture event at `index` carries — one per call, the
+/// same in every session, as ids only have to be unique within a transcript.
+fn fixture_tool_use_id(index: usize) -> String {
+    format!("toolu_mock_{index}")
+}
+
+/// A fixture call as its tool and its text, for the three whose results are
+/// on record: the refused `rm -rf`, the header edit, and the failed build.
+/// The tool is part of it because the edit's path is also what a `Read`
+/// earlier in the conversation was called on.
+type FixtureCall<'a> = (Option<&'a str>, &'a str);
+const REFUSED_CALL: FixtureCall = (Some("Bash"), "rm -rf dist && rebuild");
+const EDIT_CALL: FixtureCall = (Some("Edit"), "src/components/Header.astro");
+const FAILED_CALL: FixtureCall = (Some("Bash"), "npm run build");
+
+/// How long after its call each fixture result was written.
+const RESULT_AFTER_MS: i64 = 1_000;
+
+/// Only the three calls on record end at all: the rest of the fixture
+/// conversation stays as it was before outcomes existed, so no other screen
+/// changes under it.
+fn fixture_outcome(index: usize, call: FixtureCall) -> Option<ToolOutcome> {
+    let mut outcome = ToolOutcome {
+        tool_use_id: fixture_tool_use_id(index),
+        outcome: Outcome::Ok,
+        by: None,
+        category: None,
+        added: None,
+        removed: None,
+    };
+    match call {
+        REFUSED_CALL => {
+            outcome.outcome = Outcome::Refused;
+            outcome.by = Some(RefusedBy::AutoMode);
+            outcome.category = Some("irreversible_local_destruction".into());
+        }
+        EDIT_CALL => {
+            let (added, removed) = header_edit_counts();
+            outcome.added = Some(added);
+            outcome.removed = Some(removed);
+        }
+        FAILED_CALL => outcome.outcome = Outcome::Failed,
+        _ => return None,
+    }
+    Some(outcome)
+}
+
+/// The header edit's hunks: twelve lines in, three out, and one line far
+/// wider than a phone, so the expansion has to scroll inside its own box
+/// rather than push the page sideways (INV-17).
+fn header_edit() -> Vec<Hunk> {
+    let lines = |text: &[&str]| text.iter().map(|line| line.to_string()).collect();
+    vec![
+        Hunk {
+            old_start: 4,
+            new_start: 4,
+            lines: lines(&[
+                " <header class=\"site-header\">",
+                "-  <nav>",
+                "-    <a href=\"/\">Home</a>",
+                "+  <nav class=\"site-nav\" aria-label=\"Main\">",
+                "+    <a href=\"/\" class=\"site-nav__home\">Home</a>",
+                concat!(
+                    "+    <ThemeToggle client:load storageKey=\"theme\" ",
+                    "labelLight=\"Switch to the light theme\" labelDark=\"Switch to the dark theme\" />",
+                ),
+                "   </nav>",
+            ]),
+        },
+        Hunk {
+            old_start: 18,
+            new_start: 19,
+            lines: lines(&[
+                " <style>",
+                "-  header { background: white; }",
+                "+  header {",
+                "+    background: var(--surface);",
+                "+    color: var(--text);",
+                "+  }",
+                "+  .site-nav {",
+                "+    display: flex;",
+                "+    gap: 1rem;",
+                "+  }",
+                "+  .site-nav__home { font-weight: 600; }",
+                " </style>",
+            ]),
+        },
+    ]
+}
+
+fn header_edit_counts() -> (u32, u32) {
+    let lines = || header_edit().into_iter().flat_map(|hunk| hunk.lines);
+    let count = |prefix: char| lines().filter(|line| line.starts_with(prefix)).count() as u32;
+    (count('+'), count('-'))
+}
+
+/// What a fixture call returned, for the three on record.
+fn fixture_result(tool_use_id: &str) -> Option<ToolResultView> {
+    let (index, (at, _, tool, text)) = mock_timeline()
+        .into_iter()
+        .enumerate()
+        .find(|(index, _)| fixture_tool_use_id(*index) == tool_use_id)?;
+    fixture_outcome(index, (tool, text))?;
+    let mut view =
+        ToolResultView { at: at + RESULT_AFTER_MS, hunks: None, output: None, omitted: 0, user_modified: None };
+    match (tool, text) {
+        EDIT_CALL => {
+            view.hunks = Some(header_edit());
+            view.user_modified = Some(true);
+        }
+        REFUSED_CALL => {
+            view.output = Some("Permission for this action has been denied by auto mode.".into());
+        }
+        _ => {
+            view.output = Some(
+                concat!(
+                    "src/components/ThemeToggle.astro:12:3\n",
+                    "  error  Cannot find name 'storageKey'.\n\n",
+                    "Build failed with 1 error.",
+                )
+                .into(),
+            );
+            view.omitted = 2_048;
+        }
+    }
+    Some(view)
 }
 
 /// The opening: a request, an acknowledgement, and the two reads that follow.
@@ -1528,11 +1670,12 @@ impl MockTail {
                 notice: None,
                 tokens_before: None,
                 tokens_after: None,
+                tool_use_id: None,
             })
             .collect();
         self.echo_cursor = log.len();
         let (prompt, prompt_changed) = self.report_prompt();
-        TailRead { events, patch: AgentPatch::default(), first: false, prompt, prompt_changed }
+        TailRead { events, prompt, prompt_changed, ..TailRead::default() }
     }
 
     /*
@@ -1681,9 +1824,16 @@ impl MockTail {
                 notice: None,
                 tokens_before: None,
                 tokens_after: None,
+                tool_use_id: tool.map(|_| fixture_tool_use_id(index)),
             })
             .collect();
+        let outcomes = mock_timeline()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, (_, _, tool, text))| fixture_outcome(index, (tool, text)))
+            .collect();
         TailRead {
+            outcomes,
             events,
             patch: AgentPatch::default(),
             first: true,
@@ -1695,6 +1845,10 @@ impl MockTail {
 
 #[async_trait]
 impl TailApi for MockTail {
+    async fn tool_result(&mut self, tool_use_id: &str) -> Option<ToolResultView> {
+        fixture_result(tool_use_id)
+    }
+
     async fn read(&mut self) -> anyhow::Result<TailRead> {
         if self.sent {
             return Ok(self.echoes_since_last_read());
@@ -2183,6 +2337,27 @@ mod tests {
         assert!(!meta.dead);
     }
 
+    /// The fixture puts each way a call can end on screen once, and on the
+    /// call it names: the header is read before it is edited, and only the
+    /// edit carries counts.
+    #[tokio::test]
+    async fn the_fixture_conversation_ends_three_calls_three_ways() {
+        let first = MockTail::new("mock-idle-kb".into()).read().await.unwrap();
+        let tool_of = |id: &str| {
+            first.events.iter().find(|e| e.tool_use_id.as_deref() == Some(id)).and_then(|e| e.tool.clone())
+        };
+        let ended: Vec<(Option<String>, Outcome)> =
+            first.outcomes.iter().map(|o| (tool_of(&o.tool_use_id), o.outcome)).collect();
+        assert_eq!(
+            ended,
+            [
+                (Some("Bash".into()), Outcome::Refused),
+                (Some("Edit".into()), Outcome::Ok),
+                (Some("Bash".into()), Outcome::Failed),
+            ]
+        );
+    }
+
     #[tokio::test]
     async fn the_first_tail_read_replays_the_fixture_timeline() {
         let mut tail = MockTail::new("mock-busy".into());
@@ -2333,6 +2508,7 @@ mod tests {
         s.enrich("ghost", AgentPatch::default());
         assert_eq!(s.list().len(), fixtures().len());
     }
+
 }
 
 /* -------------------------------------------------------------------------

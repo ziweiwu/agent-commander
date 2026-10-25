@@ -16,6 +16,7 @@ import type {
   RateLimits,
   ServerEnv,
   TimelineEvent,
+  ToolResultView,
 } from '../../shared/types.ts'
 import {
   buildMessages,
@@ -23,6 +24,7 @@ import {
   pendingMessage,
   reconcile,
   type ChatMessage,
+  type Outcomes,
 } from '../lib/chat.ts'
 import type { FleetState, KindScope, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
 import type { SeenThrough, Visit } from '../lib/newSince.ts'
@@ -74,6 +76,15 @@ export interface HistoryView {
   /** How many lines of history the pane holds. */
   total: number
 }
+
+/**
+ * Where one opened row's read stands: asked and unanswered, answered with
+ * nothing found, or answered.
+ */
+export type ToolResultEntry =
+  | { state: 'pending' }
+  | { state: 'missing' }
+  | { state: 'ready'; view: ToolResultView }
 
 /** One answer to a `history` request, as the wire carries it. */
 export interface HistoryPage {
@@ -268,6 +279,18 @@ export interface AppState {
   history: HistoryView | null
   /** A history request is out and unanswered; the next waits for it. */
   historyPending: boolean
+  /**
+   * How each call in the conversation on screen ended, by `toolUseId`. Only
+   * ever set from a `timeline` frame, and dropped with the conversation.
+   */
+  outcomes: Outcomes
+  /**
+   * What the calls a reader opened returned, by `toolUseId`: read on a tap,
+   * for the focused agent only (INV-4), and held in memory and nowhere else.
+   * A diff or a command's output is the agent's work, which browser storage
+   * never holds (INV-3); it goes with the conversation.
+   */
+  toolResults: Readonly<Record<string, ToolResultEntry>>
   toast: string | null
   /** Sessions whose pane the server told us has exited. */
   exited: string[]
@@ -333,6 +356,8 @@ export interface AppState {
   /** A page of history arrived: prepend it, if it is the page that was asked for. */
   addHistory: (page: HistoryPage) => void
   clearHistory: () => void
+  /** A `toolResult` reply arrived; `view` is absent when nothing was found. */
+  addToolResult: (toolUseId: string, view: ToolResultView | undefined) => void
   /** Expect a session the fleet has not broadcast yet; null once it arrives. */
   setExpectSession: (sessionId: string | null) => void
   /** Hold what is typed into one agent's box; null, or empty text, lets it go. */
@@ -472,6 +497,8 @@ export const useStore = create<AppState>()((set, get) => ({
   frame: null,
   history: null,
   historyPending: false,
+  outcomes: {},
+  toolResults: {},
   toast: null,
   exited: [],
   answerRefused: null,
@@ -552,6 +579,10 @@ export const useStore = create<AppState>()((set, get) => ({
       s.historyPending ? { historyPending: false, history: withPage(s.history, page) } : s,
     ),
   clearHistory: () => set({ history: null, historyPending: false }),
+  addToolResult: (toolUseId, view) =>
+    set((s) => ({
+      toolResults: { ...s.toolResults, [toolUseId]: view ? { state: 'ready', view } : { state: 'missing' } },
+    })),
   showToast: (toast) => {
     window.clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => set({ toast: null }), 5000)
@@ -611,8 +642,8 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   rebuildChat: () => {
-    const { events, pending } = get()
-    const messages = reconcile(buildMessages(events), pending)
+    const { events, outcomes, pending } = get()
+    const messages = reconcile(buildMessages(events, outcomes), pending)
     const survived = pending.filter((p) => messages.some((m) => m.id === p.id))
     // Anything the transcript has now confirmed no longer needs its timer.
     for (const p of pending) {
@@ -633,6 +664,8 @@ export const useStore = create<AppState>()((set, get) => ({
       frame: null,
       history: null,
       historyPending: false,
+      outcomes: {},
+      toolResults: {},
       prompt: null,
       answerRefused: null,
       attached: false,

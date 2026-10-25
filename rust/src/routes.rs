@@ -2085,6 +2085,9 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
         ClientMessage::Answer { session_id, prompt_id, choice } => {
             on_answer(&Answer { session_id, prompt_id, choice }, viewer, app).await;
         }
+        ClientMessage::ToolResult { session_id, tool_use_id } => {
+            on_tool_result(session_id, tool_use_id, viewer, app).await;
+        }
         ClientMessage::History { session_id, before, lines } => {
             on_history(&session_id, (before, lines), viewer, app).await;
         }
@@ -2106,7 +2109,8 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
         | ClientMessage::Paste { session_id, .. }
         | ClientMessage::Key { session_id, .. }
         | ClientMessage::Answer { session_id, .. }
-        | ClientMessage::History { session_id, .. } => Some(session_id),
+        | ClientMessage::History { session_id, .. }
+        | ClientMessage::ToolResult { session_id, .. } => Some(session_id),
         ClientMessage::Pong { .. } | ClientMessage::Ping | ClientMessage::Present => None,
     }
 }
@@ -2114,6 +2118,7 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
 fn grant_for_message(message: &ClientMessage) -> Grant {
     match message {
         ClientMessage::Focus { .. }
+        | ClientMessage::ToolResult { .. }
         | ClientMessage::Attach { .. }
         | ClientMessage::History { .. }
         // Never reached — `handle` returns on a pong before asking. Named
@@ -2317,6 +2322,31 @@ async fn on_history(session_id: &str, window: (u32, u32), viewer: &Arc<Viewer>, 
             kind: Some(ErrorKind::HistoryFailed),
         }),
     }
+}
+
+/// What one tool call returned, for the row a reader opened.
+///
+/// The `history` read's terms exactly: one read per request, never polled,
+/// answered only for the agent this tab is focused on (INV-4). The read is a
+/// tail of its own, scanning back from the end of the transcript within a
+/// bound, so the viewer's offset and schedule are untouched. A miss is still
+/// answered — the row is waiting on it — with no result rather than an error.
+async fn on_tool_result(session_id: String, tool_use_id: String, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    if viewer.state.lock().unwrap().focused.as_deref() != Some(session_id.as_str()) {
+        return;
+    }
+    let well_formed = !tool_use_id.is_empty()
+        && tool_use_id.len() <= crate::outcome::MAX_TOOL_USE_ID
+        && tool_use_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    let tail = well_formed
+        .then(|| app.deps.source.get(&session_id))
+        .flatten()
+        .and_then(|agent| (app.deps.tail_for)(&agent));
+    let result = match tail {
+        Some(mut tail) => tail.tool_result(&tool_use_id).await,
+        None => None,
+    };
+    viewer.send(ServerMessage::ToolResult { session_id, tool_use_id, result });
 }
 
 fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
@@ -2594,12 +2624,14 @@ async fn pump_timeline(
         }
         moved
     };
-    if !read.events.is_empty() || read.first || read.prompt_changed || prompt_moved {
+    let news = !read.events.is_empty() || !read.outcomes.is_empty();
+    if news || read.first || read.prompt_changed || prompt_moved {
         viewer.send(ServerMessage::Timeline {
             session_id: session_id.to_string(),
             events: read.events,
             reset: read.first,
             prompt,
+            outcomes: read.outcomes,
         });
     }
 }
@@ -3789,6 +3821,7 @@ mod tests {
                     notice: None,
                     tokens_before: None,
                     tokens_after: None,
+                    tool_use_id: None,
                 }],
                 patch: AgentPatch::default(),
                 first: self.n == 1,
@@ -3796,7 +3829,68 @@ mod tests {
                 ..Default::default()
             })
         }
+
+        async fn tool_result(&mut self, tool_use_id: &str) -> Option<crate::types::ToolResultView> {
+            (tool_use_id == RECORDED_CALL).then(|| crate::types::ToolResultView {
+                at: 0,
+                hunks: None,
+                output: Some("recorded output".into()),
+                omitted: 0,
+                user_modified: None,
+            })
+        }
     }
+
+    /// A tail that answers every id it is asked for, and counts the asking.
+    struct ResultCountingTail {
+        lookups: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl TailApi for ResultCountingTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            Ok(TailRead::default())
+        }
+
+        async fn tool_result(&mut self, _tool_use_id: &str) -> Option<crate::types::ToolResultView> {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            Some(crate::types::ToolResultView {
+                at: 0,
+                hunks: None,
+                output: Some("any".into()),
+                omitted: 0,
+                user_modified: None,
+            })
+        }
+    }
+
+    /// An empty id, or one outside `[A-Za-z0-9_-]`, is answered with nothing
+    /// and never read for: an empty needle matches nearly every record.
+    #[tokio::test]
+    async fn inv4_a_malformed_tool_use_id_is_never_read_for() {
+        let parts = harness_parts(FakePanes::new());
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let counted = lookups.clone();
+        let tails = Arc::new(move |_agent: &Agent| {
+            Some(Box::new(ResultCountingTail { lookups: counted.clone() }) as Box<dyn TailApi>)
+        });
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        for malformed in ["", "toolu \"x", "toolu/../x"] {
+            send_json(&mut client, tool_result_request(SESSION, malformed)).await;
+            let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+            assert!(reply.get("result").is_none(), "{malformed:?} must not be read for");
+        }
+        assert_eq!(lookups.load(Ordering::SeqCst), 0);
+        send_json(&mut client, tool_result_request(SESSION, "toolu_well-formed_1")).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert_eq!(reply["result"]["output"], serde_json::json!("any"));
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    }
+
+    /// The one call `FakeTail` has a result on record for.
+    const RECORDED_CALL: &str = "toolu_recorded";
 
     /// A hub with one polling task per pane, which is all `routes` asks of it.
     struct FakeHub {
@@ -6430,6 +6524,44 @@ mod tests {
         assert_eq!(spawn.started.lock().unwrap()[0].task.as_deref(), Some(task.as_str()));
     }
 
+    fn tool_result_request(session: &str, id: &str) -> serde_json::Value {
+        serde_json::json!({"type":"toolResult","sessionId":session,"toolUseId":id})
+    }
+
+    /// INV-4: what a call returned is read for the agent this tab is looking
+    /// at and no other, on request — the `history` read's terms.
+    #[tokio::test]
+    async fn inv4_a_tool_result_read_needs_a_focused_viewer() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, tool_result_request(SESSION, RECORDED_CALL)).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "toolResult")).await.is_none());
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, tool_result_request(SESSION, RECORDED_CALL)).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert_eq!(reply["sessionId"], serde_json::json!(SESSION));
+        assert_eq!(reply["toolUseId"], serde_json::json!(RECORDED_CALL));
+        assert_eq!(reply["result"]["output"], serde_json::json!("recorded output"));
+    }
+
+    /// A miss is still answered, so the row asking is not left waiting, and a
+    /// read-only credential may ask: transcripts are what `read` covers.
+    #[tokio::test]
+    async fn a_tool_result_miss_is_answered_with_nothing_and_read_may_ask() {
+        let h = granting(Grants::parse("read").unwrap(), FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, tool_result_request(SESSION, "toolu_never_written")).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert!(reply.get("result").is_none());
+        let too_long = "t".repeat(crate::outcome::MAX_TOOL_USE_ID + 1);
+        send_json(&mut client, tool_result_request(SESSION, &too_long)).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert!(reply.get("result").is_none());
+        assert_eq!(h.panes.writes(), 0);
+    }
+
     /// The harness agent, now a Claude session whose transcript last moved at
     /// `at`, told to every listener as the enricher does.
     fn transcript_moves_to(source: &FakeSource, at: i64) {
@@ -6475,3 +6607,4 @@ mod tests {
         assert_eq!(h.app.viewers.seen.current()[SESSION], REPLIED_AT);
     }
 }
+

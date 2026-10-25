@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1740 tests: 752 Rust (the server) + 988 vitest (the web app)
+npm test              # 1763 tests: 766 Rust (the server) + 997 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 465 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -231,10 +231,6 @@ confirmed-empty screen rather than the loading one. The delegation trees behind 
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
 in each of INV-13's three states, an orphan whose parent is not on disk, an
 agent that has delegated nothing, and a CLI that cannot say either way.
-A message sent to a fixture moves its `lastActivityAt` to the send, as a
-transcript record does for a real agent, so it changes that fixture's place
-under the `recent` sort and is what lets a card carry "new since opened in this
-app" (F6, `seen.rs`) — `e2e/new-since.spec.ts` sends one from a hidden tab.
 Because the mock fleet runs the same server, routes and validation as the real
 one (`rust/src/sources.rs` is the seam), a failure seen in mock mode is the
 failure you would get for real.
@@ -424,6 +420,10 @@ commit.
   compiler and no test that reads a field's journey end to end. The half hour
   that went into proving the *parser* was right was spent on the one component
   that had never been wrong.
+
+  `refusals` (auto mode's refusals in the window read, for the fold) was added
+  after the guard below existed and touched all four the first time; the guard
+  is what says so if a fifth producer forgets one.
 
   Only `card_fields` is safe by construction: it is a struct literal with no
   `..` rest, so a new field is a compile error there. The other three are now

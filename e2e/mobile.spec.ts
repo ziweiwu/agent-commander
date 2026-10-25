@@ -162,3 +162,30 @@ test.describe('@phone the sheet header', () => {
     })
   }
 })
+
+/**
+ * INV-17 with F7's expansion open: a recorded diff is as wide as its longest
+ * line, and the fixture edit carries one far wider than a phone. The box
+ * scrolls; the page does not.
+ */
+test.describe('@phone a tool call that says what happened', () => {
+  test('opens an edit in a box that scrolls inside itself', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await expect(page.getByTestId('tool-outcome').filter({ hasText: 'refused · auto mode' })).toBeVisible()
+    const edit = page.getByTitle('Edit: src/components/Header.astro')
+    await expect(edit.getByTestId('tool-outcome')).toHaveText('+12 −3')
+
+    await edit.getByTestId('tool-expand').click()
+    const body = page.getByTestId('tool-result-body')
+    await expect(body).toContainText('<ThemeToggle client:load')
+    await expect(page.getByTestId('tool-result-caption')).toContainText(
+      'the file may have changed since · you changed this before it was applied',
+    )
+    expect(await body.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    )
+    expect(overflow).toBeLessThanOrEqual(1)
+  })
+})
+
