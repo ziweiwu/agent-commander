@@ -10,6 +10,7 @@
  * holds that the card draws it, and — the part that matters — that the words
  * are still there underneath for anyone the shapes do not reach.
  */
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 import { AgentCard } from '../../src/web/components/AgentCard.tsx'
@@ -20,6 +21,7 @@ const card = (over: Parameters<typeof agent>[0]) =>
   renderApp(<AgentCard agent={agent(over)} selected={false} onSelect={() => {}} />)
 
 const rail = () => screen.getByTestId('agent-rail')
+const entry = () => screen.getByTestId('agent-entry')
 
 beforeEach(resetStore)
 
@@ -184,5 +186,64 @@ describe('what the card calls itself', () => {
     expect(label).toMatch(/waiting/)
     // The reach mark's own words belong to the mark, not to the card's name.
     expect(label).not.toMatch(/terminal reachable/)
+  })
+})
+
+/**
+ * A waiting card is the one tinted surface on the fleet, and every waiting mark
+ * on it follows the rail rather than `data-status`.
+ *
+ * The status says what the agent reported; the rail says what the reader can
+ * do about it, and a pane that has exited outranks the question (INV-11). The
+ * stripe was keyed on `data-status`, so a waiting agent whose pane had gone
+ * kept an amber edge and amber words beside a struck red ring.
+ */
+describe('INV-11 the waiting surface is keyed on the rail', () => {
+  /** A CSS comment, written as a string so no scanner reads its opening as one. */
+  const CSS_COMMENT = new RegExp('/\\*[\\s\\S]*?\\*/', 'g')
+  const sheet = readFileSync('src/web/components/AgentCard.module.css', 'utf8').replace(CSS_COMMENT, '')
+  const rules = [...sheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector = '', body = '']) => ({
+    selectors: selector.split(/,(?![^(]*\))/).map((part) => part.trim()),
+    body,
+  }))
+  const PAINTS_WAITING = /var\(--(?:waiting|wash-waiting|edge-waiting|tint-waiting)\)/
+
+  /** What may paint in the waiting colours without the rail's say-so, and why. */
+  const OFF_THE_RAIL: Record<string, string> = {
+    ".rail[data-state='waiting']": 'the rail glyph, keyed on the rail’s own state',
+    '.stall': 'INV-15’s question, in the fold of a working card; never on a waiting face',
+    '.cta': 'drawn only when the rail is waiting; the DOM tests above hold that',
+  }
+
+  it('marks the entry with its rail state', () => {
+    card({ sessionId: 'a', status: 'waiting', waitingFor: 'dialog open', paneId: '%1' })
+    expect(entry().dataset.rail).toBe('waiting')
+  })
+
+  it('gives a waiting agent whose pane has exited no wash, no amber and no verb', () => {
+    useStore.setState({ exited: ['a'] })
+    card({ sessionId: 'a', status: 'waiting', waitingFor: 'dialog open', paneId: '%1' })
+    expect(entry().dataset.rail).toBe('gone')
+    expect(screen.getByTestId('agent-card').dataset.status).toBe('waiting')
+    expect(screen.queryByTestId('agent-answer-cta')).toBeNull()
+    expect(screen.getByTestId('agent-status').textContent).toMatch(/waiting/)
+  })
+
+  it('draws the wash only on a waiting rail, on the card and its toggle', () => {
+    const washed = rules.filter((rule) => rule.body.includes('var(--wash-waiting)'))
+    expect(washed.map((rule) => rule.selectors)).toEqual([
+      [".wrap[data-rail='waiting'] > :is(.card, .disclosure)"],
+    ])
+  })
+
+  it('paints nothing amber from data-status, only from the rail', () => {
+    const offRail = rules
+      .filter((rule) => PAINTS_WAITING.test(rule.body))
+      .flatMap((rule) => rule.selectors)
+      .filter((selector) => !selector.includes("[data-rail='waiting']"))
+      .filter((selector) => OFF_THE_RAIL[selector] === undefined)
+    expect(offRail, 'key a waiting mark on .wrap[data-rail], or say here why it may not be').toEqual(
+      [],
+    )
   })
 })

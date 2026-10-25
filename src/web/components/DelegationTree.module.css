@@ -65,7 +65,7 @@
 }
 .state[data-state='active'] {
   color: var(--busy);
-  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
+  border-color: var(--edge-busy);
 }
 /*
  * `done` gets no colour of its own on purpose. A green "done" beside a grey

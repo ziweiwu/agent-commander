@@ -100,6 +100,13 @@ reason it's blocked, e.g. `waiting · dialog open`), the folder it's scoped to
 output tokens, and a live one-line summary of what it's doing — `Edit:
 src/app.ts`, `Task → Rerun the exhaustive sweep`.
 
+A card blocked on you is the only tinted card on the screen, a warm wash behind
+it with an amber edge, so it can be found out of the corner of an eye; idle and
+working cards are plain. The chevron down the card's right edge (*Details*)
+opens the fold: the token count, the full path, the session's original name and
+the delegation tree. A blocked agent whose terminal has gone loses the wash and
+the **Answer** button, because there is nothing left to answer from.
+
 An agent that has handed work to a subagent reads `busy · delegated`, and its
 last-activity clock follows the subagent's transcript rather than its own. Its
 own transcript stops growing the moment it delegates, so without both of those a
@@ -619,7 +626,9 @@ otherwise the fleet fills with husks that look merely quiet.
 Sessions accumulate: you open one in a directory, get distracted, and it sits
 there for a week holding a tmux pane and a `claude` process without ever having
 been asked anything. **Prune N unused** appears beside *New agent* whenever the
-fleet contains any, and closes them.
+fleet contains any, and closes them. On a phone it sits at the foot of the Idle
+group instead, under the sessions it would close, so it does not push the agents
+that need you down the screen.
 
 "Unused" is deliberately the narrowest claim the data supports: the session is
 `idle`, it has a pane, and it carries no activity line, no token spend, no

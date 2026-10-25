@@ -7,12 +7,13 @@
  * what it named, it closes nothing at all if the confirmation is declined, and
  * it never fires while the fleet view is stale.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { FleetList } from '../../src/web/components/FleetList.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
+import { setViewport } from './setup.ts'
 
 interface ControlResult {
   ok: boolean
@@ -115,5 +116,46 @@ describe('prune', () => {
 
     expect(closeAgentById).toHaveBeenCalledTimes(2)
     expect(useStore.getState().toast).toContain('1')
+  })
+})
+
+/**
+ * Where the button sits, which on a phone is part of what it costs.
+ *
+ * In the toolbar it was a full-width row between the header and Needs you,
+ * pushing the first blocked agent about 52px down a phone for a chore done at a
+ * desk. On a phone it goes to the foot of the Idle group, under the sessions it
+ * closes; with no Idle group on screen it stays in the toolbar, because a
+ * filter must not take the action off the phone (INV-17).
+ */
+describe('prune, on a phone', () => {
+  const PHONE = (query: string) => /max-width: (560|900)px/.test(query)
+
+  afterEach(() => setViewport(() => false))
+
+  it('sits at the foot of the Idle group', () => {
+    setViewport(PHONE)
+    useStore.setState({ agents: [unused('a'), working('b')] })
+    renderApp(list())
+
+    expect(within(screen.getByTestId('idle-foot')).getByTestId('prune-button')).toBeTruthy()
+    expect(screen.getAllByTestId('prune-button')).toHaveLength(1)
+  })
+
+  it('stays in the toolbar when no Idle group is on screen', () => {
+    setViewport(PHONE)
+    useStore.setState((s) => ({ agents: [unused('a'), working('b')], fleet: { ...s.fleet, filter: 'busy' } }))
+    renderApp(list())
+
+    expect(screen.queryByTestId('idle-foot')).toBeNull()
+    expect(screen.getByTestId('prune-button')).toBeTruthy()
+  })
+
+  it('stays in the toolbar at the desk', () => {
+    useStore.setState({ agents: [unused('a'), working('b')] })
+    renderApp(list())
+
+    expect(screen.queryByTestId('idle-foot')).toBeNull()
+    expect(screen.getByTestId('prune-button')).toBeTruthy()
   })
 })
