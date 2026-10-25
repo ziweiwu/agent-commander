@@ -97,6 +97,36 @@ function freshness(agent: Agent): 'starting' | 'unprompted' | null {
   return isUnused(agent) ? 'unprompted' : null
 }
 
+/**
+ * What an empty conversation says, and the first task quoted under it while
+ * an agent this tab started is still coming up (F5).
+ *
+ * The quote is the task as the dialog sent it, held in the store under the
+ * placeholder's id; another tab, or this one after a reload, has nothing to
+ * quote and says what it says about any starting agent.
+ */
+function EmptyNotice({ agent }: { agent: Agent }) {
+  const t = useTranslate()
+  const timelineAt = useStore((s) => s.timelineAt)
+  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
+  const startingTask = useStore((s) => s.startingTask)
+  const task = startingTask?.sessionId === agent.sessionId ? startingTask.text : null
+  const notice = emptyNotice({ timelineAt, timelineStalledAt, fresh: freshness(agent), task })
+  return (
+    <div className={styles.notice} data-testid="chat-notice">
+      {t(notice, { name: shortName(agent), folder: tildePath(agent.cwd) })}
+      {notice === 'chatStartingTask' && (
+        <>
+          <blockquote className={styles.startingTask} data-testid="chat-starting-task">
+            {task}
+          </blockquote>
+          {t('chatStartingTaskTrust')}
+        </>
+      )}
+    </div>
+  )
+}
+
 export function Chat({ agent }: { agent: Agent }) {
   const t = useTranslate()
   const lang = useLang()
@@ -189,8 +219,6 @@ export function Chat({ agent }: { agent: Agent }) {
   }, [menuOpen])
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
-  const timelineAt = useStore((s) => s.timelineAt)
-  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
   const prompt = useStore((s) => s.prompt)
   /*
    * INV-16, and the two halves it is about are inside the card rather than
@@ -537,12 +565,7 @@ export function Chat({ agent }: { agent: Agent }) {
         >
           <div className={styles.list} data-testid="chat-list">
             {messages.length === 0 ? (
-              <div className={styles.notice} data-testid="chat-notice">
-                {t(emptyNotice({ timelineAt, timelineStalledAt, fresh: freshness(agent) }), {
-                  name: shortName(agent),
-                  folder: tildePath(agent.cwd),
-                })}
-              </div>
+              <EmptyNotice agent={agent} />
             ) : (
               <>
                 {rows.map((row) =>

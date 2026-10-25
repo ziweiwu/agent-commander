@@ -648,7 +648,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 - **FR-SPAWN-1** — **New agent** MUST ask for a directory — typed, picked from a
   folder browser, or chosen from the directories already in use — plus an
-  optional name, model and permission mode, and MUST start the CLI there in a
+  optional name, model, permission mode and first task (FR-SPAWN-7), and MUST start the CLI there in a
   fresh *detached* tmux session. The permission mode MUST start on `auto`;
   choosing *Default* passes no flag, so the CLI's own setting applies.
 - **FR-SPAWN-2** — The new session MUST appear in the list within a couple of
@@ -670,7 +670,24 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-SPAWN-6** — A session that is starting, or is up and has never been
   prompted, MUST say so on its Chat tab by name and folder, rather than
   "loading" or "the server may have restarted": it keeps no transcript yet, so
-  neither of those is true. **(INV-11)** *`test/ui/chat-loading.test.tsx`.*
+  neither of those is true. A starting session this tab gave a first task MUST
+  quote it there — "Starting in ~/x with your task: …" — so the reader knows it
+  will begin without them, behind the folder-trust question if there is one.
+  **(INV-11)** *`test/ui/chat-loading.test.tsx`.*
+- **FR-SPAWN-7** — An agent MAY be started with a **first task**, so a session
+  left to work from a phone does not sit idle until someone opens it and types.
+  The field MUST be offered and sent for an agent only, never for a terminal,
+  where a shell would receive it as words. The task MUST reach `claude` as
+  exactly one argv entry after `--`, last on the command line, sent once with
+  the click that starts the agent and never again **(INV-2)**. The server MUST
+  refuse it before spawning when it is over `spawn::MAX_TASK` (tmux carries the
+  whole command line in one 16 KiB message), holds a control character other
+  than a line break **(INV-12)**, or is one bare word — `claude` dispatches a
+  word that names one of its subcommands as that subcommand even after `--`,
+  measured on 2.1.310, and `--help` does not list them all **(INV-7)**. A
+  refused task MUST stay in the field. *`spawn::inv7_a_task_*`,
+  `spawn::inv12_a_task_*`, `routes::a_read_only_credential_cannot_start_an_agent_with_a_task`,
+  `test/ui/NewAgentDialog.test.tsx`, `e2e/control.spec.ts`.*
 
 ### 6.1a Opening a plain terminal
 
@@ -1121,17 +1138,17 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, NFR-SEC-11 … 14 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, NFR-SEC-11 … 14 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
-| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
+| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-SPAWN-7, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
 | INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
-| INV-12 — input is bounded | NFR-SEC-15 |
+| INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8, FR-NOTIFY-9 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |

@@ -103,7 +103,7 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1595 tests: 721 Rust (the server) + 874 vitest (the web app)
+npm test              # 1632 tests: 736 Rust (the server) + 896 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 427 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
@@ -395,6 +395,16 @@ commit.
   `list-panes` format string, so it costs no round trip — but it is also the
   kind of field that reads as decoration in a diff. Remove it and the terminal
   a user just opened never appears in the fleet, with nothing failing.
+- **An argv entry is not as inert as it looks, twice over.** tmux reads any
+  argument *ending* in `;` as the end of a command, even one handed to it as
+  its own argv entry: `a;` reaches the program as `a`, and an entry ending in
+  `;` with more arguments after it starts a new tmux command
+  (`-n 'x;' --model opus` fails with "unknown command: --model"). And
+  `claude`'s `--` stops option parsing but not subcommand dispatch:
+  `claude … -- doctor` runs `claude doctor`. Both were measured for the first
+  task (INV-7), which is why it goes last, gets a backslash before a trailing
+  `;`, and may not be one bare word. The name and the `-c` folder get the same
+  backslash.
 - **`Registry.enrich()` is a blind shallow merge** with two callers writing
   different field sets, and `undefined` overwrites. That is load-bearing for
   goal-clear and a trap for any new patch producer. A new `AgentPatch` field

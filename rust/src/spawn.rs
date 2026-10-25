@@ -6,7 +6,7 @@
 //! command shapes, each written out here in full:
 //!
 //! ```text
-//! tmux new-session -d -s <generated> -c <validated dir> claude [flags]
+//! tmux new-session -d -s <generated> -c <validated dir> claude [flags] [-- <task>]
 //! tmux new-session -d -s <generated> -c <validated dir> ; set-option …
 //! ```
 //!
@@ -15,6 +15,11 @@
 //! value the user typed into tmux's argument parser: the directory is
 //! validated first, the session name is generated here, and every value is a
 //! separate argv entry, never a shell string.
+//!
+//! The first task is the one free-text entry that is not a flag's value. It
+//! comes last, after `--`, so `claude` reads it as the prompt rather than as
+//! an option; and [`check_task`] refuses the one shape `--` does not protect,
+//! a bare word, which the CLI dispatches as a subcommand of its own.
 //!
 //! They are separate functions rather than one with a flag because the second
 //! takes no model and no permission mode: those are Claude's, and a shape that
@@ -40,6 +45,23 @@ const SESSION_PREFIX: &str = "claude";
 /// enough that the name stays a name: everything after this is decoration on
 /// something the timestamp has already made unique.
 const MAX_SUFFIX_CHARS: usize = 24;
+
+/// The most a first task may be, in bytes.
+///
+/// Below `control::MAX_PASTE` rather than equal to it. A paste reaches a
+/// running agent through a tmux buffer; a first task rides on the
+/// `new-session` command line, and the tmux client packs that whole command
+/// into one message of at most 16 KiB and refuses a longer one with "command
+/// too long" — measured on tmux 3.6a at [`TMUX_COMMAND_BYTES`]. Half of that
+/// is the task's, and the other half is left for the folder, the name and the
+/// flags.
+pub const MAX_TASK: usize = 8 * 1024;
+
+/// The longest command line the tmux client will send its server: every argv
+/// entry after `tmux` itself, plus one NUL each. Measured on tmux 3.6a by
+/// bisecting a `new-session` with a growing last argument; one byte more was
+/// refused with "command too long".
+pub const TMUX_COMMAND_BYTES: usize = 16_364;
 
 /// A directory that is not usable, or a tmux invocation that failed.
 #[derive(Debug, Clone, thiserror::Error)]
@@ -138,7 +160,79 @@ pub async fn check_spawn_request(req: &NewAgentRequest) -> Result<PathBuf, Spawn
             return Err(SpawnOptionError(format!("unknown permission mode: {mode}")).into());
         }
     }
+    if let Some(task) = first_task(req) {
+        check_task(task)?;
+    }
     Ok(cwd)
+}
+
+/// The first task as it will be sent: trimmed, and absent when blank.
+fn first_task(req: &NewAgentRequest) -> Option<&str> {
+    req.task.as_deref().map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// What a refusal over [`MAX_TASK`] suggests instead.
+const SEND_THE_REST: &str = "Start it with less, and send the rest once it is running.";
+
+/// What a refusal of one bare word suggests instead.
+const ADD_A_WORD: &str = "Add a word or two.";
+
+/// Refuse a first task that could not start the agent as the task it says.
+///
+/// Three refusals, each a measured failure rather than a precaution:
+///
+/// - **Over [`MAX_TASK`].** tmux would refuse the whole command line.
+/// - **A control character other than a line break** (INV-12). A task is
+///   typed into a dialog; a tab, a carriage return or an escape in it came
+///   from somewhere else, and the line break is the one a person types.
+/// - **One bare word.** `--` stops option parsing and does not stop
+///   subcommand dispatch: `claude --permission-mode default -- doctor` ran
+///   `claude doctor` and exited, on Claude Code 2.1.310. `claude --help` lists
+///   the subcommands and leaves out hidden ones (`project` dispatched the same
+///   way), and a list copied from it goes stale with every release that adds
+///   one — `purge` deletes a project's state. Every subcommand name is a word
+///   of ASCII letters, digits and hyphens, so that shape is what is refused,
+///   whichever names this CLI version has.
+pub fn check_task(task: &str) -> Result<(), SpawnOptionError> {
+    if task.len() > MAX_TASK {
+        let size = task.len();
+        return Err(SpawnOptionError(format!(
+            "the first task is {size} bytes; at most {MAX_TASK} fit on tmux's command line. {SEND_THE_REST}"
+        )));
+    }
+    if let Some(c) = task.chars().find(|c| c.is_control() && *c != '\n') {
+        return Err(SpawnOptionError(format!(
+            "the first task contains a control character (U+{:04X}); only line breaks are allowed",
+            u32::from(c)
+        )));
+    }
+    if could_name_a_subcommand(task) {
+        return Err(SpawnOptionError(format!(
+            "\"{task}\" alone could run one of claude's own subcommands instead of a session. {ADD_A_WORD}"
+        )));
+    }
+    Ok(())
+}
+
+/// True for a word shaped like a `claude` subcommand: ASCII letters, digits,
+/// hyphens and underscores, and nothing else — no space, so it is one word.
+fn could_name_a_subcommand(task: &str) -> bool {
+    task.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The argv entry tmux hands on as exactly `text`.
+///
+/// tmux reads an argument *ending* in `;` as the end of a command and strips
+/// that `;`, and reads a trailing `\;` as an escaped, literal `;`. Measured on
+/// 3.6a with `new-session … -- <text>`: `a;` arrived as `a`, `a\;` as `a;`,
+/// and `;` as nothing. So a trailing `;` gets the one backslash tmux takes
+/// back off, and nothing else is touched, because nothing else is read: `$`,
+/// `~`, `#{…}`, quotes and inner `;` all arrived as sent.
+fn past_tmux_separator(text: &str) -> String {
+    match text.strip_suffix(';') {
+        Some(head) => format!("{head}\\;"),
+        None => text.to_string(),
+    }
 }
 
 /// Generated, not user-supplied.
@@ -179,14 +273,14 @@ pub fn spawn_argv(session: &str, cwd: &Path, req: &NewAgentRequest, claude_bin: 
         "-s".into(),
         session.to_string(),
         "-c".into(),
-        cwd.to_string_lossy().into_owned(),
+        past_tmux_separator(&cwd.to_string_lossy()),
         claude_bin.to_string(),
     ];
     // INV-7: every value is its own argv entry, and model and mode were checked
     // against fixed allow-lists above, so nothing free-text becomes a flag.
     if let Some(name) = req.name.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         argv.push("-n".into());
-        argv.push(name.to_string());
+        argv.push(past_tmux_separator(name));
     }
     if let Some(model) = req.model.as_deref().filter(|s| !s.is_empty()) {
         argv.push("--model".into());
@@ -195,6 +289,10 @@ pub fn spawn_argv(session: &str, cwd: &Path, req: &NewAgentRequest, claude_bin: 
     if let Some(mode) = req.permission_mode.as_deref().filter(|s| !s.is_empty()) {
         argv.push("--permission-mode".into());
         argv.push(mode.to_string());
+    }
+    if let Some(task) = first_task(req) {
+        argv.push("--".into());
+        argv.push(past_tmux_separator(task));
     }
     argv
 }
@@ -240,7 +338,7 @@ pub fn terminal_argv(session: &str, cwd: &Path) -> Vec<String> {
         "-s".into(),
         session.to_string(),
         "-c".into(),
-        cwd.to_string_lossy().into_owned(),
+        past_tmux_separator(&cwd.to_string_lossy()),
         ";".into(),
         "set-option".into(),
         "-t".into(),
@@ -309,7 +407,12 @@ mod tests {
             name: None,
             model: None,
             permission_mode: None,
+            task: None,
         }
+    }
+
+    fn with_task(task: &str) -> NewAgentRequest {
+        NewAgentRequest { task: Some(task.into()), ..req("/w") }
     }
 
     /* ---- normalize_dir ---- */
@@ -483,6 +586,7 @@ mod tests {
             name: Some("  my agent  ".into()),
             model: Some("opus".into()),
             permission_mode: Some("plan".into()),
+            task: None,
         };
         let argv = spawn_argv("claude-1", Path::new("/w"), &r, "claude");
         assert_eq!(
@@ -581,6 +685,7 @@ mod tests {
             name: Some("   ".into()),
             model: Some(String::new()),
             permission_mode: Some(String::new()),
+            task: Some(" \n\n ".into()),
         };
         let argv = spawn_argv("claude-1", Path::new("/w"), &r, "claude");
         assert_eq!(argv.len(), BASE_ARGV_LEN, "{argv:?}");
@@ -594,5 +699,201 @@ mod tests {
         // Whatever the caller does with the result, the refusal is produced
         // before anything could be spawned.
         assert!(check_spawn_request(&r).await.is_err());
+    }
+
+    /// What tmux makes of the last argv entry it is handed, by the rule
+    /// measured on 3.6a: a trailing `;` ends the command and is dropped, and a
+    /// backslash right before it turns back into the `;`.
+    fn as_tmux_delivers(entry: &str) -> String {
+        let Some(head) = entry.strip_suffix(';') else { return entry.to_string() };
+        match head.strip_suffix('\\') {
+            Some(before) => format!("{before};"),
+            None => head.to_string(),
+        }
+    }
+
+    /// Each of these would be something other than a prompt if it were not
+    /// one entry after `--`: a flag, a flag with a value, a shell expansion, a
+    /// tmux separator or format, or a subcommand name with words after it.
+    const HOSTILE_TASKS: [&str; 11] = [
+        "-n x",
+        "--dangerously-skip-permissions please",
+        "--resume abc",
+        "it's \"quoted\" and 'single'",
+        "a; tmux kill-server",
+        "$(rm -rf ~) and `whoami`",
+        "line one\nline two",
+        "#{session_name} ~/x $HOME",
+        "doctor the failing tests",
+        "end with a semicolon;",
+        ";",
+    ];
+
+    #[test]
+    fn inv7_a_task_is_one_entry_after_the_separator() {
+        for task in HOSTILE_TASKS {
+            let argv = spawn_argv("claude-1", Path::new("/w"), &with_task(task), "claude");
+            assert_eq!(argv.len(), BASE_ARGV_LEN + 2, "{task:?} became {argv:?}");
+            assert_eq!(argv[BASE_ARGV_LEN], "--", "{task:?}");
+            assert_eq!(as_tmux_delivers(&argv[BASE_ARGV_LEN + 1]), task, "{task:?}");
+        }
+    }
+
+    /// After every flag, so nothing typed can be read as one; and last, so a
+    /// `;` that tmux reads as the end of a command has nothing after it to
+    /// start.
+    #[test]
+    fn inv7_the_task_comes_after_every_flag_and_last() {
+        let r = NewAgentRequest {
+            name: Some("n".into()),
+            model: Some("opus".into()),
+            permission_mode: Some("auto".into()),
+            ..with_task("-n x")
+        };
+        let argv = spawn_argv("claude-1", Path::new("/w"), &r, "claude");
+        assert_eq!(
+            &argv[BASE_ARGV_LEN..],
+            ["-n", "n", "--model", "opus", "--permission-mode", "auto", "--", "-n x"]
+        );
+    }
+
+    /// tmux strips a trailing `;` from an argument: "run the tests;" arrived a
+    /// character short, `find … \;` arrived as `find … ;`, and `;` as nothing.
+    #[test]
+    fn inv7_a_trailing_semicolon_reaches_claude_intact() {
+        for task in ["run the tests;", "find . -name '*.orig' -exec rm {} \\;", "a;b;", ";"] {
+            let argv = spawn_argv("claude-1", Path::new("/w"), &with_task(task), "claude");
+            assert_eq!(as_tmux_delivers(argv.last().unwrap()), task, "{argv:?}");
+        }
+        let inner = "a ; inside and none at the end";
+        assert_eq!(past_tmux_separator(inner), inner);
+    }
+
+    #[test]
+    fn a_task_is_sent_trimmed() {
+        let argv = spawn_argv("claude-1", Path::new("/w"), &with_task("\n  fix the build \n"), "claude");
+        assert_eq!(argv.last().unwrap(), "fix the build");
+    }
+
+    /// INV-12, at tmux's measure rather than a paste's, and counted in bytes
+    /// because that is what tmux counts.
+    #[test]
+    fn inv12_a_task_over_the_cap_is_refused() {
+        assert!(check_task(&format!("fix {}", "x".repeat(MAX_TASK - 4))).is_ok());
+        assert!(check_task(&format!("fix {}", "x".repeat(MAX_TASK - 3))).is_err());
+        let wide = "修".repeat(MAX_TASK / 3 + 1);
+        assert!(check_task(&wide).unwrap_err().0.contains("bytes"), "{} bytes", wide.len());
+        assert!(MAX_TASK < crate::control::MAX_PASTE);
+    }
+
+    /// A cap is only worth having if a task at it still starts. tmux refuses
+    /// the whole command past `TMUX_COMMAND_BYTES`, so a task at the cap, a
+    /// long name, a deep folder and every flag have to fit together.
+    #[test]
+    fn a_task_at_the_cap_still_fits_on_tmux_s_command_line() {
+        const DEEP_FOLDER_BYTES: usize = 1024;
+        const LONG_NAME_CHARS: usize = 200;
+        let cwd = format!("/{}", "d".repeat(DEEP_FOLDER_BYTES - 1));
+        let name = "n".repeat(LONG_NAME_CHARS);
+        let r = NewAgentRequest {
+            cwd: cwd.clone(),
+            name: Some(name.clone()),
+            model: Some("opusplan".into()),
+            permission_mode: Some("bypassPermissions".into()),
+            task: Some(format!("fix {}", "x".repeat(MAX_TASK - 4))),
+        };
+        let session = session_name(i64::MAX, &name);
+        let argv = spawn_argv(&session, Path::new(&cwd), &r, "/Users/someone/.local/bin/claude");
+        let bytes: usize = argv.iter().map(|a| a.len() + 1).sum();
+        assert!(bytes <= TMUX_COMMAND_BYTES, "{bytes} bytes");
+    }
+
+    #[test]
+    fn inv12_a_task_with_a_control_character_is_refused() {
+        for c in ['\t', '\r', '\0', '\u{1b}', '\u{7}', '\u{7f}', '\u{85}'] {
+            let task = format!("fix{c}the build");
+            assert!(check_task(&task).unwrap_err().0.contains("control character"), "{c:?}");
+        }
+        assert!(check_task("fix the build\nthen run the tests").is_ok());
+    }
+
+    /// Every subcommand `claude --help` lists on Claude Code 2.1.310.
+    const LISTED_SUBCOMMANDS: [&str; 21] = [
+        "agents", "attach", "auth", "auto-mode", "doctor", "gateway", "import", "install", "logs",
+        "mcp", "plugin", "plugins", "purge", "respawn", "rm", "setup-token", "stop", "kill",
+        "ultrareview", "update", "upgrade",
+    ];
+
+    /// Subcommands the same 2.1.310 binary answered for and `--help` does not
+    /// list: `project`, `sandbox` and `design-login` print their own usage,
+    /// `remote-control` and `rc` their own help page.
+    const HIDDEN_SUBCOMMANDS: [&str; 5] = ["design-login", "project", "sandbox", "remote-control", "rc"];
+
+    /// The lists are evidence, not the rule: the rule is the shape, so a name
+    /// a later release adds is refused without anyone updating a list.
+    #[test]
+    fn inv7_a_task_that_names_a_subcommand_is_refused() {
+        for name in LISTED_SUBCOMMANDS.iter().chain(HIDDEN_SUBCOMMANDS.iter()) {
+            assert!(check_task(name).unwrap_err().0.contains("subcommand"), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_task_that_cannot_be_a_subcommand_name_is_a_prompt() {
+        for task in ["doctor the failing tests", "run claude doctor", "修复登录页面", "hello!", "-n x", "why?"] {
+            assert!(check_task(task).is_ok(), "{task}");
+        }
+    }
+
+    /// Refused by the function mock mode runs too, so `--mock` refuses a task
+    /// in the same words (INV-7) — and still only after the directory.
+    #[tokio::test]
+    async fn inv7_a_bad_task_is_refused_before_anything_is_spawned() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        let long = "fix it ".repeat(MAX_TASK);
+        for task in [" doctor\n", "x\u{1b}[2J clear", long.as_str()] {
+            let r = NewAgentRequest { task: Some(task.into()), ..req(path) };
+            let refused = check_spawn_request(&r).await;
+            assert!(matches!(refused, Err(SpawnFailure::Option(_))), "{:?}", task.get(..20));
+        }
+        let r = NewAgentRequest { task: Some("fix the login bug".into()), ..req(path) };
+        assert!(check_spawn_request(&r).await.is_ok());
+        let r = NewAgentRequest { task: Some("doctor".into()), ..req("/definitely/not/here") };
+        let err = check_spawn_request(&r).await.unwrap_err();
+        assert!(err.to_string().contains("no such directory"), "{err}");
+    }
+
+    /// The name sat between `-n` and `--model`, so `x;` ended the tmux command
+    /// and tmux refused `--model` as an unknown command (measured on 3.6a).
+    #[test]
+    fn inv7_a_trailing_semicolon_in_the_name_reaches_claude_intact() {
+        let r = NewAgentRequest { name: Some("x;".into()), model: Some("opus".into()), ..with_task("go") };
+        let argv = spawn_argv("claude-1", Path::new("/w"), &r, "claude");
+        let at = argv.iter().position(|a| a == "-n").unwrap();
+        assert_eq!(as_tmux_delivers(&argv[at + 1]), "x;");
+        assert_eq!(argv[at + 2], "--model");
+    }
+
+    /// A folder ending in `;` made tmux read the program after `-c` as a tmux
+    /// command (measured on 3.6a), in both the agent and the terminal shape.
+    #[test]
+    fn inv7_a_trailing_semicolon_in_the_dir_reaches_tmux_intact() {
+        let dir = Path::new("/w/dir;");
+        let agent = spawn_argv("claude-1", dir, &with_task("go"), "claude");
+        let terminal = terminal_argv("term-1", dir);
+        for argv in [agent, terminal] {
+            let at = argv.iter().position(|a| a == "-c").unwrap();
+            assert_eq!(as_tmux_delivers(&argv[at + 1]), "/w/dir;", "{argv:?}");
+        }
+    }
+
+    /// A task already ending in `\;` is sent as `a\\;`; tmux 3.6a delivered
+    /// that as `a\;`, so the user's backslash survives.
+    #[test]
+    fn inv7_a_task_already_ending_in_an_escaped_semicolon_arrives_intact() {
+        let argv = spawn_argv("claude-1", Path::new("/w"), &with_task("a\\;"), "claude");
+        assert_eq!(argv.last().unwrap(), "a\\\\;");
+        assert_eq!(as_tmux_delivers(argv.last().unwrap()), "a\\;");
     }
 }

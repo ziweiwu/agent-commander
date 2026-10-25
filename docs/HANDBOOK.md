@@ -595,6 +595,18 @@ rather than becoming a flag — see INV-7. The permission mode starts on
 **Auto**, because a session started here is usually left to work on its own;
 pick *Default* to fall back to whatever your Claude Code settings say.
 
+**First task** is optional, for agents only. What you type there is handed to
+`claude` as its opening prompt, once, with the click that starts it, so the
+agent gets going without you having to open it and type. The starting Chat
+quotes it until the session registers. In a folder Claude Code has not trusted
+yet, the trust question still comes first — answer it on the Attach tab and
+the task goes in after. The server refuses a task over 8 KB (tmux carries the
+whole command line in one 16 KB message), one with a control character other
+than a line break, and one of a single plain word like `doctor` or `purge`:
+`claude` runs a word that names one of its own subcommands as that
+subcommand, `--` notwithstanding. A refused task stays in the field.
+The task is part of the `claude` command line, so `ps` shows it for as long as the agent runs.
+
 ## Opening a plain terminal
 
 The same dialog opens a **terminal**: a detached tmux session running your own
@@ -854,7 +866,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1595 tests: 721 Rust (the server) + 874 vitest (the web app)
+npm test           # 1632 tests: 736 Rust (the server) + 896 vitest (the web app)
 npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone

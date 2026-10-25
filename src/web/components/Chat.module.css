@@ -75,6 +75,14 @@
   font-size: var(--text-base);
   padding: 20px 4px;
 }
+.startingTask {
+  margin: 10px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--line-strong);
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 .jump {
   position: absolute;

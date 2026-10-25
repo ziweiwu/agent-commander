@@ -141,7 +141,8 @@ goes out; nothing is answered from the lock screen.
 6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent — or a plain terminal — with **+ New agent**; it opens as
-soon as it starts and stays open while it registers. Prune sessions you opened
+soon as it starts and stays open while it registers. Give an agent a **first
+task** there and it starts working on it straight away. Prune sessions you opened
 and never used with **Prune**. The fleet shows Claude sessions at rest; the
 select in the header switches it to **terminals** alone, or to **both**.
 

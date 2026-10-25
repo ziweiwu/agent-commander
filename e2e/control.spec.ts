@@ -68,6 +68,50 @@ test.describe('starting an agent', () => {
     ])
   })
 
+  /**
+   * F5 in mock mode. `--mock` runs the same `check_spawn_request` as the real
+   * path, so a first task the server would refuse for real is refused here in
+   * the same words, before anything could be spawned — and the dialog keeps
+   * the task so it can be fixed rather than retyped.
+   */
+  test('INV-7 refuses a one-word first task, sends it once, and keeps it', async ({ page }) => {
+    await openFleet(page)
+    await page.getByTestId('new-agent-button').click()
+    await page.getByTestId('new-agent-dir').fill('/tmp')
+    await page.getByTestId('new-agent-task').fill('doctor')
+
+    const request = page.waitForRequest((r) => r.url().endsWith('/api/agents') && r.method() === 'POST')
+    await page.getByTestId('new-agent-submit').click()
+    expect((await request).postDataJSON()).toMatchObject({ cwd: '/tmp', task: 'doctor' })
+
+    await expect(page.getByTestId('new-agent-error')).toContainText('subcommand')
+    await expect(page.getByTestId('new-agent-task')).toHaveValue('doctor')
+    await expect(page.getByTestId('new-agent-dialog')).toBeVisible()
+    await expect(page).not.toHaveURL(/pending/)
+  })
+
+  test('INV-12 refuses a first task too long to start with', async ({ page }) => {
+    const TOO_LONG = 9000
+    await openFleet(page)
+    await page.getByTestId('new-agent-button').click()
+    await page.getByTestId('new-agent-dir').fill('/tmp')
+    await page.getByTestId('new-agent-task').fill(`fix ${'x'.repeat(TOO_LONG)}`)
+    await page.getByTestId('new-agent-submit').click()
+
+    await expect(page.getByTestId('new-agent-error')).toContainText('bytes')
+    await expect(page.getByTestId('new-agent-dialog')).toBeVisible()
+  })
+
+  test('offers a first task to an agent and never to a terminal', async ({ page }) => {
+    await openFleet(page)
+    await page.getByTestId('new-agent-button').click()
+    await expect(page.getByTestId('new-agent-task')).toBeVisible()
+    await page.getByTestId('new-kind-terminal').click()
+    await expect(page.getByTestId('new-agent-task')).toHaveCount(0)
+    await page.getByTestId('new-kind-agent').click()
+    await expect(page.getByTestId('new-agent-task')).toBeVisible()
+  })
+
   test('closes on Escape without starting anything', async ({ page }) => {
     await openFleet(page)
     await page.getByTestId('new-agent-button').click()

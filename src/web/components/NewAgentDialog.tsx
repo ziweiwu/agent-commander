@@ -10,7 +10,7 @@ import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
 import type { Key } from '../lib/i18n.ts'
 import { MODE_KEY, NEW_AGENT_DEFAULT_MODE, NEW_AGENT_MODES } from '../lib/modes.ts'
-import { MODEL_ALIASES } from '../../shared/types.ts'
+import { MODEL_ALIASES, type NewAgentRequest } from '../../shared/types.ts'
 import { Button, Chip } from './ui/Button.tsx'
 import { FolderBrowser } from './FolderBrowser.tsx'
 import styles from './NewAgentDialog.module.css'
@@ -18,6 +18,7 @@ import styles from './NewAgentDialog.module.css'
 const RECENT_KEY = 'agent-commander.recentDirs'
 const DEFAULT_DIR_KEY = 'agent-commander.defaultDir'
 const RECENT_MAX = 6
+const TASK_ROWS = 3
 
 /**
  * Modes settable at spawn time and the models on offer, both from the lists the
@@ -118,6 +119,49 @@ function AgentOptions({ model, mode, onModel, onMode }: AgentOptionsProps) {
   )
 }
 
+/**
+ * The agent's first task, sent once with Start (F5).
+ *
+ * A textarea rather than a line, so Enter types a line break instead of
+ * submitting the form: one keystroke too early would start the agent on half a
+ * task, and nothing can take it back once it is on the command line.
+ */
+function FirstTaskField({ value, onChange }: { value: string; onChange: (task: string) => void }) {
+  const t = useTranslate()
+  return (
+    <label className={styles.field}>
+      <span className={styles.label}>{t('newAgentTask')}</span>
+      <textarea
+        className={`${styles.input} ${styles.task}`}
+        data-testid="new-agent-task"
+        value={value}
+        rows={TASK_ROWS}
+        placeholder={t('newAgentTaskPlaceholder')}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span className={styles.hint}>{t('newAgentTaskHint')}</span>
+    </label>
+  )
+}
+
+/** The four things this dialog asks about an agent beside its folder, as typed and picked. */
+interface AgentChoice {
+  name: string
+  model: string
+  mode: string
+  task: string
+}
+
+/** What the dialog chose for an agent, as the request carries it: defaults and blanks left out. */
+function agentOptions(choice: AgentChoice): Omit<NewAgentRequest, 'cwd'> {
+  return {
+    ...(choice.name.trim() ? { name: choice.name.trim() } : {}),
+    ...(choice.model !== 'default' ? { model: choice.model } : {}),
+    ...(choice.mode !== 'default' ? { permissionMode: choice.mode } : {}),
+    ...(choice.task.trim() ? { task: choice.task.trim() } : {}),
+  }
+}
+
 export function NewAgentDialog() {
   const t = useTranslate()
   const open = useStore((s) => s.newAgentOpen)
@@ -125,12 +169,14 @@ export function NewAgentDialog() {
   const kinds = useStore((s) => s.fleet.kinds)
   const setKinds = useStore((s) => s.setKinds)
   const setExpectSession = useStore((s) => s.setExpectSession)
+  const setStartingTask = useStore((s) => s.setStartingTask)
   const navigate = useNavigate()
   const agents = useStore((s) => s.agents)
   const env = useStore((s) => s.env)
 
   const [dir, setDir] = useState('')
   const [name, setName] = useState('')
+  const [task, setTask] = useState('')
   /*
    * Which of the two things this dialog opens.
    *
@@ -208,13 +254,10 @@ export function NewAgentDialog() {
     setBusy(true)
     setError('')
     const named = name.trim() ? { name: name.trim() } : {}
+    const options = agentOptions({ name, model, mode, task })
     const result = terminal
       ? await startTerminal(dir.trim(), named)
-      : await startAgent(dir.trim(), {
-          ...named,
-          ...(model !== 'default' ? { model } : {}),
-          ...(mode !== 'default' ? { permissionMode: mode } : {}),
-        })
+      : await startAgent(dir.trim(), options)
     startingRef.current = false
     setBusy(false)
     if (result.ok) {
@@ -236,6 +279,9 @@ export function NewAgentDialog() {
        * the id changes.
        */
       const id = placeholderId(result.tmuxSession)
+      const sent = terminal ? undefined : options.task
+      setStartingTask(sent ? { sessionId: id, text: sent } : null)
+      if (sent) setTask('')
       setExpectSession(id)
       close()
       navigate(`/agent/${encodeURIComponent(id)}${terminal ? '/term' : ''}`)
@@ -356,6 +402,8 @@ export function NewAgentDialog() {
                 {t(terminal ? 'newTerminalNameHint' : 'newAgentNameHint')}
               </span>
             </label>
+
+            {!terminal && <FirstTaskField value={task} onChange={setTask} />}
 
             {/*
               * Withheld rather than disabled for a terminal: both are flags on

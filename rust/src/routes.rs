@@ -104,6 +104,11 @@ use crate::control::{check_key, SendableKey, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUC
 /// The most a JSON request body may be.
 const MAX_BODY: usize = 8 * 1024;
 
+/// The most a new-agent request body may be: the ordinary bound, plus room
+/// for a first task at `spawn::MAX_TASK` after JSON has escaped it — a `"`, a
+/// `\` and a line break each travel as two bytes, so the task can double.
+const MAX_NEW_AGENT_BODY: usize = MAX_BODY + 2 * crate::spawn::MAX_TASK;
+
 const MIME_JSON: &str = "application/json; charset=utf-8";
 
 fn mime_for(path: &Path) -> &'static str {
@@ -1314,7 +1319,13 @@ async fn send_file(file: &Path, stamp: MockStamp) -> Option<Response> {
 
 /// Read a small JSON body, refusing anything oversized.
 async fn read_json(body: Body) -> Result<serde_json::Value, Failure> {
-    let bytes: Bytes = axum::body::to_bytes(body, MAX_BODY)
+    read_json_within(body, MAX_BODY).await
+}
+
+/// `read_json` with the bound left to the caller, for the one request — a new
+/// agent — that may carry a first task several times the ordinary bound.
+async fn read_json_within(body: Body, limit: usize) -> Result<serde_json::Value, Failure> {
+    let bytes: Bytes = axum::body::to_bytes(body, limit)
         .await
         .map_err(|_| Failure::server("request body too large"))?;
     serde_json::from_slice(&bytes).map_err(|e| Failure::server(e.to_string()))
@@ -1331,7 +1342,7 @@ fn status_for(failure: &Failure) -> StatusCode {
 
 /// The request body, or the failure the caller should be told about.
 async fn new_agent_request(body: Body) -> Result<NewAgentRequest, Failure> {
-    let parsed = read_json(body).await?;
+    let parsed = read_json_within(body, MAX_NEW_AGENT_BODY).await?;
     if !parsed.get("cwd").map(|value| value.is_string()).unwrap_or(false) {
         return Err(Failure::caller("cwd is required"));
     }
@@ -4944,16 +4955,12 @@ mod tests {
     #[tokio::test]
     async fn refuses_an_oversized_request_body() {
         let h = plain(FakePanes::new()).await;
-        let payload = format!("{{\"cwd\":\"/tmp\",\"name\":\"{}\"}}", "x".repeat(MAX_BODY * 2));
-        let res = post(
-            h.port,
-            "/api/agents",
-            "Content-Type: application/json\r\n",
-            Some(&payload),
-        )
-        .await;
-        assert!(status(&res).contains("500"), "{}", status(&res));
-        assert!(body(&res).contains("too large"), "{}", body(&res));
+        for (path, limit) in [("/api/terminals", MAX_BODY), ("/api/agents", MAX_NEW_AGENT_BODY)] {
+            let payload = format!("{{\"cwd\":\"/tmp\",\"name\":\"{}\"}}", "x".repeat(limit));
+            let res = post(h.port, path, "Content-Type: application/json\r\n", Some(&payload)).await;
+            assert!(status(&res).contains("500"), "{path}: {}", status(&res));
+            assert!(body(&res).contains("too large"), "{path}: {}", body(&res));
+        }
     }
 
     /* ---- INV-12 and INV-6: the guards must actually be reached ---- */
@@ -6283,5 +6290,71 @@ mod tests {
             assert!(!body(&res).contains("TOP SECRET"), "escaped with {path}");
         }
         let _ = std::fs::remove_file(outside);
+    }
+
+    /// Records each new-agent request that reached the spawn, and starts nothing.
+    #[derive(Default)]
+    struct RecordingSpawn {
+        started: Mutex<Vec<NewAgentRequest>>,
+    }
+
+    #[async_trait]
+    impl SpawnApi for RecordingSpawn {
+        async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure> {
+            let cwd = req.cwd.clone();
+            self.started.lock().unwrap().push(req);
+            Ok(SpawnResult { tmux_session: "test-session".into(), cwd })
+        }
+        async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure> {
+            Ok(SpawnResult { tmux_session: "test-terminal".into(), cwd: req.cwd })
+        }
+    }
+
+    /// A server under `grants` whose spawns are recorded rather than run.
+    async fn spawning(grants: Grants) -> (Harness, Arc<RecordingSpawn>) {
+        let parts = harness_parts(FakePanes::new());
+        let spawn = Arc::new(RecordingSpawn::default());
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        {
+            let app = Arc::get_mut(&mut app).expect("sole owner");
+            app.spawn = spawn.clone();
+            app.grants = grants;
+        }
+        let served = app.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let HarnessParts { panes, source, control, web_root } = parts;
+        (Harness { port, panes, source, control, web_root, app: served }, spawn)
+    }
+
+    /// §7: a first task is part of starting an agent, so it takes the spawn
+    /// power. Neither a read-only credential nor one that may drive a running
+    /// agent can start one with a task, and nothing reaches the spawn.
+    #[tokio::test]
+    async fn a_read_only_credential_cannot_start_an_agent_with_a_task() {
+        let payload = r#"{"cwd":"/tmp","task":"fix the login bug"}"#;
+        for grants in ["read", "read,respond,drive"] {
+            let (h, spawn) = spawning(Grants::parse(grants).unwrap()).await;
+            let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(payload)).await;
+            assert!(status(&res).contains("403"), "{grants}: {}", status(&res));
+            assert!(spawn.started.lock().unwrap().is_empty(), "{grants}");
+        }
+    }
+
+    /// A first task at its cap, made of the characters JSON doubles, still fits
+    /// the request and reaches the spawn whole. The ordinary 8 KiB body bound
+    /// refused it as "too large".
+    #[tokio::test]
+    async fn a_first_task_at_its_cap_reaches_the_spawn_whole() {
+        let (h, spawn) = spawning(Grants::ALL).await;
+        let task = format!("say {}", "\"\\\n".repeat((crate::spawn::MAX_TASK - 4) / 3));
+        let payload = serde_json::json!({ "cwd": "/tmp", "task": task }).to_string();
+        assert!(payload.len() > MAX_BODY, "the case the old bound refused");
+        let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(&payload)).await;
+        assert!(status(&res).contains("200"), "{}: {}", status(&res), body(&res));
+        assert_eq!(spawn.started.lock().unwrap()[0].task.as_deref(), Some(task.as_str()));
     }
 }
