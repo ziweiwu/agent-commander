@@ -3782,6 +3782,54 @@ mod tests {
         }
     }
 
+    /// A tail that answers every id it is asked for, and counts the asking.
+    struct ResultCountingTail {
+        lookups: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl TailApi for ResultCountingTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            Ok(TailRead::default())
+        }
+
+        async fn tool_result(&mut self, _tool_use_id: &str) -> Option<crate::types::ToolResultView> {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            Some(crate::types::ToolResultView {
+                at: 0,
+                hunks: None,
+                output: Some("any".into()),
+                omitted: 0,
+                user_modified: None,
+            })
+        }
+    }
+
+    /// An empty id, or one outside `[A-Za-z0-9_-]`, is answered with nothing
+    /// and never read for: an empty needle matches nearly every record.
+    #[tokio::test]
+    async fn inv4_a_malformed_tool_use_id_is_never_read_for() {
+        let parts = harness_parts(FakePanes::new());
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let counted = lookups.clone();
+        let tails = Arc::new(move |_agent: &Agent| {
+            Some(Box::new(ResultCountingTail { lookups: counted.clone() }) as Box<dyn TailApi>)
+        });
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        for malformed in ["", "toolu \"x", "toolu/../x"] {
+            send_json(&mut client, tool_result_request(SESSION, malformed)).await;
+            let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+            assert!(reply.get("result").is_none(), "{malformed:?} must not be read for");
+        }
+        assert_eq!(lookups.load(Ordering::SeqCst), 0);
+        send_json(&mut client, tool_result_request(SESSION, "toolu_well-formed_1")).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert_eq!(reply["result"]["output"], serde_json::json!("any"));
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    }
+
     /// The one call `FakeTail` has a result on record for.
     const RECORDED_CALL: &str = "toolu_recorded";
 
@@ -6451,11 +6499,6 @@ mod tests {
         send_json(&mut client, tool_result_request(SESSION, &too_long)).await;
         let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
         assert!(reply.get("result").is_none());
-        for malformed in ["", "toolu \"x", "toolu/../x"] {
-            send_json(&mut client, tool_result_request(SESSION, malformed)).await;
-            let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
-            assert!(reply.get("result").is_none(), "{malformed:?} must not be read for");
-        }
         assert_eq!(h.panes.writes(), 0);
     }
 }
