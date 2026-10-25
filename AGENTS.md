@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1595 tests: 721 Rust (the server) + 874 vitest (the web app)
+npm test              # 1701 tests: 741 Rust (the server) + 960 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 427 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -395,6 +395,16 @@ commit.
   `list-panes` format string, so it costs no round trip — but it is also the
   kind of field that reads as decoration in a diff. Remove it and the terminal
   a user just opened never appears in the fleet, with nothing failing.
+- **An argv entry is not as inert as it looks, twice over.** tmux reads any
+  argument *ending* in `;` as the end of a command, even one handed to it as
+  its own argv entry: `a;` reaches the program as `a`, and an entry ending in
+  `;` with more arguments after it starts a new tmux command
+  (`-n 'x;' --model opus` fails with "unknown command: --model"). And
+  `claude`'s `--` stops option parsing but not subcommand dispatch:
+  `claude … -- doctor` runs `claude doctor`. Both were measured for the first
+  task (INV-7), which is why it goes last, gets a backslash before a trailing
+  `;`, and may not be one bare word. The name and the `-c` folder get the same
+  backslash.
 - **`Registry.enrich()` is a blind shallow merge** with two callers writing
   different field sets, and `undefined` overwrites. That is load-bearing for
   goal-clear and a trap for any new patch producer. A new `AgentPatch` field
@@ -593,6 +603,14 @@ commit.
   **A continuously repainting pane makes any layout change anywhere a
   candidate**; the terminal is the most sensitive thing on the page and it is
   never the thing you changed.
+
+- **The store's `selected` lags the URL by one effect, and a fast second key
+  found the gap.** `FleetRoute` calls `focusAgent` from an effect, so for a
+  frame after `navigate` the route names one agent and the store another. The
+  e2e for ⌥J then ⌥K went to the wrong place every run on desktop, because
+  Playwright pressed the second chord inside that frame. `useHop` now calls
+  `focusAgent` itself before navigating; anything else that reads `selected` in
+  a key handler straight after a navigation has the same gap.
 
 - **`codesign` runs before the smoke test, not after.** The launched thing is a
   Mach-O now rather than a script, and on Apple silicon an *invalid* signature is

@@ -173,6 +173,26 @@ asks for the browser's permission when you turn it on; if the browser cannot
 show notifications at all (Safari on iOS outside an installed web app), the
 toggle says so instead of pretending.
 
+### Other agents that need you, while one is open
+
+The list's **Needs you** group is the notification while the list is on
+screen. Three shapes take it off: the phone's sheet, a collapsed column, and
+full screen. In those, a chip — **✋ 2 ›** — sits where the filters were (or in
+full screen's header) and counts the *other* agents waiting on you. Tap it and
+the next one opens on its conversation, in the list's own sort order, wrapping
+round. It replaces the page rather than stacking another, so swipe-back still
+lands on the fleet however many agents you went through. It is absent when
+nobody else is waiting, and it skips an agent whose pane has gone, one still
+starting up, and any status the app only guessed at. While the connection is
+down it goes grey and says *as of* when it last heard.
+
+After you answer a single question from the card, the card offers **Next:
+‹name› · waiting 14m ⌥H** — the agent that has been waiting longest. It never
+moves you on by itself; press it (or ⌥H) when you are ready. Arriving that way
+— or by the chip, or a chord below — puts the keyboard on the new agent's
+*question*, not its first option, so an Enter you were already pressing answers
+nothing.
+
 The app ships a web manifest, so on a phone it can be added to the Home Screen
 and opens full-screen like an installed app.
 
@@ -204,6 +224,12 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
+  The conversation itself reads as prose: on a desktop it is held to a 46em
+  measure at 14px, each message is marked with the language it is written in
+  (by the same test), so Chinese gets a taller line and a Chinese face rather
+  than whatever the browser falls back to, and is never slanted by a fake
+  italic. What the agent did sits under its words as one ruled list, the tool
+  name first and its argument beside it.
   What you have half-typed stays with the agent you typed it for: open another
   agent and its own box comes back, go ‹ Agents on a phone or ⤢ to full screen
   and the text is still there when you return. It is kept in memory only, so a
@@ -334,6 +360,13 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
+| `⌥J` / `⌥K` | open the next / previous agent down the list, on the tab you are on |
+| `⌥H` | open the agent that has needed you longest; a toast says *Nothing needs you* when none does |
+
+The ⌥ chords are `Alt` on Windows and Linux. They go by the key you press
+rather than the character Option makes of it, wait while a Pinyin or other
+input method is composing, and do nothing inside the terminal, where every key
+belongs to the agent.
 
 ## Claude usage
 
@@ -452,6 +485,10 @@ those are enabled only while it is idle or waiting — greyed with a tooltip whi
 it is busy, so a keystroke never interleaves with a tool call in flight. On a
 phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
 screen.
+
+**Close agent** now sits alone behind the **⋮** in the panel header — vertical,
+so it is not mistaken for the composer's **⋯** — and the header's **✕** ("Close
+panel") only closes the panel; the agent keeps running.
 
 **Shift+Tab, Goal, Compact and Clear also sit in the composer's menu**, beside
 the message box. The panel's row is above the tabs and does not exist in full
@@ -603,6 +640,18 @@ permission mode against fixed allow-lists so an unrecognised value is refused
 rather than becoming a flag — see INV-7. The permission mode starts on
 **Auto**, because a session started here is usually left to work on its own;
 pick *Default* to fall back to whatever your Claude Code settings say.
+
+**First task** is optional, for agents only. What you type there is handed to
+`claude` as its opening prompt, once, with the click that starts it, so the
+agent gets going without you having to open it and type. The starting Chat
+quotes it until the session registers. In a folder Claude Code has not trusted
+yet, the trust question still comes first — answer it on the Attach tab and
+the task goes in after. The server refuses a task over 8 KB (tmux carries the
+whole command line in one 16 KB message), one with a control character other
+than a line break, and one of a single plain word like `doctor` or `purge`:
+`claude` runs a word that names one of its own subcommands as that
+subcommand, `--` notwithstanding. A refused task stays in the field.
+The task is part of the `claude` command line, so `ps` shows it for as long as the agent runs.
 
 ## Opening a plain terminal
 
@@ -863,8 +912,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1595 tests: 721 Rust (the server) + 874 vitest (the web app)
-npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1701 tests: 741 Rust (the server) + 960 vitest (the web app)
+npm run e2e        # 458 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

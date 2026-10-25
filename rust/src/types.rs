@@ -254,6 +254,16 @@ pub struct NewAgentRequest {
     pub model: Option<String>,
     #[serde(default)]
     pub permission_mode: Option<String>,
+    /// The agent's first task, typed into the dialog and sent once with the
+    /// click that starts it (INV-2).
+    ///
+    /// It reaches `claude` as one argv entry after `--`, the last on the
+    /// command line (INV-7). `spawn::check_task` refuses it before anything is
+    /// spawned when it is too long for tmux to carry, holds a control
+    /// character other than a line break, or is one bare word, which the CLI
+    /// would run as a subcommand of its own.
+    #[serde(default)]
+    pub task: Option<String>,
 }
 
 /// Open a plain tmux session, with the user's shell and no agent in it.

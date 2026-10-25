@@ -249,7 +249,13 @@ interface HeadActionsProps {
 }
 
 /**
- * The header's own actions: the settings row's ⋯, ⤢ Full screen, and close.
+ * The header's own actions: the settings row's ⋮, ⤢ Full screen, and ✕.
+ *
+ * ⋮ rather than the composer's ⋯, because the two open different things: the
+ * composer's menu holds replies and send options, this one holds only Close
+ * agent. Drawn alike they read as one menu in two places. ✕ is named "Close
+ * panel" for the same reason — a bare "close" beside a row that says "Close
+ * agent" invited reading it as ending the session.
  *
  * One group, so the buttons wrap together onto the same line. Left as separate
  * children, the wider labelled ⤢ pushed `close` onto a row of its own and grew
@@ -273,13 +279,20 @@ function HeadActions({ controlsOpen, onToggleControls, onExpand, onClose }: Head
         aria-label={t('agentSettings')}
         onClick={onToggleControls}
       >
-        <Icon name="ellipsis" />
+        <Icon name="ellipsis-vertical" />
       </Button>
       <Button variant="compact" data-testid="fullscreen-toggle" title={t('expand')} onClick={onExpand}>
         <Icon name="expand" /> <span className={styles.actionLabel}>{t('expand')}</span>
       </Button>
-      <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
-        {t('close')}
+      <Button
+        variant="compact"
+        className={styles.close}
+        data-testid="close-button"
+        title={t('closePanel')}
+        aria-label={t('closePanel')}
+        onClick={onClose}
+      >
+        <Icon name="close" />
       </Button>
     </div>
   )

@@ -29,6 +29,12 @@ a laptop or from a phone.
   When an agent is waiting on something it did not write down — a trust prompt,
   a model picker — the card says so plainly and hands you its live terminal and
   the keys instead of pretending to know the question.
+- **The next one that needs you, without the list.** With an agent open on a
+  phone, with the column collapsed or in full screen, **✋ 2 ›** counts the other
+  agents waiting on you and opens the next. After an answer the card offers the
+  one that has waited longest, and ⌥J / ⌥K / ⌥H walk the fleet from the
+  keyboard — landing on the question, never on an option a stray Enter could
+  press.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
   never resizes it: it is a capture, not a second terminal. **Earlier output**
   reads back through its scrollback a page at a time, including for a pane
@@ -131,7 +137,9 @@ goes out; nothing is answered from the lock screen.
 1. Open <http://127.0.0.1:4317>. Agents that need you are at the top.
 2. Tap a card. **Chat** shows the conversation, with an answer card when the
    agent is blocked. **Attach** shows the terminal. Whatever you half-type stays
-   with that agent while you look at another one or go full screen.
+   with that agent while you look at another one or go full screen. The
+   header's **✕** closes the panel; **Close agent**, which ends the session,
+   sits alone behind the **⋮** beside it.
 3. Tables and links in a reply are rendered as such — a link is tappable
    wherever it appears, including in a tool call's argument.
 4. The **⋯** beside Send holds everything that is not typing: common replies,
@@ -144,7 +152,8 @@ goes out; nothing is answered from the lock screen.
 6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent — or a plain terminal — with **+ New agent**; it opens as
-soon as it starts and stays open while it registers. Prune sessions you opened
+soon as it starts and stays open while it registers. Give an agent a **first
+task** there and it starts working on it straight away. Prune sessions you opened
 and never used with **Prune**. The fleet shows Claude sessions at rest; the
 select in the header switches it to **terminals** alone, or to **both**.
 

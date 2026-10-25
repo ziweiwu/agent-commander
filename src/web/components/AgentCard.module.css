@@ -135,7 +135,7 @@
 }
 
 .name {
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   font-size: var(--text-md);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -214,7 +214,7 @@
  */
 .wrap[data-rail='waiting'] .status {
   color: var(--waiting);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 
 /*
@@ -343,7 +343,7 @@
 .context {
   flex: none;
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   font-variant-numeric: tabular-nums;
 }
 
@@ -478,7 +478,7 @@
 .cta {
   justify-self: start;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   color: var(--waiting);
   padding: 2px 10px;
   border: 1px solid var(--edge-waiting);

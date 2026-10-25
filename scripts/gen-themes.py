@@ -897,7 +897,11 @@ SCALES = """
      written out by hand is a stack nobody compares to anything. The boot shell
      in `index.html` keeps its own copy on purpose, for the same reason it
      hard-codes two colours — it paints before this file is loaded. */
-  --font-ui: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  /** The CJK faces sit after `system-ui` so Latin keeps the system face and a
+      Chinese run picks a face drawn for it, rather than whatever fallback the
+      browser reaches first — on Windows that is a serif SimSun beside sans. */
+  --font-ui: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, 'PingFang SC',
+    'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Type scale. Six steps; anything between them was drift. */
@@ -909,6 +913,15 @@ SCALES = """
   --text-xl: 17px;
   /* 16px is not a scale step but a requirement: iOS zooms a focused field
      under it. Used verbatim in the coarse-pointer rules. */
+
+  /** Line heights and the one strong weight. `--leading-ui` is a control or a
+      code line, `--leading-prose` is running text; `--weight-strong` is every
+      bold the app draws, so the agent name is 14/600 in the card, the panel
+      header and full screen alike rather than 600 in one and 650 in two.
+      `test/font-scale.test.ts` refuses a px size written outside the scale. */
+  --leading-ui: 1.4;
+  --leading-prose: 1.5;
+  --weight-strong: 600;
 
   /* Radius scale. */
   --radius-xs: 4px;

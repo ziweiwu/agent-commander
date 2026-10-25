@@ -13,6 +13,7 @@ import type {
   ControlResponse,
   DirListing,
   FleetTree,
+  NewAgentRequest,
   NewAgentResponse,
   PictureResponse,
   ServerEnv,
@@ -399,9 +400,14 @@ export async function loadEnv(): Promise<void> {
   }
 }
 
+/**
+ * Start an agent, with whatever the dialog chose beside the folder — the
+ * first task included, which goes in this one request and nowhere else
+ * (INV-2).
+ */
 export async function startAgent(
   cwd: string,
-  options: { name?: string; model?: string; permissionMode?: string } = {},
+  options: Omit<NewAgentRequest, 'cwd'> = {},
 ): Promise<NewAgentResponse> {
   return spawnRequest('/api/agents', { cwd, ...options })
 }

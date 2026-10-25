@@ -135,3 +135,24 @@ describe('an icon is never a button name', () => {
     )
   })
 })
+
+/**
+ * `ICON_MARK` is for a chip or a status mark beside 11px text, and a button's
+ * own face is `ICON_BUTTON`. Interrupt drew its stop square at the mark size,
+ * so on a phone — where the square is the button's whole face — the one
+ * control that halts an agent mid-task wore the smallest icon on the screen.
+ */
+describe('a button face is drawn at button size', () => {
+  it('no Button draws its icon at ICON_MARK', () => {
+    const offenders: string[] = []
+    for (const file of sources(COMPONENTS)) {
+      const source = readFileSync(file, 'utf8')
+      for (const match of source.matchAll(/<Button\b[\s\S]*?<\/Button>/g)) {
+        if (!/<Icon\b[^>]*size=\{ICON_MARK\}/.test(match[0])) continue
+        const line = source.slice(0, match.index).split('\n').length
+        offenders.push(`${file.replace(`${process.cwd()}/`, '')}:${line}`)
+      }
+    }
+    expect(offenders, `buttons wearing a mark-sized icon: ${offenders.join(', ')}`).toEqual([])
+  })
+})

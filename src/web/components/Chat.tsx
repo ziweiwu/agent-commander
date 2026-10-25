@@ -21,11 +21,12 @@ import {
 } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
 import { AnswerCard } from './AnswerCard.tsx'
+import { HandOff, useHandOff } from './HandOff.tsx'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button } from './ui/Button.tsx'
 import styles from './Chat.module.css'
-import { ICON_MARK, Icon } from './ui/Icon.tsx'
+import { ICON_BUTTON, Icon } from './ui/Icon.tsx'
 
 /** Distance from the bottom within which the view keeps following new messages. */
 const PIN_SLACK = 60
@@ -54,6 +55,18 @@ const VIEWPORT_EDGE_PX = 8
 const REPLIES_GAP_PX = 6
 /** What the attach button offers and a paste is taken over for. */
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+/**
+ * What a hop lands on: the question, or the card when the question is not
+ * written down. Never an option — the Enter a hand was already on its way to
+ * press must answer nothing (INV-2).
+ */
+function headingOf(card: HTMLElement): HTMLElement | null {
+  return (
+    card.querySelector<HTMLElement>('[data-testid="answer-question"]') ??
+    card.querySelector<HTMLElement>('[data-testid="answer-card"]')
+  )
+}
 
 /**
  * The picture a paste carries, if it carries one.
@@ -95,6 +108,36 @@ const QUICK_PROMPTS = [
 function freshness(agent: Agent): 'starting' | 'unprompted' | null {
   if (agent.sessionId.startsWith(PENDING_PREFIX)) return 'starting'
   return isUnused(agent) ? 'unprompted' : null
+}
+
+/**
+ * What an empty conversation says, and the first task quoted under it while
+ * an agent this tab started is still coming up (F5).
+ *
+ * The quote is the task as the dialog sent it, held in the store under the
+ * placeholder's id; another tab, or this one after a reload, has nothing to
+ * quote and says what it says about any starting agent.
+ */
+function EmptyNotice({ agent }: { agent: Agent }) {
+  const t = useTranslate()
+  const timelineAt = useStore((s) => s.timelineAt)
+  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
+  const startingTask = useStore((s) => s.startingTask)
+  const task = startingTask?.sessionId === agent.sessionId ? startingTask.text : null
+  const notice = emptyNotice({ timelineAt, timelineStalledAt, fresh: freshness(agent), task })
+  return (
+    <div className={styles.notice} data-testid="chat-notice">
+      {t(notice, { name: shortName(agent), folder: tildePath(agent.cwd) })}
+      {notice === 'chatStartingTask' && (
+        <>
+          <blockquote className={styles.startingTask} data-testid="chat-starting-task">
+            {task}
+          </blockquote>
+          {t('chatStartingTaskTrust')}
+        </>
+      )}
+    </div>
+  )
 }
 
 export function Chat({ agent }: { agent: Agent }) {
@@ -189,8 +232,6 @@ export function Chat({ agent }: { agent: Agent }) {
   }, [menuOpen])
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
-  const timelineAt = useStore((s) => s.timelineAt)
-  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
   const prompt = useStore((s) => s.prompt)
   /*
    * INV-16, and the two halves it is about are inside the card rather than
@@ -219,6 +260,10 @@ export function Chat({ agent }: { agent: Agent }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const answerRef = useRef<HTMLDivElement>(null)
+  const hopped = useStore((s) => s.hopped === agent.sessionId)
+  /** The agent a hop has already put the focus on, so it is done once per arrival. */
+  const landedRef = useRef<string | null>(null)
+  const handOff = useHandOff(agent.sessionId, prompt?.id)
   const [pinned, setPinned] = useState(true)
   const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('chat', agent.sessionId, inputRef)
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
@@ -403,6 +448,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * composer, or the previous question's buttons. Mid-sentence, it stays put.
    */
   useEffect(() => {
+    if (!hopped) landedRef.current = null
     if (coarse) return
     /*
      * Only where the card actually offers an answer. `answering` now covers a
@@ -418,14 +464,20 @@ export function Chat({ agent }: { agent: Agent }) {
       inputRef.current?.focus()
       return
     }
+    const heading = hopped && answerRef.current ? headingOf(answerRef.current) : null
+    if (heading && landedRef.current !== agent.sessionId) {
+      landedRef.current = agent.sessionId
+      heading.focus()
+      return
+    }
     const active = document.activeElement
     const idle =
       !active ||
       active === document.body ||
       (active === inputRef.current && draftRef.current === '') ||
       answerRef.current?.contains(active) === true
-    if (idle) option.focus()
-  }, [agent.sessionId, coarse, answering, prompt?.id])
+    if (idle) (heading ?? option).focus()
+  }, [agent.sessionId, coarse, answering, prompt?.id, hopped])
 
   // The mis-tap guard is per agent. Sending the same prompt to one agent and
   // then to the next is two deliberate instructions, however fast the switch.
@@ -520,9 +572,10 @@ export function Chat({ agent }: { agent: Agent }) {
 
   return (
     <div className={styles.pane} data-testid="chat">
-      {answering && (
+      {(answering || handOff.shown) && (
         <div className={styles.answer} ref={answerRef}>
-          <AnswerCard agent={agent} prompt={prompt} />
+          {answering && <AnswerCard agent={agent} prompt={prompt} onAnswered={handOff.arm} />}
+          {handOff.shown && <HandOff from={agent.sessionId} />}
         </div>
       )}
       <div className={styles.region}>
@@ -537,12 +590,7 @@ export function Chat({ agent }: { agent: Agent }) {
         >
           <div className={styles.list} data-testid="chat-list">
             {messages.length === 0 ? (
-              <div className={styles.notice} data-testid="chat-notice">
-                {t(emptyNotice({ timelineAt, timelineStalledAt, fresh: freshness(agent) }), {
-                  name: shortName(agent),
-                  folder: tildePath(agent.cwd),
-                })}
-              </div>
+              <EmptyNotice agent={agent} />
             ) : (
               <>
                 {rows.map((row) =>
@@ -867,7 +915,7 @@ export function Chat({ agent }: { agent: Agent }) {
                   reader. Spelling it out costs the message box 70px on a small
                   phone, and the box is what the row is for. */}
               <span className={styles.stopGlyph}>
-                <Icon name="stop" size={ICON_MARK} />
+                <Icon name="stop" size={ICON_BUTTON} />
               </span>
               <span className={styles.stopLabel}>{t('interrupt')}</span>
             </Button>

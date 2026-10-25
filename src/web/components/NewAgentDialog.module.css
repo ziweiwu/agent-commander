@@ -56,10 +56,10 @@
 }
 .label {
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 .input {
-  font: 14px/1.4 var(--font-mono);
+  font: var(--text-md) / var(--leading-ui) var(--font-mono);
   padding: 10px 12px;
   min-height: 42px;
   color: var(--text);
@@ -70,6 +70,10 @@
 .hint {
   font-size: var(--text-sm);
   color: var(--faint);
+}
+.task {
+  font-family: var(--font-ui);
+  resize: vertical;
 }
 
 .recent {
