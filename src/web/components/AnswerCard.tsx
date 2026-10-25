@@ -100,7 +100,14 @@ function detailLabel(tool: string): 'answerPlan' | 'answerCommand' | 'answerAbou
   return 'answerAbout'
 }
 
-export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPrompt | null }) {
+export interface AnswerCardProps {
+  agent: Agent
+  prompt: PendingPrompt | null
+  /** A single question was answered and sent: the reader may want the next agent. */
+  onAnswered?: () => void
+}
+
+export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
   /*
@@ -222,6 +229,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
     }
     setSent(true)
     showToast(t(multi ? 'answerToggled' : 'answerSent', { name: shortName(agent) }))
+    if (!multi) onAnswered?.()
     /*
      * A toggle does not spend the card, so the synchronous guard is released
      * for the next row — but not instantly, or the same-batch check it exists
@@ -243,7 +251,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
   }
 
   return (
-    <div className={styles.card} data-testid="answer-card">
+    <div className={styles.card} data-testid="answer-card" tabIndex={-1}>
       {/*
         * The CLI's own one-word title for this dialog, which every real
         * question carries and which the terminal puts on the dialog's tab. It
@@ -267,7 +275,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
       )}
 
       {prompt?.question !== undefined && (
-        <p className={styles.question} data-testid="answer-question">
+        <p className={styles.question} data-testid="answer-question" tabIndex={-1}>
           {prompt.question}
         </p>
       )}

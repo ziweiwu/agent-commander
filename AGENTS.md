@@ -572,6 +572,14 @@ commit.
   candidate**; the terminal is the most sensitive thing on the page and it is
   never the thing you changed.
 
+- **The store's `selected` lags the URL by one effect, and a fast second key
+  found the gap.** `FleetRoute` calls `focusAgent` from an effect, so for a
+  frame after `navigate` the route names one agent and the store another. The
+  e2e for ⌥J then ⌥K went to the wrong place every run on desktop, because
+  Playwright pressed the second chord inside that frame. `useHop` now calls
+  `focusAgent` itself before navigating; anything else that reads `selected` in
+  a key handler straight after a navigation has the same gap.
+
 - **`codesign` runs before the smoke test, not after.** The launched thing is a
   Mach-O now rather than a script, and on Apple silicon an *invalid* signature is
   a kernel kill rather than a warning. Signing first means the smoke test runs

@@ -27,6 +27,9 @@ import { Button, Chip } from './ui/Button.tsx'
 import { UsageChips } from './UsageChips.tsx'
 import styles from './App.module.css'
 import { ICON_MARK, Icon } from './ui/Icon.tsx'
+import { WaitingChip } from './WaitingChip.tsx'
+import { agentPath } from '../lib/hop.ts'
+import { useHopKeys } from '../hooks/useHop.ts'
 
 /** Holds the delegation-graph poll while the fleet list is unmounted. */
 function TreePoll() {
@@ -59,6 +62,7 @@ export function App() {
   }, [layout])
   // The height the sheet actually has once an on-screen keyboard is up.
   useVisualViewport()
+  useHopKeys()
 
   const mock = useStore((s) => s.mock)
   const conn = useStore((s) => s.conn)
@@ -158,7 +162,7 @@ export function App() {
         return
       }
 
-      if (typing && target !== searchRef.current) return
+      if (e.altKey || (typing && target !== searchRef.current)) return
 
       if (e.key === 'ArrowDown' || e.key === 'j') {
         e.preventDefault()
@@ -190,6 +194,7 @@ export function App() {
           agent<span>-commander</span>
         </h1>
         {!narrow && selected !== null && !solo && <SidebarToggle />}
+        {(sheetMode || fleetHidden) && !fullscreen && <WaitingChip />}
         {solo ? <span className={styles.spacer} /> : <Filters />}
         <UsageChips />
         <Button
@@ -385,12 +390,6 @@ const EXPECT_MS = 8000
  */
 const FOLLOW_MS = 4000
 
-/** The route for one agent, on the tab the reader is already on. */
-function agentPath(sessionId: string, tab: 'chat' | 'attach'): string {
-  const base = `/agent/${encodeURIComponent(sessionId)}`
-  return tab === 'attach' ? `${base}/term` : base
-}
-
 export function FleetRoute() {
   const navigate = useNavigate()
   const narrow = useIsNarrow()
@@ -436,6 +435,7 @@ export function FleetRoute() {
 
   useEffect(() => {
     focusAgent(sessionId ?? null)
+    if (useStore.getState().hopped !== sessionId) useStore.setState({ hopped: null })
   }, [sessionId])
 
   /*

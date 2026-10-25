@@ -51,6 +51,7 @@ export function resetStore(): void {
     expectSession: null,
     exited: [],
     drafts: { chat: {}, paste: {} },
+    hopped: null,
   })
 }
 
