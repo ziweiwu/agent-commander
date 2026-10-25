@@ -471,6 +471,10 @@
   flex: none;
   padding: 8px 12px 0;
 }
+/** The hand-off renders nothing when no other agent needs you; its slot then takes no room. */
+.answer:empty {
+  display: none;
+}
 
 @media (max-width: 560px) {
   .answer {

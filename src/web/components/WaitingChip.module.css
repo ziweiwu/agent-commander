@@ -1,0 +1,52 @@
+/**
+ * The filter chip's box, so it sits in the topbar row at the height that row
+ * already has: 30px, with an 11px hand. A 16px hand in a topbar chip once moved
+ * the row, which resized `main`, which re-fitted the terminal, and four
+ * `term-wrap` clicks never saw two stable frames (AGENTS.md).
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--waiting);
+  background: var(--wash-waiting);
+  border: 1px solid var(--waiting);
+  border-radius: var(--radius-pill);
+  padding: 4px 11px;
+  min-height: 30px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+}
+.chip b {
+  color: var(--text);
+  font-weight: 650;
+}
+.chip:hover {
+  border-color: var(--text);
+}
+
+/** Offline: the plain chip's colours, so the wash cannot claim a now it does not know. */
+.chip[data-stale='true'] {
+  color: var(--dim);
+  background: var(--panel-2);
+  border-color: var(--line-strong);
+}
+.asOf {
+  color: var(--dim);
+}
+
+@media (max-width: 560px) {
+  .chip {
+    min-height: 40px;
+    padding: 7px 13px;
+  }
+}
+@media (pointer: coarse) {
+  .chip {
+    min-height: 44px;
+    padding: 8px 14px;
+  }
+}

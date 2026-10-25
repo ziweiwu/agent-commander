@@ -26,6 +26,12 @@ a laptop or from a phone.
   When an agent is waiting on something it did not write down — a trust prompt,
   a model picker — the card says so plainly and hands you its live terminal and
   the keys instead of pretending to know the question.
+- **The next one that needs you, without the list.** With an agent open on a
+  phone, with the column collapsed or in full screen, **✋ 2 ›** counts the other
+  agents waiting on you and opens the next. After an answer the card offers the
+  one that has waited longest, and ⌥J / ⌥K / ⌥H walk the fleet from the
+  keyboard — landing on the question, never on an option a stray Enter could
+  press.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
   never resizes it: it is a capture, not a second terminal. **Earlier output**
   reads back through its scrollback a page at a time, including for a pane

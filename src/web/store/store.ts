@@ -275,6 +275,14 @@ export interface AppState {
   expectSession: string | null
   drafts: Drafts
   /**
+   * The agent this page went to by a hop — the waiting chip, the hand-off
+   * after an answer, or a ⌥ chord — rather than by choosing its card. Arriving
+   * that way focuses the question rather than its first option, so the Enter
+   * a hand was already on its way to press answers nothing (INV-2). Null once
+   * an agent is opened any other way.
+   */
+  hopped: string | null
+  /**
    * The first task the agent just started from this tab was given, under its
    * placeholder id, so its starting Chat can quote it (F5).
    *
@@ -448,6 +456,7 @@ export const useStore = create<AppState>()((set, get) => ({
   answerRefused: null,
   expectSession: null,
   drafts: { chat: {}, paste: {} },
+  hopped: null,
   startingTask: null,
 
   setSidebar: (sidebar) => {

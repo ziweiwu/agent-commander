@@ -121,6 +121,18 @@ chose to run — and it is simultaneously the one thing you open this on a phone
 to do, which is why it must be grantable without also granting arbitrary
 keystrokes.
 
+**Arriving at an agent by a hop never lands on an answer.** Opening a blocked
+agent by its card puts the keyboard on its first option, because the options
+are what it was opened for and they sit where Shift+Tab cannot reach them. The
+waiting chip, the "Next" button under a spent answer and the ⌥J/⌥K/⌥H chords
+are different: they are pressed in a run, an answer then a hop then an answer,
+and a hand that has just pressed Enter on one agent's option has its next Enter
+already on the way. Landing that on the next agent's option 1 would answer a
+question nobody had read. So a hop focuses the question itself (or the card,
+where the question is not written down), and Enter there sends nothing; the
+"Next" button never navigates on its own; and a hop replaces the history entry
+rather than adding one, so it is never something a back gesture replays.
+
 The chat's optimistic echo is display-only. A pending message is drawn
 immediately so sending feels instant, but it is sent exactly once; `reconcile()`
 only ever *removes* the local copy once the transcript confirms it, and never
@@ -270,6 +282,9 @@ the fleet; the agent on screen keeps its draft through the gap after a
   past what was offered is not a keystroke to invent
 - `test/ui/answer-card.test.tsx` — the card sends the option index and the
   prompt id, and never a raw key
+- `test/ui/hop.test.tsx` — after the hand-off and after ⌥H, focus is on the
+  question and an Enter writes no `answer` frame; opening by the card still
+  lands on option 1; the hand-off does not navigate until pressed
 - `test/chat.test.ts` — a repeated message stays visible until the transcript
   records *another* copy of it
 
@@ -2524,6 +2539,14 @@ itself can be collapsed away behind a named toggle in the topbar. All three are
 allowed *because* something reaches them: the `⋮` is on screen and named, leaving
 the sheet brings the filters back, and the toggle stays drawn while the column is
 gone. An action with nothing to reach it is not folded away, it is missing.
+
+**The waiting group goes off screen with the list, and a chip takes its
+place.** In the sheet, with the column collapsed and in full screen, "✋ 2 ›"
+counts the other agents that need you and opens the next one — in the topbar
+slot the filters leave, or full screen's own header — and the ⌥J/⌥K/⌥H chords
+work in all of them. Three shapes had lost the one fact this app exists to
+show; `test/ui/one-place.test.tsx` holds the chip to exactly one copy in each
+shape and none beside the list.
 
 The settings row used to fold only below 900px, on the stated grounds that a
 desktop has room for it. It folds at every width now — see INV-8 for the

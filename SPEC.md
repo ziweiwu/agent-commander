@@ -877,8 +877,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-NOTIFY-3** — A standing block MUST NOT re-fire; an agent that unblocks and
   blocks again is news again. A flapping agent MUST replace its own notification
   rather than stack copies. **(INV-14)**
-- **FR-NOTIFY-4** — A visible tab MUST NOT notify: the waiting group at the top
-  of the screen is already the notification. **(INV-14)**
+- **FR-NOTIFY-4** — A visible tab MUST NOT notify: what is on screen is already
+  the notification. That is the waiting group at the top of the list where the
+  list is shown, and the waiting chip (FR-NOTIFY-10) where an open agent has
+  taken the list off the screen — the phone's sheet, a collapsed column, full
+  screen. The premise used to be the group alone, which was false in exactly
+  those three shapes: nothing on screen said another agent was blocked.
+  **(INV-14)**
 - **FR-NOTIFY-5** — Notifications MUST be off by default, and enabling them MUST
   be the gesture that carries the browser's own permission prompt. Turning the
   preference on MUST start from "now" rather than replaying everything already
@@ -911,6 +916,24 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   tab left on screen silenced the phone. FR-NOTIFY-4, the browser's own
   notification, is per-device and unchanged. **(INV-14, INV-4)**
   *`presence::tests`, `routes::tests::inv14_*`, `test/ui/heartbeat.test.tsx`.*
+- **FR-NOTIFY-10** — Where the list is off the screen while an agent is open, a
+  chip ("✋ 2 ›") MUST count the *other* agents that need you and open the next
+  one. It is drawn in the topbar slot the filters leave in the sheet and with
+  the column collapsed, and in full screen's header; never beside the list, and
+  never at zero. "Need you" is the hand the card draws (`lib/hop.ts`
+  `needsYou`): reported `waiting`, a pane that is still there, and not a
+  `starting up` placeholder — counted over the whole fleet, never the filtered
+  view. Next follows the list's sort and wraps round. It opens on the Chat tab
+  and replaces the history entry, so swipe-back lands on the fleet. With the
+  socket down it MUST go muted and say "as of" the last frame **(INV-11)**. Its
+  accessible name says the count, the agent it opens and how long that one has
+  waited, in both languages. After a single question is answered from the
+  card, the card MUST offer "Next: ‹name› · waiting 14m ⌥H" — the agent ⌥H
+  opens — and MUST NOT go there until pressed. Arriving by the chip, that
+  button or a chord MUST focus the question, never its first option, so an
+  Enter already on its way answers nothing **(INV-2)**.
+  *`test/fleet-ui.test.ts`, `test/ui/hop.test.tsx`, `test/ui/one-place.test.tsx`,
+  `e2e/hop.spec.ts`.*
 
 ---
 
@@ -1038,6 +1061,14 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Enter` / `Shift+Enter` | in the message box: send / newline |
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
+| `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
+| `⌥H` | open the agent that has needed you longest, on Chat; "Nothing needs you" when none does |
+
+  The ⌥ chords work from the message box, with the column collapsed and in full
+  screen. They match the physical key (`e.code`), because macOS Option rewrites
+  the character; they do nothing while an input method is composing, and
+  nothing inside the terminal, where every key is the agent's. `Alt` stands in
+  for `⌥` on Windows and Linux. *`test/ui/hop.test.tsx`.*
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*
@@ -1138,7 +1169,7 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, NFR-SEC-11 … 14 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
@@ -1150,7 +1181,7 @@ unverified.
 | INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8, FR-NOTIFY-9 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |

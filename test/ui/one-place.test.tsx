@@ -15,9 +15,11 @@
  * sentence that makes it a decision rather than drift.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { AgentDetail } from '../../src/web/components/AgentDetail.tsx'
+import { App, FleetRoute } from '../../src/web/components/App.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 import { setViewport } from './setup.ts'
@@ -38,6 +40,8 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   setAgentGoal: vi.fn(),
   sendShiftTab: vi.fn(),
   closeAgent: vi.fn(),
+  closeAgentById: vi.fn(),
+  fetchTree: vi.fn(() => new Promise(() => {})),
 }))
 
 /**
@@ -149,6 +153,52 @@ describe('FR-CTL-12 one control, one place', () => {
       .map((el) => el.dataset.testid ?? el.tagName.toLowerCase())
       .filter((id) => !known.has(id))
     expect(unlisted, `a control the list does not account for: ${unlisted.join(', ')}`).toEqual([])
+  })
+})
+
+/**
+ * "✋ 2 ›" is one control with one home per shape, and the home is wherever the
+ * list is not: the topbar slot the filters leave in the sheet and with the
+ * column collapsed, and the header of full screen, which covers the topbar.
+ * Never beside the list, whose waiting group already says it, and never twice.
+ */
+const WAITING_CHIP = 'waiting-chip'
+
+describe('FR-CTL-12 the waiting chip has one home in each shape', () => {
+  const NARROW = (query: string) => query.includes('max-width: 900px')
+  const fleet = [
+    agent({ sessionId: 'a', status: 'waiting', paneId: '%1', lastActivityAt: Date.now() - 1000 }),
+    agent({ sessionId: 'b', status: 'waiting', paneId: '%2', lastActivityAt: Date.now() - 2000 }),
+  ]
+
+  function shell(path: string): void {
+    useStore.setState({ agents: fleet, selected: path === '/' ? null : 'a' })
+    render(
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/*" element={<App />}>
+            <Route index element={<FleetRoute />} />
+            <Route path="agent/:sessionId" element={<FleetRoute />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    )
+  }
+
+  it.each([
+    ['the fleet alone', '/', () => {}, 0],
+    ['a desktop with the list beside the agent', '/agent/a', () => {}, 0],
+    ['a desktop with the column collapsed', '/agent/a', () => useStore.setState({ sidebar: 'collapsed' }), 1],
+    ['the sheet', '/agent/a', () => setViewport(NARROW), 1],
+    ['full screen', '/agent/a', () => useStore.setState({ fullscreen: true }), 1],
+    ['full screen over the sheet', '/agent/a', () => {
+      setViewport(NARROW)
+      useStore.setState({ fullscreen: true })
+    }, 1],
+  ])('%s draws it %i time(s)', (_shape, path, arrange, times) => {
+    arrange()
+    shell(path)
+    expect(screen.queryAllByTestId(WAITING_CHIP)).toHaveLength(times)
   })
 })
 

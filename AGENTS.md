@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1632 tests: 736 Rust (the server) + 896 vitest (the web app)
+npm test              # 1688 tests: 736 Rust (the server) + 952 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 427 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -587,6 +587,14 @@ commit.
   **A continuously repainting pane makes any layout change anywhere a
   candidate**; the terminal is the most sensitive thing on the page and it is
   never the thing you changed.
+
+- **The store's `selected` lags the URL by one effect, and a fast second key
+  found the gap.** `FleetRoute` calls `focusAgent` from an effect, so for a
+  frame after `navigate` the route names one agent and the store another. The
+  e2e for ⌥J then ⌥K went to the wrong place every run on desktop, because
+  Playwright pressed the second chord inside that frame. `useHop` now calls
+  `focusAgent` itself before navigating; anything else that reads `selected` in
+  a key handler straight after a navigation has the same gap.
 
 - **`codesign` runs before the smoke test, not after.** The launched thing is a
   Mach-O now rather than a script, and on Apple silicon an *invalid* signature is
