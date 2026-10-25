@@ -58,6 +58,10 @@
         "count": 1,
         "lastAt": 1786599761000,
         "since": 1786599700000
+      },
+      "sincePrompt": {
+        "at": 1786597180000,
+        "calls": 214
       }
     },
     {
@@ -78,7 +82,10 @@
       "lastActivityAt": 1786599988000,
       "tokens": 67500,
       "subagents": 2,
-      "delegating": true
+      "delegating": true,
+      "sincePrompt": {
+        "calls": 38
+      }
     },
     {
       "sessionId": "mock-quiet-family",

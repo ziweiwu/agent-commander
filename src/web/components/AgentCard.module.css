@@ -73,6 +73,7 @@
   align-items: baseline;
   gap: 8px;
   min-width: 0;
+  container: card-top / inline-size;
 }
 
 /*
@@ -156,6 +157,24 @@
 }
 .wrap[data-rail='waiting'] .age[data-since='state'] {
   color: var(--waiting);
+}
+/**
+ * The age of a busy card, from the last prompt rather than the last write
+ * (F8). The whole sentence takes about 36 characters, which beside a name
+ * needs a top line of 440px — a tablet's card, never a desk tile's 253px or a
+ * phone's 266px. Narrower lines get the short form, so the face keeps its
+ * rows; the title has the sentence either way.
+ */
+.since .sinceFull {
+  display: none;
+}
+@container card-top (min-width: 440px) {
+  .since .sinceFull {
+    display: inline;
+  }
+  .since .sinceShort {
+    display: none;
+  }
 }
 
 /*
