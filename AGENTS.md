@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1560 tests: 708 Rust (the server) + 852 vitest (the web app)
+npm test              # 1671 tests: 736 Rust (the server) + 935 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 427 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -307,10 +307,16 @@ commit.
   percentage and cost to `sessions/<session_id>.json`; `usage.rs` reads the
   second inside the enrichment pass. `--install-statusline` is unchanged.
 - **Push goes out through `--notify`, and only out.** `push.rs` posts to an
-  ntfy topic or a Telegram bot when an agent *becomes* waiting while no browser
-  reports itself visible (INV-14, server-side); `--notify-link` is this app's
+  ntfy topic or a Telegram bot when an agent *becomes* waiting while nobody is
+  at a tab — visible *and* used within `PRESENCE_WINDOW`, from the client's
+  throttled `present` reports (`presence.rs`, INV-14 server-side; visible alone
+  let a desk tab silence the phone); `--notify-link` is this app's
   address on the phone so the push opens the card. It is off unless the flag is
-  given, and there is no channel in mock mode to point a review agent at.
+  given, and there is no channel in mock mode to point a review agent at. A
+  push leaves the machine, so it never carries conversation text: a name Claude
+  Code made up goes out as `folder · branch`, not as the card's title, and
+  `--notify-lang zh` is how the body becomes Chinese (FR-UI-12 keeps the
+  browser's language off the server).
 - **`bin` points at a launcher, not at the server.** The server is a Rust
   binary, and `bin` has to name something node can run, so
   `scripts/launch.mjs` finds `rust/target/release/agent-commander` and execs it.
@@ -389,6 +395,16 @@ commit.
   `list-panes` format string, so it costs no round trip — but it is also the
   kind of field that reads as decoration in a diff. Remove it and the terminal
   a user just opened never appears in the fleet, with nothing failing.
+- **An argv entry is not as inert as it looks, twice over.** tmux reads any
+  argument *ending* in `;` as the end of a command, even one handed to it as
+  its own argv entry: `a;` reaches the program as `a`, and an entry ending in
+  `;` with more arguments after it starts a new tmux command
+  (`-n 'x;' --model opus` fails with "unknown command: --model"). And
+  `claude`'s `--` stops option parsing but not subcommand dispatch:
+  `claude … -- doctor` runs `claude doctor`. Both were measured for the first
+  task (INV-7), which is why it goes last, gets a backslash before a trailing
+  `;`, and may not be one bare word. The name and the `-c` folder get the same
+  backslash.
 - **`Registry.enrich()` is a blind shallow merge** with two callers writing
   different field sets, and `undefined` overwrites. That is load-bearing for
   goal-clear and a trap for any new patch producer. A new `AgentPatch` field

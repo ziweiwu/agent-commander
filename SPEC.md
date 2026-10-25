@@ -648,7 +648,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 - **FR-SPAWN-1** — **New agent** MUST ask for a directory — typed, picked from a
   folder browser, or chosen from the directories already in use — plus an
-  optional name, model and permission mode, and MUST start the CLI there in a
+  optional name, model, permission mode and first task (FR-SPAWN-7), and MUST start the CLI there in a
   fresh *detached* tmux session. The permission mode MUST start on `auto`;
   choosing *Default* passes no flag, so the CLI's own setting applies.
 - **FR-SPAWN-2** — The new session MUST appear in the list within a couple of
@@ -670,7 +670,24 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-SPAWN-6** — A session that is starting, or is up and has never been
   prompted, MUST say so on its Chat tab by name and folder, rather than
   "loading" or "the server may have restarted": it keeps no transcript yet, so
-  neither of those is true. **(INV-11)** *`test/ui/chat-loading.test.tsx`.*
+  neither of those is true. A starting session this tab gave a first task MUST
+  quote it there — "Starting in ~/x with your task: …" — so the reader knows it
+  will begin without them, behind the folder-trust question if there is one.
+  **(INV-11)** *`test/ui/chat-loading.test.tsx`.*
+- **FR-SPAWN-7** — An agent MAY be started with a **first task**, so a session
+  left to work from a phone does not sit idle until someone opens it and types.
+  The field MUST be offered and sent for an agent only, never for a terminal,
+  where a shell would receive it as words. The task MUST reach `claude` as
+  exactly one argv entry after `--`, last on the command line, sent once with
+  the click that starts the agent and never again **(INV-2)**. The server MUST
+  refuse it before spawning when it is over `spawn::MAX_TASK` (tmux carries the
+  whole command line in one 16 KiB message), holds a control character other
+  than a line break **(INV-12)**, or is one bare word — `claude` dispatches a
+  word that names one of its subcommands as that subcommand even after `--`,
+  measured on 2.1.310, and `--help` does not list them all **(INV-7)**. A
+  refused task MUST stay in the field. *`spawn::inv7_a_task_*`,
+  `spawn::inv12_a_task_*`, `routes::a_read_only_credential_cannot_start_an_agent_with_a_task`,
+  `test/ui/NewAgentDialog.test.tsx`, `e2e/control.spec.ts`.*
 
 ### 6.1a Opening a plain terminal
 
@@ -862,7 +879,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   rather than stack copies. **(INV-14)**
 - **FR-NOTIFY-4** — A visible tab MUST NOT notify: what is on screen is already
   the notification. That is the waiting group at the top of the list where the
-  list is shown, and the waiting chip (FR-NOTIFY-8) where an open agent has
+  list is shown, and the waiting chip (FR-NOTIFY-10) where an open agent has
   taken the list off the screen — the phone's sheet, a collapsed column, full
   screen. The premise used to be the group alone, which was false in exactly
   those three shapes: nothing on screen said another agent was blocked.
@@ -882,7 +899,24 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Notification API MUST get a disabled toggle that says so rather than one that
   silently does nothing. **(INV-11, INV-14)** *`test/ui/notify.test.tsx`.*
 - **FR-NOTIFY-7** — Clicking a notification MUST open that agent.
-- **FR-NOTIFY-8** — Where the list is off the screen while an agent is open, a
+- **FR-NOTIFY-8** — A notification and the live region MUST name an agent by
+  the name its card leads with. A push sent off the machine (`--notify`) MUST
+  carry no conversation text: a name Claude Code derived goes out as
+  `folder · branch`, never as the session's title, description or a prompt.
+  The push body's language MUST be a server flag (`--notify-lang`), never the
+  browser's preference. **(INV-3, INV-14, FR-UI-12)** *`push::tests`,
+  `test/ui/notify.test.tsx`.*
+- **FR-NOTIFY-9** — A push MUST be held back only while some tab is on screen
+  **and** has had a pointer, key or touch within `PRESENCE_WINDOW` (three
+  minutes). A visible tab with no recent input MUST NOT hold it back, and a
+  hidden tab never does: the failure this allows is a duplicate alert, never a
+  missed one. The tab MUST report input only on `pointerdown`, `keydown` and
+  `touchstart`, at most once per `PRESENCE_REPORT_MS` (30 seconds), never on a
+  timer. Amended from "any visible tab holds every push back", because a desk
+  tab left on screen silenced the phone. FR-NOTIFY-4, the browser's own
+  notification, is per-device and unchanged. **(INV-14, INV-4)**
+  *`presence::tests`, `routes::tests::inv14_*`, `test/ui/heartbeat.test.tsx`.*
+- **FR-NOTIFY-10** — Where the list is off the screen while an agent is open, a
   chip ("✋ 2 ›") MUST count the *other* agents that need you and open the next
   one. It is drawn in the topbar slot the filters leave in the sheet and with
   the column collapsed, and in full screen's header; never beside the list, and
@@ -1135,19 +1169,19 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-NOTIFY-8, NFR-SEC-11 … 14 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
-| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
+| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-SPAWN-7, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
 | INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
-| INV-12 — input is bounded | NFR-SEC-15 |
+| INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |

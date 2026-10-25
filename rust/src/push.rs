@@ -13,21 +13,25 @@
 //! So the transition is watched here, where the fleet is, and handed to a
 //! channel that reaches a phone on its own: an ntfy topic (self-hosted or
 //! ntfy.sh) or a Telegram bot. Both are one outbound HTTPS request per
-//! transition and open no port, which is what keeps INV-3 whole; the body is
-//! the agent's name and what it is waiting for, and the click is a link into
-//! this app, so answering still goes through the card and its pane check
-//! (INV-2, INV-16) — nothing is answered from a lock screen.
+//! transition and open no port, which is what keeps INV-3 whole. The title is
+//! the agent's name, or its folder and branch where Claude Code made the name
+//! up, and never anything said in the conversation; the body is what it is
+//! waiting for, in English or with `--notify-lang zh` in Chinese; and the
+//! click is a link into this app, so answering still goes through the card and
+//! its pane check (INV-2, INV-16) — nothing is answered from a lock screen.
 //!
 //! **INV-14 holds here as it does in the browser, rule for rule.** The first
 //! fleet this tracker sees is backlog, not news: an agent that has been
 //! waiting three days when the server starts notifies nobody. A standing block
 //! never re-fires; one that unblocks and blocks again is news again. And a
-//! visible tab is already the notification, so while any browser reports
-//! itself visible the transition is consumed and no push goes — presence the
-//! client declares on its heartbeat, the same way Claude Code's own Remote
-//! Control suppresses pushes while you are at the terminal. An inferred
-//! status never fires: it can never be `waiting` (INV-11), and this checks
-//! that a second time rather than trusting it.
+//! tab somebody is at is already the notification, so while one is on screen
+//! and was used within `PRESENCE_WINDOW` the transition is consumed and no
+//! push goes — presence the client declares on its heartbeat and on input
+//! (`presence.rs`), the way Claude Code's own Remote Control holds its pushes
+//! while you are at the terminal. Visible alone is not enough: a desk tab left
+//! on screen used to silence the phone. An inferred status never fires: it
+//! can never be `waiting` (INV-11), and this checks that a second time rather
+//! than trusting it.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -100,17 +104,106 @@ pub trait Pusher: Send + Sync + 'static {
     async fn push(&self, push: &Push) -> Result<(), String>;
 }
 
+/// The language a push's body is written in, from `--notify-lang`.
+///
+/// A server flag and not the browser's language setting, because that setting
+/// is a preference and preferences never reach the server (FR-UI-12). The
+/// title needs no translating: it is a name, a folder or a branch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PushLang {
+    #[default]
+    English,
+    Chinese,
+}
+
+impl PushLang {
+    /// What `--notify-lang` accepts, and the refusal for anything else.
+    pub fn parse(spec: &str) -> Result<PushLang, String> {
+        match spec {
+            "en" => Ok(PushLang::English),
+            "zh" => Ok(PushLang::Chinese),
+            other => Err(format!("--notify-lang takes en or zh, got {other:?}")),
+        }
+    }
+
+    /// "Waiting on you", and why, when the session says why.
+    fn body(self, reason: Option<&str>) -> String {
+        match (self, reason) {
+            (PushLang::English, Some(reason)) => format!("Waiting on you — {reason}"),
+            (PushLang::English, None) => "Waiting on you".to_string(),
+            (PushLang::Chinese, Some(reason)) => format!("正在等你 — {}", reason_in_chinese(reason)),
+            (PushLang::Chinese, None) => "正在等你".to_string(),
+        }
+    }
+}
+
+/// Claude Code's own words for why a session is blocked, as the card puts
+/// them in Chinese (the `waiting*` keys in `i18n.ts`). The CLI picks from a
+/// closed table; a reason outside it goes out as the CLI wrote it.
+fn reason_in_chinese(reason: &str) -> &str {
+    match reason {
+        "dialog open" => "有对话框待确认",
+        "permission prompt" => "有权限确认待处理",
+        "input needed" => "需要输入",
+        "sandbox request" => "有沙箱请求待处理",
+        "goal proposal" => "有目标提议待确认",
+        "worker request" => "有工作请求待处理",
+        "starting up" => "正在启动",
+        other => other,
+    }
+}
+
+/// What a push is called: the agent's name, unless Claude Code made that name
+/// up, and then where the agent is working.
+///
+/// The card leads a made-up name like `ziweiwu-35` with the conversation's
+/// title, its description or its last prompt (`naming.ts`), so a push titled
+/// with the raw name named a session nobody had seen on screen. A push cannot
+/// borrow the card's choice: it leaves the machine for ntfy.sh or Telegram,
+/// and all three are conversation (INV-3). The folder and the branch are on
+/// the card's face and on the list of what is not conversation (`prefs.ts`).
+fn push_title(agent: &Agent) -> String {
+    if !name_is_derived(agent) || agent.folder.trim().is_empty() {
+        return agent.name.clone();
+    }
+    match agent.git_branch.as_deref().map(str::trim).filter(|branch| !branch.is_empty()) {
+        Some(branch) => format!("{} · {branch}", agent.folder),
+        None => agent.folder.clone(),
+    }
+}
+
+/// Whether Claude Code made this name up, decided as `isDerivedName` in
+/// `naming.ts` decides it: the session file's own word when it has one, and
+/// the shape of such names for a record from before it said.
+fn name_is_derived(agent: &Agent) -> bool {
+    agent.derived_name.unwrap_or_else(|| has_derived_shape(&agent.name))
+}
+
+/// How many hex digits Claude Code puts after the folder in a name it makes up.
+const DERIVED_SUFFIX_DIGITS: std::ops::RangeInclusive<usize> = 2..=3;
+
+/// `folder-35`, `my-repo-4af`: dash-separated letters and digits, then a short
+/// hex suffix.
+fn has_derived_shape(name: &str) -> bool {
+    let Some((stem, suffix)) = name.rsplit_once('-') else { return false };
+    let plain_word = |part: &str| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric());
+    DERIVED_SUFFIX_DIGITS.contains(&suffix.len())
+        && suffix.chars().all(|c| c.is_ascii_hexdigit())
+        && stem.split('-').all(plain_word)
+}
+
 /// INV-14's tracker, server-side.
 pub struct Notifier {
     seen: Mutex<Option<HashSet<String>>>,
     link_base: Option<String>,
+    lang: PushLang,
     pusher: Arc<dyn Pusher>,
 }
 
 impl Notifier {
-    pub fn new(pusher: Arc<dyn Pusher>, link_base: Option<String>) -> Arc<Self> {
+    pub fn new(pusher: Arc<dyn Pusher>, link_base: Option<String>, lang: PushLang) -> Arc<Self> {
         let link_base = link_base.map(|base| base.trim_end_matches('/').to_string());
-        Arc::new(Self { seen: Mutex::new(None), link_base, pusher })
+        Arc::new(Self { seen: Mutex::new(None), link_base, lang, pusher })
     }
 
     /// The agents this frame shows newly blocked, as pushes.
@@ -123,10 +216,10 @@ impl Notifier {
         }
     }
 
-    /// Note this frame's transitions and push none of them, for when a browser
-    /// reports itself visible: the screen is the notification, so the
-    /// transition is consumed rather than deferred, exactly as the browser's
-    /// own tracker does.
+    /// Note this frame's transitions and push none of them, for when somebody
+    /// is at a tab: the screen is the notification, so the transition is
+    /// consumed rather than deferred, exactly as the browser's own tracker
+    /// does.
     pub fn watched_on_screen(&self, agents: &[Agent]) {
         self.record(agents);
     }
@@ -148,13 +241,9 @@ impl Notifier {
     }
 
     fn compose(&self, agent: &Agent) -> Push {
-        let body = match agent.waiting_for.as_deref() {
-            Some(reason) => format!("Waiting on you — {reason}"),
-            None => "Waiting on you".to_string(),
-        };
         Push {
-            title: agent.name.clone(),
-            body,
+            title: push_title(agent),
+            body: self.lang.body(agent.waiting_for.as_deref()),
             link: self.link_base.as_ref().map(|base| format!("{base}/agent/{}", agent.session_id)),
             tag: agent.session_id.clone(),
         }
@@ -263,7 +352,11 @@ mod tests {
     }
 
     fn notifier() -> Arc<Notifier> {
-        Notifier::new(Arc::new(Recorder(StdMutex::new(Vec::new()))), Some("https://box.ts.net/".into()))
+        notifier_in(PushLang::English)
+    }
+
+    fn notifier_in(lang: PushLang) -> Arc<Notifier> {
+        Notifier::new(Arc::new(Recorder(StdMutex::new(Vec::new()))), Some("https://box.ts.net/".into()), lang)
     }
 
     #[test]
@@ -292,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn inv14_a_visible_tab_is_the_notification() {
+    fn inv14_a_tab_somebody_is_at_is_the_notification() {
         let n = notifier();
         n.freshly_blocked(&[agent("a", AgentStatus::Busy)]);
         n.watched_on_screen(&[agent("a", AgentStatus::Waiting)]);
@@ -309,9 +402,102 @@ mod tests {
         assert!(n.freshly_blocked(&[guessed]).is_empty());
     }
 
+    /// The pushes one agent produces by being watched become blocked.
+    fn pushes_for(n: &Notifier, waiting: &Agent) -> Vec<Push> {
+        let mut before = waiting.clone();
+        before.status = AgentStatus::Busy;
+        n.freshly_blocked(&[before]);
+        n.freshly_blocked(std::slice::from_ref(waiting))
+    }
+
+    /// A session Claude Code named itself, carrying every kind of
+    /// conversation text a card might lead with instead of that name.
+    fn derived(id: &str) -> Agent {
+        Agent {
+            name: "ziweiwu-35".into(),
+            derived_name: Some(true),
+            folder: "kb-vault".into(),
+            cwd: "/Users/me/kb-vault".into(),
+            git_branch: Some("main".into()),
+            ai_title: Some("SEEDED-AI-TITLE refactor the billing page".into()),
+            description: Some("SEEDED-DESCRIPTION make the export faster".into()),
+            last_prompt: Some("SEEDED-PROMPT here is my password hunter2".into()),
+            activity: Some("Bash: SEEDED-ACTIVITY cat ~/.ssh/id_rsa".into()),
+            ..agent(id, AgentStatus::Waiting)
+        }
+    }
+
+    #[test]
+    fn a_derived_name_is_pushed_as_its_folder_and_branch() {
+        let n = notifier();
+        let fired = pushes_for(&n, &derived("a"));
+        assert_eq!(fired[0].title, "kb-vault · main");
+
+        let mut no_branch = derived("b");
+        no_branch.git_branch = None;
+        assert_eq!(pushes_for(&n, &no_branch)[0].title, "kb-vault");
+
+        let mut unsaid = derived("c");
+        unsaid.derived_name = None;
+        assert_eq!(
+            pushes_for(&n, &unsaid)[0].title,
+            "kb-vault · main",
+            "a record from before Claude Code said where its name came from gets the card's shape check"
+        );
+
+        let mut chosen = derived("d");
+        chosen.derived_name = None;
+        chosen.name = "billing".into();
+        assert_eq!(pushes_for(&n, &chosen)[0].title, "billing", "a name somebody chose stays");
+    }
+
+    /// INV-3: a push leaves the machine for ntfy.sh or Telegram, so it may
+    /// carry only what is not conversation — the card's title, description
+    /// and prompts are exactly what it must never say.
+    #[test]
+    fn inv3_no_conversation_text_reaches_a_push() {
+        let mut fired = Vec::new();
+        for lang in [PushLang::English, PushLang::Chinese] {
+            let n = notifier_in(lang);
+            fired.extend(pushes_for(&n, &derived("a")));
+            let mut unsaid = derived("b");
+            unsaid.derived_name = None;
+            fired.extend(pushes_for(&n, &unsaid));
+        }
+        assert_eq!(fired.len(), 4);
+        for push in &fired {
+            let all = format!("{} {} {:?} {}", push.title, push.body, push.link, push.tag);
+            assert!(!all.contains("SEEDED"), "conversation text in a push: {all}");
+        }
+    }
+
+    #[test]
+    fn notify_lang_zh_writes_the_body_in_chinese() {
+        let n = notifier_in(PushLang::Chinese);
+        let fired = pushes_for(&n, &derived("a"));
+        assert_eq!(fired[0].body, "正在等你 — 有对话框待确认");
+        assert_eq!(fired[0].title, "kb-vault · main", "a folder and a branch are not translated");
+
+        let mut unsaid = derived("b");
+        unsaid.waiting_for = Some("a reason the CLI added later".into());
+        assert_eq!(pushes_for(&n, &unsaid)[0].body, "正在等你 — a reason the CLI added later");
+        unsaid.session_id = "c".into();
+        unsaid.waiting_for = None;
+        assert_eq!(pushes_for(&n, &unsaid)[0].body, "正在等你");
+
+        assert_eq!(pushes_for(&notifier(), &derived("a"))[0].body, "Waiting on you — dialog open");
+    }
+
+    #[test]
+    fn notify_lang_takes_en_or_zh_and_refuses_the_rest_in_words() {
+        assert_eq!(PushLang::parse("en"), Ok(PushLang::English));
+        assert_eq!(PushLang::parse("zh"), Ok(PushLang::Chinese));
+        assert!(PushLang::parse("fr").unwrap_err().contains("en or zh"));
+    }
+
     #[test]
     fn a_push_without_an_address_carries_no_link() {
-        let n = Notifier::new(Arc::new(Recorder(StdMutex::new(Vec::new()))), None);
+        let n = Notifier::new(Arc::new(Recorder(StdMutex::new(Vec::new()))), None, PushLang::English);
         n.freshly_blocked(&[]);
         let fired = n.freshly_blocked(&[agent("a", AgentStatus::Waiting)]);
         assert_eq!(fired[0].link, None);

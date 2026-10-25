@@ -820,7 +820,7 @@ exactly two shapes it will run. The first starts an agent:
 
 ```
 tmux new-session -d -s <generated> -c <validated dir> claude [-n <name>] \
-  [--model <alias>] [--permission-mode <mode>]
+  [--model <alias>] [--permission-mode <mode>] [-- <task>]
 ```
 
 Every value is a separate argv entry — never a shell string — and the session
@@ -831,6 +831,39 @@ anything is spawned; a missing path is refused with an error rather than
 guessed at. Model and permission mode are checked against the fixed allow-lists
 in `rust/src/types.rs` (and re-exported by `options.rs`), so an unrecognised value is refused rather than
 becoming a flag.
+
+**The first task is one free-text argv entry, after `--` and last** (F5,
+amended 2026-10-25). An agent started from a phone used to sit idle until
+someone opened it and typed, so the dialog takes a first task and the CLI gets
+it as its prompt. The name was already free text, as `-n`'s value; the task is
+one more entry of that kind, placed where it cannot be read as a flag: after
+`--`, which stops `claude`'s option parsing (measured: `-- '-n x'` arrived as
+the prompt), and last, so nothing follows it for it to modify. It is trimmed,
+and a blank one adds neither entry. `check_spawn_request` refuses three
+shapes before anything is spawned, so mock mode refuses them in the same words:
+
+- **Over `spawn::MAX_TASK` (8 KiB)**, see INV-12.
+- **A control character other than a line break** (INV-12).
+- **One bare word** of ASCII letters, digits, `-` and `_`. `--` stops option
+  parsing and does *not* stop subcommand dispatch: on Claude Code 2.1.310,
+  `claude --permission-mode default -- doctor` ran `claude doctor` and
+  exited, and the hidden `project` dispatched the same way. `claude --help`
+  leaves hidden subcommands out, and a list copied from it goes stale with
+  the next release that adds one — `purge` deletes a project's state — so the
+  shape every subcommand name has is what is refused, not a list of names.
+
+One character is rewritten rather than refused: tmux reads an argument
+*ending* in `;` as the end of a command and strips it (`a;` arrived as `a`),
+and takes `\;` as an escaped `;`. A task ending in `;` therefore gets the one
+backslash tmux takes back off, and arrives as typed; nothing else in it is
+read by tmux (`$`, `~`, `#{…}`, quotes and inner `;` all arrived as sent).
+
+The task survives the folder-trust prompt: started in a folder Claude Code had
+never trusted, `claude -- 'reply with the single word PONG'` stopped on the
+trust question, and once it was answered, answered PONG. It is sent once, with
+the click `startingRef` already guards (INV-2), and the browser keeps it only
+to quote it in the starting Chat. It is on the `claude` command line, so `ps`
+shows it while the agent runs.
 
 The second opens a **plain terminal** — a tmux session with the user's own
 shell in it and no agent at all:
@@ -899,6 +932,19 @@ true rather than aspirational.
   for a terminal carries the Attach tab and none of the controls that type
 - `routes::tests` (the new-agent group) — what the dialog chose is what reaches the spawn,
   and an unrecognised alias is a 400 rather than a 500
+- `spawn::inv7_a_task_is_one_entry_after_the_separator` (hostile tasks: a
+  leading `-`, quotes, `;`, `$()`, a line break, tmux formats),
+  `inv7_the_task_comes_after_every_flag_and_last`,
+  `inv7_a_trailing_semicolon_reaches_claude_intact`,
+  `inv7_a_task_that_names_a_subcommand_is_refused` (every name 2.1.310's
+  `--help` lists, and the hidden ones it dispatched), and
+  `inv7_a_bad_task_is_refused_before_anything_is_spawned`
+- `routes::a_read_only_credential_cannot_start_an_agent_with_a_task` — a task
+  is the spawn power, and neither `read` nor `drive` holds it
+- `test/ui/NewAgentDialog.test.tsx` ("the first task") — sent trimmed and only
+  for an agent, never offered for a terminal, kept in the field on a refusal,
+  and sent once for a burst of submits; `e2e/control.spec.ts` — mock mode
+  refuses a one-word or oversized task and keeps it in the field
 - `test/ui/NewAgentDialog.test.tsx` — a rejected directory surfaces the server's
   reason and leaves the dialog open
 
@@ -1619,6 +1665,23 @@ an agent, and a tab switching views quickly is not what this guards.
   never refused; the budget refills after a burst; and an oversized frame is
   refused before it is parsed
 
+**A first task is bounded too, and tighter than a paste** (F5). It reaches the
+agent on the `tmux new-session` command line rather than through a buffer, and
+the tmux client packs that whole command into one message: measured on tmux
+3.6a, 16,364 bytes of arguments was the most it would send, and one more was
+refused with "command too long". So `spawn::MAX_TASK` is 8 KiB rather than
+`MAX_PASTE`, leaving the other half for the folder, the name and the flags,
+and the new-agent route reads a body big enough for a task at that cap after
+JSON has escaped it. A control character other than a line break is refused
+in it: a task is typed into a dialog, and the line break is the one a person
+types there.
+
+- `spawn::inv12_a_task_over_the_cap_is_refused`, counted in bytes as tmux
+  counts; `a_task_at_the_cap_still_fits_on_tmux_s_command_line`;
+  `inv12_a_task_with_a_control_character_is_refused`
+- `routes::a_first_task_at_its_cap_reaches_the_spawn_whole` — a task at the
+  cap made of characters JSON doubles still fits the request
+
 ## INV-13 — A delegation tree claims only what the sidecars say
 
 The fleet card draws an agent's delegates, and everything under them. Their
@@ -1863,23 +1926,69 @@ to a channel that reaches a phone on its own — an ntfy topic or a Telegram bot
 `--notify-link` a link to the card, so the answer still goes through the card
 and its pane check (INV-2, INV-16): nothing is answered from a lock screen.
 
-The four rules above bind it word for word. The first fleet the server sees is
-backlog; a standing block never re-fires; unblocked-then-blocked is news; and
-**a visible tab is the notification** — the client says on every heartbeat and
-on every `visibilitychange` whether it is on screen, and while any browser is,
-the transition is consumed and nothing is pushed, the way Claude Code's own
-Remote Control holds its pushes while you are at the terminal. An inferred
-status never fires, checked here a second time. A push that fails is logged
-and not retried: the next transition sends its own.
+**What a push may say is narrower than what the card says.** The card leads a
+name Claude Code made up (`ziweiwu-35`) with the conversation's title, its
+description or its last prompt, and a push titled with the raw name named a
+session nobody had seen on screen. The push cannot borrow the card's choice:
+it leaves the machine for ntfy.sh or Telegram, and all three are conversation
+(INV-3). So a derived name goes out as `folder · branch` — both on the card's
+face and on `prefs.ts`'s list of what is not conversation — and a name
+somebody chose goes out as it is. The browser's own notification and the
+screen-reader live region stay on the device, so they use the card's name
+(`displayName`). The body is English unless the server is started with
+`--notify-lang zh`; a server flag, because the browser's language is a
+preference and preferences never reach the server (FR-UI-12).
+
+The four rules above bind it word for word, but for the last. The first fleet
+the server sees is backlog; a standing block never re-fires;
+unblocked-then-blocked is news; and **a tab somebody is at is the
+notification** — while one is, the transition is consumed and nothing is
+pushed, the way Claude Code's own Remote Control holds its pushes while you are
+at the terminal. An inferred status never fires, checked here a second time. A
+push that fails is logged and not retried: the next transition sends its own.
+
+**Amended again: on screen is not the same as somebody there.** The rule used
+to be "a visible tab is the notification", with visibility the only signal: the
+client says on every heartbeat and every `visibilitychange` whether it is on
+screen. A desk tab left on screen when its owner walked away therefore
+silenced every push to the phone in their pocket — the one device the push
+exists for. So for the push, a tab counts as somebody being there only while it
+is visible **and** has felt a pointer, a key or a touch within
+`PRESENCE_WINDOW` (three minutes, `presence.rs`). The client reports that input
+as a `present` message on `pointerdown`, `keydown` and `touchstart`, at most
+once per `PRESENCE_REPORT_MS` (30 seconds) and never on a timer (INV-4); the
+server keeps `last_input_at` per tab. A hidden tab never counts, however
+recently it was used. A visible tab nobody has touched lately does not hold a
+push back, so the mistake this rule makes is a duplicate — the phone buzzes
+beside a screen already showing the block — and never a missed alert. The one
+miss it still allows is bounded by the window: a block that begins within three
+minutes of the last touch is taken as seen. The browser's own notification is
+per-device and unchanged: it still stands down while its own tab is visible.
 
 - `push::tests` — the first frame is backlog; a watched transition fires once,
-  and again only after it clears; a visible tab consumes it; an inferred
+  and again only after it clears; a tab somebody is at consumes it; an inferred
   status never fires; a push without an address carries no link; the channel
   spec is parsed and refused in words; an ntfy push is one outbound POST with
-  the documented headers, against a local server
-- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`
+  the documented headers, against a local server; a derived name is pushed as
+  its folder and branch (`a_derived_name_is_pushed_as_its_folder_and_branch`);
+  seeded title, description, prompt and activity strings reach no push in
+  either language (`inv3_no_conversation_text_reaches_a_push`); and
+  `--notify-lang zh` writes the body in Chinese
+- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`,
+  `options::a_push_language_is_en_or_zh_and_needs_a_channel`
+- `test/ui/notify.test.tsx` — the notification is titled with `displayName`,
+  and the live region names agents the same way
+- `presence::tests` — a visible tab nobody has used is nobody; one used just
+  now is somebody; a hidden tab never is; input older than `PRESENCE_WINDOW`
+  lapses; one attended tab among idle ones is enough, and a closed one counts
+  for nothing
+- `routes::tests::inv14_*` — over a real socket: a tab that only says it is
+  visible no longer holds a push back, one that also reports input does, and a
+  hidden one never does
 - `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
-  connect, on every beat, and the moment that changes
+  connect, on every beat, and the moment that changes; it reports a pointer, a
+  key or a touch at most once per `PRESENCE_REPORT_MS`, never on a timer or for
+  any other event, and at once on a new socket
 
 ## INV-15 — A silent family is a question, never a verdict
 

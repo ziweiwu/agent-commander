@@ -52,6 +52,7 @@ export function resetStore(): void {
     exited: [],
     drafts: { chat: {}, paste: {} },
     hopped: null,
+    startingTask: null,
   })
 }
 

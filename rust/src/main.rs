@@ -41,6 +41,7 @@ mod pane_props;
 mod pictures;
 mod pending;
 mod poll;
+mod presence;
 mod procs;
 mod push;
 mod registry;

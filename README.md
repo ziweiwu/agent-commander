@@ -119,10 +119,15 @@ agent-commander --token auto \
 ```
 
 For Telegram use `--notify telegram:<chat_id>` with the bot token in
-`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`.
-A push fires only when an agent *becomes* blocked while no browser tab is on
-screen — the open tab is the notification otherwise — and only ever goes out;
-nothing is answered from the lock screen.
+`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`,
+and add `--notify-lang zh` for a push written in Chinese. A session Claude Code
+named itself is pushed as its folder and branch (`kb-vault · main`), never as
+anything said in the conversation, since the push goes through ntfy.sh or
+Telegram.
+A push fires only when an agent *becomes* blocked while nobody is at a browser
+tab — one on screen and touched in the last three minutes is the notification
+otherwise, so a desk tab left open does not silence the phone — and only ever
+goes out; nothing is answered from the lock screen.
 
 ## Use
 
@@ -142,7 +147,8 @@ nothing is answered from the lock screen.
 6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
 Start a new agent — or a plain terminal — with **+ New agent**; it opens as
-soon as it starts and stays open while it registers. Prune sessions you opened
+soon as it starts and stays open while it registers. Give an agent a **first
+task** there and it starts working on it straight away. Prune sessions you opened
 and never used with **Prune**. The fleet shows Claude sessions at rest; the
 select in the header switches it to **terminals** alone, or to **both**.
 

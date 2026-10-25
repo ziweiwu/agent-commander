@@ -104,6 +104,11 @@ use crate::control::{check_key, SendableKey, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUC
 /// The most a JSON request body may be.
 const MAX_BODY: usize = 8 * 1024;
 
+/// The most a new-agent request body may be: the ordinary bound, plus room
+/// for a first task at `spawn::MAX_TASK` after JSON has escaped it — a `"`, a
+/// `\` and a line break each travel as two bytes, so the task can double.
+const MAX_NEW_AGENT_BODY: usize = MAX_BODY + 2 * crate::spawn::MAX_TASK;
+
 const MIME_JSON: &str = "application/json; charset=utf-8";
 
 fn mime_for(path: &Path) -> &'static str {
@@ -339,34 +344,13 @@ pub enum Watched {
 #[derive(Default)]
 pub struct Viewers {
     count: AtomicUsize,
-    /// How many of them say their tab is on screen. The push channel's
-    /// "a visible tab is the notification" (INV-14) reads this.
-    visible: AtomicUsize,
+    /// Which tabs are on screen and lately used. The push channel's "somebody
+    /// at a tab is the notification" (INV-14) reads this.
+    pub presence: crate::presence::Presence,
     listener: std::sync::OnceLock<Box<dyn Fn(Watched) + Send + Sync>>,
 }
 
 impl Viewers {
-    /// Whether any connected browser reports itself visible right now.
-    pub fn any_visible(&self) -> bool {
-        self.visible.load(Ordering::SeqCst) > 0
-    }
-
-    fn shown(&self) {
-        self.visible.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn hidden(&self) {
-        // Saturating: a socket that never said "visible" cannot take the
-        // count below zero on its way out.
-        //
-        // Rust 1.99 deprecated `fetch_update` in favour of `try_update`, which
-        // is only stable since 1.95; `rust-version` is older than that, so
-        // clippy's `incompatible_msrv` refuses the new name. Same method,
-        // older spelling, until the floor moves past 1.95.
-        #[allow(deprecated)]
-        let _ = self.visible.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
-    }
-
     /// Run this whenever the fleet goes from unwatched to watched, or back.
     pub fn on_change(&self, listener: Box<dyn Fn(Watched) + Send + Sync>) {
         let _ = self.listener.set(listener);
@@ -1335,7 +1319,13 @@ async fn send_file(file: &Path, stamp: MockStamp) -> Option<Response> {
 
 /// Read a small JSON body, refusing anything oversized.
 async fn read_json(body: Body) -> Result<serde_json::Value, Failure> {
-    let bytes: Bytes = axum::body::to_bytes(body, MAX_BODY)
+    read_json_within(body, MAX_BODY).await
+}
+
+/// `read_json` with the bound left to the caller, for the one request — a new
+/// agent — that may carry a first task several times the ordinary bound.
+async fn read_json_within(body: Body, limit: usize) -> Result<serde_json::Value, Failure> {
+    let bytes: Bytes = axum::body::to_bytes(body, limit)
         .await
         .map_err(|_| Failure::server("request body too large"))?;
     serde_json::from_slice(&bytes).map_err(|e| Failure::server(e.to_string()))
@@ -1352,7 +1342,7 @@ fn status_for(failure: &Failure) -> StatusCode {
 
 /// The request body, or the failure the caller should be told about.
 async fn new_agent_request(body: Body) -> Result<NewAgentRequest, Failure> {
-    let parsed = read_json(body).await?;
+    let parsed = read_json_within(body, MAX_NEW_AGENT_BODY).await?;
     if !parsed.get("cwd").map(|value| value.is_string()).unwrap_or(false) {
         return Err(Failure::caller("cwd is required"));
     }
@@ -1743,8 +1733,8 @@ struct ViewerState {
 struct Viewer {
     tx: UnboundedSender<ServerMessage>,
     state: Mutex<ViewerState>,
-    /// Whether this tab last said it was on screen; see `Viewers::visible`.
-    visible: std::sync::atomic::AtomicBool,
+    /// This tab in `Viewers::presence`.
+    tab: crate::presence::TabId,
     /// INV-12: how much this tab may still ask of a live agent. Outside the
     /// state lock because it has its own, and because a refusal must not have
     /// to wait on a pane read holding that one.
@@ -1752,25 +1742,9 @@ struct Viewer {
 }
 
 impl Viewer {
-    /// Record that the tab is on screen, moving the fleet-wide count only on
-    /// a change.
-    fn came_on_screen(&self, viewers: &Viewers) {
-        if !self.visible.swap(true, Ordering::SeqCst) {
-            viewers.shown();
-        }
-    }
-
-    /// Record that the tab is off screen — hidden, or gone — moving the
-    /// fleet-wide count only on a change.
-    fn went_off_screen(&self, viewers: &Viewers) {
-        if self.visible.swap(false, Ordering::SeqCst) {
-            viewers.hidden();
-        }
-    }
-
-    fn new(tx: UnboundedSender<ServerMessage>) -> Self {
+    fn new(tx: UnboundedSender<ServerMessage>, tab: crate::presence::TabId) -> Self {
         Self {
-            visible: std::sync::atomic::AtomicBool::new(false),
+            tab,
             tx,
             state: Mutex::new(ViewerState {
                 focused: None,
@@ -1865,7 +1839,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
         }
     });
 
-    let viewer = Arc::new(Viewer::new(tx));
+    let viewer = Arc::new(Viewer::new(tx, app.viewers.presence.arrive()));
     let (off, off_limits) = subscribe_viewer(&viewer, &app);
     app.viewers.joined();
 
@@ -1919,7 +1893,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     off_limits();
     viewer.clear_timers();
     writer.abort();
-    viewer.went_off_screen(&app.viewers);
+    app.viewers.presence.gone(viewer.tab);
     app.viewers.left();
 }
 
@@ -2005,23 +1979,29 @@ struct KeyRequest {
     confirmed: Option<bool>,
 }
 
-async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
-    // A pong asks for nothing, so it is answered before the gate rather than
-    // inside it. Running it through `grant_for_message` would make a server
-    // started with a narrow `--grant` reply to its own heartbeat with an
-    // error, once every beat, for the life of the connection.
-    if let ClientMessage::Pong { visible } = &msg {
-        match visible.unwrap_or(false) {
-            true => viewer.came_on_screen(&app.viewers),
-            false => viewer.went_off_screen(&app.viewers),
-        }
-        return;
+/// Take the messages that ask for nothing, and say whether `msg` was one.
+///
+/// They are answered before the grant gate rather than inside it. Running a
+/// pong through `grant_for_message` would make a server started with a narrow
+/// `--grant` reply to its own heartbeat with an error, once every beat, for the
+/// life of the connection. The client's own probe is answered the same way
+/// and for the same reason — a tab that has just come back asks, and a narrow
+/// grant must not turn the answer into an error — and so is a tab saying it
+/// was used, which reaches no agent and only holds pushes back (INV-14).
+fn answered_before_the_gate(msg: &ClientMessage, viewer: &Viewer, app: &App) -> bool {
+    let presence = &app.viewers.presence;
+    match msg {
+        ClientMessage::Pong { visible: Some(true) } => presence.on_screen(viewer.tab),
+        ClientMessage::Pong { .. } => presence.off_screen(viewer.tab),
+        ClientMessage::Present => presence.touched(viewer.tab, std::time::Instant::now()),
+        ClientMessage::Ping => viewer.send(ServerMessage::Pong),
+        _ => return false,
     }
-    // The client's own probe, answered the same way and for the same reason:
-    // a tab that has just come back asks, and a narrow grant must not turn
-    // the answer into an error.
-    if matches!(msg, ClientMessage::Ping) {
-        viewer.send(ServerMessage::Pong);
+    true
+}
+
+async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    if answered_before_the_gate(&msg, viewer, app) {
         return;
     }
     // The socket is checked per message rather than at the handshake: one
@@ -2054,7 +2034,7 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
             on_history(&session_id, (before, lines), viewer, app).await;
         }
         // Returned above, before the grant gate.
-        ClientMessage::Pong { .. } | ClientMessage::Ping => {}
+        ClientMessage::Pong { .. } | ClientMessage::Ping | ClientMessage::Present => {}
     }
 }
 
@@ -2072,7 +2052,7 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
         | ClientMessage::Key { session_id, .. }
         | ClientMessage::Answer { session_id, .. }
         | ClientMessage::History { session_id, .. } => Some(session_id),
-        ClientMessage::Pong { .. } | ClientMessage::Ping => None,
+        ClientMessage::Pong { .. } | ClientMessage::Ping | ClientMessage::Present => None,
     }
 }
 
@@ -2085,7 +2065,8 @@ fn grant_for_message(message: &ClientMessage) -> Grant {
         // rather than left to a wildcard so that adding a message cannot
         // acquire `Read` by omission.
         | ClientMessage::Pong { .. }
-        | ClientMessage::Ping => Grant::Read,
+        | ClientMessage::Ping
+        | ClientMessage::Present => Grant::Read,
         ClientMessage::Answer { .. } => Grant::Respond,
         ClientMessage::Paste { .. } | ClientMessage::Key { .. } => Grant::Drive,
     }
@@ -3346,8 +3327,11 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     if let Some(spec) = &opts.notify {
         let channel = crate::push::Channel::parse(spec, &|key| std::env::var(key).ok())
             .map_err(|why| anyhow::anyhow!(why))?;
-        let notifier =
-            crate::push::Notifier::new(crate::push::HttpPusher::new(channel), opts.notify_link.clone());
+        let notifier = crate::push::Notifier::new(
+            crate::push::HttpPusher::new(channel),
+            opts.notify_link.clone(),
+            opts.notify_lang.unwrap_or_default(),
+        );
         push_on_transitions(&app, notifier);
     }
     let count = app.deps.source.list().len();
@@ -3386,12 +3370,13 @@ fn fleet_for(
 }
 
 /// INV-14, server-side: every fleet change goes past the push tracker, which
-/// fires only for a transition it watched while no browser was visible. The
-/// listener stays for the life of the server, so its handle is let go.
+/// fires only for a transition it watched while nobody was at a tab — on
+/// screen and used within `PRESENCE_WINDOW` (`presence.rs`). The listener
+/// stays for the life of the server, so its handle is let go.
 fn push_on_transitions(app: &Arc<App>, notifier: Arc<crate::push::Notifier>) {
     let viewers = app.clone();
     let _keep = app.deps.source.on_change(Box::new(move |agents| {
-        if viewers.viewers.any_visible() {
+        if viewers.viewers.presence.anyone_there(std::time::Instant::now()) {
             notifier.watched_on_screen(&agents);
             return;
         }
@@ -4970,16 +4955,12 @@ mod tests {
     #[tokio::test]
     async fn refuses_an_oversized_request_body() {
         let h = plain(FakePanes::new()).await;
-        let payload = format!("{{\"cwd\":\"/tmp\",\"name\":\"{}\"}}", "x".repeat(MAX_BODY * 2));
-        let res = post(
-            h.port,
-            "/api/agents",
-            "Content-Type: application/json\r\n",
-            Some(&payload),
-        )
-        .await;
-        assert!(status(&res).contains("500"), "{}", status(&res));
-        assert!(body(&res).contains("too large"), "{}", body(&res));
+        for (path, limit) in [("/api/terminals", MAX_BODY), ("/api/agents", MAX_NEW_AGENT_BODY)] {
+            let payload = format!("{{\"cwd\":\"/tmp\",\"name\":\"{}\"}}", "x".repeat(limit));
+            let res = post(h.port, path, "Content-Type: application/json\r\n", Some(&payload)).await;
+            assert!(status(&res).contains("500"), "{path}: {}", status(&res));
+            assert!(body(&res).contains("too large"), "{path}: {}", body(&res));
+        }
     }
 
     /* ---- INV-12 and INV-6: the guards must actually be reached ---- */
@@ -6106,6 +6087,75 @@ mod tests {
         assert_eq!(control_route("/api/agents"), None);
     }
 
+    /// Pushes a server handed to its channel, kept rather than sent.
+    struct Delivered(Mutex<Vec<crate::push::Push>>);
+
+    #[async_trait]
+    impl crate::push::Pusher for Delivered {
+        async fn push(&self, push: &crate::push::Push) -> Result<(), String> {
+            self.0.lock().unwrap().push(push.clone());
+            Ok(())
+        }
+    }
+
+    /// Move the harness agent to `status` and tell every listener, as the
+    /// registry does when a session file changes.
+    fn fleet_moves_to(source: &FakeSource, status: AgentStatus) {
+        let agents = {
+            let mut agents = source.agents.lock().unwrap();
+            agents[0].status = status;
+            agents.clone()
+        };
+        for listener in source.listeners.lock().unwrap().iter().flatten() {
+            listener(agents.clone());
+        }
+    }
+
+    /// How many pushes go out when the harness agent becomes blocked while
+    /// one tab has said `reports` over its socket.
+    async fn pushes_while_a_tab_says(reports: &[serde_json::Value]) -> usize {
+        let h = plain(FakePanes::new()).await;
+        let delivered = Arc::new(Delivered(Mutex::new(Vec::new())));
+        let notifier = crate::push::Notifier::new(delivered.clone(), None, crate::push::PushLang::English);
+        push_on_transitions(&h.app, notifier);
+        let mut client = open(h.port).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "fleet")).await.is_some());
+        for report in reports {
+            send_json(&mut client, report.clone()).await;
+        }
+        send_json(&mut client, serde_json::json!({ "type": "ping" })).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "pong")).await.is_some(), "every report was read");
+
+        fleet_moves_to(&h.source, AgentStatus::Busy);
+        fleet_moves_to(&h.source, AgentStatus::Waiting);
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        let sent = delivered.0.lock().unwrap().len();
+        sent
+    }
+
+    /// INV-14, amended: a desk tab left on screen silenced every push to the
+    /// phone. Visible is no longer enough to be the notification; somebody has
+    /// to have used the tab lately.
+    #[tokio::test]
+    async fn inv14_a_visible_tab_nobody_has_touched_does_not_hold_back_a_push() {
+        let visible = serde_json::json!({ "type": "pong", "visible": true });
+        assert_eq!(pushes_while_a_tab_says(&[visible]).await, 1);
+    }
+
+    #[tokio::test]
+    async fn inv14_a_visible_tab_somebody_just_used_holds_back_the_push() {
+        let visible = serde_json::json!({ "type": "pong", "visible": true });
+        let used = serde_json::json!({ "type": "present" });
+        assert_eq!(pushes_while_a_tab_says(&[visible, used]).await, 0);
+    }
+
+    #[tokio::test]
+    async fn inv14_a_hidden_tab_never_holds_back_a_push() {
+        let used = serde_json::json!({ "type": "present" });
+        let hidden = serde_json::json!({ "type": "pong", "visible": false });
+        assert_eq!(pushes_while_a_tab_says(&[used, hidden]).await, 1);
+    }
+
     /// A script Vite named after its content, with a `-` and a `_` in the hash
     /// because its alphabet has both.
     const HASHED_JS: &str = "index-Cs-nH_0A.js";
@@ -6240,5 +6290,71 @@ mod tests {
             assert!(!body(&res).contains("TOP SECRET"), "escaped with {path}");
         }
         let _ = std::fs::remove_file(outside);
+    }
+
+    /// Records each new-agent request that reached the spawn, and starts nothing.
+    #[derive(Default)]
+    struct RecordingSpawn {
+        started: Mutex<Vec<NewAgentRequest>>,
+    }
+
+    #[async_trait]
+    impl SpawnApi for RecordingSpawn {
+        async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure> {
+            let cwd = req.cwd.clone();
+            self.started.lock().unwrap().push(req);
+            Ok(SpawnResult { tmux_session: "test-session".into(), cwd })
+        }
+        async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure> {
+            Ok(SpawnResult { tmux_session: "test-terminal".into(), cwd: req.cwd })
+        }
+    }
+
+    /// A server under `grants` whose spawns are recorded rather than run.
+    async fn spawning(grants: Grants) -> (Harness, Arc<RecordingSpawn>) {
+        let parts = harness_parts(FakePanes::new());
+        let spawn = Arc::new(RecordingSpawn::default());
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        {
+            let app = Arc::get_mut(&mut app).expect("sole owner");
+            app.spawn = spawn.clone();
+            app.grants = grants;
+        }
+        let served = app.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let HarnessParts { panes, source, control, web_root } = parts;
+        (Harness { port, panes, source, control, web_root, app: served }, spawn)
+    }
+
+    /// §7: a first task is part of starting an agent, so it takes the spawn
+    /// power. Neither a read-only credential nor one that may drive a running
+    /// agent can start one with a task, and nothing reaches the spawn.
+    #[tokio::test]
+    async fn a_read_only_credential_cannot_start_an_agent_with_a_task() {
+        let payload = r#"{"cwd":"/tmp","task":"fix the login bug"}"#;
+        for grants in ["read", "read,respond,drive"] {
+            let (h, spawn) = spawning(Grants::parse(grants).unwrap()).await;
+            let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(payload)).await;
+            assert!(status(&res).contains("403"), "{grants}: {}", status(&res));
+            assert!(spawn.started.lock().unwrap().is_empty(), "{grants}");
+        }
+    }
+
+    /// A first task at its cap, made of the characters JSON doubles, still fits
+    /// the request and reaches the spawn whole. The ordinary 8 KiB body bound
+    /// refused it as "too large".
+    #[tokio::test]
+    async fn a_first_task_at_its_cap_reaches_the_spawn_whole() {
+        let (h, spawn) = spawning(Grants::ALL).await;
+        let task = format!("say {}", "\"\\\n".repeat((crate::spawn::MAX_TASK - 4) / 3));
+        let payload = serde_json::json!({ "cwd": "/tmp", "task": task }).to_string();
+        assert!(payload.len() > MAX_BODY, "the case the old bound refused");
+        let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(&payload)).await;
+        assert!(status(&res).contains("200"), "{}: {}", status(&res), body(&res));
+        assert_eq!(spawn.started.lock().unwrap()[0].task.as_deref(), Some(task.as_str()));
     }
 }

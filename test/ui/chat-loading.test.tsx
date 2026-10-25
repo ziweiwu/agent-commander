@@ -75,6 +75,19 @@ describe('emptyNotice', () => {
       expect(emptyNotice({ timelineAt: null, timelineStalledAt, fresh: 'starting' })).toBe('chatStarting')
     }
   })
+
+  /**
+   * F5: the task is quoted only while the agent is still starting. Once it
+   * has registered, the transcript is the record of what it was given.
+   */
+  it('quotes a first task only while the agent is starting', () => {
+    const task = 'fix the login bug'
+    const unread = { timelineAt: null, timelineStalledAt: null }
+    expect(emptyNotice({ ...unread, fresh: 'starting', task })).toBe('chatStartingTask')
+    expect(emptyNotice({ ...unread, fresh: 'starting', task: '' })).toBe('chatStarting')
+    expect(emptyNotice({ ...unread, fresh: 'unprompted', task })).toBe('chatFirstPrompt')
+    expect(emptyNotice({ timelineAt: 1, timelineStalledAt: null, task })).toBe('chatEmpty')
+  })
 })
 
 describe('the Chat tab', () => {
@@ -129,5 +142,39 @@ describe('the Chat tab', () => {
     useStore.setState({ conn: 'open', selected: 'pending:claude-1', timelineAt: null, timelineStalledAt: null })
     renderApp(<Chat agent={agent({ sessionId: 'pending:claude-1', status: 'waiting', paneId: '%2' })} />)
     expect(screen.getByTestId('chat-notice').textContent).toMatch(/is starting in .*Attach tab/)
+  })
+
+  /**
+   * F5: a session started with a first task says which task, so the reader
+   * knows it will begin without them — and that a trust prompt in a new
+   * folder still stands in front of it.
+   */
+  it('quotes the first task of a session this tab started', () => {
+    const text = 'fix the login bug\nthen open a pull request'
+    useStore.setState({
+      conn: 'open',
+      selected: 'pending:claude-1',
+      timelineAt: null,
+      timelineStalledAt: null,
+      startingTask: { sessionId: 'pending:claude-1', text },
+    })
+    renderApp(<Chat agent={agent({ sessionId: 'pending:claude-1', status: 'waiting', paneId: '%2', cwd: '/tmp/x' })} />)
+    const notice = screen.getByTestId('chat-notice').textContent ?? ''
+    expect(notice).toMatch(/is starting in \/tmp\/x with your task:/)
+    expect(notice).toMatch(/Attach tab/)
+    expect(screen.getByTestId('chat-starting-task').textContent).toBe(text)
+  })
+
+  it('quotes nothing for a placeholder this tab did not start with that task', () => {
+    useStore.setState({
+      conn: 'open',
+      selected: 'pending:claude-2',
+      timelineAt: null,
+      timelineStalledAt: null,
+      startingTask: { sessionId: 'pending:claude-1', text: 'fix the login bug' },
+    })
+    renderApp(<Chat agent={agent({ sessionId: 'pending:claude-2', status: 'waiting', paneId: '%2' })} />)
+    expect(screen.queryByTestId('chat-starting-task')).toBeNull()
+    expect(screen.getByTestId('chat-notice').textContent).not.toMatch(/your task/)
   })
 })

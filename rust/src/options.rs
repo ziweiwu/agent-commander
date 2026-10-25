@@ -178,6 +178,10 @@ pub struct Options {
     pub notify: Option<String>,
     /// This app's address on the phone, so a push can open the card itself.
     pub notify_link: Option<String>,
+    /// `--notify-lang`: what language a push's body is in. A flag rather than
+    /// the browser's language, because no preference reaches the server
+    /// (FR-UI-12). English when absent.
+    pub notify_lang: Option<crate::push::PushLang>,
 }
 
 impl Default for Options {
@@ -200,6 +204,7 @@ impl Default for Options {
             print_url: false,
             notify: None,
             notify_link: None,
+            notify_lang: None,
         }
     }
 }
@@ -405,6 +410,7 @@ pub fn parse_args_with_token_file(argv: &[String], token_path: &Path) -> Result<
             "--print-url" => opts.print_url = true,
             "--notify" => opts.notify = Some(take_value(&mut i)?),
             "--notify-link" => opts.notify_link = Some(take_value(&mut i)?),
+            "--notify-lang" => opts.notify_lang = Some(crate::push::PushLang::parse(&take_value(&mut i)?)?),
             "--dev" => opts.dev = true,
             "--help" | "-h" => return Ok(Parsed::Help(help_text())),
             "--version" | "-V" => return Ok(Parsed::Version(version_text())),
@@ -482,6 +488,7 @@ fn finalise_options(mut opts: Options, token_path: &Path) -> Result<Parsed, Stri
     }
     refuse_an_open_bind_without_a_token(&opts)?;
     refuse_a_push_address_nobody_could_open(&opts)?;
+    refuse_a_push_language_without_a_channel(&opts)?;
     Ok(Parsed::Options(opts))
 }
 
@@ -516,6 +523,15 @@ fn refuse_a_push_address_nobody_could_open(opts: &Options) -> Result<(), String>
             Err("--notify-link only means something with --notify".to_string())
         }
         _ => Ok(()),
+    }
+}
+
+/// A language for pushes that are never sent is a typo for a flag that was
+/// meant, so it is refused rather than ignored.
+fn refuse_a_push_language_without_a_channel(opts: &Options) -> Result<(), String> {
+    match opts.notify_lang.is_some() && opts.notify.is_none() {
+        true => Err("--notify-lang only means something with --notify".to_string()),
+        false => Ok(()),
     }
 }
 
@@ -583,6 +599,7 @@ pub fn help_text() -> String {
         "                     ~/.claude/agent-commander/telegram-token".to_string(),
         "      --notify-link <url>  this app's address on the phone, so a push opens the card"
             .to_string(),
+        "      --notify-lang <en|zh>  the language a push is written in (default en)".to_string(),
         "      --mock         serve fixture agents, touching nothing real".to_string(),
         "      --mock-transitions  like --mock, but statuses change on a timer".to_string(),
         "      --mock-empty   like --mock, with no agents at all".to_string(),
@@ -709,6 +726,17 @@ mod tests {
             .unwrap_err()
             .contains("wants the URL"));
         assert!(parse(&["--notify-link", "https://box.ts.net"]).unwrap_err().contains("--notify"));
+    }
+
+    #[test]
+    fn a_push_language_is_en_or_zh_and_needs_a_channel() {
+        let zh = parse(&["--notify", "https://ntfy.sh/t", "--notify-lang", "zh"]).unwrap();
+        assert_eq!(zh.notify_lang, Some(crate::push::PushLang::Chinese));
+        assert_eq!(parse(&["--notify", "https://ntfy.sh/t"]).unwrap().notify_lang, None);
+        assert!(parse(&["--notify", "https://ntfy.sh/t", "--notify-lang", "zh-TW"])
+            .unwrap_err()
+            .contains("en or zh"));
+        assert!(parse(&["--notify-lang", "zh"]).unwrap_err().contains("--notify"));
     }
 
     #[test]

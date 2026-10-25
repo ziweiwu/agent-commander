@@ -9,11 +9,13 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  blockedAnnouncement,
   freshlyBlocked,
   notifyBlocked,
   resetBlockedTracking,
   shouldNudge,
 } from '../../src/web/lib/notify.ts'
+import { displayName } from '../../src/web/lib/naming.ts'
 import { agent } from './helpers.tsx'
 import type { Agent } from '../../src/shared/types.ts'
 
@@ -133,11 +135,34 @@ describe('INV-14 what reaches the OS', () => {
     expect(FakeNotification.instances).toHaveLength(0)
   })
 
+  it('is titled with the name the card shows, not the one Claude Code made up', () => {
+    const named = (status: Agent['status']): Agent =>
+      agent({ sessionId: 'a', status, name: 'ziweiwu-35', derivedName: true, aiTitle: 'Refactor the billing page' })
+    notifyBlocked([named('idle')], { enabled: true, lang: 'en' })
+    notifyBlocked([named('waiting')], { enabled: true, lang: 'en' })
+
+    expect(FakeNotification.instances.map((n) => n.title)).toEqual([displayName(named('waiting'))])
+    expect(FakeNotification.instances[0]?.title).toBe('Refactor the billing page')
+  })
+
   it('respects a permission revoked after the preference was stored', () => {
     FakeNotification.permission = 'denied'
     notifyBlocked([idle('a')], { enabled: true, lang: 'en' })
     notifyBlocked([waiting('a')], { enabled: true, lang: 'en' })
 
     expect(FakeNotification.instances).toHaveLength(0)
+  })
+})
+
+/**
+ * The screen reader's half of the same rule: the live region announces a new
+ * block by the name the card leads with, which a sighted reader would look
+ * for, rather than the session id Claude Code made up.
+ */
+describe('the live region names agents as their cards do', () => {
+  it('announces each newly blocked agent by its displayed name', () => {
+    const made = agent({ sessionId: 'a', status: 'waiting', name: 'ziweiwu-35', derivedName: true, aiTitle: 'Refactor the billing page' })
+    const chosen = agent({ sessionId: 'b', status: 'waiting', name: 'billing' })
+    expect(blockedAnnouncement([made, chosen])).toBe('2: Refactor the billing page, billing')
   })
 })

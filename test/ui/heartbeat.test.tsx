@@ -15,7 +15,7 @@
  * cover it, because it early-returns when the selection has not changed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { connect } from '../../src/web/store/transport.ts'
+import { connect, PRESENCE_REPORT_MS } from '../../src/web/store/transport.ts'
 import { useStore } from '../../src/web/store/store.ts'
 
 /** Enough of a socket to open, carry text, and be closed. */
@@ -164,6 +164,63 @@ describe('INV-4 the heartbeat', () => {
     // check the module's `socket` would be nulled and `send()` would refuse
     // for the life of the page under a caption reading "reconnecting…".
     expect(useStore.getState().conn).toBe('open')
+  })
+})
+
+/**
+ * INV-14, amended: a visible tab counts as somebody being there only if it has
+ * been used lately, because a desk tab left on screen silenced every push to
+ * the phone. The tab says so on a pointer, a key or a touch — event-driven,
+ * never on a timer (INV-4) — and at most once per interval, so typing a
+ * paragraph is one message, not one per key.
+ */
+describe('INV-14 a hand on the tab', () => {
+  const presents = (socket: FakeSocket): number => socket.messages().filter((m) => m.type === 'present').length
+
+  it('tells the server, at most once per interval', () => {
+    connect()
+    const ws = FakeSocket.last!
+    ws.fire('open')
+    window.dispatchEvent(new Event('pointerdown'))
+    expect(presents(ws)).toBe(1)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' }))
+    window.dispatchEvent(new Event('touchstart'))
+    vi.advanceTimersByTime(PRESENCE_REPORT_MS - 1)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }))
+    expect(presents(ws)).toBe(1)
+
+    vi.advanceTimersByTime(1)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+    expect(presents(ws)).toBe(2)
+  })
+
+  it('says nothing on a timer, or for anything that is not a hand on the tab', () => {
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+    connect()
+    const ws = FakeSocket.last!
+    ws.fire('open')
+    for (const kind of ['mousemove', 'scroll', 'wheel', 'focus', 'resize']) window.dispatchEvent(new Event(kind))
+    document.dispatchEvent(new Event('visibilitychange'))
+    ws.deliver({ type: 'ping' })
+    vi.advanceTimersByTime(10 * PRESENCE_REPORT_MS)
+    ws.deliver({ type: 'ping' })
+    expect(presents(ws)).toBe(0)
+  })
+
+  it('tells a new socket at once, since the server forgot the old one with it', () => {
+    connect()
+    const first = FakeSocket.last!
+    first.fire('open')
+    window.dispatchEvent(new Event('pointerdown'))
+    expect(presents(first)).toBe(1)
+
+    first.close()
+    connect()
+    const second = FakeSocket.last!
+    second.fire('open')
+    window.dispatchEvent(new Event('pointerdown'))
+    expect(presents(second)).toBe(1)
   })
 })
 

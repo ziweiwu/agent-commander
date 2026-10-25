@@ -13,13 +13,14 @@ import type {
   ControlResponse,
   DirListing,
   FleetTree,
+  NewAgentRequest,
   NewAgentResponse,
   PictureResponse,
   ServerEnv,
   ServerMessage,
 } from '../../shared/types.ts'
 import { translate } from '../lib/i18n.ts'
-import { notifyBlocked, shouldNudge } from '../lib/notify.ts'
+import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
 import { useStore } from './store.ts'
 
@@ -399,9 +400,14 @@ export async function loadEnv(): Promise<void> {
   }
 }
 
+/**
+ * Start an agent, with whatever the dialog chose beside the folder — the
+ * first task included, which goes in this one request and nowhere else
+ * (INV-2).
+ */
 export async function startAgent(
   cwd: string,
-  options: { name?: string; model?: string; permissionMode?: string } = {},
+  options: Omit<NewAgentRequest, 'cwd'> = {},
 ): Promise<NewAgentResponse> {
   return spawnRequest('/api/agents', { cwd, ...options })
 }
@@ -717,7 +723,7 @@ function announceBlocked(agents: Agent[]): void {
   document.title = blocked.length ? `(${blocked.length}) agent-commander` : 'agent-commander'
   if (fresh.length === 0) return
   const region = document.getElementById('live-region')
-  if (region) region.textContent = `${fresh.length}: ${fresh.map((a) => a.name).join(', ')}`
+  if (region) region.textContent = blockedAnnouncement(fresh)
 }
 
 /**
@@ -873,13 +879,42 @@ function onScreen(): boolean {
 
 /**
  * Tell the server whether this tab is on screen, on every change. A visible
- * tab is already the notification, so while one is the server pushes nothing
- * off the machine; the moment the last one hides, a transition is news again.
- * Rides the heartbeat's own message, so an older server reads it as a pong.
+ * tab somebody is using is already the notification, so while one is the
+ * server pushes nothing off the machine; the moment the last one hides, a
+ * transition is news again. Rides the heartbeat's own message, so an older
+ * server reads it as a pong.
  */
 function tellPresence(): void {
   if (socket?.readyState !== WebSocket.OPEN) return
   send({ type: 'pong', visible: onScreen() })
+}
+
+/**
+ * How often, at most, this tab tells the server that somebody is using it.
+ *
+ * Visible alone used to hold every push back, so a desk tab left on screen
+ * silenced the phone. The server now counts a visible tab as somebody being
+ * there only within `PRESENCE_WINDOW` (three minutes, `presence.rs`) of its
+ * last report, so this sits well inside that window: a tab in steady use never
+ * lapses between two reports, and typing a paragraph is one message rather
+ * than one per key. Reports ride real input and never a timer (INV-4), so a
+ * tab nobody touches sends none at all.
+ */
+export const PRESENCE_REPORT_MS = 30_000
+/** The events that mean a person's hand is on this tab. */
+const HAND_EVENTS = ['pointerdown', 'keydown', 'touchstart'] as const
+/**
+ * When this socket last carried a report, or `null` before its first. Reset
+ * on every open: the server keeps the record per socket, so a new one has
+ * heard nothing yet.
+ */
+let presenceReportedAt: number | null = null
+
+/** Tell the server this tab was just used, unless it was told lately. */
+function reportHand(): void {
+  const now = Date.now()
+  if (presenceReportedAt !== null && now - presenceReportedAt < PRESENCE_REPORT_MS) return
+  if (send({ type: 'present' })) presenceReportedAt = now
 }
 
 /** Register the page's lifecycle as a reason to look at the socket, once. */
@@ -890,6 +925,7 @@ function listenForReturn(): void {
   document.addEventListener('visibilitychange', tellPresence)
   window.addEventListener('pageshow', onReturn)
   window.addEventListener('online', onReturn)
+  for (const kind of HAND_EVENTS) window.addEventListener(kind, reportHand, { capture: true, passive: true })
 }
 
 /**
@@ -917,6 +953,7 @@ function onOpen(): void {
   retry = 500
   lastHeard = Date.now()
   useStore.setState({ conn: 'open', reach: 'reachable' })
+  presenceReportedAt = null
   tellPresence()
   const { selected, attached } = useStore.getState()
   if (selected) {
