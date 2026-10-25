@@ -1662,6 +1662,8 @@ impl TranscriptTail {
             // The file this tracked has been replaced, so every call it was
             // holding open belongs to a transcript that no longer exists.
             self.open_calls.clear();
+            self.refusals = None;
+            self.window_since = None;
             first = true;
         }
         first
@@ -2715,6 +2717,31 @@ mod tests {
         let out = tail.read_next().await;
         assert!(out.first);
         assert_eq!(out.events.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["fresh"]);
+    }
+
+    #[tokio::test]
+    async fn a_replacement_counts_refusals_afresh_from_the_new_file() {
+        let (root, file) = projects();
+        let refusal = |id: &str| {
+            result_record(
+                id,
+                json!({ "content": "denied", "is_error": true }),
+                json!({ "permissionDecision": {
+                    "decision": "reject", "reasonType": "classifier", "source": "config",
+                } }),
+            )
+        };
+        let before = format!("{}\n{}\n{}\n", said("go"), refusal("toolu_1"), refusal("toolu_2"));
+        append(&file, before.as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        assert_eq!(tail.read_next().await.patch.refusals.expect("two refusals").count, 2);
+
+        fs::write(&file, format!("{}\n", refusal("toolu_3"))).unwrap();
+        let out = tail.read_next().await;
+        assert!(out.first);
+        let held = out.patch.refusals.expect("the new file's refusal");
+        assert_eq!(held.count, 1);
+        assert_eq!(held.since, held.last_at);
     }
 
     #[tokio::test]

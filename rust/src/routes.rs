@@ -2280,7 +2280,10 @@ async fn on_tool_result(session_id: String, tool_use_id: String, viewer: &Arc<Vi
     if viewer.state.lock().unwrap().focused.as_deref() != Some(session_id.as_str()) {
         return;
     }
-    let tail = (tool_use_id.len() <= crate::outcome::MAX_TOOL_USE_ID)
+    let well_formed = !tool_use_id.is_empty()
+        && tool_use_id.len() <= crate::outcome::MAX_TOOL_USE_ID
+        && tool_use_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    let tail = well_formed
         .then(|| app.deps.source.get(&session_id))
         .flatten()
         .and_then(|agent| (app.deps.tail_for)(&agent));
@@ -6436,6 +6439,11 @@ mod tests {
         send_json(&mut client, tool_result_request(SESSION, &too_long)).await;
         let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
         assert!(reply.get("result").is_none());
+        for malformed in ["", "toolu \"x", "toolu/../x"] {
+            send_json(&mut client, tool_result_request(SESSION, malformed)).await;
+            let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+            assert!(reply.get("result").is_none(), "{malformed:?} must not be read for");
+        }
         assert_eq!(h.panes.writes(), 0);
     }
 }
