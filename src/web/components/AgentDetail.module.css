@@ -36,7 +36,7 @@
 .head h2 {
   margin: 0;
   font-size: var(--text-md);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   flex: 1 1 6ch;
   min-width: 0;
   overflow: hidden;
@@ -56,7 +56,7 @@
  * could break across lines, which is the behaviour being removed here.
  */
 .path {
-  font: 12px var(--font-mono);
+  font: var(--text-sm) var(--font-mono);
   color: var(--dim);
   max-width: 240px;
   overflow: hidden;
@@ -200,8 +200,6 @@
 .factLabel {
   font-size: var(--text-xs);
   color: var(--faint);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 /* The same question the card asks, in the same voice (INV-15). */
 .stall {

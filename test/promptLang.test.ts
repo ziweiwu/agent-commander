@@ -7,7 +7,7 @@
  * app to get it.
  */
 import { describe, expect, it } from 'vitest'
-import { conversationLang } from '../src/web/lib/promptLang.ts'
+import { conversationLang, textLang } from '../src/web/lib/promptLang.ts'
 import type { ChatMessage } from '../src/web/lib/chat.ts'
 
 let seq = 0
@@ -79,5 +79,42 @@ describe('conversationLang', () => {
       { ...msg(''), tools: [{ id: 't1', tool: 'Read', text: 'src/app.ts', subagent: false }] },
     ]
     expect(conversationLang(messages, 'en')).toBe('zh-CN')
+  })
+})
+
+/**
+ * One message's language, for its `lang` attribute: the stylesheet's taller
+ * Chinese line and the browser's choice of CJK face both key on it. The same
+ * Han-share rule as the conversation, so a message is `zh-CN` exactly when it
+ * would have tipped the quick prompts on its own.
+ */
+describe('textLang', () => {
+  it('reads Chinese prose as zh-CN', () => {
+    expect(textLang('好的，我先看一下现在的代码结构。')).toBe('zh-CN')
+  })
+
+  it('reads English prose as en', () => {
+    expect(textLang('Getting oriented in the codebase.')).toBe('en')
+  })
+
+  it('keeps English that quotes one Chinese filename as en', () => {
+    expect(textLang('I renamed the file to 报告.md and updated every import that referred to it')).toBe(
+      'en',
+    )
+  })
+
+  it('reads mixed prose that is mostly Chinese as zh-CN', () => {
+    expect(textLang('把 README 里的 install 步骤改成中文说明')).toBe('zh-CN')
+  })
+
+  it('reads text with no letters at all as en', () => {
+    expect(textLang('')).toBe('en')
+    expect(textLang('— … !')).toBe('en')
+  })
+
+  it('agrees with conversationLang on a single message', () => {
+    for (const text of ['继续', 'continue', '用 pytest 跑一遍', 'run 测试 again please, all of them']) {
+      expect(textLang(text)).toBe(conversationLang([msg(text)], 'en'))
+    }
   })
 })

@@ -418,7 +418,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         {(multi ? MULTI_KEYS : KEYS).map((key) => (
           <Button
             key={key}
-            variant="compact"
+            variant="key"
             data-testid={`answer-key-${key}`}
             disabled={!agent.paneId || !online}
             onClick={() => nudge(key)}
@@ -429,7 +429,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         {/* INV-6: `Escape` can destroy work in flight, so it asks first — the
             same rule the terminal's own keybar follows. */}
         <Button
-          variant="compact"
+          variant="key"
           data-testid="answer-key-Escape"
           disabled={!agent.paneId || !online}
           onClick={() => {

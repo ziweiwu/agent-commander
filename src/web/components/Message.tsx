@@ -8,6 +8,7 @@ import {
   type ToolCall,
 } from '../lib/chat.ts'
 import { clock } from '../lib/format.ts'
+import { textLang } from '../lib/promptLang.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import styles from './Message.module.css'
 import { ICON_INLINE, Icon } from './ui/Icon.tsx'
@@ -214,15 +215,16 @@ function RichText({ text }: { text: string }) {
    * thing INV-17's keyboard clause exists to prevent, reintroduced by a
    * container added for a feature most messages never use.
    */
+  const lang = textLang(text)
   if (blocks.length === 1 && blocks[0]?.kind === 'p') {
     return (
-      <div className={`${styles.text} ${styles.para}`} data-testid="message-text">
+      <div className={`${styles.text} ${styles.para}`} data-testid="message-text" lang={lang}>
         <Inline text={blocks[0].text} />
       </div>
     )
   }
   return (
-    <div className={`${styles.text} ${styles.blocks}`} data-testid="message-text">
+    <div className={`${styles.text} ${styles.blocks}`} data-testid="message-text" lang={lang}>
       {blocks.map((block, i) =>
         block.kind === 'table' ? (
           <Table key={i} block={block} />

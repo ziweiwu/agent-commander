@@ -195,6 +195,12 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
+  The conversation itself reads as prose: on a desktop it is held to a 46em
+  measure at 14px, each message is marked with the language it is written in
+  (by the same test), so Chinese gets a taller line and a Chinese face rather
+  than whatever the browser falls back to, and is never slanted by a fake
+  italic. What the agent did sits under its words as one ruled list, the tool
+  name first and its argument beside it.
   What you have half-typed stays with the agent you typed it for: open another
   agent and its own box comes back, go ‹ Agents on a phone or ⤢ to full screen
   and the text is still there when you return. It is kept in memory only, so a
@@ -443,6 +449,10 @@ those are enabled only while it is idle or waiting — greyed with a tooltip whi
 it is busy, so a keystroke never interleaves with a tool call in flight. On a
 phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
 screen.
+
+**Close agent** now sits alone behind the **⋮** in the panel header — vertical,
+so it is not mistaken for the composer's **⋯** — and the header's **✕** ("Close
+panel") only closes the panel; the agent keeps running.
 
 **Shift+Tab, Goal, Compact and Clear also sit in the composer's menu**, beside
 the message box. The panel's row is above the tabs and does not exist in full

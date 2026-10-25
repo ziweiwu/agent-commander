@@ -606,7 +606,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 - **FR-CTL-12** — Shift+Tab, Model, Goal, Compact and Clear MUST live in the
   composer's menu beside the message box, and nowhere else. The panel's control
-  row sits above the tabs, folds behind `⋯` on a phone and does not exist in
+  row sits above the tabs, folds behind `⋮` on a phone and does not exist in
   full screen — which is exactly where a conversation gets long enough to want
   compacting, and where its model is read — so the composer is the one surface
   every layout keeps; the row keeps Close, which ends the session rather than
