@@ -87,6 +87,20 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
   /** The server's own sentence where there is one; a generic one otherwise. */
   const reasonNotAttachable = agent.attachBlockedReason ?? t('termNotAttachable')
 
+  /**
+   * Before the tabs in the sheet, so that when the row runs out it is the tabs
+   * that drop to a second line (FR-DET-2) and ⤢ stays on screen at 320px.
+   * After them on the desktop panel, whose header never wraps.
+   */
+  const actions = (
+    <HeadActions
+      controlsOpen={controlsOpen}
+      onToggleControls={() => setControlsOpen((v) => !v)}
+      onExpand={() => setFullscreen(true)}
+      onClose={onClose}
+    />
+  )
+
   return (
     <section
       className={`${styles.detail} ${sheet ? styles.sheet : ''}`}
@@ -137,13 +151,14 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           * goes and the facts stay.
           *
           * Two placements rather than one, and the reason is `.sheet .head`:
-          * it is `flex-wrap: nowrap` on purpose, so a phone keeps the back
-          * link, the name and the actions on a single line. Wrapping the facts
-          * in beside them would squeeze that row rather than take a new one, so
-          * below 900px they stay under the header, which is where a narrow
+          * it wraps, so a phone keeps the back link, the name and the actions
+          * on the first line and drops the tabs to a second (FR-DET-2). The
+          * facts in there as well would take a third line or squeeze the name,
+          * so below 900px they stay under the header, which is where a narrow
           * shape has the room anyway.
           */}
         {!sheet && <StatusLine agent={agent} />}
+        {sheet && actions}
 
         {/*
           * The tabs share the header's row.
@@ -205,63 +220,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         )}
 
         </div>
-
-        {/*
-          * One group, so the buttons wrap together onto the same line. Left as
-          * separate children, the wider labelled ⤢ pushed `close` onto a row
-          * of its own and grew the header by a whole line.
-          *
-          * Full screen is rendered once now rather than once per layout: it
-          * used to be drawn in the header on a desktop and in the tab row on a
-          * phone, which was two copies of one control kept apart only by the
-          * breakpoint between them (FR-CTL-12).
-          */}
-        <div className={styles.headActions}>
-          <Button
-            variant="compact"
-            data-testid="controls-toggle"
-            aria-expanded={controlsOpen}
-            title={t('agentSettings')}
-            aria-label={t('agentSettings')}
-            onClick={() => setControlsOpen((v) => !v)}
-          >
-            <Icon name="ellipsis" />
-          </Button>
-          <Button
-            variant="compact"
-            data-testid="fullscreen-toggle"
-            title={t('expand')}
-            onClick={() => setFullscreen(true)}
-          >
-            {/* The word is dropped where the row is tightest, and the glyph is
-                never the accessible name: `title` carries it either way. */}
-            <Icon name="expand" /> <span className={styles.actionLabel}>{t('expand')}</span>
-          </Button>
-          {/* Keeps `.close`: the sheet hides this button, where `‹ Agents` is
-              the way back and a second one would be two answers to one question. */}
-          <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
-            {t('close')}
-          </Button>
-        </div>
-
-        {/*
-          * On a desktop the facts sit inside the header's row, the way the tabs
-          * already do.
-          *
-          * They were a band of their own: 1406x32 at a 1440 viewport, 3.4% of
-          * the screen for one 294px run of facts on a row that was otherwise
-          * empty. The header had 18px of slack and could not take it — until
-          * `.path` stopped claiming 621px of that row for a folder name (see
-          * `.path` in the stylesheet). With the path elided there is room for
-          * the facts beside it, so the band goes and the facts stay.
-          *
-          * Two placements rather than one, and the reason is `.sheet .head`:
-          * it is `flex-wrap: nowrap` on purpose, so that a phone keeps the back
-          * link, the name and the actions on a single line. Wrapping the facts
-          * in beside them would squeeze that row rather than take a new one, so
-          * below 900px they stay where they were — under the header, which is
-          * where a narrow shape has the room anyway.
-          */}
+        {!sheet && actions}
       </div>
 
       {showControls && <AgentControls agent={agent} />}
@@ -279,6 +238,50 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         )}
       </div>
     </section>
+  )
+}
+
+interface HeadActionsProps {
+  controlsOpen: boolean
+  onToggleControls: () => void
+  onExpand: () => void
+  onClose: () => void
+}
+
+/**
+ * The header's own actions: the settings row's ⋯, ⤢ Full screen, and close.
+ *
+ * One group, so the buttons wrap together onto the same line. Left as separate
+ * children, the wider labelled ⤢ pushed `close` onto a row of its own and grew
+ * the header by a whole line. Full screen is rendered once rather than once per
+ * layout (FR-CTL-12).
+ *
+ * The ⤢ word is dropped where the row is tightest (`.actionLabel`), and the
+ * glyph is never the accessible name: `title` carries it either way. `close`
+ * keeps `.close` so the sheet can hide it, where ‹ Agents is the way back and a
+ * second one would be two answers to one question.
+ */
+function HeadActions({ controlsOpen, onToggleControls, onExpand, onClose }: HeadActionsProps) {
+  const t = useTranslate()
+  return (
+    <div className={styles.headActions}>
+      <Button
+        variant="compact"
+        data-testid="controls-toggle"
+        aria-expanded={controlsOpen}
+        title={t('agentSettings')}
+        aria-label={t('agentSettings')}
+        onClick={onToggleControls}
+      >
+        <Icon name="ellipsis" />
+      </Button>
+      <Button variant="compact" data-testid="fullscreen-toggle" title={t('expand')} onClick={onExpand}>
+        <Icon name="expand" /> <span className={styles.actionLabel}>{t('expand')}</span>
+      </Button>
+      <Button variant="compact" className={styles.close} data-testid="close-button" onClick={onClose}>
+        {t('close')}
+      </Button>
+    </div>
   )
 }
 

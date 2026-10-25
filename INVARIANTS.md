@@ -210,8 +210,25 @@ authority is a ref, cleared synchronously, so the second call in the batch finds
 it empty. Quick-prompt chips have no draft to clear and a double tap is two
 separate tasks, so an identical chip within a second is treated as a mis-tap.
 
+The draft itself belongs to the agent it was typed for. It was `useState` in a
+`<Chat>` that nothing keyed by agent, so half a reply to one agent sat in the
+next one's box, one Enter from reaching the wrong session; and ‹ Agents on a
+phone and ⤢ each mounted a fresh composer that started empty. The store now
+holds one draft per agent for the composer and one for the Attach tab's paste
+line, with the height each box had grown to, **in memory only** (INV-3: they
+are the user's own words, which browser storage never holds). A draft is let
+go by a send that went — never by a refused one — or by its session leaving
+the fleet; the agent on screen keeps its draft through the gap after a
+`/clear`. The ref above is still what a burst reads.
+
 - `test/ui/burst-send.test.tsx` — asserts one send from a burst of three, for
   Enter, for the Send button, and for a double-tapped chip
+- `test/ui/draft-per-agent.test.tsx` — A→B→A gives each box back its own text,
+  closing and reopening the panel and ⤢ both keep it, a send clears only the
+  draft it took, a refused send keeps it, the box height comes back with it,
+  nothing reaches browser storage, departed sessions are pruned, and the paste
+  line behaves the same; `e2e/mobile.spec.ts` holds it through ‹ Agents in a
+  real browser
 - `pane::tests` (the picture group) — a picture is pasted and then submitted by
   a second write, left alone for `PICTURE_SETTLE` in between, while ordinary
   text — a path an agent was merely told about included — is not made to wait;
@@ -2217,7 +2234,11 @@ lines and about half open with a `cd`, so a first-line card was approving a
 directory change — and says when the call asks to leave the sandbox
 (`sandbox_off`, 178 calls that went unmarked). `summarize_tool` also reads
 `url`, `query`, `function`, `key` and `text`, which is what 10.4% of tool calls
-carried while the generic arm looked only for a description or a path.
+carried while the generic arm looked only for a description or a path. The
+fact comes first: the command is drawn above the agent's description of it, at
+the body size in `--font-mono` — it was below it, at 11px in the browser's own
+Courier, because its `<pre>` named no family. `test/pre-font.test.ts` fails any
+`<pre>` whose class sets none; `test/ui/answer-card.test.tsx` holds the order.
 
 - `transcript::prompt_tests` (the set group) — every question travels with its
   own `multiSelect`; the pane picks the question; the review page reads as a
@@ -2476,10 +2497,18 @@ anything laid out from it.
   desktop, tablet and phone on Chromium and phone and tablet again on WebKit,
   plus a landscape phone driven by resizing. Also asserts no layout scrolls
   sideways, including the empty state with a 300-character query in it, and
-  that every visible control is hittable and named
+  that every visible control is hittable and named — at the project's own size
+  and again on a 320px phone. Hittable includes not cut off: `checkVisibility()`
+  is true for a control an `overflow: hidden` ancestor has clipped, which is how
+  ⤢ sat past the 320px sheet's edge with this sweep green, so the control's
+  centre has to lie inside every box that clips it
+- `e2e/mobile.spec.ts` — the sheet's header at 320, 375, 390 and 430px, for an
+  idle agent and a blocked one: every header control inside the sheet, and at
+  least 60px of the agent's name (FR-DET-2)
 - `npm run audit:a11y` — WCAG 2.2 AA at five profiles (desktop, tablet both
   ways, phone both ways) in both themes, which is where contrast and naming
-  are judged; `npm run audit:mobile` carries the 16px input rule
+  are judged; `npm run audit:mobile` carries the 16px input rule and FR-UI-2's
+  44px tap floor, on the phone's fleet before an agent is opened as well as after
 
 ## INV-18 — A link goes where the text says, and nowhere else
 

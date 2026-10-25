@@ -13,6 +13,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { screen } from '@testing-library/react'
 import { AgentCard } from '../../src/web/components/AgentCard.tsx'
+import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
 const card = (over: Parameters<typeof agent>[0]) =>
@@ -67,6 +68,24 @@ describe('the rail draws one shape per state', () => {
     card({ sessionId: 'a', status: 'waiting', waitingFor: 'dialog open', paneId: undefined })
     expect(rail().dataset.state).toBe('gone')
     expect(screen.queryByTestId('agent-answer-cta')).toBeNull()
+  })
+
+  /**
+   * The same, for a pane id that is still on the wire after the server said
+   * the pane had exited. The verb used to check only for an id, so "Answer →"
+   * was drawn beside the struck ring of a terminal that is not there.
+   */
+  it('offers no Answer verb for a waiting agent whose pane has exited', () => {
+    useStore.setState({ exited: ['a'] })
+    card({ sessionId: 'a', status: 'waiting', waitingFor: 'dialog open', paneId: '%1' })
+    expect(rail().dataset.state).toBe('gone')
+    expect(screen.queryByTestId('agent-answer-cta')).toBeNull()
+  })
+
+  it('offers it beside the hand of a waiting agent it can reach', () => {
+    card({ sessionId: 'a', status: 'waiting', waitingFor: 'dialog open', paneId: '%1' })
+    expect(rail().dataset.state).toBe('waiting')
+    expect(screen.getByTestId('agent-answer-cta')).toBeTruthy()
   })
 })
 

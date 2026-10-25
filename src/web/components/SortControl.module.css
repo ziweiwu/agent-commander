@@ -73,3 +73,10 @@
     display: none;
   }
 }
+
+@media (pointer: coarse), (max-width: 560px) {
+  .dir {
+    min-width: 44px;
+    justify-content: center;
+  }
+}

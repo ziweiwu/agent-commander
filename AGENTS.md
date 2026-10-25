@@ -649,6 +649,16 @@ commit.
   which measured the tablet at 80.9% with a fine pointer and 79.5% with the
   coarse one it actually has.
 
+- **"Visible" is not "on screen".** `checkVisibility()` and Playwright's
+  `isVisible()` are both true for a control an `overflow: hidden` ancestor has
+  cut off, so the phone sheet's ⤢ sat at x 325-369 inside a 320px sheet with the
+  "every control can be hit" sweep green — and no project even ran at 320.
+  `e2e/responsive.spec.ts` now follows a control's centre through every box
+  that clips it, and sweeps 320px too. The same audit took a 40-by-32 floor
+  against FR-UI-2's 44 and never looked at the fleet with no agent open, which
+  is how a 41.5px Details toggle passed: a floor written in a gate is a claim
+  to check against the requirement it cites.
+
 - **Playwright's default click waits for the element to be *stable*, and beside
   a live capture that wait can never end.** `page.click` requires two
   consecutive animation frames with an identical bounding box before it acts.

@@ -191,7 +191,6 @@ export const AgentCard = memo(function AgentCard({
   const worked = formatUptime(lang, uptimeParts(agent.startedAt, agent.lastActivityAt))
   const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
   const onFace = delegatesOnFace(agent, claim)
-  const canAnswer = agent.status === 'waiting' && Boolean(agent.paneId)
   /*
    * The sessions the server has told us have lost their pane. The card has to
    * know: a pane id says a reference exists, not that anything is behind it,
@@ -201,6 +200,8 @@ export const AgentCard = memo(function AgentCard({
   const exited = useStore((s) => s.exited)
   const rail = railOf(agent, exited)
   const reach = reachOf(agent, exited)
+  /** The Answer verb goes with the hand: never beside a struck ring, a pane that has exited, or a guess. */
+  const canAnswer = rail.state === 'waiting'
   /** Whether the age on this card is time-in-state rather than time-since. */
   const blockedFor = ageIsTimeInState(agent)
   /*

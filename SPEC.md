@@ -243,7 +243,11 @@ the default for an unrecognised kind is deny.
   What decides whether they fit is the agent's *name*, which no breakpoint
   knows, so the wrap MUST be a `flex-wrap` rather than a media query, and the
   name is what elides. Full screen MUST be drawn once rather than once per
-  layout. *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`.*
+  layout. On the phone sheet the header's actions come before the tabs, so it
+  is the tabs that drop and ⤢ stays inside the sheet; a `nowrap` there once
+  held everything to one row, which put ⤢ past a 320px sheet's clipped edge and
+  gave the name about 0px up to 390. The name MUST keep at least 60px.
+  *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`, `e2e/mobile.spec.ts`.*
 - **FR-DET-1** — The line under the agent's tabs MUST carry only what it can
   actually say, and MUST NOT be drawn when that is nothing. A mode reading of
   "not reported yet" is the ordinary state, because Claude Code writes the
@@ -870,6 +874,12 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   (which crosses the breakpoint by being turned over), and a single-column phone
   sheet — and MUST survive a rotation mid-conversation without losing which agent
   is open, which tab it is on, what is half-typed, or the terminal's column count.
+  What is half-typed MUST also survive navigation, and stay with the agent it
+  was typed for: switching agents, ‹ Agents and back, and ⤢ each keep it, in
+  the composer and in the Attach tab's paste line alike. It is held in memory
+  per agent, never in browser storage **(INV-3)**, and let go only by a send
+  that went or by the agent leaving the fleet.
+  *`test/ui/draft-per-agent.test.tsx`, `e2e/mobile.spec.ts`.*
   The stylesheets MUST cut at exactly two widths, 900px and 560px, and the root
   element carries `data-layout` naming which of the three is on. Eleven
   breakpoints, each measured and each right, were more than a reader could
@@ -912,7 +922,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   `e2e/empty.spec.ts`.*
 - **FR-UI-2** — Text inputs MUST be at least 16px so iOS does not zoom the page,
   tap targets MUST be at least 44px, and safe-area insets MUST keep content clear
-  of a notch in both orientations. *`scripts/audit-mobile.mjs`.*
+  of a notch in both orientations. The audit measures 44 in both directions, on
+  the fleet with no agent open as well as with one open: it used to take 40 by
+  32, with an agent open, and passed the fleet card's 41.5px Details toggle.
+  *`scripts/audit-mobile.mjs`.*
 - **FR-UI-3** — The conversation MUST fill a phone screen with the message box
   pinned above the home indicator.
 - **FR-UI-4** — The app MUST ship a web manifest so a phone can install it to the
