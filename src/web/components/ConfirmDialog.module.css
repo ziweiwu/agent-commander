@@ -66,7 +66,7 @@
    rules, which carry the same specificity and would otherwise win or lose on
    stylesheet order. */
 button.destructive {
-  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  border-color: var(--danger);
   color: var(--danger);
 }
 button.destructive:hover:not(:disabled) {

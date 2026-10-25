@@ -1072,6 +1072,9 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
             return handle_control(&app, body, &session_id, &action).await;
         }
     }
+    if is_public_asset(&method, &path) {
+        return serve_asset(&app, Request::from_parts(parts, body)).await;
+    }
     serve_static(&app, &path).await
 }
 
@@ -1185,7 +1188,69 @@ async fn serve_static(app: &App, pathname: &str) -> Response {
 }
 
 /// What the document is served with: always revalidate, never pin a build.
+/// So is every file under `/assets/` whose name does not change with its
+/// bytes — the manifest and the icons — for the same reason.
 const DOCUMENT_CACHE: &str = "no-cache";
+
+/// What a file named after its own bytes is served with. A build that changes
+/// the bytes changes the name, so a copy the browser already holds is never
+/// the wrong one and never needs asking about again. Over Tailscale on a phone
+/// that is the difference between a push tap painting from cache and one that
+/// waits on half a megabyte of script first.
+const HASHED_ASSET_CACHE: &str = "public, max-age=31536000, immutable";
+
+/// How many characters of content hash Vite writes into a compiled file's name.
+const VITE_HASH_LEN: usize = 8;
+
+/// True for `/assets/<name>-<hash>.js` or `.css`, the names Vite gives what it
+/// compiles. The hash alphabet is base64url, so `-` and `_` may appear in it.
+fn is_content_hashed(pathname: &str) -> bool {
+    let Some(name) = pathname.strip_prefix("/assets/").filter(|n| !n.contains('/')) else {
+        return false;
+    };
+    let Some(stem) = name.strip_suffix(".js").or_else(|| name.strip_suffix(".css")) else {
+        return false;
+    };
+    let stem = stem.as_bytes();
+    let Some(dash) = stem.len().checked_sub(VITE_HASH_LEN + 1).filter(|&at| at > 0) else {
+        return false;
+    };
+    stem[dash] == b'-'
+        && stem[dash + 1..].iter().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+/// A file from the bundle, or the brotli or gzip copy of it the build wrote
+/// beside it (`precompress` in `vite.config.ts`), whichever the request accepts.
+///
+/// This is the only place anything is compressed. BREACH recovers a secret
+/// from how well a response compresses when the secret shares that response
+/// with text an attacker can choose; the document, the API and the socket
+/// carry the token and agent state, and nothing under this prefix ever does
+/// (`is_public_asset`).
+///
+/// `ServeDir` chooses the copy by `Accept-Encoding`, q-values included, and
+/// answers `If-Modified-Since`, all from the `fs` feature this crate already
+/// had. It does not say that its choice varied with the request, so `Vary` is
+/// added here, or a shared cache could hand brotli to a client that never
+/// offered to read it.
+async fn serve_asset(app: &App, req: Request<Body>) -> Response {
+    let hashed = is_content_hashed(req.uri().path());
+    let mut files = tower_http::services::ServeDir::new(&app.web_root)
+        .precompressed_br()
+        .precompressed_gzip()
+        .append_index_html_on_directories(false);
+    let Ok(res) = files.try_call(req).await else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "could not read the bundle");
+    };
+    let mut res = res.map(Body::new);
+    if res.status().is_success() || res.status() == StatusCode::NOT_MODIFIED {
+        let policy = if hashed { HASHED_ASSET_CACHE } else { DOCUMENT_CACHE };
+        let headers = res.headers_mut();
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+        headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+    }
+    res
+}
 
 /// Whether the document being served should say it is a mock fleet.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -6082,5 +6147,141 @@ mod tests {
         let used = serde_json::json!({ "type": "present" });
         let hidden = serde_json::json!({ "type": "pong", "visible": false });
         assert_eq!(pushes_while_a_tab_says(&[used, hidden]).await, 1);
+    }
+
+    /// A script Vite named after its content, with a `-` and a `_` in the hash
+    /// because its alphabet has both.
+    const HASHED_JS: &str = "index-Cs-nH_0A.js";
+    const HASHED_CSS: &str = "index-CSWKOJY3.css";
+    /// What the build writes beside a hashed file, told apart by their bytes.
+    const BROTLI_COPY: &str = "the brotli copy";
+    const GZIP_COPY: &str = "the gzip copy";
+    const PLAIN_JS: &str = "console.log('plain')\n";
+    const YEAR_LONG: &str = "public, max-age=31536000, immutable";
+
+    /// A built bundle as Vite lays one out: content-hashed names for what it
+    /// compiled, each with a compressed copy beside it, and fixed names for
+    /// what it copied out of `public/`. A compressed copy also sits beside the
+    /// document and a root-level script, where none may ever be served.
+    fn lay_out_a_bundle(root: &Path) {
+        let assets = root.join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        for hashed in [HASHED_JS, HASHED_CSS] {
+            std::fs::write(assets.join(hashed), PLAIN_JS).unwrap();
+            std::fs::write(assets.join(format!("{hashed}.br")), BROTLI_COPY).unwrap();
+            std::fs::write(assets.join(format!("{hashed}.gz")), GZIP_COPY).unwrap();
+        }
+        for fixed in ["manifest.webmanifest", "icon-192.png", "app.js"] {
+            std::fs::write(assets.join(fixed), "fixed name\n").unwrap();
+        }
+        std::fs::write(root.join("index.html.br"), BROTLI_COPY).unwrap();
+        std::fs::write(root.join("app.js.br"), BROTLI_COPY).unwrap();
+    }
+
+    /// The value of one response header, matched without regard to case.
+    fn header_in(response: &str, name: &str) -> Option<String> {
+        let head = response.split_once("\r\n\r\n").map_or(response, |(head, _)| head);
+        head.lines().skip(1).find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim().eq_ignore_ascii_case(name).then(|| value.trim().to_string())
+        })
+    }
+
+    #[tokio::test]
+    async fn a_content_hashed_bundle_file_is_kept_for_a_year() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        for hashed in [HASHED_JS, HASHED_CSS] {
+            let res = get(h.port, &format!("/assets/{hashed}"), "").await;
+            assert!(status(&res).contains("200"), "{hashed}: {}", status(&res));
+            assert_eq!(header_in(&res, "cache-control").as_deref(), Some(YEAR_LONG), "{hashed}");
+        }
+    }
+
+    /// Their names never change, so pinning one would strand a phone on it.
+    /// They revalidate on every load instead, which costs a 304 rather than
+    /// the file because each carries a `Last-Modified` to revalidate against.
+    #[tokio::test]
+    async fn the_document_the_manifest_and_the_icons_keep_revalidating() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let hashed = get(h.port, &format!("/assets/{HASHED_JS}"), "").await;
+        assert_eq!(header_in(&hashed, "cache-control").as_deref(), Some(YEAR_LONG));
+        for path in ["/", "/assets/manifest.webmanifest", "/assets/icon-192.png", "/assets/app.js"] {
+            let res = get(h.port, path, "").await;
+            assert!(status(&res).contains("200"), "{path}: {}", status(&res));
+            assert_eq!(header_in(&res, "cache-control").as_deref(), Some("no-cache"), "{path}");
+        }
+        let manifest = get(h.port, "/assets/manifest.webmanifest", "").await;
+        let stamp = header_in(&manifest, "last-modified").expect("the manifest names its date");
+        let again =
+            get(h.port, "/assets/manifest.webmanifest", &format!("If-Modified-Since: {stamp}\r\n"))
+                .await;
+        assert!(status(&again).contains("304"), "{}", status(&again));
+        assert_eq!(header_in(&again, "cache-control").as_deref(), Some("no-cache"));
+    }
+
+    #[tokio::test]
+    async fn inv3_a_compressed_copy_is_served_only_to_a_client_that_accepts_it() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let path = format!("/assets/{HASHED_JS}");
+        for (accepts, encoding, served) in [
+            ("Accept-Encoding: br\r\n", Some("br"), BROTLI_COPY),
+            ("Accept-Encoding: gzip, deflate, br, zstd\r\n", Some("br"), BROTLI_COPY),
+            ("Accept-Encoding: gzip\r\n", Some("gzip"), GZIP_COPY),
+            ("Accept-Encoding: br;q=0, gzip\r\n", Some("gzip"), GZIP_COPY),
+            ("Accept-Encoding: identity\r\n", None, PLAIN_JS),
+            ("", None, PLAIN_JS),
+        ] {
+            let res = get(h.port, &path, accepts).await;
+            assert!(status(&res).contains("200"), "{accepts:?}: {}", status(&res));
+            assert_eq!(header_in(&res, "content-encoding").as_deref(), encoding, "{accepts:?}");
+            assert_eq!(body(&res), served, "{accepts:?}");
+            let vary = header_in(&res, "vary").unwrap_or_default().to_ascii_lowercase();
+            assert!(vary.contains("accept-encoding"), "{accepts:?}: vary {vary:?}");
+            let kind = header_in(&res, "content-type").unwrap_or_default();
+            assert!(kind.starts_with("text/javascript"), "{accepts:?}: {kind}");
+        }
+    }
+
+    /// BREACH reads a secret out of how well a response compresses, so nothing
+    /// that carries agent state or a token may be compressed at all. The first
+    /// request is the control: the same header does buy a compressed copy
+    /// under `/assets/`, so the refusals after it are not a header ignored.
+    #[tokio::test]
+    async fn inv3_nothing_outside_the_bundle_is_ever_served_compressed() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let accepts = "Accept-Encoding: gzip, deflate, br, zstd\r\n";
+        let control = get(h.port, &format!("/assets/{HASHED_JS}"), accepts).await;
+        assert_eq!(header_in(&control, "content-encoding").as_deref(), Some("br"));
+        for path in ["/", "/agent/xyz", "/app.js", "/api/agents", "/api/tree", "/api/env"] {
+            let res = get(h.port, path, accepts).await;
+            assert!(status(&res).contains("200"), "{path}: {}", status(&res));
+            assert_eq!(header_in(&res, "content-encoding"), None, "{path}");
+            assert!(!body(&res).contains(BROTLI_COPY), "{path}");
+        }
+    }
+
+    /// The bundle route reads the disk through `ServeDir` rather than
+    /// `serve_static`, so it is held to the same standard on its own.
+    #[tokio::test]
+    async fn the_bundle_route_cannot_be_walked_out_of_its_web_root_either() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let outside = h.web_root.path().parent().unwrap().join("ac-asset-secret.txt");
+        std::fs::write(&outside, "TOP SECRET").unwrap();
+        let name = outside.file_name().unwrap().to_string_lossy().to_string();
+        for path in [
+            format!("/assets/../../{name}"),
+            format!("/assets/%2e%2e/%2e%2e/{name}"),
+            format!("/assets/..%2f..%2f{name}"),
+            format!("/assets/%2f..%2f..%2f{name}"),
+        ] {
+            let res = get(h.port, &path, "").await;
+            assert!(!body(&res).contains("TOP SECRET"), "escaped with {path}");
+        }
+        let _ = std::fs::remove_file(outside);
     }
 }

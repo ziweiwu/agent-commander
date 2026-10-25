@@ -11,7 +11,7 @@
   margin-top: 12px;
 }
 .you {
-  background: color-mix(in srgb, var(--busy) 10%, transparent);
+  background: var(--panel-2);
 }
 .pending {
   opacity: 0.6;
@@ -55,7 +55,7 @@
   font-size: var(--text-sm);
 }
 .whoYou {
-  color: var(--busy);
+  color: var(--text);
 }
 .whoAgent {
   color: var(--accent);
@@ -229,7 +229,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--busy);
   animation: blink 1.2s infinite;
 }
 .dots i:nth-child(2) {

@@ -620,6 +620,7 @@ function handle(msg: ServerMessage): void {
       // A status change decides whether an echo may be counting down: a message
       // queued behind a live turn is waiting, not late.
       useStore.getState().syncDelivery()
+      useStore.getState().pruneDrafts(msg.agents.map((agent) => agent.sessionId))
       announceBlocked(msg.agents)
       const fresh = notifyBlocked(msg.agents, { enabled: state.notify, lang: state.lang })
       // The one unsolicited prompt in the app, and only for a block this page

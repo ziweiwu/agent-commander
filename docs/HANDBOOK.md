@@ -188,6 +188,11 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
+  What you have half-typed stays with the agent you typed it for: open another
+  agent and its own box comes back, go ‹ Agents on a phone or ⤢ to full screen
+  and the text is still there when you return. It is kept in memory only, so a
+  reload loses it, and only a send that went clears it. The Attach tab's paste
+  line keeps its text per agent the same way.
 - **Attach** — the actual terminal, live. Full keyboard passthrough, so you can
   answer a permission dialog, hit Esc to interrupt, or arrow through a menu.
 
@@ -240,6 +245,16 @@ full-height sheet over it with a `‹ Agents` button back. The conversation fill
 the screen with the message box pinned to the bottom, above the home indicator.
 Inputs are 16px so iOS does not zoom the page when you tap them, tap targets are
 44px, and safe-area insets keep content clear of the notch in both orientations.
+
+Only the first visit downloads the app. Its scripts and stylesheets are named
+after their contents, so the browser may keep them for a year without asking
+again, and a later visit — including a push tap after iOS has evicted the page
+— fetches the 4KB document and paints from what its cache still holds. The first visit gets them compressed:
+about 146KB instead of 555KB, and the terminal behind a permission or plan
+prompt as 64KB instead of 305KB. A rebuild changes the names, so an update is
+never stuck behind a cached copy. Only these files are compressed; the API and
+the live connection never are, because they carry the token and your agents'
+conversations (INV-3).
 
 When the keyboard comes up, the sheet lays itself out in what is left of the
 screen rather than under the keys: the message box stays visible, the last
@@ -830,8 +845,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
-npm run e2e        # 401 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1595 tests: 721 Rust (the server) + 874 vitest (the web app)
+npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

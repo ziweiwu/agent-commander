@@ -210,8 +210,25 @@ authority is a ref, cleared synchronously, so the second call in the batch finds
 it empty. Quick-prompt chips have no draft to clear and a double tap is two
 separate tasks, so an identical chip within a second is treated as a mis-tap.
 
+The draft itself belongs to the agent it was typed for. It was `useState` in a
+`<Chat>` that nothing keyed by agent, so half a reply to one agent sat in the
+next one's box, one Enter from reaching the wrong session; and ‹ Agents on a
+phone and ⤢ each mounted a fresh composer that started empty. The store now
+holds one draft per agent for the composer and one for the Attach tab's paste
+line, with the height each box had grown to, **in memory only** (INV-3: they
+are the user's own words, which browser storage never holds). A draft is let
+go by a send that went — never by a refused one — or by its session leaving
+the fleet; the agent on screen keeps its draft through the gap after a
+`/clear`. The ref above is still what a burst reads.
+
 - `test/ui/burst-send.test.tsx` — asserts one send from a burst of three, for
   Enter, for the Send button, and for a double-tapped chip
+- `test/ui/draft-per-agent.test.tsx` — A→B→A gives each box back its own text,
+  closing and reopening the panel and ⤢ both keep it, a send clears only the
+  draft it took, a refused send keeps it, the box height comes back with it,
+  nothing reaches browser storage, departed sessions are pruned, and the paste
+  line behaves the same; `e2e/mobile.spec.ts` holds it through ‹ Agents in a
+  real browser
 - `pane::tests` (the picture group) — a picture is pasted and then submitted by
   a second write, left alone for `PICTURE_SETTLE` in between, while ordinary
   text — a path an agent was merely told about included — is not made to wait;
@@ -363,6 +380,18 @@ than an attacker.
   verbatim on npm, and no agent's directory, prompts or output passes through
   them. The same-origin check applies to them in full either way, because it
   applies to everything.
+
+  **The same prefix is the only thing ever served compressed.** The build
+  writes a brotli and a gzip copy beside each compiled script and stylesheet,
+  and `serve_asset` hands one out when the request's `Accept-Encoding` allows
+  it. Nothing else is compressed — not the document, not the API, not the
+  socket — because BREACH recovers a secret from how well a response
+  compresses when that secret shares the response with text an attacker can
+  influence, and the token, the session cookie and every agent's conversation
+  travel on exactly those. The bundle holds none of them, so its compressed
+  length gives nothing away. A compression layer added to the whole router
+  would undo this without failing anything else, which is what the second
+  test below is for.
 - *The address bar, which the token no longer touches.* It arrives once, as
   `?token=…` on the URL the user opened; `cookie_exchange` trades it for an
   `HttpOnly; SameSite=Strict` cookie and redirects to the same path without it.
@@ -397,6 +426,12 @@ than an attacker.
   (`options::inv3_trust_tailnet_serves_without_a_token_on_loopback_only`),
   and the bundle is exempt from the token while the document, the fleet and the
   socket are not
+- `routes::inv3_a_compressed_copy_is_served_only_to_a_client_that_accepts_it`
+  and `routes::inv3_nothing_outside_the_bundle_is_ever_served_compressed` — a
+  compressed copy goes only to a request that offered to read it, and nothing
+  outside `/assets/` is compressed even beside a copy on disk and a request
+  asking for one; `e2e/asset-cache.spec.ts` checks the real build's names and
+  copies from a real browser
 - `test/ui/token.test.tsx` — the page puts no token on any request and none in
   the address bar, even when it was loaded from a URL carrying one
 
@@ -2263,7 +2298,11 @@ lines and about half open with a `cd`, so a first-line card was approving a
 directory change — and says when the call asks to leave the sandbox
 (`sandbox_off`, 178 calls that went unmarked). `summarize_tool` also reads
 `url`, `query`, `function`, `key` and `text`, which is what 10.4% of tool calls
-carried while the generic arm looked only for a description or a path.
+carried while the generic arm looked only for a description or a path. The
+fact comes first: the command is drawn above the agent's description of it, at
+the body size in `--font-mono` — it was below it, at 11px in the browser's own
+Courier, because its `<pre>` named no family. `test/pre-font.test.ts` fails any
+`<pre>` whose class sets none; `test/ui/answer-card.test.tsx` holds the order.
 
 - `transcript::prompt_tests` (the set group) — every question travels with its
   own `multiSelect`; the pane picks the question; the review page reads as a
@@ -2522,10 +2561,18 @@ anything laid out from it.
   desktop, tablet and phone on Chromium and phone and tablet again on WebKit,
   plus a landscape phone driven by resizing. Also asserts no layout scrolls
   sideways, including the empty state with a 300-character query in it, and
-  that every visible control is hittable and named
+  that every visible control is hittable and named — at the project's own size
+  and again on a 320px phone. Hittable includes not cut off: `checkVisibility()`
+  is true for a control an `overflow: hidden` ancestor has clipped, which is how
+  ⤢ sat past the 320px sheet's edge with this sweep green, so the control's
+  centre has to lie inside every box that clips it
+- `e2e/mobile.spec.ts` — the sheet's header at 320, 375, 390 and 430px, for an
+  idle agent and a blocked one: every header control inside the sheet, and at
+  least 60px of the agent's name (FR-DET-2)
 - `npm run audit:a11y` — WCAG 2.2 AA at five profiles (desktop, tablet both
   ways, phone both ways) in both themes, which is where contrast and naming
-  are judged; `npm run audit:mobile` carries the 16px input rule
+  are judged; `npm run audit:mobile` carries the 16px input rule and FR-UI-2's
+  44px tap floor, on the phone's fleet before an agent is opened as well as after
 
 ## INV-18 — A link goes where the text says, and nowhere else
 

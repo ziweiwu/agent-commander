@@ -59,11 +59,20 @@ const ALLOWED: Record<string, Hidden> = {
 
   // Keyboard hints, which are true but not load-bearing — and describe keys a
   // touch device does not have.
-  '.hint': { reason: 'the keys it names still work; a phone has no hardware keyboard to use them' },
+  '.hint': {
+    reason:
+      "the Attach tab's key hint: the keys it names still work, and a phone has no hardware " +
+      "keyboard to use them. Never the composer's `.hint`, which is its offline notice — see " +
+      'the test below that keeps it on every shape',
+  },
 
   // Decoration and chrome that name nothing about the agent on screen.
   '.gutter': { reason: 'the message rail is decorative; grouping survives it' },
-  '.sheetMode .title': { reason: "the sheet's own header names what is open" },
+  '.sheetMode .title': {
+    reason:
+      "the app's own name; the sheet's header names the open agent, and FR-DET-2's wrap keeps " +
+      'at least 60px of that name on a 320px phone (e2e/mobile.spec.ts measures it)',
+  },
   '.statusLine': {
     reason:
       'a readout, not a control: the mode is on the strip’s own button and the delegates are on the card; a landscape phone needs the height for the conversation',
@@ -172,6 +181,20 @@ describe('INV-17 the three layouts differ in labelling, not in capability', () =
     const hidden = new Set(hiddenByViewport().map((h) => h.selector))
     const stale = Object.keys(ALLOWED).filter((selector) => !hidden.has(selector))
     expect(stale, `nothing hides these any more — drop them: ${stale.join(', ')}`).toEqual([])
+  })
+
+  /**
+   * A permission is keyed by selector, not by file, so the Attach tab's key
+   * hint holding `.hint` also covered the composer's `.hint` — the offline
+   * notice, the one sentence that says why Enter will not send (INV-11). A
+   * landscape phone hid it that way, and emptied the box's `aria-describedby`
+   * with it. The composer's copy is held to every shape on its own.
+   */
+  it("never hides the composer's offline notice, whatever `.hint` is allowed elsewhere", () => {
+    const hidden = hiddenByViewport()
+      .filter(({ file, selector }) => file.endsWith('Chat.module.css') && selector === '.hint')
+      .map(({ condition }) => `@media ${condition}`)
+    expect(hidden, 'Chat.module.css hides the offline notice').toEqual([])
   })
 
   /*

@@ -355,6 +355,8 @@ const EN = {
   helpTailscaleDetected: 'Detected on this machine',
   helpReveal: 'reveal',
   helpHide: 'hide',
+  helpCopy: 'copy',
+  helpCopyLabel: 'copy: {text}',
   helpMaskedNote:
     'Your machine and tailnet names are hidden so this page is safe to screenshot or share. Copy still copies the real address.',
   helpTailscaleMissing:
@@ -763,6 +765,8 @@ const ZH: Record<Key, string> = {
   helpTailscaleDetected: '已在本机检测到',
   helpReveal: '显示',
   helpHide: '隐藏',
+  helpCopy: '复制',
+  helpCopyLabel: '复制：{text}',
   helpMaskedNote: '已隐藏本机名称与 tailnet 名称，方便截图或分享。点击“复制”仍会复制真实地址。',
   helpTailscaleMissing: '本机未检测到 Tailscale，下面的地址仅作示例。',
   helpAddToHome: '在 Safari 中点「分享 → 添加到主屏幕」，就能得到一个应用图标。',

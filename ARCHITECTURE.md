@@ -637,6 +637,21 @@ nothing about the `<script>` that URL then pulls in, so `GET`/`HEAD` under
 whole boundary, which is why nothing under it may ever serve agent state, and
 why a miss there 404s instead of falling through to the shell.
 
+It is also the only place a response is cached or compressed, and both lean on
+that boundary. `serve_asset` hands the prefix to tower-http's `ServeDir`, which
+picks the brotli or gzip copy the build wrote beside each compiled file
+(`precompress` in `vite.config.ts`) by `Accept-Encoding`, and answers
+`If-Modified-Since`; `Vary: Accept-Encoding` is added on top because `ServeDir`
+does not send it. A name carrying Vite's content hash (`is_content_hashed`) is
+served `immutable` for a year, since new bytes always get a new name; the
+manifest and the icons share the prefix with fixed names and get `no-cache`,
+like the document, so they revalidate to a 304 instead. Compression stays
+inside the prefix because a compressed response leaks the length of whatever
+secret shares it with attacker-chosen text (BREACH), and the token, the cookie
+and the conversation all live outside it (INV-3). Nothing re-sends the bundle
+to a phone that already holds it, which is INV-4's rule about the tree, applied
+to the bytes the page is made of.
+
 **7. A known reconcile gap is documented and unfixed** (`chat.ts:139`): a message
 sent in the second before backfill arrives was baselined against an empty history.
 Re-baselining on backfill was tried and reverted, because it cannot tell "this

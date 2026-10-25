@@ -98,7 +98,7 @@
   font-size: var(--text-xs);
 }
 .orphan {
-  color: var(--waiting);
+  color: var(--dim);
 }
 
 /* Effort and the last-write time move as one, pushed to the right of whatever
