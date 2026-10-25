@@ -846,7 +846,6 @@ function probeServer(): void {
 function onReturn(): void {
   if (document.visibilityState !== 'visible') return
   if (socket === null) {
-    window.clearTimeout(retryTimer)
     retry = 500
     probeServer()
     connect()
@@ -965,7 +964,14 @@ function onOpen(): void {
   }
 }
 
+/**
+ * Open the socket now. A reconnect still waiting on its backoff is cancelled
+ * first: connecting now is what it was waiting to do, and left armed it would
+ * fire later, open a second socket and make that the one `send` writes to,
+ * orphaning this one with its listeners still attached.
+ */
 export function connect(): void {
+  window.clearTimeout(retryTimer)
   listenForReturn()
   const ws = openSocket()
   if (!ws) {

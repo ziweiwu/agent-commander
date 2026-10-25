@@ -247,7 +247,14 @@ the default for an unrecognised kind is deny.
   is the tabs that drop and ⤢ stays inside the sheet; a `nowrap` there once
   held everything to one row, which put ⤢ past a 320px sheet's clipped edge and
   gave the name about 0px up to 390. The name MUST keep at least 60px.
-  *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`, `e2e/mobile.spec.ts`.*
+  On the desktop panel the name MUST keep twelve characters: when they, the
+  status, the tabs and the actions do not fit, the tabs and the actions drop to
+  a second row together. Holding that header to one row by shrinking left the
+  name 0-36px at 901px and 20px at 1180px with the fleet column open. The
+  folder and the facts take only what the row leaves, so they never cause the
+  wrap themselves.
+  *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`, `e2e/mobile.spec.ts`,
+  `e2e/header.spec.ts`.*
 - **FR-DET-1** — The line under the agent's tabs MUST carry only what it can
   actually say, and MUST NOT be drawn when that is nothing. A mode reading of
   "not reported yet" is the ordinary state, because Claude Code writes the

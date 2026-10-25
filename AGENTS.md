@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1701 tests: 741 Rust (the server) + 960 vitest (the web app)
+npm test              # 1702 tests: 741 Rust (the server) + 961 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 461 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -516,6 +516,20 @@ commit.
   INV-4 tail-count flake that used to sit beside it went away with the port:
   `enrich.rs`'s cadence re-arms after the work instead of on a wall clock, so a
   slow pass no longer drops a tick.
+- **`hop.test.tsx`'s hand-off tests were not load, though they looked it.**
+  "names the agent blocked longest…" and "lands on the question…" failed 4
+  full runs in 10 at load ~24, fast (80-180ms) and on an assertion rather than
+  a timeout: the click wrote its `answer` to a socket the test was not
+  watching. "goes muted… while the socket is down" closes its socket, which
+  arms `retryLater`'s 500ms real timer, and `transport.ts` is one module per
+  file — so the timer fired inside a later test, `connect()` opened a second
+  socket and `send` wrote to that. Under load, 500ms is long enough to land in
+  any test after it. `connect()` now cancels a pending retry itself, so the
+  explicit call supersedes the scheduled one (production only ever called it
+  with none pending, from `main.tsx` and `onReturn`). A 1.1s pause before the
+  click made it fail every run; with the fix 12 of 12 full runs passed. Any
+  test that closes a socket on real timers leaks the same timer to the next
+  test in its file; fake timers, as `return.test.tsx` uses, discard it.
 - **WebKit times out under a loaded machine, and it is not always the same
   spec.** Measured on 2026-09-06 at load average 8.7: a full run failed
   `responsive.spec.ts` "every control on screen can be hit and announced" on

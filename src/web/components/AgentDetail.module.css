@@ -27,18 +27,24 @@
   border-bottom: 1px solid var(--line);
   flex-wrap: wrap;
 }
-/*
- * The name yields first. Everything else in this row is a fixed width or a
- * word that cannot be shortened, so when the row runs out it is the name that
- * elides — its full text is in its own `title`, and the reader picked this
- * agent a moment ago.
+/**
+ * The name elides, but never below twelve characters on the desktop panel.
+ *
+ * Everything else in this row is a fixed width or a word that cannot be
+ * shortened, so the name is what gives way — its full text is in its own
+ * `title`. It used to give way to nothing: with `min-width: 0` and the header
+ * held to one row, the fleet mock measured 0-36px of name at 901px and 20px at
+ * 1180px with the fleet column open, which is an ellipsis rather than a name.
+ * Twelve characters is enough to tell `agent-comman…` from `kb-vault`, and
+ * the row wraps (`.controls`) before it takes any of them. The sheet keeps its
+ * own floor below.
  */
 .head h2 {
   margin: 0;
   font-size: var(--text-md);
   font-weight: var(--weight-strong);
-  flex: 1 1 6ch;
-  min-width: 0;
+  flex: 1 1 12ch;
+  min-width: 12ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -83,6 +89,43 @@
   color: var(--waiting);
   border-color: var(--edge-waiting);
   background: var(--tint-waiting);
+}
+/**
+ * The folder and the session's facts: the two things in the row that only
+ * ever take what is left over.
+ *
+ * One group with a zero basis, because a wrapping row decides where to break
+ * from each child's *preferred* width — and these two prefer 240px and ~294px,
+ * which is what wrapped the header between 901 and 1071px before 4f0b451 held
+ * it to one row. At a zero basis they never cause a break. They then grow back
+ * to their natural width before the name does, by the weight of their grow
+ * factor against the name's 1, and stop there (`max-width`), which keeps the
+ * shrink order 4f0b451 measured: the facts give way first, the path next.
+ */
+.where {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 100 1 0;
+  min-width: 0;
+  max-width: max-content;
+}
+/**
+ * The tabs and the header's actions, one unit when the row runs out.
+ *
+ * When the name's twelve characters, the status and these do not fit on one
+ * row, this group drops to a second as a whole: the tabs and ⋮ ⤢ ✕ together,
+ * as the tabs drop on the sheet (FR-DET-2). Dropping the actions alone would
+ * leave the tabs' underline hanging mid-header, off the rule it is drawn to
+ * meet.
+ */
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 /* The header's action pair, kept on one line and pushed to the end together. */
 .headActions {
@@ -232,10 +275,11 @@
   /* One line, elided. Two lines here would grow the header by exactly the band
      this change removes. */
   flex-wrap: nowrap;
+  white-space: nowrap;
   overflow: hidden;
 }
 
-/*
+/**
  * The one-line guarantee, enforced one level further down.
  *
  * `flex-wrap: nowrap` above governs this element's own children and not its
@@ -244,9 +288,9 @@
  * Without this the line has two ways to grow: it can wrap internally as well as
  * being wrapped by the header.
  *
- * This is what makes the header's children genuinely shrinkable, which is what
- * the `nowrap` on `.head` below depends on. It is not on its own what keeps the
- * header to one row; see that rule for the measurement.
+ * This is what makes the facts genuinely shrinkable, which is what `.where`
+ * depends on to give way before the name does. It is not on its own what keeps
+ * the header to one row; see `.head` under the desktop cut for that.
  *
  * Targeted by test id rather than by class because the delegate line is
  * declared in another CSS module, where a class selector written here would
@@ -366,8 +410,12 @@
   }
 }
 .sheet .close,
-.sheet .path {
+.sheet .where {
   display: none;
+}
+/** The sheet orders its own row (FR-DET-2), so the desktop's grouping steps aside. */
+.sheet .controls {
+  display: contents;
 }
 
 .sheet .pane {
@@ -418,30 +466,21 @@
  * dropping decoration on a small screen, not on the large one.
  */
 @media (min-width: 901px) {
+  /**
+   * One row where it fits and two where it does not, by wrapping (FR-DET-2).
+   *
+   * 4f0b451 held this row to one line with `flex-wrap: nowrap`, because the
+   * folder and the facts, wrapping on their preferred widths, had pushed the
+   * actions to a second row across 901-1071px with plenty of room to spare.
+   * That bought the row and charged the name for it: when the status, the tabs
+   * and the actions really did not fit, the only thing left to shrink was the
+   * name, down to 0px. `.where` now has a zero basis, so the break happens only
+   * when the name's floor, the status and `.controls` truly do not fit, and
+   * then `.controls` drops. The work surface keeps its single row everywhere
+   * `audit-workspace.mjs` measures it.
+   */
   .head {
     padding-block: 6px;
-    /*
-     * One row, by shrinking rather than by wrapping.
-     *
-     * `.head` is `flex-wrap: wrap`, and a wrapping flex container prefers to
-     * wrap over shrinking — so its children never gave up a pixel. Measured at
-     * 1024x768 the action buttons were pushed to a second row (y=132 against
-     * y=88 for everything else), the header stood at 93px instead of 49, and the
-     * work surface fell to 73.8% against a bar of 80. The whole 901-1071px band
-     * was like that: a window dragged to half of a wide display, or a 1024x768
-     * screen. No gate saw it, because `audit-workspace.mjs` sampled 1440, 1180,
-     * 834 and 390 and that band sits between two of them.
-     *
-     * With wrapping off, the deficit is distributed by `flex-shrink x basis`, so
-     * the status facts (basis ~294px, and clipped) give way first, the path
-     * (240px, ellipsised) next, and the agent's name (basis 6ch) last. That is
-     * the right order and it costs nothing to get: the name is the identity and
-     * it should be the last thing to go.
-     *
-     * Only above the desktop cut. Below it `.sheet .head` wraps instead, so the
-     * tabs can drop to a second row rather than push ⤢ off the sheet (FR-DET-2).
-     */
-    flex-wrap: nowrap;
   }
   /* Tied to the header's padding: the tabs hang onto the rule below it, so this
      offset has to be whatever that padding is or the underline floats. */

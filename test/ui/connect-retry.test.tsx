@@ -34,6 +34,7 @@ class FakeSocket {
 }
 
 const original = globalThis.WebSocket
+const originalFetch = globalThis.fetch
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -44,6 +45,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers()
   globalThis.WebSocket = original
+  globalThis.fetch = originalFetch
 })
 
 describe('the websocket retry chain', () => {
@@ -81,5 +83,24 @@ describe('the websocket retry chain', () => {
     // counted. The point is only that it never gave up.
     expect(ctor.mock.calls.length).toBeGreaterThan(2)
     expect(useStore.getState().conn).toBe('closed')
+  })
+
+  it('cancels a pending retry when connect() is called directly, so one socket is live', () => {
+    globalThis.fetch = vi.fn(() => Promise.resolve(new Response('{}'))) as typeof fetch
+    const ctor = vi.fn(function () {
+      return new FakeSocket()
+    })
+    ;(globalThis as unknown as { WebSocket: unknown }).WebSocket = ctor
+
+    connect()
+    FakeSocket.last?.fire('open')
+    FakeSocket.last?.fire('close')
+    connect()
+    const live = FakeSocket.last
+    expect(ctor.mock.calls.length).toBe(2)
+
+    vi.advanceTimersByTime(10_000)
+    expect(ctor.mock.calls.length).toBe(2)
+    expect(FakeSocket.last).toBe(live)
   })
 })
