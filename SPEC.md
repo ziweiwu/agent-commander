@@ -311,6 +311,29 @@ the default for an unrecognised kind is deny.
   *`transcript::inv11_since_prompt_*`,
   `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
   `test/ui/card-since-prompt.test.tsx`.*
+- **FR-CARD-10** — An idle Claude agent's card MUST say **new** (新) beside its
+  age when the agent's `lastActivityAt` is past `seenThrough`, the server's
+  in-memory record of the agent's own transcript time at the last moment a tab
+  that was on screen had it open, and the Idle heading MUST count those cards
+  (`Idle 7 · 2 new`). The record MUST live on the server, so opening an agent
+  on the laptop clears the mark on the phone; a hidden tab MUST NOT move it;
+  and the first frame carrying a session's transcript time MUST seed it as
+  backlog, so a fresh server shows no marks. Busy, waiting, inferred and
+  terminal cards, and every card while the fleet is stale, MUST carry no mark,
+  and it MUST be drawn in `--text` or `--dim`, never amber. The wording MUST be
+  "new since opened in this app", never "unread", "done" or "ready": the
+  reader may have followed the agent in tmux, and all this app knows is what
+  it showed. **(INV-11, INV-14)** *`seen::tests`,
+  `routes::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`,
+  `test/ui/new-since.test.tsx`, `e2e/new-since.spec.ts`.*
+- **FR-CARD-11** — The fold MUST count the tool calls auto mode refused, over
+  the window of the transcript that was read, with the age of the newest and
+  where that window starts: "auto mode refused 3 actions · last 4m ago (since
+  14:02)". The same caveat `tokens` carries, for the same reason — a backfill
+  that starts part-way through a session cannot count all of it. A refusal
+  MUST NOT push (INV-14). **(INV-11)**
+  *`test/ui/card-usage.test.tsx`,
+  `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
 
 ### 3.3 Delegates
 
@@ -365,6 +388,26 @@ over the list with a back control; on a wide one, a second column.
   its own case the generic reading finds no description, path, pattern or
   command and the row reads as the bare word "Skill".
   *`transcript::names_the_skill_a_skill_call_ran`.*
+- **FR-CHAT-16** — A tool call MUST say how it ended, in words, in the third
+  column of its row: `+12 −3` for an edit, counted from the `+` and `-` that
+  open its recorded hunk lines; `refused · auto mode · <category in words>`;
+  or `failed`. The danger hue MAY underline the last two and MUST NOT carry
+  them alone. A refusal MUST be read from `permissionDecision` and never from
+  the words of an error, because those are the CLI's and "refused" is a claim
+  about who stopped the call; an error with no rejecting decision is `failed`.
+  A call whose result is on record MUST open on a tap to show its hunks or
+  the tail of its output, about 32 KB at most with how much was left out, in a
+  box that scrolls inside itself — on a phone the page MUST NOT scroll
+  sideways (INV-17). The box MUST be captioned as a record ("as recorded at
+  14:07 — the file may have changed since", plus "you changed this before it
+  was applied" where the record says so), MUST be read only on a tap for the
+  focused agent (INV-4), and MUST NOT be written to browser storage (INV-3).
+  **(INV-11)** *`transcript::reads_an_edit_s_hunk_counts`,
+  `transcript::reads_a_classifier_refusal_from_permission_decision`,
+  `transcript::reads_a_hook_refusal`,
+  `transcript::reads_a_null_decision_error_is_failed_not_refused`,
+  `routes::inv4_a_tool_result_read_needs_a_focused_viewer`,
+  `test/ui/message-tools.test.tsx`, `e2e/mobile.spec.ts`.*
 - **FR-CHAT-13** — A slash command the user typed MUST read as the command it
   ran. Claude Code stores one as `<command-name>` markup with the arguments
   beside it, and rendering the record verbatim put three tags on screen with
@@ -422,6 +465,24 @@ over the list with a back control; on a wide one, a second column.
   **(INV-2, INV-11)**. The button MUST be offered on exactly the condition the
   composer is — an agent with a pane — and MUST NOT grow a gate of its own.
   *`test/ui/picture.test.tsx`, `routes::a_picture_is_stored_and_its_path_comes_back_to_be_typed`.*
+- **FR-CHAT-15** — Opening an agent with something new since it was last
+  opened in this app (FR-CARD-10) MUST draw a divider, in the day separator's
+  style, before the first message past `seenThrough`, reading *New since you
+  last opened this · 3h ago — 2 replies, 41 tool calls*. It MUST be placed
+  from `seenThrough` as it stood before this visit's own focus moved it, and
+  held for the whole visit; its counts stop where the agent had got when the
+  visit began. Where the agent had got MUST come from a caught-up fleet: every
+  fleet frame carries `caughtUp`, false from the moment the server idles its
+  enricher until that enricher's first full pass after resuming, so a visit
+  begun before it follows the agent's activity until the caught-up frame, and
+  one begun on a caught-up fleet never follows — what arrives while the reader
+  is here, their own sends included, is not news. When nothing read is at or before `seenThrough` the transcript
+  tail did not reach that far, so it MUST go at the top and say *at least*.
+  When the new part is taller than the view, the chat MUST open scrolled to the
+  divider, with *Jump to latest* for the rest. Nothing newer MUST mean no
+  divider. **(INV-11)** *`test/ui/new-since.test.tsx`,
+  `test/ui/new-since-visit.test.tsx`,
+  `enrich::tests::f6_caught_up_only_after_the_first_pass_following_a_resume`.*
 
 ### 4.2 Answering a blocked agent
 
@@ -826,7 +887,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 | Grant | Covers |
 |---|---|
-| `read` | the fleet, transcripts, frames, `/api/env` |
+| `read` | the fleet, transcripts (a tool call's recorded result among them), frames, `/api/env` |
 | `respond` | answering the question an agent is blocked on |
 | `drive` | pastes, keystrokes, mode, model, compact, clear, close |
 | `spawn` | starting new agents, and the folder picker |
@@ -1195,17 +1256,17 @@ unverified.
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
 | INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
-| INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
+| INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-16, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
 | INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-SPAWN-7, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |

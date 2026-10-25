@@ -48,12 +48,24 @@ a laptop or from a phone.
   as well: a tmux session running your own shell in a folder you pick. It gets
   an Attach tab and none of the controls that type Claude Code's slash commands
   at whatever is in the pane.
+- **Tool calls that say what happened.** Each call in the conversation reads
+  how it ended — `Edit src/app.ts  +12 −3`, `refused · auto mode ·
+  irreversible local destruction`, or `failed` — from the fields Claude Code
+  records for that, never from the wording of an error. Tap one to see the
+  diff or the end of its output as it was recorded; the card's fold counts
+  what auto mode refused.
 - **What a busy agent is running**, read from the process table: the tool
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.
 - **Steer a running session**: message it, switch model or permission mode,
   set a goal, compact or clear its context, or close it.
 - **Notifications** when an agent starts waiting on you, off by default.
+- **New since you last opened it here.** An idle agent that has done
+  something since it was last on screen in this app says **new** beside its
+  age, and the Idle heading counts them (`Idle 7 · 2 new`). Opening it on any
+  device clears the mark on every device, and the conversation draws a line
+  where the new part begins. It never says "unread": you may have followed it
+  in the terminal, and all the app knows is what it showed you.
 - **Works on a phone** over Tailscale, and keeps working when the network does
   not: a sleeping phone's socket is noticed and replaced rather than left
   looking live, and the conversation says it is loading rather than claiming the

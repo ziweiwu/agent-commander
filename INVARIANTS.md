@@ -689,6 +689,25 @@ and the first reading's start time stands while it is.
   paging, the untouched diff, the dead pane, and the grant
 - `pane::a_window_past_the_end_of_history_is_cut_to_what_is_there` — the cut,
   against tmux's clamping
+
+*What a tool call returned* is read on the same terms: one `toolResult`
+request per tap, answered only for a tab focused on that session, never
+polled. The read is a tail of its own that scans back from the end of the
+transcript at most `RESULT_SCAN_BYTES` (8 MiB — an edit's record carries the
+whole file it edited, so a few edits to a large file are megabytes) and sends
+at most `RESULT_CAP_BYTES`; a call further back than that is answered as not
+found rather than read for. A miss is still answered, so the row asking is
+never left waiting.
+
+- `routes::inv4_a_tool_result_read_needs_a_focused_viewer`,
+  `routes::a_tool_result_miss_is_answered_with_nothing_and_read_may_ask` — the
+  gate, the miss, the grant and the id bound
+- `transcript::a_tool_result_read_looks_back_no_further_than_its_bound` — the
+  scan bound
+- `e2e/mobile.spec.ts` (`@phone a tool call that says what happened`) — an
+  edit wider than the phone opens in a box that scrolls inside itself, and the
+  document does not scroll sideways (INV-17)
+
 A read that fails is named on the wire, `kind: 'history-failed'`, for the
 reason `answer-refused` is: the browser holds one request at a time, and a
 latch released by any error that happens to name the agent swallowed the reply
@@ -1464,6 +1483,51 @@ made once, not one the browser may repeat from memory.
 - `test/ui/fleet-snapshot.test.tsx` — what is remembered, what is not, and
   that an empty fleet is forgotten
 
+**Amended: "new" says what this app showed, never what the reader read.** An
+idle card may carry the word *new* (F6) when its agent has done something since
+it was last opened on a tab that was on screen. The tempting words — *unread*,
+*done*, *ready* — are each a claim this app cannot back: the reader may have
+followed the whole thing in tmux, and an idle agent may have stopped for any
+reason (INV-13's quiet rule). So the claim is the narrow one, *new since opened
+in this app*, and every part of it is measured rather than guessed:
+
+- **The time is the agent's own.** The server keeps `seenThrough[session]`
+  (`seen.rs`) as the agent's `lastActivityAt` — a transcript timestamp, never
+  this machine's clock — at the last moment a tab on screen had it open. A
+  card is new when its `lastActivityAt` is past that. A terminal's activity is
+  a pane clock, so terminals are not tracked at all.
+- **On screen is the evidence, and a hidden tab is none.** A session open on a
+  tab in the background has been shown to nobody, so it does not move the
+  record. The same `visible` the push channel reads (INV-14) decides it, and
+  the record lives on the server so the laptop and the phone agree.
+- **Only an idle Claude card says it.** A busy card is still moving, so *new*
+  would be noise; a waiting card already has the hand; an inferred status is
+  not a transcript time. And it is the plain text colour, never amber: amber
+  is the hand's, and this asks nothing of the reader.
+- **A memory says nothing new.** While the socket is down no card carries the
+  mark, and nothing on this side clears one: only the server's record moves
+  it, so no mark changes until the connection is back.
+- **The conversation's divider counts a floor when that is all it has.** The
+  line *New since you last opened this · 3h ago — 2 replies, 41 tool calls*
+  sits before the first message past `seenThrough`, placed from where the
+  conversation stood when the visit began and held there. When the transcript
+  tail did not reach back that far it goes at the top and says *at least*.
+
+- `seen::tests` — a visible focus advances the record, a hidden one does not,
+  the first frame is backlog, a new transcript record after a focus is new,
+  it never moves back, and a terminal is never tracked
+- `routes::tests::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`
+  — the same over a real socket, and every tab is told
+- `test/ui/new-since.test.tsx` — the mark is on idle Claude cards only, beside
+  the age, never amber, absent while stale; the heading counts it; the divider
+  sits where the news begins, says *at least* at the top, is absent when
+  nothing is newer, holds while the record moves, and opens the view at itself
+  when the news is taller than it
+- `test/ui/new-since-visit.test.tsx` — the divider is placed from the record
+  as it stood before this tab's own focus moved it
+- `e2e/new-since.spec.ts` — a fixture that moves while its only tab is hidden
+  is marked, and opening it clears the mark
+
 ### Two more places the same rule bit
 
 **A composer with the socket down used to accept the message.** `send()` returns
@@ -1664,6 +1728,54 @@ absence-of-evidence rule the Prune button was removed for.
   field of it, which is what the description shipped without: it was produced,
   written and compared, and dropped in the merge between, so no card carried
   one and nothing failed
+
+**A tool call says how it ended, from the fields written to say so.** A row
+used to name what the agent *asked* for and nothing more: an edit read as a
+path, and a call auto mode refused looked exactly like one that ran. Each call
+now carries its `tool_use_id`, and when the result record is read the server
+sends a `ToolOutcome` beside the timeline's events — `ok`, `failed` or
+`refused`, who refused it, the classifier's category, and an edit's `+`/`-`
+counts from the prefixes of its recorded `structuredPatch` lines. Three rules
+keep it inside the record:
+
+- **A refusal is read from `permissionDecision` and nowhere else.** Never from
+  the words of the error: an error saying "denied" with a null or absent
+  decision is `failed`, because the words are the CLI's and can change, and
+  "refused" is a claim about who stopped the call. Who is named only where the
+  decision names them — `classifier` is auto mode, `hook` a hook, a `user*`
+  source the person — and a deny rule or a safety check is called `refused`
+  with nobody beside it rather than guessed at.
+- **A record-level field describes a record's only result.** The decision and
+  `toolUseResult` sit beside `message`, so on a record answering several calls
+  they cannot say which; none of those calls is called refused, and none gets
+  counts. On this machine's 38k result records none that answered several
+  calls carried a decision.
+- **What a call returned is a memory, and is captioned as one.** Opening a row
+  reads the record back — on a tap, for the focused tab, the history read's
+  terms (INV-4) — and shows the hunks or the output's tail, cut near 32 KB with
+  how much was left out. It reads "as recorded at 14:07 — the file may have
+  changed since", and "you changed this before it was applied" where the
+  record says `userModified`. It is held in memory and nowhere else (INV-3).
+
+The card's fold counts auto mode's refusals the way it counts `tokens`: over
+the window that was read, labelled with where that window starts — "auto mode
+refused 3 actions · last 4m ago (since 14:02)". A delegate's sidechain is its
+own conversation and is not counted. A refusal never pushes: INV-14 is
+unchanged, and this is a fact waiting to be asked about.
+
+- `transcript::reads_an_edit_s_hunk_counts`,
+  `transcript::reads_a_classifier_refusal_from_permission_decision`,
+  `transcript::reads_a_hook_refusal`,
+  `transcript::reads_a_null_decision_error_is_failed_not_refused`,
+  `transcript::a_decision_on_a_record_answering_several_calls_is_pinned_on_none`
+  — each reading from a record shaped like the ones on disk
+- `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`,
+  `transcript::an_edit_s_result_is_its_hunks_and_says_when_you_changed_it`,
+  `transcript::a_long_output_is_sent_as_its_tail_with_what_was_left_out`
+- `test/ui/message-tools.test.tsx` — the row's words, the expansion, its
+  caption, a miss said to be one, and nothing a result held written to
+  browser storage
+- `test/ui/card-usage.test.tsx` — the fold's count, age and window
 
 ## INV-12 — Input to a live agent is bounded
 
@@ -2025,6 +2137,22 @@ per-device and unchanged: it still stands down while its own tab is visible.
   connect, on every beat, and the moment that changes; it reports a pointer, a
   key or a touch at most once per `PRESENCE_REPORT_MS`, never on a timer or for
   any other event, and at once on a new socket
+
+**Amended: the backlog rule also governs "new since opened in this app".**
+The card's *new* (F6, INV-11) is a transition too — the agent moved past what
+this app last showed — and it fails the same way a notification does if a
+fresh start counts as one. So it takes the first rule word for word: the first
+frame that carries a session's transcript time seeds `seenThrough` as backlog,
+and a fresh server shows no marks. The record is in memory only, so a restart
+is that fresh start. "Carries its transcript time" matters: the enricher idles
+until somebody connects (INV-4), and before its first read a session has no
+`lastActivityAt`; seeding from nothing would have marked every card the moment
+that read landed. A session that leaves the fleet is forgotten and is backlog
+again if it returns. The cost is the mirror of the push's: an agent's very
+first activity, seen before any record of it existed, is never marked.
+
+- `seen::tests::inv14_the_first_frame_is_backlog_so_a_fresh_server_shows_no_marks`,
+  `seen::tests::inv14_a_session_is_seeded_by_its_first_transcript_time_not_before`
 
 ## INV-15 — A silent family is a question, never a verdict
 

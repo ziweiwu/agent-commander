@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1702 tests: 741 Rust (the server) + 961 vitest (the web app)
+npm test              # 1764 tests: 766 Rust (the server) + 998 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 461 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 468 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -420,6 +420,10 @@ commit.
   compiler and no test that reads a field's journey end to end. The half hour
   that went into proving the *parser* was right was spent on the one component
   that had never been wrong.
+
+  `refusals` (auto mode's refusals in the window read, for the fold) was added
+  after the guard below existed and touched all four the first time; the guard
+  is what says so if a fifth producer forgets one.
 
   Only `card_fields` is safe by construction: it is a struct literal with no
   `..` rest, so a new field is a compile error there. The other three are now

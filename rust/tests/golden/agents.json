@@ -54,6 +54,11 @@
         "costUsd": 4.12,
         "at": 1786599980000
       },
+      "refusals": {
+        "count": 1,
+        "lastAt": 1786599761000,
+        "since": 1786599700000
+      },
       "sincePrompt": {
         "at": 1786597180000,
         "calls": 214

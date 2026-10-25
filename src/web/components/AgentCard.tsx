@@ -1,12 +1,21 @@
 import { memo, useMemo, useState } from 'react'
-import type { Agent, AgentTree } from '../../shared/types.ts'
+import type { Agent, AgentTree, Refusals } from '../../shared/types.ts'
 import { CLAUDE_KIND, hasTranscripts, specOf } from '../../shared/agent-kinds.ts'
-import { CONTEXT_WARN_PCT, relative, tildePath, tokens, uptimeParts, usd } from '../lib/format.ts'
+import {
+  CONTEXT_WARN_PCT,
+  clock,
+  dayMark,
+  relative,
+  tildePath,
+  tokens,
+  uptimeParts,
+  usd,
+} from '../lib/format.ts'
 import { plainText } from '../lib/chat.ts'
 import { claimOf, isStallCandidate, type DelegationClaim } from '../lib/delegation.ts'
 import { trailOf } from '../lib/trail.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
-import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
+import { formatDay, formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { useStore } from '../store/store.ts'
 import { DelegationTree } from './DelegationTree.tsx'
@@ -101,6 +110,12 @@ export interface AgentCardProps {
    */
   tree?: AgentTree
   selected: boolean
+  /**
+   * It did something since it was last opened in this app (F6). Decided by
+   * the list, which also counts these for the group heading; `isNewSinceOpened`
+   * keeps it to idle Claude cards.
+   */
+  newSinceOpened?: boolean
   onSelect: (sessionId: string) => void
 }
 
@@ -138,6 +153,7 @@ export const AgentCard = memo(function AgentCard({
   agent,
   tree,
   selected,
+  newSinceOpened = false,
   onSelect,
 }: AgentCardProps) {
   const t = useTranslate()
@@ -337,6 +353,11 @@ export const AgentCard = memo(function AgentCard({
                 </span>
               )
             )}
+            {newSinceOpened && (
+              <span className={styles.newSince} data-testid="agent-new" title={t('cardNewTitle')}>
+                {t('cardNew')}
+              </span>
+            )}
           </div>
 
           {descriptionLine && (
@@ -461,6 +482,7 @@ export const AgentCard = memo(function AgentCard({
                 </dd>
               </div>
             )}
+            {agent.refusals && <RefusalsFact refusals={agent.refusals} />}
             {agent.usage?.costUsd !== undefined && (
               <div className={styles.fact} data-testid="agent-cost">
                 <dt>{t('costLabel')}</dt>
@@ -561,6 +583,25 @@ function SincePromptAge({ face }: { face: SinceFace }) {
         {short}
       </span>
     </span>
+  )
+}
+
+/**
+ * Auto mode's refusals, counted only over what was read and labelled with
+ * where that starts — the same caveat the token count carries (INV-11). A
+ * refusal never pushes (INV-14); it waits here to be asked about.
+ */
+function RefusalsFact({ refusals }: { refusals: Refusals }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const mark = dayMark(refusals.since)
+  const since = mark.kind === 'today' ? clock(refusals.since) : `${formatDay(lang, mark)} ${clock(refusals.since)}`
+  const vars = { n: refusals.count, ago: formatRelative(lang, relative(refusals.lastAt)), since }
+  return (
+    <div className={styles.fact} data-testid="agent-refusals">
+      <dt>{t('refusalsLabel')}</dt>
+      <dd>{t(refusals.count === 1 ? 'refusalsOne' : 'refusalsMany', vars)}</dd>
+    </div>
   )
 }
 

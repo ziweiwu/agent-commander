@@ -34,6 +34,7 @@ mod frames;
 mod limits;
 mod mock;
 mod options;
+mod outcome;
 mod pane;
 mod pane_hub;
 #[cfg(test)]
@@ -46,6 +47,7 @@ mod procs;
 mod push;
 mod registry;
 mod routes;
+mod seen;
 mod sources;
 mod spawn;
 mod subagents;

@@ -7,7 +7,7 @@
 
 use crate::control::SendableKey;
 pub use crate::pane::History;
-use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent};
+use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent, ToolOutcome, ToolResultView};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -72,6 +72,8 @@ pub struct AgentPatch {
     pub running: Option<Option<crate::types::RunningProcess>>,
     /// Context-window usage and cost from the bridge's per-session file.
     pub usage: Option<crate::types::SessionUsage>,
+    /// Auto mode's refusals in the window of the transcript that was read.
+    pub refusals: Option<crate::types::Refusals>,
     /// `Some(None)` clears it: a transcript that was replaced and holds no
     /// prompt has nothing left to count from (INV-11).
     pub since_prompt: Option<Option<crate::types::SincePrompt>>,
@@ -97,6 +99,7 @@ impl AgentPatch {
             && self.cwd.is_none()
             && self.running.is_none()
             && self.usage.is_none()
+            && self.refusals.is_none()
             && self.since_prompt.is_none()
     }
 
@@ -118,6 +121,7 @@ impl AgentPatch {
         if let Some(v) = &self.git_branch { agent.git_branch = Some(v.clone()) }
         if let Some(v) = &self.running { agent.running = v.clone() }
         if let Some(v) = &self.usage { agent.usage = Some(v.clone()) }
+        if let Some(v) = self.refusals { agent.refusals = Some(v) }
         if let Some(v) = self.since_prompt { agent.since_prompt = v }
         if let Some(v) = &self.cwd {
             agent.cwd = v.clone();
@@ -207,11 +211,19 @@ pub struct TailRead {
     /// plumbing rather than a message and so produces no timeline event. Without
     /// this the card that offered the answer would have nothing to retire it.
     pub prompt_changed: bool,
+    /// How the calls whose results this read reached ended.
+    pub outcomes: Vec<ToolOutcome>,
 }
 
 #[async_trait]
 pub trait TailApi: Send + Sync + 'static {
     async fn read(&mut self) -> anyhow::Result<TailRead>;
+    /// What one tool call returned, as recorded, for a reader who opened its
+    /// row. On request only, never polled (INV-4); `None` where this tail
+    /// cannot find it or keeps no record of results at all.
+    async fn tool_result(&mut self, _tool_use_id: &str) -> Option<ToolResultView> {
+        None
+    }
 }
 
 /// Account-level quota, watched from the file the statusLine bridge writes.

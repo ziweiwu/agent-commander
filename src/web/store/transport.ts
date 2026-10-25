@@ -18,11 +18,14 @@ import type {
   PictureResponse,
   ServerEnv,
   ServerMessage,
+  ToolOutcome,
 } from '../../shared/types.ts'
+import type { Outcomes } from '../lib/chat.ts'
 import { translate } from '../lib/i18n.ts'
 import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
-import { useStore } from './store.ts'
+import { followVisit, visitOf } from '../lib/newSince.ts'
+import { useStore, type ToolResultEntry } from './store.ts'
 
 let socket: WebSocket | null = null
 let retry = 500
@@ -79,7 +82,7 @@ let serverBeats = false
  */
 const RETURN_PROBE_MS = 4_000
 let probeTimer: number | undefined
-/** The pending backoff, so a return can cancel it and connect now. */
+/** The pending backoff, so a `connect()` made now can cancel it. */
 let retryTimer: number | undefined
 let listening = false
 
@@ -131,7 +134,7 @@ export function focusAgent(sessionId: string | null): void {
   if (state.selected && state.attached) {
     send({ type: 'attach', sessionId: state.selected, on: false })
   }
-  useStore.setState({ selected: sessionId })
+  useStore.setState({ selected: sessionId, visit: visitOf(sessionId, state, state.seenThrough) })
   // Drops `attached` with the rest of the conversation: the server forgets
   // the attachment on a focus change, and so must this side.
   state.resetConversation()
@@ -191,6 +194,40 @@ export const HISTORY_DEPTH = 2_000 + HISTORY_PAGE
  * page after the held lines is what is asked for, so pressing again reads
  * further up rather than the same window twice.
  */
+/**
+ * Ask what one call of the focused agent returned. One request per row, sent
+ * only on a tap and answered only for the focused tab (INV-4). False when it
+ * could not be sent, so the row can say why instead of waiting.
+ */
+export function requestToolResult(toolUseId: string): boolean {
+  const { selected, toolResults } = useStore.getState()
+  if (!selected) return false
+  const held = toolResults[toolUseId]
+  if (held && held.state !== 'missing') return true
+  if (!send({ type: 'toolResult', sessionId: selected, toolUseId })) return false
+  useStore.setState({ toolResults: { ...toolResults, [toolUseId]: { state: 'pending' } } })
+  return true
+}
+
+/**
+ * The reads still held once the socket has gone, less the ones waiting on a
+ * reply that will never come — a row left reading "Reading the record…" for
+ * good would say nothing true. A read that answered is kept.
+ */
+function withoutPending(
+  held: Readonly<Record<string, ToolResultEntry>>,
+): Readonly<Record<string, ToolResultEntry>> {
+  return Object.fromEntries(Object.entries(held).filter(([, entry]) => entry.state !== 'pending'))
+}
+
+/** Fold a frame's outcomes into the ones already held, by `toolUseId`. */
+function withOutcomes(held: Outcomes, arrived: ToolOutcome[] | undefined): Outcomes {
+  if (!arrived?.length) return held
+  const next: Record<string, ToolOutcome> = { ...held }
+  for (const outcome of arrived) next[outcome.toolUseId] = outcome
+  return next
+}
+
 export function requestHistory(): boolean {
   const { selected, history, historyPending } = useStore.getState()
   if (!selected || historyPending) return false
@@ -620,7 +657,13 @@ function handle(msg: ServerMessage): void {
   switch (msg.type) {
     case 'fleet': {
       const fleetAt = Date.now()
-      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt })
+      useStore.setState({
+        agents: msg.agents,
+        mock: msg.mock,
+        fleetAt,
+        caughtUp: msg.caughtUp,
+        visit: followVisit(state.visit, msg),
+      })
       // For the next cold start; the shape of the fleet and nothing said in it.
       saveFleetSnapshot(msg.agents, fleetAt)
       // A status change decides whether an echo may be counting down: a message
@@ -643,6 +686,18 @@ function handle(msg: ServerMessage): void {
       useStore.setState({ limits: msg.limits })
       return
     }
+    case 'seen': {
+      /**
+       * The first record after a selection is how far it had been shown before
+       * this tab's own focus moved it: on a cold load the selection is made
+       * before the server has said anything, and that record is the divider's.
+       */
+      useStore.setState({
+        seenThrough: msg.seenThrough,
+        visit: state.visit ?? visitOf(state.selected, state, msg.seenThrough),
+      })
+      return
+    }
     case 'timeline': {
       if (msg.sessionId !== state.selected) return
       // The conversation has been answered for; stop waiting on it.
@@ -651,6 +706,7 @@ function handle(msg: ServerMessage): void {
         timelineAt: Date.now(),
         timelineStalledAt: null,
         events: msg.reset ? msg.events : [...state.events, ...msg.events],
+        outcomes: withOutcomes(msg.reset ? {} : state.outcomes, msg.outcomes),
         // Absent means nothing is open. Carried on every timeline frame rather
         // than only when it appears, so answering a question clears the card
         // that offered it — the `tool_result` that closes one is plumbing and
@@ -674,6 +730,11 @@ function handle(msg: ServerMessage): void {
       // has left is a memory of somewhere else.
       if (msg.sessionId !== state.selected) return
       state.addHistory({ sessionId: msg.sessionId, before: msg.before, lines: msg.lines, total: msg.total })
+      return
+    }
+    case 'toolResult': {
+      if (msg.sessionId !== state.selected) return
+      state.addToolResult(msg.toolUseId, msg.result)
       return
     }
     case 'paste-ack': {
@@ -975,7 +1036,7 @@ export function connect(): void {
   listenForReturn()
   const ws = openSocket()
   if (!ws) {
-    useStore.setState({ conn: 'closed' })
+    useStore.setState({ conn: 'closed', caughtUp: false })
     retryLater()
     return
   }
@@ -1022,7 +1083,12 @@ export function connect(): void {
     // gate left shut disables "Earlier output" for the life of the page while
     // saying nothing (INV-11). The lines already held are kept — they are what
     // the pane said, and that has not stopped being true.
-    useStore.setState({ conn: 'closed', historyPending: false })
+    useStore.setState({
+      conn: 'closed',
+      historyPending: false,
+      caughtUp: false,
+      toolResults: withoutPending(useStore.getState().toolResults),
+    })
     // Say which kind of down this is, for the caption (INV-11).
     if (document.visibilityState === 'visible') probeServer()
     retryLater()

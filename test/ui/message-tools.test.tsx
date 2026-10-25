@@ -9,10 +9,14 @@
  * "6 actions". These pin the constant's own promise.
  */
 import { readFileSync } from 'node:fs'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { fireEvent, screen } from '@testing-library/react'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen } from '@testing-library/react'
+import type { ClientMessage, ToolOutcome } from '../../src/shared/types.ts'
 import { Message } from '../../src/web/components/Message.tsx'
-import type { ChatMessage } from '../../src/web/lib/chat.ts'
+import type { ChatMessage, ToolCall } from '../../src/web/lib/chat.ts'
+import { clock } from '../../src/web/lib/format.ts'
+import { useStore } from '../../src/web/store/store.ts'
+import { connect } from '../../src/web/store/transport.ts'
 import { renderApp, resetStore } from './helpers.tsx'
 
 /** The same number `Message.tsx` shows before it collapses the remainder. */
@@ -140,3 +144,237 @@ describe('a message says what language it is in', () => {
     expect(screen.getByTestId('message-text').getAttribute('lang')).toBe('en')
   })
 })
+
+const sent: ClientMessage[] = []
+const sockets: FakeSocket[] = []
+
+class FakeSocket {
+  static readonly OPEN = 1
+  readyState = 1
+  readonly listeners = new Map<string, Array<(e: unknown) => void>>()
+  constructor(readonly url: unknown) {
+    sockets.push(this)
+  }
+  send(raw: string): void {
+    const parsed = JSON.parse(raw) as ClientMessage
+    if (parsed.type === 'toolResult') sent.push(parsed)
+  }
+  addEventListener(type: string, fn: (e: unknown) => void): void {
+    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn])
+  }
+  fire(type: string, event: unknown = {}): void {
+    for (const fn of this.listeners.get(type) ?? []) fn(event)
+  }
+}
+
+function arrives(msg: object): void {
+  act(() => sockets[sockets.length - 1]?.fire('message', { data: JSON.stringify(msg) }))
+}
+
+const RECORDED_AT = 1_786_000_000_000
+
+const ok = (id: string, added?: number, removed?: number): ToolOutcome => ({
+  toolUseId: id,
+  outcome: 'ok',
+  ...(added === undefined ? {} : { added, removed }),
+})
+
+const calls = (...list: Array<[string, string, ToolOutcome | undefined]>): ChatMessage => ({
+  ...withTools(0),
+  tools: list.map(([tool, text, outcome], i): ToolCall => ({
+    id: `c${i}`,
+    tool,
+    text,
+    subagent: false,
+    toolUseId: outcome?.toolUseId ?? `toolu_${i}`,
+    ...(outcome ? { outcome } : {}),
+  })),
+})
+
+const anEdit = calls(['Edit', 'src/app.ts', ok('toolu_e', 12, 3)])
+
+beforeAll(() => {
+  vi.stubGlobal('WebSocket', FakeSocket)
+  connect()
+  sockets[sockets.length - 1]?.fire('open')
+})
+
+describe('a call says what happened, in words', () => {
+  beforeEach(() => {
+    sent.length = 0
+    useStore.setState({ selected: 'a' })
+  })
+
+  it('reads an edit as its counts, a refusal by whom and why, and a failure', () => {
+    renderApp(
+      <Message
+        message={calls(
+          ['Edit', 'src/app.ts', ok('toolu_e', 12, 3)],
+          [
+            'Bash',
+            'rm -rf dist',
+            { toolUseId: 'toolu_r', outcome: 'refused', by: 'autoMode', category: 'irreversible_local_destruction' },
+          ],
+          ['Bash', 'npm run build', { toolUseId: 'toolu_f', outcome: 'failed' }],
+          ['Read', 'README.md', ok('toolu_o')],
+          ['Grep', 'still running', undefined],
+        )}
+      />,
+    )
+    const said = screen.getAllByTestId('tool-outcome').map((cell) => [cell.dataset.kind, cell.textContent])
+    expect(said).toEqual([
+      ['ok', '+12 −3'],
+      ['refused', 'refused · auto mode · irreversible local destruction'],
+      ['failed', 'failed'],
+    ])
+    const [, , , read, running] = rows()
+    expect(read?.children).toHaveLength(2)
+    expect(read?.querySelector('[data-testid="tool-expand"]')).not.toBeNull()
+    expect(running?.querySelector('[data-testid="tool-expand"]')).toBeNull()
+  })
+
+  it('names nobody where the decision names nobody this app has a word for', () => {
+    renderApp(<Message message={calls(['Bash', 'ls', { toolUseId: 'toolu_x', outcome: 'refused' }])} />)
+    expect(screen.getByTestId('tool-outcome').textContent).toBe('refused')
+  })
+
+  it('keeps the outcome in the third column, its words in the danger hue', () => {
+    expect(rule('.outcome')['grid-column']).toBe('3')
+    expect(rule('.outcome')['font-variant-numeric']).toBe('tabular-nums')
+    expect(rule('.outcome').color).toBe('var(--dim)')
+    const danger = /\.outcome\[data-kind='refused'\],\s*\.outcome\[data-kind='failed'\]\s*\{\s*color: var\(--danger\);/
+    expect(SHEET).toMatch(danger)
+  })
+})
+
+describe('INV-4 a row opens on a tap, with what was recorded', () => {
+  beforeEach(() => {
+    sent.length = 0
+    useStore.setState({ selected: 'a', toolResults: {} })
+  })
+
+  it('asks once, for the focused agent, and shows the hunks in a box of their own', () => {
+    renderApp(<Message message={anEdit} />)
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    expect(sent).toEqual([{ type: 'toolResult', sessionId: 'a', toolUseId: 'toolu_e' }])
+    expect(screen.getByTestId('tool-result-status').textContent).toBe('Reading the record…')
+
+    arrives({
+      type: 'toolResult',
+      sessionId: 'a',
+      toolUseId: 'toolu_e',
+      result: { at: RECORDED_AT, hunks: [{ oldStart: 4, newStart: 4, lines: ['-old', '+new'] }], omitted: 0 },
+    })
+    expect(screen.getByTestId('tool-result-body').textContent).toBe('@@ -4 +4 @@\n-old\n+new\n')
+    expect(screen.getByTestId('tool-result-caption').textContent).toBe(
+      `as recorded at ${clock(RECORDED_AT)} — the file may have changed since`,
+    )
+    expect(rule('.resultBody').overflow).toBe('auto')
+
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    expect(sent).toHaveLength(1)
+  })
+
+  it('says when you changed the edit before it was applied', () => {
+    renderApp(<Message message={anEdit} />)
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    arrives({
+      type: 'toolResult',
+      sessionId: 'a',
+      toolUseId: 'toolu_e',
+      result: { at: RECORDED_AT, hunks: [{ oldStart: 1, newStart: 1, lines: ['+x'] }], omitted: 0, userModified: true },
+    })
+    expect(screen.getByTestId('tool-result-caption').textContent).toBe(
+      `as recorded at ${clock(RECORDED_AT)} — the file may have changed since · you changed this before it was applied`,
+    )
+  })
+
+  it('captions an output without the file clause, and says how much came before it', () => {
+    renderApp(<Message message={calls(['Bash', 'npm run build', { toolUseId: 'toolu_f', outcome: 'failed' }])} />)
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    arrives({
+      type: 'toolResult',
+      sessionId: 'a',
+      toolUseId: 'toolu_f',
+      result: { at: RECORDED_AT, output: 'Build failed.', omitted: 2048 },
+    })
+    expect(screen.getByTestId('tool-result-caption').textContent).toBe(`as recorded at ${clock(RECORDED_AT)}`)
+    expect(screen.getByTestId('tool-result-body').textContent).toBe('Build failed.')
+    expect(screen.getByTestId('tool-result').textContent).toContain('2 KB before this not shown')
+  })
+
+  it('says a record it could not find was not found, and drops another agent\'s reply', () => {
+    renderApp(<Message message={anEdit} />)
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    arrives({ type: 'toolResult', sessionId: 'b', toolUseId: 'toolu_e', result: { at: 0, output: 'x', omitted: 0 } })
+    expect(screen.getByTestId('tool-result-status').textContent).toBe('Reading the record…')
+    arrives({ type: 'toolResult', sessionId: 'a', toolUseId: 'toolu_e' })
+    expect(screen.getByTestId('tool-result-status').textContent).toMatch(/^Not found near the end/)
+  })
+})
+
+/**
+ * INV-3: what a call returned is the agent's work, and browser storage never
+ * holds that. A snapshot of everything the page wrote to either store, taken
+ * after a diff was opened and a fleet frame was remembered, has none of it.
+ */
+describe('INV-3 a result is held in memory and nowhere else', () => {
+  const stores = { local: new Map<string, string>(), session: new Map<string, string>() }
+  const storage = (held: Map<string, string>) => ({
+    getItem: (k: string) => held.get(k) ?? null,
+    setItem: (k: string, v: string) => void held.set(k, v),
+    removeItem: (k: string) => void held.delete(k),
+    clear: () => held.clear(),
+    key: (i: number) => [...held.keys()][i] ?? null,
+    get length() {
+      return held.size
+    },
+  })
+
+  beforeEach(() => {
+    stores.local.clear()
+    stores.session.clear()
+    vi.stubGlobal('localStorage', storage(stores.local))
+    vi.stubGlobal('sessionStorage', storage(stores.session))
+    useStore.setState({ selected: 'a', toolResults: {} })
+  })
+  afterEach(() => {
+    vi.stubGlobal('localStorage', undefined)
+    vi.stubGlobal('sessionStorage', undefined)
+  })
+
+  it('writes no hunk, no output and no outcome to either store', () => {
+    renderApp(<Message message={anEdit} />)
+    fireEvent.click(screen.getByTestId('tool-expand'))
+    arrives({
+      type: 'toolResult',
+      sessionId: 'a',
+      toolUseId: 'toolu_e',
+      result: { at: RECORDED_AT, hunks: [{ oldStart: 1, newStart: 1, lines: ['+a-private-line'] }], omitted: 0 },
+    })
+    arrives({
+      type: 'fleet',
+      mock: false,
+      agents: [
+        {
+          sessionId: 'a',
+          pid: 1,
+          name: 'a',
+          cwd: '/x',
+          folder: 'x',
+          status: 'idle',
+          agentKind: 'claude',
+          kind: 'interactive',
+          startedAt: 1,
+          refusals: { count: 2, lastAt: 2, since: 1 },
+        },
+      ],
+    })
+    expect(screen.getByTestId('tool-result-body').textContent).toContain('+a-private-line')
+    const snapshot = JSON.stringify({ local: [...stores.local], session: [...stores.session] })
+    expect(stores.local.size + stores.session.size).toBeGreaterThan(0)
+    expect(snapshot).not.toMatch(/a-private-line|hunks|toolu_e|refusals/)
+  })
+})
+
