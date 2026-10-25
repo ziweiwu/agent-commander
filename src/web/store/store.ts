@@ -25,6 +25,7 @@ import {
   type ChatMessage,
 } from '../lib/chat.ts'
 import type { FleetState, KindScope, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
+import type { SeenThrough, Visit } from '../lib/newSince.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
   applyLang,
@@ -159,6 +160,18 @@ export interface AppState {
    * lets the view say when it stopped being able to make that claim.
    */
   fleetAt: number | null
+  /**
+   * How far each session has been shown in this app, as the server last said
+   * (F6). Null until it has said, which is no marks rather than every mark:
+   * the remembered fleet painted on a cold start carries none.
+   */
+  seenThrough: SeenThrough | null
+  /**
+   * Where the open conversation stood when this visit to it began, for the
+   * divider in Chat. Set when the selection changes, or by the first record to
+   * arrive after it, and held until the next selection.
+   */
+  visit: Visit | null
   /** Account-level quota, or null when nothing has reported it. */
   limits: RateLimits | null
   env: ServerEnv | null
@@ -397,6 +410,8 @@ export const useStore = create<AppState>()((set, get) => ({
   trees: [],
   treesEtag: null,
   fleetAt: null,
+  seenThrough: null,
+  visit: null,
   limits: null,
   env: null,
   // Read from the document rather than waiting for the first WebSocket frame.

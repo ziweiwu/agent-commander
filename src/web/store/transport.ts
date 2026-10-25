@@ -22,6 +22,7 @@ import type {
 import { translate } from '../lib/i18n.ts'
 import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
+import { visitOf } from '../lib/newSince.ts'
 import { useStore } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -131,7 +132,7 @@ export function focusAgent(sessionId: string | null): void {
   if (state.selected && state.attached) {
     send({ type: 'attach', sessionId: state.selected, on: false })
   }
-  useStore.setState({ selected: sessionId })
+  useStore.setState({ selected: sessionId, visit: visitOf(sessionId, state.agents, state.seenThrough) })
   // Drops `attached` with the rest of the conversation: the server forgets
   // the attachment on a focus change, and so must this side.
   state.resetConversation()
@@ -641,6 +642,18 @@ function handle(msg: ServerMessage): void {
     }
     case 'limits': {
       useStore.setState({ limits: msg.limits })
+      return
+    }
+    case 'seen': {
+      /**
+       * The first record after a selection is how far it had been shown before
+       * this tab's own focus moved it: on a cold load the selection is made
+       * before the server has said anything, and that record is the divider's.
+       */
+      useStore.setState({
+        seenThrough: msg.seenThrough,
+        visit: state.visit ?? visitOf(state.selected, state.agents, msg.seenThrough),
+      })
       return
     }
     case 'timeline': {

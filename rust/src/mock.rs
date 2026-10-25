@@ -859,6 +859,23 @@ impl MockSource {
             .cloned()
     }
 
+    /// A fixture's transcript gained a record at `at`, as a sent message
+    /// makes a real one: its `lastActivityAt` moves there and every tab hears.
+    ///
+    /// Without it a mock agent's activity never moved once the server was up,
+    /// so "new since opened in this app" (F6) could never be put on a mock
+    /// card to look at, and the e2e that clears one had nothing to clear.
+    pub fn wrote(&self, session_id: &str, written_at: i64) {
+        {
+            let mut agents = self.inner.agents.lock().unwrap();
+            let Some(agent) = agents.iter_mut().find(|a| a.session_id == session_id) else {
+                return;
+            };
+            agent.last_activity_at = Some(written_at);
+        }
+        self.inner.notify();
+    }
+
     /// Give one fixture a new session id, as `/clear` really does.
     ///
     /// `/clear` replaces the session rather than editing it: Claude Code opens
@@ -1365,15 +1382,19 @@ impl PaneApi for MockPanes {
             }
             return Ok(());
         }
+        let at = now_ms();
         ECHOES
             .lock()
             .unwrap()
             .entry(session_id.clone())
             .or_default()
             .push(Echo {
-                at: now_ms(),
+                at,
                 text: text.to_string(),
             });
+        if let Some(source) = &self.source {
+            source.wrote(&session_id, at);
+        }
         Ok(())
     }
 
@@ -2190,6 +2211,29 @@ mod tests {
         assert_eq!(ra.events[0].id, format!("{session}:echo:0"));
         // Drained once per reader, not once globally.
         assert!(a.read().await.unwrap().events.is_empty());
+        ECHOES.lock().unwrap().remove(session);
+    }
+
+    /// F6: a sent message is a transcript record, so the fixture's activity
+    /// moves to it and every tab hears — or a mock card could never be new.
+    #[tokio::test]
+    async fn a_submitted_paste_moves_the_fixtures_activity_and_tells_every_tab() {
+        let session = "mock-idle-ce";
+        let source = Arc::new(MockSource::new(false));
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let log = heard.clone();
+        let _off = source.on_change(Box::new(move |agents: Vec<Agent>| {
+            let agent = agents.into_iter().find(|a| a.session_id == "mock-idle-ce");
+            log.lock().unwrap().push(agent.and_then(|a| a.last_activity_at));
+        }));
+        let before = source.get(session).unwrap().last_activity_at.unwrap();
+        let pane_of_idle_ce = "%73";
+        MockPanes::over(source.clone()).paste(pane_of_idle_ce, "hello", Submit::Yes).await.unwrap();
+        let after = source.get(session).unwrap().last_activity_at.unwrap();
+        assert!(after > before);
+        let sent_at = ECHOES.lock().unwrap()[session].last().unwrap().at;
+        assert_eq!(after, sent_at, "the record's own time, as the transcript would say");
+        assert_eq!(heard.lock().unwrap().last(), Some(&Some(after)));
         ECHOES.lock().unwrap().remove(session);
     }
 

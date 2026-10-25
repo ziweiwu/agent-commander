@@ -1413,6 +1413,51 @@ made once, not one the browser may repeat from memory.
 - `test/ui/fleet-snapshot.test.tsx` — what is remembered, what is not, and
   that an empty fleet is forgotten
 
+**Amended: "new" says what this app showed, never what the reader read.** An
+idle card may carry the word *new* (F6) when its agent has done something since
+it was last opened on a tab that was on screen. The tempting words — *unread*,
+*done*, *ready* — are each a claim this app cannot back: the reader may have
+followed the whole thing in tmux, and an idle agent may have stopped for any
+reason (INV-13's quiet rule). So the claim is the narrow one, *new since opened
+in this app*, and every part of it is measured rather than guessed:
+
+- **The time is the agent's own.** The server keeps `seenThrough[session]`
+  (`seen.rs`) as the agent's `lastActivityAt` — a transcript timestamp, never
+  this machine's clock — at the last moment a tab on screen had it open. A
+  card is new when its `lastActivityAt` is past that. A terminal's activity is
+  a pane clock, so terminals are not tracked at all.
+- **On screen is the evidence, and a hidden tab is none.** A session open on a
+  tab in the background has been shown to nobody, so it does not move the
+  record. The same `visible` the push channel reads (INV-14) decides it, and
+  the record lives on the server so the laptop and the phone agree.
+- **Only an idle Claude card says it.** A busy card is still moving, so *new*
+  would be noise; a waiting card already has the hand; an inferred status is
+  not a transcript time. And it is the plain text colour, never amber: amber
+  is the hand's, and this asks nothing of the reader.
+- **A memory says nothing new.** While the socket is down no card carries the
+  mark, and nothing on this side clears one: only the server's record moves
+  it, so no mark changes until the connection is back.
+- **The conversation's divider counts a floor when that is all it has.** The
+  line *New since you last opened this · 3h ago — 2 replies, 41 tool calls*
+  sits before the first message past `seenThrough`, placed from where the
+  conversation stood when the visit began and held there. When the transcript
+  tail did not reach back that far it goes at the top and says *at least*.
+
+- `seen::tests` — a visible focus advances the record, a hidden one does not,
+  the first frame is backlog, a new transcript record after a focus is new,
+  it never moves back, and a terminal is never tracked
+- `routes::tests::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`
+  — the same over a real socket, and every tab is told
+- `test/ui/new-since.test.tsx` — the mark is on idle Claude cards only, beside
+  the age, never amber, absent while stale; the heading counts it; the divider
+  sits where the news begins, says *at least* at the top, is absent when
+  nothing is newer, holds while the record moves, and opens the view at itself
+  when the news is taller than it
+- `test/ui/new-since-visit.test.tsx` — the divider is placed from the record
+  as it stood before this tab's own focus moved it
+- `e2e/new-since.spec.ts` — a fixture that moves while its only tab is hidden
+  is marked, and opening it clears the mark
+
 ### Two more places the same rule bit
 
 **A composer with the socket down used to accept the message.** `send()` returns
@@ -1974,6 +2019,22 @@ per-device and unchanged: it still stands down while its own tab is visible.
   connect, on every beat, and the moment that changes; it reports a pointer, a
   key or a touch at most once per `PRESENCE_REPORT_MS`, never on a timer or for
   any other event, and at once on a new socket
+
+**Amended: the backlog rule also governs "new since opened in this app".**
+The card's *new* (F6, INV-11) is a transition too — the agent moved past what
+this app last showed — and it fails the same way a notification does if a
+fresh start counts as one. So it takes the first rule word for word: the first
+frame that carries a session's transcript time seeds `seenThrough` as backlog,
+and a fresh server shows no marks. The record is in memory only, so a restart
+is that fresh start. "Carries its transcript time" matters: the enricher idles
+until somebody connects (INV-4), and before its first read a session has no
+`lastActivityAt`; seeding from nothing would have marked every card the moment
+that read landed. A session that leaves the fleet is forgotten and is backlog
+again if it returns. The cost is the mirror of the push's: an agent's very
+first activity, seen before any record of it existed, is never marked.
+
+- `seen::tests::inv14_the_first_frame_is_backlog_so_a_fresh_server_shows_no_marks`,
+  `seen::tests::inv14_a_session_is_seeded_by_its_first_transcript_time_not_before`
 
 ## INV-15 — A silent family is a question, never a verdict
 

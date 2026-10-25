@@ -19,6 +19,8 @@ export function resetStore(): void {
     // an empty `agents` here is a confirmed-empty fleet. The first-frame tests
     // set this back to null themselves (INV-11).
     fleetAt: Date.now(),
+    seenThrough: null,
+    visit: null,
     limits: null,
     env: null,
     mock: false,

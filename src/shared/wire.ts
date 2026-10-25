@@ -368,7 +368,7 @@ prompt?: PendingPrompt, } | { "type": "frame", frame: Frame, } | { "type": "hist
  * pane-exit case is the one state a viewer must react to
  * structurally, because INV-1 means there is no pty to report it.
  */
-kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" };
+kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" } | { "type": "seen", seenThrough: { [key in string]: number }, };
 
 /**
  * One session's context-window usage and cost, from Claude Code's statusLine.

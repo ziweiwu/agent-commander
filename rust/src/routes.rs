@@ -347,6 +347,9 @@ pub struct Viewers {
     /// Which tabs are on screen and lately used. The push channel's "somebody
     /// at a tab is the notification" (INV-14) reads this.
     pub presence: crate::presence::Presence,
+    /// How far each session has been shown on a tab that was on screen, for
+    /// "new since opened in this app" (F6). Fed by [`track_seen`].
+    pub seen: crate::seen::SeenThrough,
     listener: std::sync::OnceLock<Box<dyn Fn(Watched) + Send + Sync>>,
 }
 
@@ -1841,6 +1844,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
 
     let viewer = Arc::new(Viewer::new(tx, app.viewers.presence.arrive()));
     let (off, off_limits) = subscribe_viewer(&viewer, &app);
+    let off_seen = subscribe_to_seen(&viewer, &app);
     app.viewers.joined();
 
     /*
@@ -1891,6 +1895,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
 
     off();
     off_limits();
+    off_seen();
     viewer.clear_timers();
     writer.abort();
     app.viewers.presence.gone(viewer.tab);
@@ -1954,6 +1959,45 @@ fn subscribe_viewer(viewer: &Arc<Viewer>, app: &Arc<App>) -> (Unsubscribe, Unsub
     (off, off_limits)
 }
 
+/// Send this tab how far each session has been shown, and every change after.
+///
+/// Subscribed before the first record is sent, so a change in between reaches
+/// it twice rather than not at all; the record is whole each time, so twice is
+/// harmless. The fleet is folded in first, which is what seeds a fresh
+/// server's sessions as backlog before anybody can open one (INV-14).
+fn subscribe_to_seen(viewer: &Arc<Viewer>, app: &Arc<App>) -> Unsubscribe {
+    let off = {
+        let viewer = viewer.clone();
+        app.viewers.seen.on_change(Box::new(move |seen_through| {
+            viewer.send(ServerMessage::Seen { seen_through });
+        }))
+    };
+    mark_shown(app);
+    viewer.send(ServerMessage::Seen { seen_through: app.viewers.seen.current() });
+    off
+}
+
+/// Fold the fleet, and the sessions open on a tab that is on screen, into the
+/// record of what has been shown (F6).
+fn mark_shown(app: &App) {
+    let on_screen = app.viewers.presence.on_screen_sessions();
+    app.viewers.seen.observe(&app.deps.source.list(), &on_screen);
+}
+
+/// F6, wired: every fleet change goes past the record of what has been shown.
+///
+/// Registered once, before any tab subscribes, so a tab hears the record move
+/// before it hears the fleet frame that moved it: an agent whose new activity
+/// is on screen somewhere never flickers "new" in between. The listener stays
+/// for the life of the server, so its handle is let go.
+pub fn track_seen(app: &Arc<App>) {
+    let shown = app.clone();
+    let _keep = app.deps.source.on_change(Box::new(move |agents| {
+        let on_screen = shown.viewers.presence.on_screen_sessions();
+        shown.viewers.seen.observe(&agents, &on_screen);
+    }));
+}
+
 /// Whether this tab's terminal view is open.
 ///
 /// Two named states rather than a bare flag: attaching and detaching are two
@@ -1991,7 +2035,10 @@ struct KeyRequest {
 fn answered_before_the_gate(msg: &ClientMessage, viewer: &Viewer, app: &App) -> bool {
     let presence = &app.viewers.presence;
     match msg {
-        ClientMessage::Pong { visible: Some(true) } => presence.on_screen(viewer.tab),
+        ClientMessage::Pong { visible: Some(true) } => {
+            presence.on_screen(viewer.tab);
+            mark_shown(app);
+        }
         ClientMessage::Pong { .. } => presence.off_screen(viewer.tab),
         ClientMessage::Present => presence.touched(viewer.tab, std::time::Instant::now()),
         ClientMessage::Ping => viewer.send(ServerMessage::Pong),
@@ -2273,6 +2320,8 @@ fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
         st.focused = session_id.clone();
         st.last_prompt_id = None;
     }
+    app.viewers.presence.focus(viewer.tab, session_id.clone());
+    mark_shown(app);
     let Some(session_id) = session_id else { return };
     let Some(agent) = app.deps.source.get(&session_id) else { return };
     /*
@@ -3323,6 +3372,7 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     if !opts.mock {
         enricher.clear_pictures_in(app.pictures.clone());
     }
+    track_seen(&app);
     idle_the_enricher_on_viewers(&app, &enricher);
     if let Some(spec) = &opts.notify {
         let channel = crate::push::Channel::parse(spec, &|key| std::env::var(key).ok())
@@ -4092,6 +4142,7 @@ mod tests {
     async fn start(token: Option<&str>, panes: Arc<FakePanes>, fixtures: Fixtures) -> Harness {
         let parts = harness_parts(panes);
         let app = harness_app(&parts, fixtures, token);
+        track_seen(&app);
         let served = app.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -6356,5 +6407,50 @@ mod tests {
         let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(&payload)).await;
         assert!(status(&res).contains("200"), "{}: {}", status(&res), body(&res));
         assert_eq!(spawn.started.lock().unwrap()[0].task.as_deref(), Some(task.as_str()));
+    }
+
+    /// The harness agent, now a Claude session whose transcript last moved at
+    /// `at`, told to every listener as the enricher does.
+    fn transcript_moves_to(source: &FakeSource, at: i64) {
+        let agents = {
+            let mut agents = source.agents.lock().unwrap();
+            agents[0].agent_kind = crate::agent_kinds::CLAUDE_KIND.into();
+            agents[0].status = AgentStatus::Idle;
+            agents[0].last_activity_at = Some(at);
+            agents.clone()
+        };
+        for listener in source.listeners.lock().unwrap().iter().flatten() {
+            listener(agents.clone());
+        }
+    }
+
+    /// Every message sent so far has been read: the reply to a ping is behind them.
+    async fn read_so_far(client: &mut Client) {
+        send_json(client, serde_json::json!({ "type": "ping" })).await;
+        assert!(next_msg(client, |m| is_type(m, "pong")).await.is_some());
+    }
+
+    /// F6 over a real socket: the record moves to the agent's own time only
+    /// while the tab that has it open is on screen, and every tab hears it.
+    #[tokio::test]
+    async fn inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen() {
+        const READ_AT: i64 = 1_786_600_000_000;
+        const REPLIED_AT: i64 = READ_AT + 60_000;
+        let h = plain(FakePanes::new()).await;
+        transcript_moves_to(&h.source, READ_AT);
+        let mut client = open(h.port).await;
+        let first = next_msg(&mut client, |m| is_type(m, "seen")).await.expect("a record on connect");
+        assert_eq!(first["seenThrough"][SESSION], READ_AT, "the first frame is backlog");
+
+        send_json(&mut client, serde_json::json!({ "type": "pong", "visible": false })).await;
+        send_json(&mut client, serde_json::json!({ "type": "focus", "sessionId": SESSION })).await;
+        read_so_far(&mut client).await;
+        transcript_moves_to(&h.source, REPLIED_AT);
+        assert_eq!(h.app.viewers.seen.current()[SESSION], READ_AT, "a hidden tab shows nobody anything");
+
+        send_json(&mut client, serde_json::json!({ "type": "pong", "visible": true })).await;
+        let moved = next_msg(&mut client, |m| is_type(m, "seen") && m["seenThrough"][SESSION] == REPLIED_AT).await;
+        assert!(moved.is_some(), "the tab is told, so another device would be too");
+        assert_eq!(h.app.viewers.seen.current()[SESSION], REPLIED_AT);
     }
 }

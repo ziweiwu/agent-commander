@@ -45,6 +45,12 @@ a laptop or from a phone.
 - **Steer a running session**: message it, switch model or permission mode,
   set a goal, compact or clear its context, or close it.
 - **Notifications** when an agent starts waiting on you, off by default.
+- **New since you last opened it here.** An idle agent that has done
+  something since it was last on screen in this app says **new** beside its
+  age, and the Idle heading counts them (`Idle 7 · 2 new`). Opening it on any
+  device clears the mark on every device, and the conversation draws a line
+  where the new part begins. It never says "unread": you may have followed it
+  in the terminal, and all the app knows is what it showed you.
 - **Works on a phone** over Tailscale, and keeps working when the network does
   not: a sleeping phone's socket is noticed and replaced rather than left
   looking live, and the conversation says it is loading rather than claiming the

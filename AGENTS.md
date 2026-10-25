@@ -231,6 +231,10 @@ confirmed-empty screen rather than the loading one. The delegation trees behind 
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
 in each of INV-13's three states, an orphan whose parent is not on disk, an
 agent that has delegated nothing, and a CLI that cannot say either way.
+A message sent to a fixture moves its `lastActivityAt` to the send, as a
+transcript record does for a real agent, so it changes that fixture's place
+under the `recent` sort and is what lets a card carry "new since opened in this
+app" (F6, `seen.rs`) — `e2e/new-since.spec.ts` sends one from a hidden tab.
 Because the mock fleet runs the same server, routes and validation as the real
 one (`rust/src/sources.rs` is the seam), a failure seen in mock mode is the
 failure you would get for real.

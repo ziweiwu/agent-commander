@@ -157,6 +157,19 @@
 .wrap[data-rail='waiting'] .age[data-since='state'] {
   color: var(--waiting);
 }
+/**
+ * New since opened in this app (F6), beside the age it qualifies. A word in
+ * the plain text colour, never amber: amber is the hand's, and this asks
+ * nothing of the reader. It only says there is something they have not been
+ * shown here.
+ */
+.newSince {
+  flex: none;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
 
 /*
  * The status word, now leading the context line instead of sitting in the

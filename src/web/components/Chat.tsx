@@ -2,10 +2,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { emptyNotice } from '../lib/chat.ts'
-import { dayMark, tildePath } from '../lib/format.ts'
+import { dayMark, relative, tildePath } from '../lib/format.ts'
 import { isUnused } from '../lib/filter.ts'
 import { PENDING_PREFIX } from '../lib/succession.ts'
-import { formatDay, translate } from '../lib/i18n.ts'
+import { formatDay, formatRelative, translate } from '../lib/i18n.ts'
+import { dividerFor, type Divider } from '../lib/newSince.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
@@ -123,6 +124,32 @@ function EmptyNotice({ agent }: { agent: Agent }) {
           {t('chatStartingTaskTrust')}
         </>
       )}
+    </div>
+  )
+}
+
+/**
+ * Where this visit's news begins (F6), drawn as a day separator is.
+ *
+ * "New since you last opened this", never "unread": the reader may have
+ * followed it in the terminal, and all this app knows is what it showed
+ * (INV-11). The counts stop where the agent had got when the visit began, and
+ * say "at least" when the transcript tail did not reach back far enough.
+ */
+function NewSinceLine({ divider, since, anchor }: { divider: Divider; since: number; anchor: React.Ref<HTMLDivElement> }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const replies = t(divider.replies === 1 ? 'newSinceReplyOne' : 'newSinceReplyMany', { n: divider.replies })
+  const tools = t(divider.tools === 1 ? 'newSinceToolOne' : 'newSinceToolMany', { n: divider.tools })
+  const when = formatRelative(lang, relative(since))
+  return (
+    <div
+      ref={anchor}
+      className={styles.daySep}
+      data-testid="new-since"
+      data-at-least={divider.atLeast || undefined}
+    >
+      <span>{t(divider.atLeast ? 'newSinceAtLeast' : 'newSince', { when, replies, tools })}</span>
     </div>
   )
 }
@@ -368,8 +395,18 @@ export function Chat({ agent }: { agent: Agent }) {
     showToast(result.ok ? t('shiftTabSent') : t('controlFailed', { error: result.error }))
   }
 
+  /**
+   * F6: where this visit's news begins, placed from where the conversation
+   * stood when the visit began and held there while the reader works down.
+   */
+  const visit = useStore((s) => s.visit)
+  const ownVisit = visit?.sessionId === agent.sessionId ? visit : null
+  const divider = useMemo(() => dividerFor(messages, ownVisit), [messages, ownVisit])
+  const dividerRef = useRef<HTMLDivElement>(null)
+  const dividerPlacedFor = useRef<string | null>(null)
+
   const rows = useMemo(() => {
-    const out: Array<{ key: string; day?: string; message?: (typeof messages)[number] }> = []
+    const out: Array<{ key: string; day?: string; newSince?: true; message?: (typeof messages)[number] }> = []
     let lastDay = ''
     for (const message of messages) {
       const day = formatDay(lang, dayMark(message.at))
@@ -377,10 +414,11 @@ export function Chat({ agent }: { agent: Agent }) {
         lastDay = day
         out.push({ key: `day-${day}-${message.id}`, day })
       }
+      if (message.id === divider?.before) out.push({ key: 'new-since', newSince: true })
       out.push({ key: message.id, message })
     }
     return out
-  }, [messages, lang])
+  }, [messages, lang, divider?.before])
 
   /*
    * Follow the conversation only while the user is already at the bottom.
@@ -401,6 +439,23 @@ export function Chat({ agent }: { agent: Agent }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages.length, busy, pinned])
+
+  /**
+   * Open at the divider when what is new is taller than the view, once per
+   * visit; "Jump to latest" covers the rest. Declared after the follow above
+   * so it has the last word on the first paint, and it unpins so the follow
+   * does not take the view straight back down.
+   */
+  useLayoutEffect(() => {
+    const line = dividerRef.current
+    const box = scrollRef.current
+    if (!line || !box || dividerPlacedFor.current === agent.sessionId) return
+    dividerPlacedFor.current = agent.sessionId
+    const top = line.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop
+    if (box.scrollHeight - top <= box.clientHeight) return
+    box.scrollTop = top
+    setPinned(false)
+  }, [divider, agent.sessionId])
 
   /*
    * Stay pinned when the box itself changes height, not only when a message
@@ -568,15 +623,18 @@ export function Chat({ agent }: { agent: Agent }) {
               <EmptyNotice agent={agent} />
             ) : (
               <>
-                {rows.map((row) =>
-                  row.day ? (
+                {rows.map((row) => {
+                  if (row.newSince && divider && ownVisit) {
+                    return <NewSinceLine key={row.key} divider={divider} since={ownVisit.seenThrough} anchor={dividerRef} />
+                  }
+                  return row.day ? (
                     <div key={row.key} className={styles.daySep}>
                       <span>{row.day}</span>
                     </div>
                   ) : (
                     <Message key={row.key} message={row.message!} />
-                  ),
-                )}
+                  )
+                })}
                 {agent.status === 'busy' && <WorkingIndicator />}
               </>
             )}
