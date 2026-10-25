@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1724 tests: 755 Rust (the server) + 969 vitest (the web app)
+npm test              # 1763 tests: 766 Rust (the server) + 997 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 460 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 465 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.

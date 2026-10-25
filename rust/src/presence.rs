@@ -15,7 +15,7 @@
 //! never on a timer (INV-4). A browser's own notification is a separate,
 //! per-device matter and still stands down while its own tab is visible.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -35,11 +35,13 @@ pub const PRESENCE_WINDOW: Duration = Duration::from_secs(180);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TabId(u64);
 
-/// One tab: whether it says it is on screen, and when it last felt a hand.
-#[derive(Debug, Default, Clone, Copy)]
+/// One tab: whether it says it is on screen, when it last felt a hand, and
+/// which session it has open.
+#[derive(Debug, Default, Clone)]
 struct Tab {
     visible: bool,
     last_input_at: Option<Instant>,
+    focused: Option<String>,
 }
 
 impl Tab {
@@ -74,6 +76,21 @@ impl Presence {
     /// The tab felt a pointer, a key or a touch at `moment`.
     pub fn touched(&self, tab: TabId, moment: Instant) {
         self.update(tab, |t| t.last_input_at = Some(moment));
+    }
+
+    /// The tab opened a session, or closed the one it had (`None`).
+    pub fn focus(&self, tab: TabId, session_id: Option<String>) {
+        self.update(tab, |t| t.focused = session_id);
+    }
+
+    /// The sessions some tab has open while it is on screen — what "new since
+    /// opened in this app" counts as seen (`seen.rs`). On screen alone, not
+    /// [`PRESENCE_WINDOW`]: a conversation left open on a visible tab is being
+    /// shown, which is the whole of the claim, while a hidden tab's open
+    /// session is shown to nobody.
+    pub fn on_screen_sessions(&self) -> HashSet<String> {
+        let tabs = self.tabs.lock().unwrap();
+        tabs.values().filter(|tab| tab.visible).filter_map(|tab| tab.focused.clone()).collect()
     }
 
     pub fn gone(&self, tab: TabId) {

@@ -119,6 +119,12 @@
   border-radius: var(--radius-pill);
   padding: 0 7px;
 }
+/** New since opened in this app (F6): the plain text colour, never amber, which is the hand's. */
+.groupNew {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text);
+}
 /* The heading carries the hand as well as the colour: colour alone is the
  * one channel a reader may not have (INV-13's rule, applied here). */
 .waitingTitle {

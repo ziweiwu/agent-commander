@@ -24,6 +24,7 @@ import type { Outcomes } from '../lib/chat.ts'
 import { translate } from '../lib/i18n.ts'
 import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
+import { followVisit, visitOf } from '../lib/newSince.ts'
 import { useStore, type ToolResultEntry } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -133,7 +134,7 @@ export function focusAgent(sessionId: string | null): void {
   if (state.selected && state.attached) {
     send({ type: 'attach', sessionId: state.selected, on: false })
   }
-  useStore.setState({ selected: sessionId })
+  useStore.setState({ selected: sessionId, visit: visitOf(sessionId, state, state.seenThrough) })
   // Drops `attached` with the rest of the conversation: the server forgets
   // the attachment on a focus change, and so must this side.
   state.resetConversation()
@@ -656,7 +657,13 @@ function handle(msg: ServerMessage): void {
   switch (msg.type) {
     case 'fleet': {
       const fleetAt = Date.now()
-      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt })
+      useStore.setState({
+        agents: msg.agents,
+        mock: msg.mock,
+        fleetAt,
+        caughtUp: msg.caughtUp,
+        visit: followVisit(state.visit, msg),
+      })
       // For the next cold start; the shape of the fleet and nothing said in it.
       saveFleetSnapshot(msg.agents, fleetAt)
       // A status change decides whether an echo may be counting down: a message
@@ -677,6 +684,18 @@ function handle(msg: ServerMessage): void {
     }
     case 'limits': {
       useStore.setState({ limits: msg.limits })
+      return
+    }
+    case 'seen': {
+      /**
+       * The first record after a selection is how far it had been shown before
+       * this tab's own focus moved it: on a cold load the selection is made
+       * before the server has said anything, and that record is the divider's.
+       */
+      useStore.setState({
+        seenThrough: msg.seenThrough,
+        visit: state.visit ?? visitOf(state.selected, state, msg.seenThrough),
+      })
       return
     }
     case 'timeline': {
@@ -1011,7 +1030,7 @@ export function connect(): void {
   listenForReturn()
   const ws = openSocket()
   if (!ws) {
-    useStore.setState({ conn: 'closed' })
+    useStore.setState({ conn: 'closed', caughtUp: false })
     retryLater()
     return
   }
@@ -1061,6 +1080,7 @@ export function connect(): void {
     useStore.setState({
       conn: 'closed',
       historyPending: false,
+      caughtUp: false,
       toolResults: withoutPending(useStore.getState().toolResults),
     })
     // Say which kind of down this is, for the caption (INV-11).

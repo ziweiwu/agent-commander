@@ -885,7 +885,14 @@ pub enum ClientMessage {
 #[serde(tag = "type")]
 pub enum ServerMessage {
     #[serde(rename = "fleet")]
-    Fleet { agents: Vec<Agent>, mock: bool },
+    Fleet {
+        agents: Vec<Agent>,
+        mock: bool,
+        /// False while the transcript fields may be frozen: from the moment
+        /// the enricher idles until its first full pass after resuming (F6).
+        #[serde(rename = "caughtUp")]
+        caught_up: bool,
+    },
     #[serde(rename = "limits")]
     Limits { limits: Option<RateLimits> },
     #[serde(rename = "timeline")]
@@ -967,6 +974,19 @@ pub enum ServerMessage {
         #[serde(skip_serializing_if = "Option::is_none")]
         #[cfg_attr(test, ts(optional))]
         result: Option<ToolResultView>,
+    },
+    /// How far each session has been shown in this app, as the agent's own
+    /// transcript time (`seen.rs`, F6). An idle card whose `lastActivityAt`
+    /// is past its entry is new since it was last opened here.
+    ///
+    /// Its own message rather than a field on the agent: it moves when a tab
+    /// opens a session, which is no change to the fleet, and every tab has to
+    /// hear it so the laptop and the phone agree. The whole record each time,
+    /// because it is one number per session and a delta would need ordering.
+    #[serde(rename = "seen")]
+    Seen {
+        #[serde(rename = "seenThrough")]
+        seen_through: std::collections::HashMap<String, i64>,
     },
 }
 

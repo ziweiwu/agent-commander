@@ -9,6 +9,7 @@ import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
 import { relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
+import { isNewSinceOpened } from '../lib/newSince.ts'
 import { useLayout } from '../hooks/useMediaQuery.ts'
 import { AgentCard } from './AgentCard.tsx'
 import { Button } from './ui/Button.tsx'
@@ -47,6 +48,21 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const phone = useLayout() === 'phone'
 
   const groups = useMemo(() => grouped(agents, fleet), [agents, fleet])
+  const seenThrough = useStore((s) => s.seenThrough)
+  /**
+   * The idle sessions that did something since they were last opened in this
+   * app (F6). None while the fleet is a memory: with the socket down nothing
+   * can be opened or shown, so a mark would be a claim about now (INV-11).
+   */
+  const fresh = useMemo(
+    () =>
+      new Set(
+        conn === 'open'
+          ? agents.filter((agent) => isNewSinceOpened(agent, seenThrough)).map((agent) => agent.sessionId)
+          : [],
+      ),
+    [agents, seenThrough, conn],
+  )
 
   /*
    * The delegation graph, polled only while this list is mounted (INV-4).
@@ -219,6 +235,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                   {t(GROUP_KEY[group.key] as Key)}
                 </span>
                 <span className={styles.groupCount}>{group.agents.length}</span>
+                <NewInGroup count={group.agents.filter((agent) => fresh.has(agent.sessionId)).length} />
               </h2>
               <div
                 className={`${styles.groupList} ${group.key === 'waiting' ? styles.waitingGroup : ''}`}
@@ -229,6 +246,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                     agent={agent}
                     tree={treeOf.get(agent.sessionId)}
                     selected={agent.sessionId === selected}
+                    newSinceOpened={fresh.has(agent.sessionId)}
                     onSelect={onSelect}
                   />
                 ))}
@@ -243,6 +261,17 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         )}
       </div>
     </div>
+  )
+}
+
+/** "· 2 new" after a group's count, when any of its cards carries the mark (F6). */
+function NewInGroup({ count }: { count: number }) {
+  const t = useTranslate()
+  if (count === 0) return null
+  return (
+    <span className={styles.groupNew} data-testid="group-new">
+      · {t('groupNew', { count })}
+    </span>
   )
 }
 

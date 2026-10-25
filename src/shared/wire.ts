@@ -405,7 +405,12 @@ tmux: boolean, port: number, platform: string,
  */
 version: string, };
 
-export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boolean, } | { "type": "limits", limits: RateLimits | null, } | { "type": "timeline", sessionId: string, events: Array<TimelineEvent>, reset: boolean, 
+export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boolean, 
+/**
+ * False while the transcript fields may be frozen: from the moment
+ * the enricher idles until its first full pass after resuming (F6).
+ */
+caughtUp: boolean, } | { "type": "limits", limits: RateLimits | null, } | { "type": "timeline", sessionId: string, events: Array<TimelineEvent>, reset: boolean, 
 /**
  * What this agent is blocked on, when its transcript says.
  *
@@ -425,7 +430,7 @@ outcomes?: Array<ToolOutcome>, } | { "type": "frame", frame: Frame, } | { "type"
  * pane-exit case is the one state a viewer must react to
  * structurally, because INV-1 means there is no pty to report it.
  */
-kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" } | { "type": "toolResult", sessionId: string, toolUseId: string, result?: ToolResultView, };
+kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" } | { "type": "toolResult", sessionId: string, toolUseId: string, result?: ToolResultView, } | { "type": "seen", seenThrough: { [key in string]: number }, };
 
 /**
  * One session's context-window usage and cost, from Claude Code's statusLine.

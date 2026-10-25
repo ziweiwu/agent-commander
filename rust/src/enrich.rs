@@ -28,6 +28,26 @@ const TICK: Duration = Duration::from_millis(5000);
 /// Builds a tail reader for one session, or None when it has no transcript yet.
 pub type TailFactory = Arc<dyn Fn(&Agent) -> Option<Box<dyn TailApi>> + Send + Sync>;
 
+/// Whether the fleet's transcript fields are current.
+///
+/// The enricher keeps its last values while nobody is watching, so from the
+/// moment it idles until its first full pass after resuming, `lastActivityAt`
+/// may be behind the transcript. A tab that opens a conversation in that gap
+/// must not take the stale time as where the agent had got (F6, INV-11).
+pub struct CaughtUp(AtomicBool);
+
+impl Default for CaughtUp {
+    fn default() -> Self {
+        CaughtUp(AtomicBool::new(true))
+    }
+}
+
+impl CaughtUp {
+    pub fn get(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
 pub struct FleetEnricher {
     source: Arc<dyn AgentSource>,
     tail_for: TailFactory,
@@ -47,6 +67,7 @@ pub struct FleetEnricher {
     /// what they cost themselves.
     usage: std::sync::OnceLock<Arc<crate::usage::UsageReader>>,
     pictures: std::sync::OnceLock<Arc<crate::pictures::PictureStore>>,
+    caught_up: std::sync::OnceLock<Arc<CaughtUp>>,
 }
 
 impl FleetEnricher {
@@ -75,6 +96,7 @@ impl FleetEnricher {
             watched: AtomicBool::new(true),
             usage: std::sync::OnceLock::new(),
             pictures: std::sync::OnceLock::new(),
+            caught_up: std::sync::OnceLock::new(),
         })
     }
 
@@ -90,6 +112,14 @@ impl FleetEnricher {
     /// tick holds, and a second loop would be a second thing to get wrong.
     pub fn clear_pictures_in(&self, store: Arc<crate::pictures::PictureStore>) {
         let _ = self.pictures.set(store);
+    }
+
+    /// Say here whether the fleet is caught up: false while idle, true from
+    /// the end of the first pass after resuming, which is announced with a
+    /// fleet change even when the pass itself changed nothing.
+    pub fn report_catch_up_to(&self, flag: Arc<CaughtUp>) {
+        flag.0.store(self.watched.load(Ordering::SeqCst), Ordering::SeqCst);
+        let _ = self.caught_up.set(flag);
     }
 
     /// Tick now, then on the interval, until [`stop`](Self::stop).
@@ -149,6 +179,9 @@ impl FleetEnricher {
         if !self.watched.swap(false, Ordering::SeqCst) {
             return;
         }
+        if let Some(flag) = self.caught_up.get() {
+            flag.0.store(false, Ordering::SeqCst);
+        }
         self.stop_loop().await;
     }
 
@@ -174,7 +207,16 @@ impl FleetEnricher {
             return;
         }
         self.run_once().await;
+        self.announce_catch_up();
         self.running.store(false, Ordering::SeqCst);
+    }
+
+    fn announce_catch_up(&self) {
+        let Some(flag) = self.caught_up.get() else { return };
+        if !self.watched.load(Ordering::SeqCst) || flag.0.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        self.source.notify();
     }
 
     async fn run_once(&self) {
@@ -783,6 +825,22 @@ mod tests {
         }
     }
 
+    /// A tail whose every read waits for the test to let it through.
+    struct GatedTail(Arc<tokio::sync::Notify>);
+
+    #[async_trait]
+    impl TailApi for GatedTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            self.0.notified().await;
+            Ok(TailRead::default())
+        }
+    }
+
+    fn gated(gate: &Arc<tokio::sync::Notify>) -> TailFactory {
+        let gate = gate.clone();
+        Arc::new(move |_| Some(Box::new(GatedTail(gate.clone())) as Box<dyn TailApi>))
+    }
+
     fn counting(reads: &Arc<StdMutex<usize>>, work: Duration) -> TailFactory {
         let reads = reads.clone();
         Arc::new(move |_| {
@@ -826,6 +884,41 @@ mod tests {
         tokio::time::sleep(RESUME_GRACE).await;
         assert!(*reads.lock().unwrap() > at_pause, "a connecting tab waited for a tick");
         enricher.stop().await;
+    }
+
+    /// F6: the fleet is caught up only once a full pass has run since the
+    /// enricher last resumed, and that moment is announced even when the pass
+    /// changed nothing, so a tab that opened on frozen values hears it.
+    #[tokio::test]
+    async fn f6_caught_up_only_after_the_first_pass_following_a_resume() {
+        let source = FakeSource::with(vec![agent("a")]);
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let slow = FleetEnricher::with_interval(
+            source.clone(),
+            gated(&gate),
+            None,
+            Duration::from_secs(3600),
+        );
+        slow.unwatch().await;
+        let flag = Arc::new(CaughtUp::default());
+        slow.report_catch_up_to(flag.clone());
+        assert!(!flag.get(), "an idle enricher's fleet was called caught up");
+        let before = source.notifications();
+        slow.watch().await;
+        tokio::time::sleep(RESUME_GRACE).await;
+        assert!(!flag.get(), "caught up before the first pass after resuming had finished");
+        assert_eq!(source.notifications(), before, "announced before the pass finished");
+        gate.notify_one();
+        tokio::time::sleep(SEVERAL_TICKS).await;
+        assert!(flag.get(), "never caught up after the first pass");
+        assert_eq!(source.notifications(), before + 1, "the catch-up was not announced");
+
+        gate.notify_one();
+        slow.tick().await;
+        assert_eq!(source.notifications(), before + 1, "a later unchanged pass announced again");
+        slow.unwatch().await;
+        assert!(!flag.get(), "still caught up after idling");
+        slow.stop().await;
     }
 
     /// INV-4: a pass that overruns its interval backs its own cadence off
