@@ -380,6 +380,18 @@ than an attacker.
   verbatim on npm, and no agent's directory, prompts or output passes through
   them. The same-origin check applies to them in full either way, because it
   applies to everything.
+
+  **The same prefix is the only thing ever served compressed.** The build
+  writes a brotli and a gzip copy beside each compiled script and stylesheet,
+  and `serve_asset` hands one out when the request's `Accept-Encoding` allows
+  it. Nothing else is compressed — not the document, not the API, not the
+  socket — because BREACH recovers a secret from how well a response
+  compresses when that secret shares the response with text an attacker can
+  influence, and the token, the session cookie and every agent's conversation
+  travel on exactly those. The bundle holds none of them, so its compressed
+  length gives nothing away. A compression layer added to the whole router
+  would undo this without failing anything else, which is what the second
+  test below is for.
 - *The address bar, which the token no longer touches.* It arrives once, as
   `?token=…` on the URL the user opened; `cookie_exchange` trades it for an
   `HttpOnly; SameSite=Strict` cookie and redirects to the same path without it.
@@ -414,6 +426,12 @@ than an attacker.
   (`options::inv3_trust_tailnet_serves_without_a_token_on_loopback_only`),
   and the bundle is exempt from the token while the document, the fleet and the
   socket are not
+- `routes::inv3_a_compressed_copy_is_served_only_to_a_client_that_accepts_it`
+  and `routes::inv3_nothing_outside_the_bundle_is_ever_served_compressed` — a
+  compressed copy goes only to a request that offered to read it, and nothing
+  outside `/assets/` is compressed even beside a copy on disk and a request
+  asking for one; `e2e/asset-cache.spec.ts` checks the real build's names and
+  copies from a real browser
 - `test/ui/token.test.tsx` — the page puts no token on any request and none in
   the address bar, even when it was loaded from a URL carrying one
 

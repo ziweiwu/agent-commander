@@ -1,5 +1,58 @@
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { brotliCompressSync, constants as zlib, gzipSync } from 'node:zlib'
 import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+
+/** The bundle files the server may hand out compressed: compiled scripts and stylesheets. */
+const COMPRESSIBLE = /^assets\/[^/]+\.(?:js|css)$/
+
+/** Brotli at its slowest and smallest, which a build can afford and a request could not. */
+const BROTLI_BEST = {
+  params: {
+    [zlib.BROTLI_PARAM_QUALITY]: zlib.BROTLI_MAX_QUALITY,
+    [zlib.BROTLI_PARAM_MODE]: zlib.BROTLI_MODE_TEXT,
+  },
+}
+
+/** Write `compressed` to `path` only when it would actually save bytes. */
+function writeIfSmaller(path: string, raw: Buffer, compressed: Buffer): void {
+  if (compressed.length < raw.length) writeFileSync(path, compressed)
+}
+
+/** Write the brotli and gzip copies of one emitted file beside it. */
+function compressBeside(path: string): void {
+  const raw = readFileSync(path)
+  writeIfSmaller(`${path}.br`, raw, brotliCompressSync(raw, BROTLI_BEST))
+  writeIfSmaller(`${path}.gz`, raw, gzipSync(raw, { level: zlib.Z_BEST_COMPRESSION }))
+}
+
+/**
+ * Write a brotli and a gzip copy beside every script and stylesheet the build emits.
+ *
+ * The bundle is ~860KB of text, and over Tailscale on a phone a push tap is
+ * usually a cold start, because iOS evicts the page. Compressing here rather
+ * than per request costs the server nothing and needs no compression crate:
+ * `serve_asset` in `rust/src/routes.rs` hands `ServeDir` the request and it
+ * serves whichever copy the `Accept-Encoding` allows, from disk.
+ *
+ * Only this build's own output is compressed, and Vite names every file of it
+ * after its content, so a compressed copy can never outlive the bytes it was
+ * made from. The manifest and the icons are copied from `public/`, are not in
+ * the bundle this hook is handed, and are never given a copy.
+ */
+function precompress(): Plugin {
+  return {
+    name: 'precompress',
+    apply: 'build',
+    writeBundle(output, bundle) {
+      const dir = output.dir
+      if (dir === undefined) throw new Error('precompress: the build names no output dir')
+      const emitted = Object.keys(bundle).filter((name) => COMPRESSIBLE.test(name))
+      emitted.forEach((name) => compressBeside(join(dir, name)))
+    },
+  }
+}
 
 /**
  * Stop the app's stylesheet from blocking the first paint.
@@ -36,7 +89,7 @@ function nonBlockingCss(): Plugin {
 
 export default defineConfig({
   root: 'src/web',
-  plugins: [react(), nonBlockingCss()],
+  plugins: [react(), nonBlockingCss(), precompress()],
   build: {
     outDir: '../../dist/web',
     emptyOutDir: true,

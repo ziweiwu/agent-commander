@@ -245,6 +245,16 @@ the screen with the message box pinned to the bottom, above the home indicator.
 Inputs are 16px so iOS does not zoom the page when you tap them, tap targets are
 44px, and safe-area insets keep content clear of the notch in both orientations.
 
+Only the first visit downloads the app. Its scripts and stylesheets are named
+after their contents, so the browser may keep them for a year without asking
+again, and a later visit — including a push tap after iOS has evicted the page
+— fetches the 4KB document and paints from what its cache still holds. The first visit gets them compressed:
+about 146KB instead of 555KB, and the terminal behind a permission or plan
+prompt as 64KB instead of 305KB. A rebuild changes the names, so an update is
+never stuck behind a cached copy. Only these files are compressed; the API and
+the live connection never are, because they carry the token and your agents'
+conversations (INV-3).
+
 When the keyboard comes up, the sheet lays itself out in what is left of the
 screen rather than under the keys: the message box stays visible, the last
 message stays visible above it, and the same is true of the new-agent dialog
@@ -812,7 +822,7 @@ npm run mock -- -p 4501
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
 npm test           # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
-npm run e2e        # 401 end-to-end tests: desktop/tablet/phone on Chromium,
+npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck
