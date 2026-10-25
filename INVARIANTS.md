@@ -1815,17 +1815,34 @@ screen-reader live region stay on the device, so they use the card's name
 `--notify-lang zh`; a server flag, because the browser's language is a
 preference and preferences never reach the server (FR-UI-12).
 
-The four rules above bind it word for word. The first fleet the server sees is
-backlog; a standing block never re-fires; unblocked-then-blocked is news; and
-**a visible tab is the notification** — the client says on every heartbeat and
-on every `visibilitychange` whether it is on screen, and while any browser is,
-the transition is consumed and nothing is pushed, the way Claude Code's own
-Remote Control holds its pushes while you are at the terminal. An inferred
-status never fires, checked here a second time. A push that fails is logged
-and not retried: the next transition sends its own.
+The four rules above bind it word for word, but for the last. The first fleet
+the server sees is backlog; a standing block never re-fires;
+unblocked-then-blocked is news; and **a tab somebody is at is the
+notification** — while one is, the transition is consumed and nothing is
+pushed, the way Claude Code's own Remote Control holds its pushes while you are
+at the terminal. An inferred status never fires, checked here a second time. A
+push that fails is logged and not retried: the next transition sends its own.
+
+**Amended again: on screen is not the same as somebody there.** The rule used
+to be "a visible tab is the notification", with visibility the only signal: the
+client says on every heartbeat and every `visibilitychange` whether it is on
+screen. A desk tab left on screen when its owner walked away therefore
+silenced every push to the phone in their pocket — the one device the push
+exists for. So for the push, a tab counts as somebody being there only while it
+is visible **and** has felt a pointer, a key or a touch within
+`PRESENCE_WINDOW` (three minutes, `presence.rs`). The client reports that input
+as a `present` message on `pointerdown`, `keydown` and `touchstart`, at most
+once per `PRESENCE_REPORT_MS` (30 seconds) and never on a timer (INV-4); the
+server keeps `last_input_at` per tab. A hidden tab never counts, however
+recently it was used. A visible tab nobody has touched lately does not hold a
+push back, so the mistake this rule makes is a duplicate — the phone buzzes
+beside a screen already showing the block — and never a missed alert. The one
+miss it still allows is bounded by the window: a block that begins within three
+minutes of the last touch is taken as seen. The browser's own notification is
+per-device and unchanged: it still stands down while its own tab is visible.
 
 - `push::tests` — the first frame is backlog; a watched transition fires once,
-  and again only after it clears; a visible tab consumes it; an inferred
+  and again only after it clears; a tab somebody is at consumes it; an inferred
   status never fires; a push without an address carries no link; the channel
   spec is parsed and refused in words; an ntfy push is one outbound POST with
   the documented headers, against a local server; a derived name is pushed as
@@ -1837,8 +1854,17 @@ and not retried: the next transition sends its own.
   `options::a_push_language_is_en_or_zh_and_needs_a_channel`
 - `test/ui/notify.test.tsx` — the notification is titled with `displayName`,
   and the live region names agents the same way
+- `presence::tests` — a visible tab nobody has used is nobody; one used just
+  now is somebody; a hidden tab never is; input older than `PRESENCE_WINDOW`
+  lapses; one attended tab among idle ones is enough, and a closed one counts
+  for nothing
+- `routes::tests::inv14_*` — over a real socket: a tab that only says it is
+  visible no longer holds a push back, one that also reports input does, and a
+  hidden one never does
 - `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
-  connect, on every beat, and the moment that changes
+  connect, on every beat, and the moment that changes; it reports a pointer, a
+  key or a touch at most once per `PRESENCE_REPORT_MS`, never on a timer or for
+  any other event, and at once on a new socket
 
 ## INV-15 — A silent family is a question, never a verdict
 

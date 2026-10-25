@@ -26,6 +26,8 @@ import { agent, renderApp, resetStore } from './helpers.tsx'
 
 /** Everything the client sent down the socket, as the server would parse it. */
 const sent: ClientMessage[] = []
+/** What a tab says about itself, which reaches no agent and is not watched here. */
+const PRESENCE_PLUMBING = ['pong', 'present']
 const sockets: FakeSocket[] = []
 
 /** A socket that records rather than connects, and can be spoken to. */
@@ -40,7 +42,7 @@ class FakeSocket {
     {
       const parsed = JSON.parse(raw) as ClientMessage
       // The heartbeat's presence pong is plumbing, not what this test watches.
-      if ((parsed as { type: string }).type !== 'pong') sent.push(parsed)
+      if (!PRESENCE_PLUMBING.includes((parsed as { type: string }).type)) sent.push(parsed)
     }
   }
   addEventListener(type: string, fn: (e: unknown) => void): void {

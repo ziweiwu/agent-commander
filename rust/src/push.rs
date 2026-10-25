@@ -24,12 +24,14 @@
 //! fleet this tracker sees is backlog, not news: an agent that has been
 //! waiting three days when the server starts notifies nobody. A standing block
 //! never re-fires; one that unblocks and blocks again is news again. And a
-//! visible tab is already the notification, so while any browser reports
-//! itself visible the transition is consumed and no push goes — presence the
-//! client declares on its heartbeat, the same way Claude Code's own Remote
-//! Control suppresses pushes while you are at the terminal. An inferred
-//! status never fires: it can never be `waiting` (INV-11), and this checks
-//! that a second time rather than trusting it.
+//! tab somebody is at is already the notification, so while one is on screen
+//! and was used within `PRESENCE_WINDOW` the transition is consumed and no
+//! push goes — presence the client declares on its heartbeat and on input
+//! (`presence.rs`), the way Claude Code's own Remote Control holds its pushes
+//! while you are at the terminal. Visible alone is not enough: a desk tab left
+//! on screen used to silence the phone. An inferred status never fires: it
+//! can never be `waiting` (INV-11), and this checks that a second time rather
+//! than trusting it.
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -214,10 +216,10 @@ impl Notifier {
         }
     }
 
-    /// Note this frame's transitions and push none of them, for when a browser
-    /// reports itself visible: the screen is the notification, so the
-    /// transition is consumed rather than deferred, exactly as the browser's
-    /// own tracker does.
+    /// Note this frame's transitions and push none of them, for when somebody
+    /// is at a tab: the screen is the notification, so the transition is
+    /// consumed rather than deferred, exactly as the browser's own tracker
+    /// does.
     pub fn watched_on_screen(&self, agents: &[Agent]) {
         self.record(agents);
     }
@@ -383,7 +385,7 @@ mod tests {
     }
 
     #[test]
-    fn inv14_a_visible_tab_is_the_notification() {
+    fn inv14_a_tab_somebody_is_at_is_the_notification() {
         let n = notifier();
         n.freshly_blocked(&[agent("a", AgentStatus::Busy)]);
         n.watched_on_screen(&[agent("a", AgentStatus::Waiting)]);

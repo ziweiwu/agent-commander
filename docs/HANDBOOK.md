@@ -686,6 +686,12 @@ the conversation's title or a prompt, because it goes to ntfy.sh or Telegram
 `--notify-lang zh`, in Chinese. That is a server flag and not the language
 menu, because no preference ever reaches the server (FR-UI-12).
 
+No push goes while you are at a browser tab: one that is on screen and has had
+a click, a key or a touch in the last three minutes is already the
+notification. A tab merely left on screen does not count, so a desk you walked
+away from does not silence the phone; at worst the phone buzzes beside a screen
+already showing the block.
+
 **The token only appears in a URL once.** Open the link and the server trades it
 for an `HttpOnly; SameSite=Strict` cookie and redirects to the same address
 without the query string, so it stops living in the address bar — and therefore

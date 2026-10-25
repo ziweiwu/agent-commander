@@ -299,8 +299,10 @@ commit.
   percentage and cost to `sessions/<session_id>.json`; `usage.rs` reads the
   second inside the enrichment pass. `--install-statusline` is unchanged.
 - **Push goes out through `--notify`, and only out.** `push.rs` posts to an
-  ntfy topic or a Telegram bot when an agent *becomes* waiting while no browser
-  reports itself visible (INV-14, server-side); `--notify-link` is this app's
+  ntfy topic or a Telegram bot when an agent *becomes* waiting while nobody is
+  at a tab — visible *and* used within `PRESENCE_WINDOW`, from the client's
+  throttled `present` reports (`presence.rs`, INV-14 server-side; visible alone
+  let a desk tab silence the phone); `--notify-link` is this app's
   address on the phone so the push opens the card. It is off unless the flag is
   given, and there is no channel in mock mode to point a review agent at. A
   push leaves the machine, so it never carries conversation text: a name Claude
