@@ -12,8 +12,15 @@
 import { expect, test, type Page } from '@playwright/test'
 import { AGENT, openAgent, openFleet } from './helpers.ts'
 
-/** Short enough that the mock fleet overflows its column. */
+/** The desktop the escape was measured on. */
 const LAPTOP = { width: 1440, height: 900 }
+/**
+ * Short enough that the mock fleet overflows its column. 1440x900 was, until
+ * the toolbar became one row and the cards lost their Details strip: all
+ * fourteen fixture cards fit there now, which is the point of that change and
+ * leaves nothing for the column to overflow.
+ */
+const SHORT_DESKTOP = { width: 1440, height: 600 }
 
 async function documentOverflow(page: Page): Promise<number> {
   return page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)
@@ -25,6 +32,7 @@ test.describe('the desktop document fits the viewport @desktop', () => {
   })
 
   test('with the fleet column overflowing', async ({ page }) => {
+    await page.setViewportSize(SHORT_DESKTOP)
     await openFleet(page)
     const column = page.getByTestId('agent-card').first().locator('xpath=ancestor::*[contains(@class, "column")][1]')
     const overflows = await column.evaluate((el) => el.scrollHeight > el.clientHeight)

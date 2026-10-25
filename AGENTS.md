@@ -181,6 +181,14 @@ a checkout where the two have drifted. Edit the generator, never the output.
 | `scripts/gen-ui-icons.py` | `src/web/lib/icon-paths.ts` | `test/icons.test.ts` |
 | `scripts/gen-icons.py` | `src/web/public/assets/icon-*.png` | `test/mac-app.test.ts` |
 
+**A wash or a translucent edge is a token too.** `gen-themes.py` emits every
+`color-mix()` the app draws as `--tint-*` or `--edge-*` (`OVERLAYS`), plus the
+waiting card's opaque `--wash-waiting`, solved per palette. A module never
+writes `color-mix(` itself — `test/overlays.test.ts` fails one that does — so
+`audit-contrast.py` can read each tint's strength from `tokens.css` and measure
+everything drawn on it; a tint no `COMPOSITES` entry measures fails the audit.
+A new tint means a line in `OVERLAYS` and a line in `COMPOSITES`.
+
 **The last two are different scripts and the names are one word apart.**
 `gen-icons.py` draws the *application* icon — the PWA PNGs and the macOS
 `.iconset`, one picture of three lanes. `gen-ui-icons.py` draws the

@@ -1265,6 +1265,14 @@ that `gone` outranks `waiting` in the rail: a question that can be answered
 from nowhere must not wear the mark that means "you can answer this", which is
 the same reasoning that already withholds the card's Answer verb.
 
+**Every waiting mark on the card follows the rail, not the reported status.** A
+waiting card is the one tinted surface on the fleet, and its tint, its amber
+edge, its amber status words and its Answer verb are all keyed on the entry's
+`data-rail`. They were keyed on `data-status`, so a waiting agent whose pane had
+exited kept an amber stripe and amber words beside a struck red ring. Now it
+says `waiting · dialog open` in the plain colour, because that is what it
+reported, with nothing on it that invites a tap.
+
 **And the age says what it is the age of.** For an agent that reported itself
 waiting the card reads it as how long it has been blocked, not when it last
 wrote. It is the same field and the same number — for an agent that stopped to
@@ -1277,8 +1285,11 @@ recorded activity is given no such sentence at all.
   as a modifier rather than a fifth shape, reach independent of state, and the
   age refusing to read as time-in-state for a status this app worked out
 - `test/ui/status-rail.test.tsx` — the card drawing it, the rail staying
-  `aria-hidden` so the words beside it carry the meaning, and
-  `attachBlockedReason` reaching the reader rather than being invented
+  `aria-hidden` so the words beside it carry the meaning,
+  `attachBlockedReason` reaching the reader rather than being invented, and
+  every rule in `AgentCard.module.css` that paints a waiting colour keyed on
+  the rail, with a waiting agent whose pane has exited drawn with no wash, no
+  amber and no verb
 
 **An inferred status may never be `waiting`.** An agent blocked on a permission
 prompt and an agent that has finished both sit there emitting nothing; no

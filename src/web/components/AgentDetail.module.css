@@ -77,12 +77,12 @@
 }
 .pill[data-status='busy'] {
   color: var(--busy);
-  border-color: color-mix(in srgb, var(--busy) 40%, transparent);
+  border-color: var(--edge-busy);
 }
 .pill[data-status='waiting'] {
   color: var(--waiting);
-  border-color: color-mix(in srgb, var(--waiting) 50%, transparent);
-  background: color-mix(in srgb, var(--waiting) 14%, transparent);
+  border-color: var(--edge-waiting);
+  background: var(--tint-waiting);
 }
 /* The header's action pair, kept on one line and pushed to the end together. */
 .headActions {
@@ -314,8 +314,8 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  background: color-mix(in srgb, var(--waiting) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--waiting) 45%, transparent);
+  background: var(--tint-waiting);
+  border: 1px solid var(--edge-waiting);
   border-radius: var(--radius-md);
   padding: 10px 12px;
   margin-bottom: 12px;
