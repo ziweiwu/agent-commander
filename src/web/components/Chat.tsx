@@ -26,7 +26,7 @@ import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button } from './ui/Button.tsx'
 import styles from './Chat.module.css'
-import { ICON_MARK, Icon } from './ui/Icon.tsx'
+import { ICON_BUTTON, Icon } from './ui/Icon.tsx'
 
 /** Distance from the bottom within which the view keeps following new messages. */
 const PIN_SLACK = 60
@@ -915,7 +915,7 @@ export function Chat({ agent }: { agent: Agent }) {
                   reader. Spelling it out costs the message box 70px on a small
                   phone, and the box is what the row is for. */}
               <span className={styles.stopGlyph}>
-                <Icon name="stop" size={ICON_MARK} />
+                <Icon name="stop" size={ICON_BUTTON} />
               </span>
               <span className={styles.stopLabel}>{t('interrupt')}</span>
             </Button>

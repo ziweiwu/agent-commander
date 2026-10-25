@@ -116,7 +116,7 @@
   padding-top: 10px;
   flex: none;
 }
-/*
+/**
  * The menu above the message box, holding everything that is not typing.
  *
  * It replaced a permanent row. That row cost 50px of every screen at rest —
@@ -127,6 +127,12 @@
  *
  * Portalled to the body and pinned in viewport pixels by `Chat`, because the
  * detail pane clips.
+ *
+ * A fixed width rather than one its content sets. `Chat` keeps the panel on
+ * screen by measuring it once, as it opens; a panel that then grew — the goal
+ * field opening inside it — ran off the right edge with its Set button, which
+ * is how sans-serif compact buttons, narrower than the mono ones, made the
+ * goal form unreachable on a portrait tablet.
  */
 .menuPanel {
   position: fixed;
@@ -134,8 +140,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-width: 240px;
-  max-width: min(360px, calc(100vw - 24px));
+  width: min(360px, calc(100vw - 24px));
   /* Never taller than the visible rectangle, which an on-screen keyboard
      shrinks (INV-17); past that it scrolls inside itself. */
   max-height: calc(var(--vvh, 100dvh) - 24px);
@@ -162,7 +167,7 @@
   padding: 4px 10px 2px;
   color: var(--faint);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 .menuHeading:not(:first-child) {
   margin-top: 4px;
@@ -258,7 +263,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-md);
   padding: 10px 12px;
-  font: 13px/1.45 var(--font-ui);
+  font: var(--text-base) / var(--leading-prose) var(--font-ui);
 }
 .input::placeholder {
   /* A textarea wraps, and the fixed height then clips the second line, so the
@@ -293,7 +298,7 @@
   font-size: var(--text-xs);
 }
 .hint kbd {
-  font: 11px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
   padding: 0 4px;
@@ -443,8 +448,7 @@
 
 .stopGlyph {
   display: none;
-  font-size: 10px;
-  line-height: 1;
+  line-height: 0;
 }
 
 /* On a phone the label costs the message box more than it is worth: measured
@@ -452,7 +456,7 @@
    Applied at the phone layout's one cut. */
 @media (max-width: 560px) {
   .stopGlyph {
-    display: inline;
+    display: inline-flex;
   }
   .stopLabel {
     display: none;
@@ -505,6 +509,7 @@
    */
   .list {
     padding-left: 0;
+    max-width: 46em;
   }
 }
 

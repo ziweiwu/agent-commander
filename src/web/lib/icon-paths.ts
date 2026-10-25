@@ -21,6 +21,8 @@ export const ICON_PATHS = {
     '<path d="M5 9L12 16L19 9"/>',
   'ellipsis':
     '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+  'ellipsis-vertical':
+    '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
   'expand':
     '<path d="M9 4.5H4.5V9"/><path d="M15 4.5H19.5V9"/><path d="M15 19.5H19.5V15"/><path d="M9 19.5H4.5V15"/>',
   'panel-hide':

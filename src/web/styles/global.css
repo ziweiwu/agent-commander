@@ -18,8 +18,18 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.5 var(--font-ui);
+  font: var(--text-md) / var(--leading-prose) var(--font-ui);
   -webkit-text-size-adjust: 100%;
+}
+
+/**
+ * Chinese has no italic. Without this a browser slants Han by shearing it,
+ * which reads as a rendering fault rather than as emphasis; a heavier weight
+ * may still be synthesised, because a CJK face often ships only one.
+ */
+:root:lang(zh),
+:lang(zh) {
+  font-synthesis: weight;
 }
 
 /* Set while a modal or the mobile sheet owns the screen. */

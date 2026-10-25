@@ -1047,13 +1047,17 @@ buttons for one action, on the app's central screen. Model followed the
 others a step later, for the same reason in reverse: left alone in the row, it
 was the one control about the next turn that a phone and a full screen could
 not see. The row keeps Close, which ends the session rather than steering it —
-and **the row itself now folds behind the `⋯` at every width**, where it used to
+and **the row itself now folds behind the `⋮` at every width**, where it used to
 fold only below 900px. The old reasoning was that a desktop has room for it;
 measured, the room cost 3.9% of a 1440x900 screen for a 960x53 band holding one
 103x36 button, so 857px of it was empty. That is the same argument that turned
 the composer strip into a menu, and it was always true here too — the phone was
-just where it hurt first. INV-17 permits the fold because the `⋯` is on screen
-and named at every width. Clear and Compact
+just where it hurt first. INV-17 permits the fold because the `⋮` is on screen
+and named at every width. It is drawn `⋮` rather than the composer's `⋯`
+because the two open different things — this one holds only Close agent — and
+drawn alike they read as one menu in two places; the header's ✕ beside it is
+named "Close panel" for the same reason, since a bare "close" next to "Close
+agent" read as ending the session. Clear and Compact
 are still one *hook* (`web/hooks/useContextActions.ts`) with one caller,
 because their reasoning is a sequence rather than a widget: a `sendingRef` so
 a double click cannot discard the session the first click just created, a
@@ -2529,10 +2533,10 @@ synchronously, because two presses in one React batch would otherwise each read
 the same uncleared line and send it twice.
 
 **The disclosures are part of the contract, not an implementation detail.**
-The agent's settings row folds behind `⋯` in the tab strip, the fleet's filters
+The agent's settings row folds behind `⋮` in the tab strip, the fleet's filters
 are hidden while the sheet covers the list they filter, and the fleet column
 itself can be collapsed away behind a named toggle in the topbar. All three are
-allowed *because* something reaches them: the `⋯` is on screen and named, leaving
+allowed *because* something reaches them: the `⋮` is on screen and named, leaving
 the sheet brings the filters back, and the toggle stays drawn while the column is
 gone. An action with nothing to reach it is not folded away, it is missing.
 
@@ -2586,7 +2590,7 @@ knowing the padding it had changed and not the four stacked bands it had not.
 
 What the bar bought, and what it cost, both belong here. It bought: the fleet
 column down from a 430px track to a 288px preference that collapses away, the
-settings row folded behind its `⋯` at every width, the status facts moved into
+settings row folded behind its `⋮` at every width, the status facts moved into
 the header's own row on a desktop, the 46px the hover timestamps were renting
 handed back, and the filters following the list they filter. It cost nothing
 that says anything — every trim is whitespace, and the two things that looked

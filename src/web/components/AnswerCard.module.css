@@ -16,7 +16,7 @@
 .question {
   margin: 0;
   font-size: var(--text-md);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   color: var(--text);
 }
 
@@ -177,7 +177,7 @@
   padding: 6px 8px;
   max-height: 160px;
   overflow: auto;
-  font: 11px/1.45 var(--font-mono);
+  font: var(--text-xs) / var(--leading-ui) var(--font-mono);
   color: var(--dim);
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -201,5 +201,5 @@
   border-left: 3px solid var(--danger);
   color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
