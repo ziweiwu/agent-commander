@@ -421,6 +421,10 @@ commit.
   that went into proving the *parser* was right was spent on the one component
   that had never been wrong.
 
+  `refusals` (auto mode's refusals in the window read, for the fold) was added
+  after the guard below existed and touched all four the first time; the guard
+  is what says so if a fifth producer forgets one.
+
   Only `card_fields` is safe by construction: it is a struct literal with no
   `..` rest, so a new field is a compile error there. The other three are now
   held by `sources::tests::every_patch_field_is_named_by_the_three_functions_that_carry_it`,

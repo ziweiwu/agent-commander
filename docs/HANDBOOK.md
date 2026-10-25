@@ -103,8 +103,11 @@ src/app.ts`, `Task → Rerun the exhaustive sweep`.
 A card blocked on you is the only tinted card on the screen, a warm wash behind
 it with an amber edge, so it can be found out of the corner of an eye; idle and
 working cards are plain. The chevron down the card's right edge (*Details*)
-opens the fold: the token count, the full path, the session's original name and
-the delegation tree. A blocked agent whose terminal has gone loses the wash and
+opens the fold: the token count, the full path, the session's original name,
+the delegation tree, and — once auto mode has refused anything — *auto mode
+refused 3 actions · last 4m ago (since 14:02)*, counted over the part of the
+transcript that was read and saying where that starts, as the token count does.
+A refusal never sends a notification; it waits in the fold. A blocked agent whose terminal has gone loses the wash and
 the **Answer** button, because there is nothing left to answer from.
 
 An agent that has handed work to a subagent reads `busy · delegated`, and its
@@ -471,6 +474,22 @@ without the run burying the reply. A skill names itself; a slash command you
 typed reads as `/goal ship it` rather than as the markup Claude Code stores it
 as.
 
+Each call also says how it ended, in a column of its own: an edit reads
+`Edit src/app.ts  +12 −3`, counted from its recorded diff; a call auto mode
+stopped reads `refused · auto mode · irreversible local destruction`; one that
+errored reads `failed`. Those two are in the danger colour, but the words are
+always there. A refusal is read from the decision Claude Code records, never
+guessed from an error message, so an error that merely mentions permission is
+`failed`.
+
+Tap a call that has finished to see what it did: an edit's diff, or the last
+32 KB or so of what a command printed, with how much was left out. It opens in
+a box that scrolls on its own, so a long line never pushes a phone sideways,
+and it reads *as recorded at 14:07 — the file may have changed since*, plus
+*you changed this before it was applied* when you edited it in the permission
+dialog. It is read when you tap, for the agent you are looking at, from the
+last 8 MB of the transcript; nothing of it is kept in the browser.
+
 The agent's header is one row: the way back, its name, its status, the Chat
 and Attach tabs, and the header's own buttons. They used to be two, which came
 to 108px of a phone screen while the tab row was two-fifths full. If the name
@@ -815,7 +834,7 @@ filesystem. `--grant` separates those.
 
 | Grant | What it covers |
 |---|---|
-| `read` | the fleet, transcripts, frames, `/api/env` |
+| `read` | the fleet, transcripts (a tool call's recorded result among them), frames, `/api/env` |
 | `respond` | answering the question an agent is blocked on |
 | `drive` | pastes, keystrokes, `mode`, `model`, `compact`, `clear`, `close` |
 | `spawn` | starting new agents, and the folder picker |

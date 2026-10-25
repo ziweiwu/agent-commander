@@ -671,6 +671,25 @@ and the first reading's start time stands while it is.
   paging, the untouched diff, the dead pane, and the grant
 - `pane::a_window_past_the_end_of_history_is_cut_to_what_is_there` — the cut,
   against tmux's clamping
+
+*What a tool call returned* is read on the same terms: one `toolResult`
+request per tap, answered only for a tab focused on that session, never
+polled. The read is a tail of its own that scans back from the end of the
+transcript at most `RESULT_SCAN_BYTES` (8 MiB — an edit's record carries the
+whole file it edited, so a few edits to a large file are megabytes) and sends
+at most `RESULT_CAP_BYTES`; a call further back than that is answered as not
+found rather than read for. A miss is still answered, so the row asking is
+never left waiting.
+
+- `routes::inv4_a_tool_result_read_needs_a_focused_viewer`,
+  `routes::a_tool_result_miss_is_answered_with_nothing_and_read_may_ask` — the
+  gate, the miss, the grant and the id bound
+- `transcript::a_tool_result_read_looks_back_no_further_than_its_bound` — the
+  scan bound
+- `e2e/mobile.spec.ts` (`@phone a tool call that says what happened`) — an
+  edit wider than the phone opens in a box that scrolls inside itself, and the
+  document does not scroll sideways (INV-17)
+
 A read that fails is named on the wire, `kind: 'history-failed'`, for the
 reason `answer-refused` is: the browser holds one request at a time, and a
 latch released by any error that happens to name the agent swallowed the reply
@@ -1617,6 +1636,54 @@ absence-of-evidence rule the Prune button was removed for.
   field of it, which is what the description shipped without: it was produced,
   written and compared, and dropped in the merge between, so no card carried
   one and nothing failed
+
+**A tool call says how it ended, from the fields written to say so.** A row
+used to name what the agent *asked* for and nothing more: an edit read as a
+path, and a call auto mode refused looked exactly like one that ran. Each call
+now carries its `tool_use_id`, and when the result record is read the server
+sends a `ToolOutcome` beside the timeline's events — `ok`, `failed` or
+`refused`, who refused it, the classifier's category, and an edit's `+`/`-`
+counts from the prefixes of its recorded `structuredPatch` lines. Three rules
+keep it inside the record:
+
+- **A refusal is read from `permissionDecision` and nowhere else.** Never from
+  the words of the error: an error saying "denied" with a null or absent
+  decision is `failed`, because the words are the CLI's and can change, and
+  "refused" is a claim about who stopped the call. Who is named only where the
+  decision names them — `classifier` is auto mode, `hook` a hook, a `user*`
+  source the person — and a deny rule or a safety check is called `refused`
+  with nobody beside it rather than guessed at.
+- **A record-level field describes a record's only result.** The decision and
+  `toolUseResult` sit beside `message`, so on a record answering several calls
+  they cannot say which; none of those calls is called refused, and none gets
+  counts. On this machine's 38k result records none that answered several
+  calls carried a decision.
+- **What a call returned is a memory, and is captioned as one.** Opening a row
+  reads the record back — on a tap, for the focused tab, the history read's
+  terms (INV-4) — and shows the hunks or the output's tail, cut near 32 KB with
+  how much was left out. It reads "as recorded at 14:07 — the file may have
+  changed since", and "you changed this before it was applied" where the
+  record says `userModified`. It is held in memory and nowhere else (INV-3).
+
+The card's fold counts auto mode's refusals the way it counts `tokens`: over
+the window that was read, labelled with where that window starts — "auto mode
+refused 3 actions · last 4m ago (since 14:02)". A delegate's sidechain is its
+own conversation and is not counted. A refusal never pushes: INV-14 is
+unchanged, and this is a fact waiting to be asked about.
+
+- `transcript::reads_an_edit_s_hunk_counts`,
+  `transcript::reads_a_classifier_refusal_from_permission_decision`,
+  `transcript::reads_a_hook_refusal`,
+  `transcript::reads_a_null_decision_error_is_failed_not_refused`,
+  `transcript::a_decision_on_a_record_answering_several_calls_is_pinned_on_none`
+  — each reading from a record shaped like the ones on disk
+- `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`,
+  `transcript::an_edit_s_result_is_its_hunks_and_says_when_you_changed_it`,
+  `transcript::a_long_output_is_sent_as_its_tail_with_what_was_left_out`
+- `test/ui/message-tools.test.tsx` — the row's words, the expansion, its
+  caption, a miss said to be one, and nothing a result held written to
+  browser storage
+- `test/ui/card-usage.test.tsx` — the fold's count, age and window
 
 ## INV-12 — Input to a live agent is bounded
 

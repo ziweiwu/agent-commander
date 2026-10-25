@@ -67,3 +67,24 @@ describe('INV-11 context and cost are shown as what they are', () => {
     expect(screen.getByTestId('agent-cost').textContent).toContain('<$0.01')
   })
 })
+
+/**
+ * Auto mode's refusals, in the fold: counted over what was read and labelled
+ * with where that starts, the way the token count is (INV-11).
+ */
+describe('INV-11 a refusal count says where its window starts', () => {
+  it('folds the count, the newest one\'s age, and the start of what was read', () => {
+    const since = new Date()
+    since.setHours(14, 2, 0, 0)
+    card({
+      sessionId: 'a',
+      status: 'busy',
+      refusals: { count: 3, lastAt: Date.now() - 4 * 60_000, since: since.getTime() },
+    })
+    expect(face().textContent).not.toMatch(/refused/)
+    fireEvent.click(screen.getByTestId('details-toggle'))
+    expect(screen.getByTestId('agent-refusals').textContent).toContain(
+      'auto mode refused 3 actions · last 4m ago (since 14:02)',
+    )
+  })
+})

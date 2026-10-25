@@ -47,6 +47,8 @@ export function resetStore(): void {
     frame: null,
     history: null,
     historyPending: false,
+    outcomes: {},
+    toolResults: {},
     toast: null,
     expectSession: null,
     exited: [],

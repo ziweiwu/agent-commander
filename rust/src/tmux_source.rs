@@ -245,6 +245,7 @@ fn merge_patch(dst: &mut AgentPatch, src: AgentPatch) {
         cwd,
         running,
         usage,
+        refusals,
     );
 }
 

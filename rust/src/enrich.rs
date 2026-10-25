@@ -323,6 +323,7 @@ fn card_fields(patch: AgentPatch) -> AgentPatch {
         model: patch.model,
         goal: patch.goal,
         git_branch: patch.git_branch,
+        refusals: patch.refusals,
         status: None,
         waiting_for: None,
         cwd: None,
@@ -352,6 +353,9 @@ fn differs(agent: &Agent, patch: &AgentPatch) -> bool {
         return true;
     }
     if matches!(&patch.usage, Some(v) if agent.usage.as_ref() != Some(v)) {
+        return true;
+    }
+    if matches!(&patch.refusals, Some(v) if agent.refusals.as_ref() != Some(v)) {
         return true;
     }
     if matches!(patch.last_activity_at, Some(v) if agent.last_activity_at != Some(v))

@@ -34,6 +34,7 @@ mod frames;
 mod limits;
 mod mock;
 mod options;
+mod outcome;
 mod pane;
 mod pane_hub;
 #[cfg(test)]

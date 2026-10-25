@@ -287,6 +287,14 @@ the default for an unrecognised kind is deny.
   the reported status, so a waiting agent whose pane has exited carries none
   of them. Idle and working cards carry no coloured edge. **(INV-11)**
   *`test/ui/card-diet.test.tsx`, `test/ui/status-rail.test.tsx`.*
+- **FR-CARD-9** — The fold MUST count the tool calls auto mode refused, over
+  the window of the transcript that was read, with the age of the newest and
+  where that window starts: "auto mode refused 3 actions · last 4m ago (since
+  14:02)". The same caveat `tokens` carries, for the same reason — a backfill
+  that starts part-way through a session cannot count all of it. A refusal
+  MUST NOT push (INV-14). **(INV-11)**
+  *`test/ui/card-usage.test.tsx`,
+  `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
 
 ### 3.3 Delegates
 
@@ -341,6 +349,26 @@ over the list with a back control; on a wide one, a second column.
   its own case the generic reading finds no description, path, pattern or
   command and the row reads as the bare word "Skill".
   *`transcript::names_the_skill_a_skill_call_ran`.*
+- **FR-CHAT-15** — A tool call MUST say how it ended, in words, in the third
+  column of its row: `+12 −3` for an edit, counted from the `+` and `-` that
+  open its recorded hunk lines; `refused · auto mode · <category in words>`;
+  or `failed`. The danger hue MAY underline the last two and MUST NOT carry
+  them alone. A refusal MUST be read from `permissionDecision` and never from
+  the words of an error, because those are the CLI's and "refused" is a claim
+  about who stopped the call; an error with no rejecting decision is `failed`.
+  A call whose result is on record MUST open on a tap to show its hunks or
+  the tail of its output, about 32 KB at most with how much was left out, in a
+  box that scrolls inside itself — on a phone the page MUST NOT scroll
+  sideways (INV-17). The box MUST be captioned as a record ("as recorded at
+  14:07 — the file may have changed since", plus "you changed this before it
+  was applied" where the record says so), MUST be read only on a tap for the
+  focused agent (INV-4), and MUST NOT be written to browser storage (INV-3).
+  **(INV-11)** *`transcript::reads_an_edit_s_hunk_counts`,
+  `transcript::reads_a_classifier_refusal_from_permission_decision`,
+  `transcript::reads_a_hook_refusal`,
+  `transcript::reads_a_null_decision_error_is_failed_not_refused`,
+  `routes::inv4_a_tool_result_read_needs_a_focused_viewer`,
+  `test/ui/message-tools.test.tsx`, `e2e/mobile.spec.ts`.*
 - **FR-CHAT-13** — A slash command the user typed MUST read as the command it
   ran. Claude Code stores one as `<command-name>` markup with the arguments
   beside it, and rendering the record verbatim put three tags on screen with
@@ -802,7 +830,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 | Grant | Covers |
 |---|---|
-| `read` | the fleet, transcripts, frames, `/api/env` |
+| `read` | the fleet, transcripts (a tool call's recorded result among them), frames, `/api/env` |
 | `respond` | answering the question an agent is blocked on |
 | `drive` | pastes, keystrokes, mode, model, compact, clear, close |
 | `spawn` | starting new agents, and the folder picker |
@@ -1140,14 +1168,14 @@ unverified.
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
 | INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, NFR-SEC-11 … 14 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
-| INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
+| INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-15, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
 | INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-SPAWN-7, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CHAT-15, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8, FR-NOTIFY-9 |
