@@ -805,7 +805,7 @@ exactly two shapes it will run. The first starts an agent:
 
 ```
 tmux new-session -d -s <generated> -c <validated dir> claude [-n <name>] \
-  [--model <alias>] [--permission-mode <mode>]
+  [--model <alias>] [--permission-mode <mode>] [-- <task>]
 ```
 
 Every value is a separate argv entry — never a shell string — and the session
@@ -816,6 +816,39 @@ anything is spawned; a missing path is refused with an error rather than
 guessed at. Model and permission mode are checked against the fixed allow-lists
 in `rust/src/types.rs` (and re-exported by `options.rs`), so an unrecognised value is refused rather than
 becoming a flag.
+
+**The first task is one free-text argv entry, after `--` and last** (F5,
+amended 2026-10-25). An agent started from a phone used to sit idle until
+someone opened it and typed, so the dialog takes a first task and the CLI gets
+it as its prompt. The name was already free text, as `-n`'s value; the task is
+one more entry of that kind, placed where it cannot be read as a flag: after
+`--`, which stops `claude`'s option parsing (measured: `-- '-n x'` arrived as
+the prompt), and last, so nothing follows it for it to modify. It is trimmed,
+and a blank one adds neither entry. `check_spawn_request` refuses three
+shapes before anything is spawned, so mock mode refuses them in the same words:
+
+- **Over `spawn::MAX_TASK` (8 KiB)**, see INV-12.
+- **A control character other than a line break** (INV-12).
+- **One bare word** of ASCII letters, digits, `-` and `_`. `--` stops option
+  parsing and does *not* stop subcommand dispatch: on Claude Code 2.1.310,
+  `claude --permission-mode default -- doctor` ran `claude doctor` and
+  exited, and the hidden `project` dispatched the same way. `claude --help`
+  leaves hidden subcommands out, and a list copied from it goes stale with
+  the next release that adds one — `purge` deletes a project's state — so the
+  shape every subcommand name has is what is refused, not a list of names.
+
+One character is rewritten rather than refused: tmux reads an argument
+*ending* in `;` as the end of a command and strips it (`a;` arrived as `a`),
+and takes `\;` as an escaped `;`. A task ending in `;` therefore gets the one
+backslash tmux takes back off, and arrives as typed; nothing else in it is
+read by tmux (`$`, `~`, `#{…}`, quotes and inner `;` all arrived as sent).
+
+The task survives the folder-trust prompt: started in a folder Claude Code had
+never trusted, `claude -- 'reply with the single word PONG'` stopped on the
+trust question, and once it was answered, answered PONG. It is sent once, with
+the click `startingRef` already guards (INV-2), and the browser keeps it only
+to quote it in the starting Chat. It is on the `claude` command line, so `ps`
+shows it while the agent runs.
 
 The second opens a **plain terminal** — a tmux session with the user's own
 shell in it and no agent at all:
@@ -884,6 +917,19 @@ true rather than aspirational.
   for a terminal carries the Attach tab and none of the controls that type
 - `routes::tests` (the new-agent group) — what the dialog chose is what reaches the spawn,
   and an unrecognised alias is a 400 rather than a 500
+- `spawn::inv7_a_task_is_one_entry_after_the_separator` (hostile tasks: a
+  leading `-`, quotes, `;`, `$()`, a line break, tmux formats),
+  `inv7_the_task_comes_after_every_flag_and_last`,
+  `inv7_a_trailing_semicolon_reaches_claude_intact`,
+  `inv7_a_task_that_names_a_subcommand_is_refused` (every name 2.1.310's
+  `--help` lists, and the hidden ones it dispatched), and
+  `inv7_a_bad_task_is_refused_before_anything_is_spawned`
+- `routes::a_read_only_credential_cannot_start_an_agent_with_a_task` — a task
+  is the spawn power, and neither `read` nor `drive` holds it
+- `test/ui/NewAgentDialog.test.tsx` ("the first task") — sent trimmed and only
+  for an agent, never offered for a terminal, kept in the field on a refusal,
+  and sent once for a burst of submits; `e2e/control.spec.ts` — mock mode
+  refuses a one-word or oversized task and keeps it in the field
 - `test/ui/NewAgentDialog.test.tsx` — a rejected directory surfaces the server's
   reason and leaves the dialog open
 
@@ -1592,6 +1638,23 @@ an agent, and a tab switching views quickly is not what this guards.
   and is reported once rather than 5,000 times; a briskly typed sentence is
   never refused; the budget refills after a burst; and an oversized frame is
   refused before it is parsed
+
+**A first task is bounded too, and tighter than a paste** (F5). It reaches the
+agent on the `tmux new-session` command line rather than through a buffer, and
+the tmux client packs that whole command into one message: measured on tmux
+3.6a, 16,364 bytes of arguments was the most it would send, and one more was
+refused with "command too long". So `spawn::MAX_TASK` is 8 KiB rather than
+`MAX_PASTE`, leaving the other half for the folder, the name and the flags,
+and the new-agent route reads a body big enough for a task at that cap after
+JSON has escaped it. A control character other than a line break is refused
+in it: a task is typed into a dialog, and the line break is the one a person
+types there.
+
+- `spawn::inv12_a_task_over_the_cap_is_refused`, counted in bytes as tmux
+  counts; `a_task_at_the_cap_still_fits_on_tmux_s_command_line`;
+  `inv12_a_task_with_a_control_character_is_refused`
+- `routes::a_first_task_at_its_cap_reaches_the_spawn_whole` — a task at the
+  cap made of characters JSON doubles still fits the request
 
 ## INV-13 — A delegation tree claims only what the sidecars say
 

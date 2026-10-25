@@ -448,8 +448,10 @@ export function emptyNotice(conversation: {
    * the server for a conversation that simply has not begun.
    */
   fresh?: 'starting' | 'unprompted' | null
-}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' | 'chatStarting' | 'chatFirstPrompt' {
-  if (conversation.fresh === 'starting') return 'chatStarting'
+  /** The first task this tab started the agent with, quoted while it starts (F5). */
+  task?: string | null
+}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' | 'chatStarting' | 'chatStartingTask' | 'chatFirstPrompt' {
+  if (conversation.fresh === 'starting') return conversation.task ? 'chatStartingTask' : 'chatStarting'
   if (conversation.fresh === 'unprompted') return 'chatFirstPrompt'
   if (conversation.timelineAt !== null) return 'chatEmpty'
   return conversation.timelineStalledAt !== null ? 'chatUnreachable' : 'chatLoading'

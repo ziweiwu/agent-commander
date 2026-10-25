@@ -71,6 +71,10 @@
   font-size: var(--text-sm);
   color: var(--faint);
 }
+.task {
+  font-family: var(--font-ui);
+  resize: vertical;
+}
 
 .recent {
   display: flex;

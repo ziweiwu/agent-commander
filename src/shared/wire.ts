@@ -152,7 +152,18 @@ met: boolean, at: number, reason?: string,
  */
 fresh?: boolean, };
 
-export type NewAgentRequest = { cwd: string, name?: string, model?: string, permissionMode?: string, };
+export type NewAgentRequest = { cwd: string, name?: string, model?: string, permissionMode?: string, 
+/**
+ * The agent's first task, typed into the dialog and sent once with the
+ * click that starts it (INV-2).
+ *
+ * It reaches `claude` as one argv entry after `--`, the last on the
+ * command line (INV-7). `spawn::check_task` refuses it before anything is
+ * spawned when it is too long for tmux to carry, holds a control
+ * character other than a line break, or is one bare word, which the CLI
+ * would run as a subcommand of its own.
+ */
+task?: string, };
 
 /**
  * `{ ok: true, tmuxSession, cwd } | { ok: false, error }`

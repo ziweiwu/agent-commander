@@ -6,8 +6,10 @@ import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
 const startAgent = vi.hoisted(() => vi.fn())
+const startTerminal = vi.hoisted(() => vi.fn())
 vi.mock('../../src/web/store/transport.ts', () => ({
   startAgent,
+  startTerminal,
   loadEnv: vi.fn(),
   sendMessage: vi.fn(),
   sendKey: vi.fn(),
@@ -21,6 +23,7 @@ const env = { tailscale: null, tmux: true, port: 4317, platform: 'darwin', versi
 beforeEach(() => {
   resetStore()
   startAgent.mockReset()
+  startTerminal.mockReset()
 })
 
 describe('NewAgentDialog', () => {
@@ -208,5 +211,113 @@ describe('starting an agent happens exactly once', () => {
     await waitFor(() => expect(startAgent).toHaveBeenCalledTimes(1))
     await user.click(screen.getByTestId('new-agent-submit'))
     await waitFor(() => expect(startAgent).toHaveBeenCalledTimes(2))
+  })
+})
+
+/**
+ * F5: an agent can be started with its first task, so a session left to work
+ * from a phone does not sit idle until someone opens it and types. The task
+ * travels in the one request the click sends and nowhere else (INV-2).
+ */
+describe('the first task', () => {
+  const TASK = 'fix the login bug\nthen open a pull request'
+
+  async function typeTask(user: ReturnType<typeof userEvent.setup>, text: string) {
+    await user.type(screen.getByTestId('new-agent-dir'), '/x')
+    await user.type(screen.getByTestId('new-agent-task'), text)
+  }
+
+  it('goes with the agent it starts, trimmed', async () => {
+    const user = userEvent.setup()
+    startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/x' })
+    useStore.setState({ newAgentOpen: true, env })
+    renderApp(<NewAgentDialog />)
+
+    await typeTask(user, `  ${TASK}  `)
+    await user.click(screen.getByTestId('new-agent-submit'))
+
+    await waitFor(() =>
+      expect(startAgent).toHaveBeenCalledExactlyOnceWith('/x', { task: TASK, permissionMode: 'auto' }),
+    )
+  })
+
+  it('is left out when it is blank', async () => {
+    const user = userEvent.setup()
+    startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/x' })
+    useStore.setState({ newAgentOpen: true, env })
+    renderApp(<NewAgentDialog />)
+
+    await typeTask(user, '   ')
+    await user.click(screen.getByTestId('new-agent-submit'))
+
+    await waitFor(() => expect(startAgent).toHaveBeenCalledExactlyOnceWith('/x', { permissionMode: 'auto' }))
+  })
+
+  /**
+   * A shell would receive the task as words typed at its prompt, which is
+   * not a task and not something the user asked to type (INV-7). Withheld,
+   * not disabled, the same way model and mode are.
+   */
+  it('is never offered or sent for a terminal', async () => {
+    const user = userEvent.setup()
+    startTerminal.mockResolvedValue({ ok: true, tmuxSession: 'term-1', cwd: '/x' })
+    useStore.setState({ newAgentOpen: true, env })
+    renderApp(<NewAgentDialog />)
+
+    await typeTask(user, TASK)
+    await user.click(screen.getByTestId('new-kind-terminal'))
+    expect(screen.queryByTestId('new-agent-task')).toBeNull()
+    await user.click(screen.getByTestId('new-agent-submit'))
+
+    await waitFor(() => expect(startTerminal).toHaveBeenCalledExactlyOnceWith('/x', {}))
+    expect(startAgent).not.toHaveBeenCalled()
+    expect(useStore.getState().startingTask).toBeNull()
+  })
+
+  it('stays in the field when the start is refused', async () => {
+    const user = userEvent.setup()
+    startAgent.mockResolvedValue({ ok: false, error: 'a first task of one word ("doctor") could start…' })
+    useStore.setState({ newAgentOpen: true, env })
+    renderApp(<NewAgentDialog />)
+
+    await typeTask(user, TASK)
+    await user.click(screen.getByTestId('new-agent-submit'))
+
+    expect((await screen.findByTestId('new-agent-error')).textContent).toContain('doctor')
+    expect(screen.getByTestId<HTMLTextAreaElement>('new-agent-task').value).toBe(TASK)
+    expect(useStore.getState().startingTask).toBeNull()
+  })
+
+  it('is handed to the starting chat under the placeholder, and leaves the field', async () => {
+    const user = userEvent.setup()
+    startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/x' })
+    useStore.setState({ newAgentOpen: true, env })
+    const { rerender } = renderApp(<NewAgentDialog />)
+
+    await typeTask(user, TASK)
+    await user.click(screen.getByTestId('new-agent-submit'))
+
+    await waitFor(() =>
+      expect(useStore.getState().startingTask).toEqual({ sessionId: 'pending:claude-1', text: TASK }),
+    )
+    useStore.setState({ newAgentOpen: true })
+    rerender(<NewAgentDialog />)
+    expect(screen.getByTestId<HTMLTextAreaElement>('new-agent-task').value).toBe('')
+  })
+
+  /** INV-2 on the field that carries words to the agent: a burst of submits in one tick is one spawn. */
+  it('is sent once for a burst of three submits in the same tick', async () => {
+    const user = userEvent.setup()
+    startAgent.mockReturnValue(new Promise(() => {}))
+    useStore.setState({ newAgentOpen: true, env })
+    renderApp(<NewAgentDialog />)
+    await typeTask(user, TASK)
+
+    const submit = screen.getByTestId('new-agent-submit')
+    submit.click()
+    submit.click()
+    submit.click()
+
+    expect(startAgent).toHaveBeenCalledExactlyOnceWith('/x', { task: TASK, permissionMode: 'auto' })
   })
 })

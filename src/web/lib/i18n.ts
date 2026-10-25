@@ -198,6 +198,10 @@ const EN = {
   chatStarting:
     '{name} is starting in {folder}. ' +
     'If Claude stops to ask whether this folder is trusted, answer it on the Attach tab.',
+  chatStartingTask: '{name} is starting in {folder} with your task:',
+  chatStartingTaskTrust:
+    'If Claude stops to ask whether this folder is trusted, answer it on the Attach tab. ' +
+    'The task waits behind that question.',
   chatFirstPrompt:
     '{name} is ready in {folder} and has not been given anything to do yet. Type its first instruction below.',
   chatUnreachable:
@@ -460,6 +464,11 @@ const EN = {
   newAgentDirHint: 'Where the agent will run. Must be an existing directory.',
   newAgentName: 'Name (optional)',
   newAgentNameHint: 'Shown in the list. Defaults to the folder name.',
+  newAgentTask: 'First task (optional)',
+  newAgentTaskPlaceholder: 'Fix the failing login test, then open a pull request',
+  newAgentTaskHint:
+    'Sent once, as the agent starts, so it can get going without you. ' +
+    'Use more than one word: a single English word can run one of claude\u2019s own commands instead.',
   newAgentStart: 'Start agent',
   newAgentCancel: 'Cancel',
   newAgentStarting: 'Starting…',
@@ -640,6 +649,8 @@ const ZH: Record<Key, string> = {
   chatLoading: '正在加载对话…',
   chatEmpty: '还没有任何对话。在下方给它发一条消息，就会显示在这里。',
   chatStarting: '{name} 正在 {folder} 中启动。如果 Claude 询问是否信任这个文件夹，请在“终端”标签页中回答。',
+  chatStartingTask: '{name} 正在 {folder} 中启动，带着你的任务：',
+  chatStartingTaskTrust: '如果 Claude 询问是否信任这个文件夹，请在“终端”标签页中回答。任务会在你回答之后开始。',
   chatFirstPrompt: '{name} 已在 {folder} 中就绪，还没有收到任何任务。在下方输入第一条指令。',
   chatUnreachable: '暂时没有收到这个对话的内容。刚启动的 agent 还没有写下任何东西——否则可能是服务器在此页面打开后重启过。',
   messagePlaceholder: '发消息给 {name}',
@@ -853,6 +864,9 @@ const ZH: Record<Key, string> = {
   newAgentDirHint: '代理运行的位置，必须是已存在的目录。',
   newAgentName: '名称（可选）',
   newAgentNameHint: '显示在列表中，默认使用文件夹名。',
+  newAgentTask: '第一个任务（可选）',
+  newAgentTaskPlaceholder: '修复失败的登录测试，然后提交一个拉取请求',
+  newAgentTaskHint: '在代理启动时发送一次，让它不用等你就能开始工作。请不要只写一个英文单词：那可能会运行 claude 自己的命令。',
   newAgentStart: '启动代理',
   newAgentCancel: '取消',
   newAgentStarting: '启动中…',

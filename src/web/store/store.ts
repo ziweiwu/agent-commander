@@ -135,6 +135,12 @@ export function prunedDrafts(drafts: Drafts, keep: ReadonlySet<string>): Drafts 
   return { chat: prune(drafts.chat), paste: prune(drafts.paste) }
 }
 
+/** A first task, and the placeholder of the agent it was started with. */
+export interface StartingTask {
+  sessionId: string
+  text: string
+}
+
 export interface AppState {
   /* server-driven */
   agents: Agent[]
@@ -268,6 +274,16 @@ export interface AppState {
    */
   expectSession: string | null
   drafts: Drafts
+  /**
+   * The first task the agent just started from this tab was given, under its
+   * placeholder id, so its starting Chat can quote it (F5).
+   *
+   * One slot, in memory only: the task is the user's own words to an agent,
+   * which INV-3 keeps out of browser storage, and it is worth quoting only
+   * while that placeholder is on screen. It is never sent again from here —
+   * the server already has it, on the command line it started (INV-2).
+   */
+  startingTask: StartingTask | null
 
   /* actions */
   setSidebar: (state: SidebarState) => void
@@ -297,6 +313,7 @@ export interface AppState {
   keepDraft: (box: DraftBox, sessionId: string, draft: Draft | null) => void
   /** Drop the drafts of sessions that have left the fleet. */
   pruneDrafts: (live: readonly string[]) => void
+  setStartingTask: (task: StartingTask | null) => void
   addPending: (text: string) => void
   /**
    * Re-decide which echoes may be counting down, after a status change.
@@ -431,6 +448,7 @@ export const useStore = create<AppState>()((set, get) => ({
   answerRefused: null,
   expectSession: null,
   drafts: { chat: {}, paste: {} },
+  startingTask: null,
 
   setSidebar: (sidebar) => {
     saveSidebar(sidebar)
@@ -521,6 +539,7 @@ export const useStore = create<AppState>()((set, get) => ({
       const held = [...Object.keys(s.drafts.chat), ...Object.keys(s.drafts.paste)]
       return held.every((sessionId) => keep.has(sessionId)) ? s : { drafts: prunedDrafts(s.drafts, keep) }
     }),
+  setStartingTask: (startingTask) => set({ startingTask }),
 
   /** Echo a sent message locally so sending feels instant. */
   addPending: (text) => {
