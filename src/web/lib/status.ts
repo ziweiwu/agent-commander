@@ -18,6 +18,7 @@
  * homeless: it is not a status, and it never was.
  */
 import type { Agent } from '../../shared/types.ts'
+import { CLAUDE_KIND } from '../../shared/agent-kinds.ts'
 
 /** The four shapes the rail can draw. `hand` is the fifth, and is `waiting`. */
 export type RailState = 'working' | 'waiting' | 'idle' | 'gone'
@@ -151,4 +152,33 @@ export function ageFrom(agent: Agent): number | null {
 /** Whether the age should be read as "in this state for", not "last seen". */
 export function ageIsTimeInState(agent: Agent): boolean {
   return agent.status === 'waiting' && agent.statusInferred !== true
+}
+
+/**
+ * What a busy card's age says instead of "about now" (F8).
+ *
+ * A working agent writes every few seconds, so `ageFrom` reads about now for
+ * one that has ground on a single request for two hours as for one that has
+ * just begun. The server keeps the time of the last prompt a person typed and
+ * the agent's own tool calls since, and this is what the card may say of them:
+ *
+ * - `clock` — the prompt was read: how long since, and an exact count;
+ * - `floor` — it is older than the backfill reached: no clock, and the calls
+ *   in what was read are a lower bound, said as one (INV-11);
+ * - `null` — no prompt was ever read, or the card is not a busy Claude card:
+ *   the old age stands.
+ *
+ * Only a busy card, because an idle or waiting one already reads its age as
+ * something true about now. Only Claude, because only its transcript says who
+ * typed a prompt.
+ */
+export type SinceFace =
+  | { kind: 'clock'; at: number; calls: number }
+  | { kind: 'floor'; calls: number }
+
+export function sinceOf(agent: Agent): SinceFace | null {
+  const since = agent.sincePrompt
+  if (!since || agent.status !== 'busy' || agent.agentKind !== CLAUDE_KIND) return null
+  if (since.at === undefined) return { kind: 'floor', calls: since.calls }
+  return { kind: 'clock', at: since.at, calls: since.calls }
 }

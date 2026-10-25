@@ -65,7 +65,18 @@ describe('F6 the visit', () => {
     focusAgent('x')
     socket.deliver({ type: 'seen', seenThrough: { x: REPLIED_AT } })
     expect(useStore.getState().seenThrough).toEqual({ x: REPLIED_AT })
-    expect(useStore.getState().visit).toEqual({ sessionId: 'x', seenThrough: SHOWN_AT, activityAt: REPLIED_AT })
+    expect(useStore.getState().visit).toMatchObject({ sessionId: 'x', seenThrough: SHOWN_AT, activityAt: REPLIED_AT })
+  })
+
+  it('on a cold load after the enricher idled, takes the catch-up that lands on the focused tab', () => {
+    focusAgent('x')
+    connect()
+    const socket = FakeSocket.last!
+    socket.deliver({ ...fleet, agents: [agent({ sessionId: 'x', lastActivityAt: SHOWN_AT })] })
+    socket.deliver({ type: 'seen', seenThrough: { x: SHOWN_AT } })
+    socket.deliver(fleet)
+    socket.deliver({ type: 'seen', seenThrough: { x: REPLIED_AT } })
+    expect(useStore.getState().visit).toMatchObject({ seenThrough: SHOWN_AT, activityAt: REPLIED_AT })
   })
 
   it('on a cold load, is taken from the first record to arrive after the selection', () => {

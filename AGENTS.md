@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1632 tests: 736 Rust (the server) + 896 vitest (the web app)
+npm test              # 1737 tests: 751 Rust (the server) + 986 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 427 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 458 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -431,6 +431,22 @@ commit.
   which parses the struct and fails naming the field and the function that
   forgot it. Verified the way a guard has to be — by deleting `description`
   from `merge_patch` and watching it go red.
+
+  `differs` was the fifth place and nothing held it, so a field it forgot
+  still reached the card, but only on a tick where some other field moved.
+  `sincePrompt` would have been that field — its call count moves while
+  everything else on a working card stands still. It is held now by
+  `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
+  which reads every `field: patch.field` out of `card_fields` and fails naming
+  any `differs` does not compare. Seen red by deleting `since_prompt` from
+  `differs`.
+
+  **`sincePrompt` is the enricher's alone.** The detail view's tail opens when
+  an agent is opened, so its backfill starts later in the file than the
+  enricher's and can see a floor where the enricher sees a clock. `routes.rs`
+  clears the field from that tail's patch (`leave_the_prompt_count_to_the_enricher`)
+  rather than let the two overwrite each other on every read. `tokens` has the
+  same two-tail shape and was left as it is.
 - **A new wire type has to be named in `wire::render_once()` or `gen:types`
   emits nothing.** ts-rs exports from a *root list*, not from the `#[derive]`:
   `types.rs`'s `render_once` calls `export_all` on each root, and a type nobody
@@ -591,6 +607,14 @@ commit.
   **A continuously repainting pane makes any layout change anywhere a
   candidate**; the terminal is the most sensitive thing on the page and it is
   never the thing you changed.
+
+- **The store's `selected` lags the URL by one effect, and a fast second key
+  found the gap.** `FleetRoute` calls `focusAgent` from an effect, so for a
+  frame after `navigate` the route names one agent and the store another. The
+  e2e for ⌥J then ⌥K went to the wrong place every run on desktop, because
+  Playwright pressed the second chord inside that frame. `useHop` now calls
+  `focusAgent` itself before navigating; anything else that reads `selected` in
+  a key handler straight after a navigation has the same gap.
 
 - **`codesign` runs before the smoke test, not after.** The launched thing is a
   Mach-O now rather than a script, and on Apple silicon an *invalid* signature is

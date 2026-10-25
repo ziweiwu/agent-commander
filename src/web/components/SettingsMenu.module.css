@@ -43,8 +43,6 @@
 .label {
   display: block;
   font-size: var(--text-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--faint);
   padding: 4px 8px 2px;
 }

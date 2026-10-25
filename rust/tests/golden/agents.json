@@ -53,6 +53,10 @@
         "contextSize": 200000,
         "costUsd": 4.12,
         "at": 1786599980000
+      },
+      "sincePrompt": {
+        "at": 1786597180000,
+        "calls": 214
       }
     },
     {
@@ -73,7 +77,10 @@
       "lastActivityAt": 1786599988000,
       "tokens": 67500,
       "subagents": 2,
-      "delegating": true
+      "delegating": true,
+      "sincePrompt": {
+        "calls": 38
+      }
     },
     {
       "sessionId": "mock-quiet-family",

@@ -132,6 +132,15 @@ own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
 
+A **working** card's age counts from the last prompt you typed rather than its
+last write, which for a working agent is always about now: `47m since your
+prompt · 214 calls`, the calls being the agent's own tool calls since — never
+its delegates'. Task notifications, SDK sends and compactions do not restart
+it. When your prompt is older than the part of the transcript the app read, it
+shows no clock and says `at least 214 calls in what was read`; when no prompt
+was read at all, the card keeps the ordinary age. On a narrow card it shortens
+to `47m · 214 calls` (or `≥214 calls`), with the whole sentence on hover.
+
 ### Delegates
 
 Every card carries a line about what the agent handed out — `4 delegates ·
@@ -183,6 +192,26 @@ asks for the browser's permission when you turn it on; if the browser cannot
 show notifications at all (Safari on iOS outside an installed web app), the
 toggle says so instead of pretending.
 
+### Other agents that need you, while one is open
+
+The list's **Needs you** group is the notification while the list is on
+screen. Three shapes take it off: the phone's sheet, a collapsed column, and
+full screen. In those, a chip — **✋ 2 ›** — sits where the filters were (or in
+full screen's header) and counts the *other* agents waiting on you. Tap it and
+the next one opens on its conversation, in the list's own sort order, wrapping
+round. It replaces the page rather than stacking another, so swipe-back still
+lands on the fleet however many agents you went through. It is absent when
+nobody else is waiting, and it skips an agent whose pane has gone, one still
+starting up, and any status the app only guessed at. While the connection is
+down it goes grey and says *as of* when it last heard.
+
+After you answer a single question from the card, the card offers **Next:
+‹name› · waiting 14m ⌥H** — the agent that has been waiting longest. It never
+moves you on by itself; press it (or ⌥H) when you are ready. Arriving that way
+— or by the chip, or a chord below — puts the keyboard on the new agent's
+*question*, not its first option, so an Enter you were already pressing answers
+nothing.
+
 The app ships a web manifest, so on a phone it can be added to the Home Screen
 and opens full-screen like an installed app.
 
@@ -214,6 +243,12 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
+  The conversation itself reads as prose: on a desktop it is held to a 46em
+  measure at 14px, each message is marked with the language it is written in
+  (by the same test), so Chinese gets a taller line and a Chinese face rather
+  than whatever the browser falls back to, and is never slanted by a fake
+  italic. What the agent did sits under its words as one ruled list, the tool
+  name first and its argument beside it.
   What you have half-typed stays with the agent you typed it for: open another
   agent and its own box comes back, go ‹ Agents on a phone or ⤢ to full screen
   and the text is still there when you return. It is kept in memory only, so a
@@ -344,6 +379,13 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
+| `⌥J` / `⌥K` | open the next / previous agent down the list, on the tab you are on |
+| `⌥H` | open the agent that has needed you longest; a toast says *Nothing needs you* when none does |
+
+The ⌥ chords are `Alt` on Windows and Linux. They go by the key you press
+rather than the character Option makes of it, wait while a Pinyin or other
+input method is composing, and do nothing inside the terminal, where every key
+belongs to the agent.
 
 ## Claude usage
 
@@ -462,6 +504,10 @@ those are enabled only while it is idle or waiting — greyed with a tooltip whi
 it is busy, so a keystroke never interleaves with a tool call in flight. On a
 phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
 screen.
+
+**Close agent** now sits alone behind the **⋮** in the panel header — vertical,
+so it is not mistaken for the composer's **⋯** — and the header's **✕** ("Close
+panel") only closes the panel; the agent keeps running.
 
 **Shift+Tab, Goal, Compact and Clear also sit in the composer's menu**, beside
 the message box. The panel's row is above the tabs and does not exist in full
@@ -885,8 +931,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1632 tests: 736 Rust (the server) + 896 vitest (the web app)
-npm run e2e        # 427 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1737 tests: 751 Rust (the server) + 986 vitest (the web app)
+npm run e2e        # 458 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

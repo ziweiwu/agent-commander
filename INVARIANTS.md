@@ -121,6 +121,18 @@ chose to run — and it is simultaneously the one thing you open this on a phone
 to do, which is why it must be grantable without also granting arbitrary
 keystrokes.
 
+**Arriving at an agent by a hop never lands on an answer.** Opening a blocked
+agent by its card puts the keyboard on its first option, because the options
+are what it was opened for and they sit where Shift+Tab cannot reach them. The
+waiting chip, the "Next" button under a spent answer and the ⌥J/⌥K/⌥H chords
+are different: they are pressed in a run, an answer then a hop then an answer,
+and a hand that has just pressed Enter on one agent's option has its next Enter
+already on the way. Landing that on the next agent's option 1 would answer a
+question nobody had read. So a hop focuses the question itself (or the card,
+where the question is not written down), and Enter there sends nothing; the
+"Next" button never navigates on its own; and a hop replaces the history entry
+rather than adding one, so it is never something a back gesture replays.
+
 The chat's optimistic echo is display-only. A pending message is drawn
 immediately so sending feels instant, but it is sent exactly once; `reconcile()`
 only ever *removes* the local copy once the transcript confirms it, and never
@@ -270,6 +282,9 @@ the fleet; the agent on screen keeps its draft through the gap after a
   past what was offered is not a keystroke to invent
 - `test/ui/answer-card.test.tsx` — the card sends the option index and the
   prompt id, and never a raw key
+- `test/ui/hop.test.tsx` — after the hand-off and after ⌥H, focus is on the
+  question and an Enter writes no `answer` frame; opening by the card still
+  lands on option 1; the hand-off does not navigate until pressed
 - `test/chat.test.ts` — a repeated message stays visible until the transcript
   records *another* copy of it
 
@@ -1032,13 +1047,17 @@ buttons for one action, on the app's central screen. Model followed the
 others a step later, for the same reason in reverse: left alone in the row, it
 was the one control about the next turn that a phone and a full screen could
 not see. The row keeps Close, which ends the session rather than steering it —
-and **the row itself now folds behind the `⋯` at every width**, where it used to
+and **the row itself now folds behind the `⋮` at every width**, where it used to
 fold only below 900px. The old reasoning was that a desktop has room for it;
 measured, the room cost 3.9% of a 1440x900 screen for a 960x53 band holding one
 103x36 button, so 857px of it was empty. That is the same argument that turned
 the composer strip into a menu, and it was always true here too — the phone was
-just where it hurt first. INV-17 permits the fold because the `⋯` is on screen
-and named at every width. Clear and Compact
+just where it hurt first. INV-17 permits the fold because the `⋮` is on screen
+and named at every width. It is drawn `⋮` rather than the composer's `⋯`
+because the two open different things — this one holds only Close agent — and
+drawn alike they read as one menu in two places; the header's ✕ beside it is
+named "Close panel" for the same reason, since a bare "close" next to "Close
+agent" read as ending the session. Clear and Compact
 are still one *hook* (`web/hooks/useContextActions.ts`) with one caller,
 because their reasoning is a sequence rather than a widget: a `sendingRef` so
 a double click cannot discard the session the first click just created, a
@@ -1325,6 +1344,35 @@ wrote. It is the same field and the same number — for an agent that stopped to
 ask, the last thing that happened *is* that it stopped — so nothing new is
 measured; what changes is only what the card calls it, and an agent with no
 recorded activity is given no such sentence at all.
+
+**And a working card's age counts from your prompt, not its last write.** A
+busy agent writes every few seconds, so its age read about now whether it had
+ground on one request for two hours or had just begun — the one card whose age
+said nothing. It now reads "47m since your prompt · 214 calls": when a person
+last typed a prompt, and this agent's own tool calls since, from the enricher's
+existing tail (INV-4: no new read). Three rules keep it inside what is known:
+
+- **The prompt is the one `describe` already trusts.** A task notification, an
+  SDK send and a compaction summary are machinery; a clock any of them
+  restarted would say a two-hour run had just begun.
+- **Counts only, and only its own.** A delegate's calls are its effort, counted
+  on its own node (INV-13's precedent); its records in the parent's file
+  neither restart the clock nor add to the count. What was said is never
+  carried.
+- **Absent when unknown, a floor when partial.** The tail backfills a bounded
+  window. A prompt older than that window gives no clock and "at least 214
+  calls in what was read" — a lower bound said as one. A transcript read whole
+  with no prompt in it has nothing to count from, and the card keeps the age
+  it had. The detail view's own tail starts later in the file, so it leaves
+  the figure to the enricher's rather than overwrite a clock with a floor.
+
+- `transcript::inv11_since_prompt_*` — machinery does not restart it,
+  delegates are excluded, a prompt never read gives nothing, a partial backfill
+  gives a floor that the next prompt replaces
+- `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`
+  — a count that moves on a tick where nothing else does must still broadcast
+- `test/ui/card-since-prompt.test.tsx` — busy Claude cards only, both
+  languages, the "at least" wording, the fallback, and no row added to the face
 
 - `test/status.test.ts` — what the two channels may claim, without a DOM: the
   hand refused to an inferred status, `gone` outranking `waiting`, delegation
@@ -2575,12 +2623,20 @@ synchronously, because two presses in one React batch would otherwise each read
 the same uncleared line and send it twice.
 
 **The disclosures are part of the contract, not an implementation detail.**
-The agent's settings row folds behind `⋯` in the tab strip, the fleet's filters
+The agent's settings row folds behind `⋮` in the tab strip, the fleet's filters
 are hidden while the sheet covers the list they filter, and the fleet column
 itself can be collapsed away behind a named toggle in the topbar. All three are
-allowed *because* something reaches them: the `⋯` is on screen and named, leaving
+allowed *because* something reaches them: the `⋮` is on screen and named, leaving
 the sheet brings the filters back, and the toggle stays drawn while the column is
 gone. An action with nothing to reach it is not folded away, it is missing.
+
+**The waiting group goes off screen with the list, and a chip takes its
+place.** In the sheet, with the column collapsed and in full screen, "✋ 2 ›"
+counts the other agents that need you and opens the next one — in the topbar
+slot the filters leave, or full screen's own header — and the ⌥J/⌥K/⌥H chords
+work in all of them. Three shapes had lost the one fact this app exists to
+show; `test/ui/one-place.test.tsx` holds the chip to exactly one copy in each
+shape and none beside the list.
 
 The settings row used to fold only below 900px, on the stated grounds that a
 desktop has room for it. It folds at every width now — see INV-8 for the
@@ -2624,7 +2680,7 @@ knowing the padding it had changed and not the four stacked bands it had not.
 
 What the bar bought, and what it cost, both belong here. It bought: the fleet
 column down from a 430px track to a 288px preference that collapses away, the
-settings row folded behind its `⋯` at every width, the status facts moved into
+settings row folded behind its `⋮` at every width, the status facts moved into
 the header's own row on a desktop, the 46px the hover timestamps were renting
 handed back, and the filters following the list they filter. It cost nothing
 that says anything — every trim is whitespace, and the two things that looked

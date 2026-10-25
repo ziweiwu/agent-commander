@@ -37,20 +37,48 @@ export function isNewSinceOpened(agent: Agent, seen: SeenThrough | null): boolea
  * Held for the whole visit. Opening the session moves the server's record to
  * now within a round trip, so the divider has to be placed from what was true
  * a moment before, and kept there while the reader works down to it.
+ *
+ * Except `activityAt` while the fleet may still be frozen: with no tab
+ * connected the server idles the enricher and keeps its last values, so a
+ * cold open can begin on an agent whose news has not been read yet. Until
+ * `followUntil`, the first move of the agent's activity is taken as where it
+ * had got; after that, or once it has moved, the visit holds.
  */
 export interface Visit {
   sessionId: string
   seenThrough: number
   activityAt: number
+  followUntil: number
 }
 
+/**
+ * How long a visit waits for the enricher's first pass after it resumes.
+ *
+ * The pass runs the moment a tab connects and the loop then runs every five
+ * seconds, so this is the pass plus slack for a slow transcript read.
+ */
+export const CATCH_UP_MS = 15_000
+
 /** The visit beginning now, or null while the server has not said how far it was shown. */
-export function visitOf(sessionId: string | null, agents: Agent[], seen: SeenThrough | null): Visit | null {
+export function visitOf(
+  sessionId: string | null,
+  agents: Agent[],
+  seen: SeenThrough | null,
+  now: number = Date.now(),
+): Visit | null {
   if (sessionId === null) return null
   const seenThrough = seen?.[sessionId]
   const activityAt = agents.find((a) => a.sessionId === sessionId)?.lastActivityAt
   if (seenThrough === undefined || activityAt === undefined) return null
-  return { sessionId, seenThrough, activityAt }
+  return { sessionId, seenThrough, activityAt, followUntil: now + CATCH_UP_MS }
+}
+
+/** The visit after a fleet frame: its first catch-up adopted, then held. */
+export function followVisit(visit: Visit | null, agents: Agent[], now: number = Date.now()): Visit | null {
+  if (visit === null || now > visit.followUntil) return visit
+  const activityAt = agents.find((a) => a.sessionId === visit.sessionId)?.lastActivityAt
+  if (activityAt === undefined || activityAt <= visit.activityAt) return visit
+  return { ...visit, activityAt, followUntil: 0 }
 }
 
 /** Where the divider goes in the conversation, and what it counts. */

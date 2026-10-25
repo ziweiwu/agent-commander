@@ -21,7 +21,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::sources::{AgentPatch, TailApi, TailRead};
 use crate::types::{
-    now_ms, Agent, GoalState, NoticeKind, PendingPrompt, PromptOption, TimelineEvent, TimelineKind, Question,
+    now_ms, Agent, GoalState, NoticeKind, PendingPrompt, PromptOption, SincePrompt, TimelineEvent,
+    TimelineKind, Question,
 };
 
 /// On first read, at least this much of the transcript is loaded...
@@ -939,6 +940,22 @@ pub struct ParseResult {
     pub opened: Vec<(String, PendingPrompt)>,
     /// `tool_use` ids answered by a `tool_result` in this batch.
     pub answered: Vec<String>,
+    /// The last prompt a person typed in this batch, and this agent's own
+    /// calls after it.
+    pub prompted: PromptTally,
+}
+
+/// One batch's share of "since your last prompt".
+///
+/// `at` is the newest prompt `describe::is_typed_by_a_person` accepts, and
+/// `calls` counts this agent's `tool_use` blocks after it — or after the start
+/// of the batch when it holds no such prompt, so the tail can add them on.
+/// A delegate's calls are its own effort, counted on its own node (INV-13),
+/// never here.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PromptTally {
+    pub at: Option<i64>,
+    pub calls: u32,
 }
 
 impl ParseResult {
@@ -948,6 +965,7 @@ impl ParseResult {
             patch: AgentPatch::default(),
             opened: Vec::new(),
             answered: Vec::new(),
+            prompted: PromptTally::default(),
         }
     }
 }
@@ -1007,6 +1025,9 @@ impl Batch<'_> {
         // something ever write: see `describe.rs`.
         if let Some(description) = crate::describe::description_from(rec) {
             self.out.patch.description = Some(description);
+        }
+        if is_a_person_prompting_this_agent(rec, kind) {
+            self.out.prompted = PromptTally { at: Some(record_time(rec)), calls: 0 };
         }
         if is_compaction(rec, kind) {
             self.push_compaction(rec);
@@ -1206,6 +1227,9 @@ impl Batch<'_> {
                 self.out.opened.push((id.to_string(), pending_prompt(name, block.get("input"))));
             }
         }
+        if context.sidechain != Some(true) {
+            self.out.prompted.calls = self.out.prompted.calls.saturating_add(1);
+        }
         let delegated = sets.subagent_tools.contains(name);
         if delegated {
             self.subagents += 1;
@@ -1237,6 +1261,18 @@ impl Batch<'_> {
         }
         self.out
     }
+}
+
+/// A prompt a person typed to this agent, rather than to one of its delegates.
+///
+/// The person half is `describe`'s, so the card's subject and its clock cannot
+/// disagree about who spoke: task notifications, SDK sends and compaction
+/// summaries are machinery and restart nothing. A sidechain record is a
+/// delegate's brief from its parent, not the user speaking.
+fn is_a_person_prompting_this_agent(rec: &Value, kind: &str) -> bool {
+    kind == "user"
+        && rec.get("isSidechain").and_then(Value::as_bool) != Some(true)
+        && crate::describe::is_typed_by_a_person(rec)
 }
 
 fn is_compaction(rec: &Value, kind: &str) -> bool {
@@ -1395,6 +1431,15 @@ pub struct TranscriptTail {
     open_calls: Vec<(String, PendingPrompt)>,
     /// The prompt the last read reported, so a change can be noticed.
     reported_prompt: Option<PendingPrompt>,
+    /// When a person last typed a prompt, as far as this tail has read.
+    prompt_at: Option<i64>,
+    /// This agent's own calls since `prompt_at`, or since the read began when
+    /// no prompt has been read.
+    calls_since_prompt: u32,
+    /// Whether the read began at the transcript's first byte, so that a prompt
+    /// it has not seen is one that was never written rather than one the
+    /// backfill did not reach back to.
+    read_from_the_top: bool,
 }
 
 impl TranscriptTail {
@@ -1412,6 +1457,9 @@ impl TranscriptTail {
             total_subagents: 0,
             open_calls: Vec::new(),
             reported_prompt: None,
+            prompt_at: None,
+            calls_since_prompt: 0,
+            read_from_the_top: false,
         }
     }
 
@@ -1445,6 +1493,33 @@ impl TranscriptTail {
                 continue;
             }
             self.open_calls.push((id.clone(), prompt.clone()));
+        }
+    }
+
+    /// Fold one batch's prompt and calls into the running count.
+    fn track_prompt(&mut self, tally: PromptTally) {
+        match tally.at {
+            Some(at) => {
+                self.prompt_at = Some(at);
+                self.calls_since_prompt = tally.calls;
+            }
+            None => self.calls_since_prompt = self.calls_since_prompt.saturating_add(tally.calls),
+        }
+    }
+
+    /// What the card may say about the time since the last prompt (INV-11).
+    ///
+    /// A prompt read gives a clock and an exact count. None read, in a read
+    /// that began mid-file, gives no clock and a floor — the prompt is older
+    /// than the backfill — and only once there is a call to put a floor
+    /// under. None read in the whole file gives nothing at all.
+    pub fn since_prompt(&self) -> Option<SincePrompt> {
+        match self.prompt_at {
+            Some(at) => Some(SincePrompt { at: Some(at), calls: self.calls_since_prompt }),
+            None if !self.read_from_the_top && self.calls_since_prompt > 0 => {
+                Some(SincePrompt { at: None, calls: self.calls_since_prompt })
+            }
+            None => None,
         }
     }
 
@@ -1503,6 +1578,9 @@ impl TranscriptTail {
         let first = self.seek_to_start(size);
         if first && self.offset == 0 && size > BACKFILL_BYTES {
             self.offset = self.backfill_start(&path, size).await;
+        }
+        if first {
+            self.read_from_the_top = self.offset == 0;
         }
         // Checked even when the transcript has not grown by a byte: that
         // silence is exactly what a delegated run looks like from here.
@@ -1593,6 +1671,8 @@ impl TranscriptTail {
             // The file this tracked has been replaced, so every call it was
             // holding open belongs to a transcript that no longer exists.
             self.open_calls.clear();
+            self.prompt_at = None;
+            self.calls_since_prompt = 0;
             first = true;
         }
         first
@@ -1668,6 +1748,8 @@ impl TranscriptTail {
     /// subagent of this session is doing.
     async fn apply_batch(&mut self, result: &mut ParseResult) {
         self.track_calls(result);
+        self.track_prompt(result.prompted);
+        result.patch.since_prompt = Some(self.since_prompt());
         self.total_tokens += result.patch.tokens.unwrap_or(0);
         self.total_subagents += result.patch.subagents.unwrap_or(0);
         if self.total_tokens > 0 {
@@ -3005,6 +3087,149 @@ mod tests {
         assert_eq!(d.write(&bytes[3..]), "检b");
         // Bytes that can never be valid are replaced, not held forever.
         assert_eq!(d.write(&[0xff, b'x']), "\u{FFFD}x");
+    }
+
+    /// When the person typed the prompt every test below counts from.
+    const PROMPTED_AT: &str = "2026-08-14T01:00:00.000Z";
+
+    fn typed(text: &str, prompted_at: &str) -> String {
+        format!(
+            "{}\n",
+            json!({
+                "type": "user",
+                "timestamp": prompted_at,
+                "promptSource": "typed",
+                "message": { "content": text },
+            })
+        )
+    }
+
+    /// One tool call, as its own assistant record.
+    fn call_record(id: &str) -> Value {
+        let block = json!({ "type": "tool_use", "id": id, "name": "Bash", "input": { "command": "ls" } });
+        json!({
+            "type": "assistant",
+            "timestamp": "2026-08-14T01:30:00.000Z",
+            "message": { "content": [block] },
+        })
+    }
+
+    /// The same call made by a delegate, in the parent's file.
+    fn delegate_call(id: &str) -> String {
+        let mut record = call_record(id);
+        record["isSidechain"] = json!(true);
+        format!("{record}\n")
+    }
+
+    /// `n` of this agent's own tool calls, one record each.
+    fn calls(n: usize) -> String {
+        (0..n).map(|i| format!("{}\n", call_record(&format!("c{i}")))).collect()
+    }
+
+    fn at_ms(iso: &str) -> i64 {
+        parse_iso8601_ms(iso).expect("a fixture timestamp")
+    }
+
+    async fn since_after(file_text: &str) -> (TranscriptTail, Option<SincePrompt>) {
+        let (root, file) = projects();
+        fs::write(&file, file_text).unwrap();
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let read = tail.read_next().await;
+        let since = read.patch.since_prompt.expect("a read that parsed says what it knows");
+        drop(root);
+        (tail, since)
+    }
+
+    /// Claude Code writes its own machinery as `user` records too: a task
+    /// notification, an SDK send, the summary a compaction leaves. None of them
+    /// is the person asking, and a clock any of them restarted would say a
+    /// two-hour run had just begun.
+    #[tokio::test]
+    async fn inv11_since_prompt_system_sdk_and_compaction_prompts_do_not_reset_it() {
+        const BEFORE: usize = 3;
+        const AFTER: usize = 4;
+        let machinery = [
+            json!({ "type": "user", "timestamp": "2026-08-14T02:00:00.000Z",
+                    "promptSource": "system", "message": { "content": "<task-notification>done</task-notification>" } }),
+            json!({ "type": "user", "timestamp": "2026-08-14T02:01:00.000Z",
+                    "promptSource": "sdk", "message": { "content": "run the sweep" } }),
+            json!({ "type": "user", "timestamp": "2026-08-14T02:02:00.000Z", "origin": { "kind": "human" },
+                    "isCompactSummary": true, "message": { "content": "This session is being continued…" } }),
+            json!({ "type": "system", "subtype": "compact_boundary", "timestamp": "2026-08-14T02:03:00.000Z" }),
+        ];
+        let mut text = typed("fix the locale layout", PROMPTED_AT);
+        text.push_str(&calls(BEFORE));
+        for record in &machinery {
+            text.push_str(&format!("{record}\n"));
+        }
+        text.push_str(&calls(AFTER));
+        let (_, since) = since_after(&text).await;
+        assert_eq!(
+            since,
+            Some(SincePrompt { at: Some(at_ms(PROMPTED_AT)), calls: (BEFORE + AFTER) as u32 })
+        );
+    }
+
+    /// A delegate's work is its own, and is counted on its own node (INV-13).
+    /// Its records in the parent's file — the brief it was handed and every
+    /// call it made — neither restart the clock nor add to the count; the
+    /// call that handed the work over is this agent's own, and does.
+    #[tokio::test]
+    async fn inv11_since_prompt_delegate_events_are_excluded() {
+        const OWN: usize = 2;
+        let mut text = typed("sweep the locales", PROMPTED_AT);
+        text.push_str(&calls(OWN));
+        let mut handed_over = call_record("task");
+        handed_over["message"]["content"][0]["name"] = json!("Task");
+        text.push_str(&format!("{handed_over}\n"));
+        let brief = json!({ "type": "user", "timestamp": "2026-08-14T02:00:00.000Z", "isSidechain": true,
+                            "promptSource": "typed", "message": { "content": "sweep every locale" } });
+        text.push_str(&format!("{brief}\n"));
+        const DELEGATE_CALLS: usize = 5;
+        for i in 0..DELEGATE_CALLS {
+            text.push_str(&delegate_call(&format!("d{i}")));
+        }
+        let (_, since) = since_after(&text).await;
+        assert_eq!(since, Some(SincePrompt { at: Some(at_ms(PROMPTED_AT)), calls: (OWN + 1) as u32 }));
+    }
+
+    /// A transcript read from its first byte with no prompt in it — a session
+    /// only ever driven by the SDK — has nothing to count from. No clock, and
+    /// no count either: the card keeps the age it had.
+    #[tokio::test]
+    async fn inv11_since_prompt_a_prompt_the_tail_never_saw_gives_no_clock() {
+        let sdk = json!({ "type": "user", "timestamp": PROMPTED_AT, "promptSource": "sdk",
+                          "message": { "content": "run the sweep" } });
+        let text = format!("{sdk}\n{}", calls(3));
+        let (tail, since) = since_after(&text).await;
+        assert_eq!(since, None);
+        assert_eq!(tail.since_prompt(), None);
+    }
+
+    /// The prompt is further back than the backfill reached. The calls in what
+    /// was read are a floor, not a count, and there is no clock to show — then
+    /// the next prompt typed gives both, and the floor is gone.
+    #[tokio::test]
+    async fn inv11_since_prompt_a_partial_backfill_gives_at_least() {
+        const READ: usize = 6;
+        let (root, file) = projects();
+        let mut text = typed("start the long run", PROMPTED_AT);
+        text.push_str(&tool_output(BACKFILL_SCAN_BYTES as usize));
+        text.push_str(&calls(READ));
+        fs::write(&file, &text).unwrap();
+
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let first = tail.read_next().await;
+        assert_eq!(first.patch.since_prompt, Some(Some(SincePrompt { at: None, calls: READ as u32 })));
+
+        append(&file, calls(2).as_bytes());
+        let more = tail.read_next().await;
+        assert_eq!(more.patch.since_prompt, Some(Some(SincePrompt { at: None, calls: (READ + 2) as u32 })));
+
+        const NEXT_AT: &str = "2026-08-14T03:00:00.000Z";
+        append(&file, format!("{}{}", typed("now the docs", NEXT_AT), calls(1)).as_bytes());
+        let after = tail.read_next().await;
+        assert_eq!(after.patch.since_prompt, Some(Some(SincePrompt { at: Some(at_ms(NEXT_AT)), calls: 1 })));
     }
 }
 

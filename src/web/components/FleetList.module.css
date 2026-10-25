@@ -109,7 +109,7 @@
   gap: 8px;
   margin: 0 2px 8px;
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   color: var(--dim);
 }
 .groupCount {
@@ -197,7 +197,7 @@
   margin: 0 0 6px;
   overflow-wrap: anywhere;
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 .emptyBody {
   margin: 0;

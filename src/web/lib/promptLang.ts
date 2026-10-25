@@ -36,9 +36,22 @@ export function conversationLang(messages: ChatMessage[], fallback: Lang): Lang 
   // Nothing said yet, so there is no conversation to take a cue from.
   if (recent.length === 0) return fallback
 
-  const sample = recent.join(' ')
-  const han = sample.match(HAN)?.length ?? 0
+  return textLang(recent.join(' '))
+}
+
+/**
+ * The language one piece of text is written in, by the same Han-share test the
+ * conversation uses — so a message is marked `zh-CN` exactly when it would
+ * have tipped the quick prompts to Chinese on its own.
+ *
+ * It is what a message's `lang` attribute says, and that attribute is load-
+ * bearing rather than a nicety: it is how the stylesheet gives Chinese its
+ * taller line, how the browser picks a CJK face over a Japanese one for the
+ * shared Han code points, and how a screen reader picks its voice.
+ */
+export function textLang(text: string): Lang {
+  const han = text.match(HAN)?.length ?? 0
   if (han === 0) return 'en'
-  const letters = sample.match(LETTERS)?.length ?? 0
+  const letters = text.match(LETTERS)?.length ?? 0
   return letters > 0 && han / letters >= HAN_SHARE ? 'zh-CN' : 'en'
 }

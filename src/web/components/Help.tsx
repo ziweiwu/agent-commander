@@ -122,6 +122,14 @@ export function Help({ onClose }: { onClose: () => void }) {
             <kbd>Enter</kbd> / <kbd>Shift+Enter</kbd>
           </dt>
           <dd>{t('keyEnterSend')}</dd>
+          <dt>
+            <kbd>⌥J</kbd> / <kbd>⌥K</kbd>
+          </dt>
+          <dd>{t('keyHopList')}</dd>
+          <dt>
+            <kbd>⌥H</kbd>
+          </dt>
+          <dd>{t('keyHopWaiting')}</dd>
         </dl>
       </section>
 

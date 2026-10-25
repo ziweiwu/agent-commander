@@ -7,6 +7,7 @@ import { Chat } from './Chat.tsx'
 import { LazyTerminal } from './LazyTerminal.tsx'
 
 import { Button } from './ui/Button.tsx'
+import { WaitingChip } from './WaitingChip.tsx'
 import { displayName } from '../lib/naming.ts'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import styles from './FullscreenView.module.css'
@@ -25,6 +26,10 @@ export interface FullscreenViewProps {
  * conversation full-bleed, jump to the terminal to answer a prompt, and come
  * back without ever dropping out of full screen. Rendered through a portal at
  * body level so it escapes the detail panel's overflow.
+ *
+ * It covers the fleet list at every width, so the waiting chip rides in its
+ * header: the topbar's copy is behind the overlay, and without one here full
+ * screen would be the one shape where nothing said another agent needs you.
  */
 export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProps) {
   const t = useTranslate()
@@ -92,6 +97,7 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
             {t('tabAttach')}
           </button>
         </div>
+        <WaitingChip />
         <Button variant="compact" data-testid="fullscreen-exit" onClick={onExit}>
           {t('collapse')}
         </Button>

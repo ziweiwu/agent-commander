@@ -86,7 +86,17 @@ running?: RunningProcess,
  * denominator: `tokens` above is output only, from a capped tail, and was
  * once shown as spend (INV-11). Absent until the bridge has written.
  */
-usage?: SessionUsage, };
+usage?: SessionUsage, 
+/**
+ * When the person last typed a prompt, and how many tool calls this
+ * agent's own transcript has made since — never a delegate's.
+ *
+ * A busy card's age counts from the last write, which for a working agent
+ * is always about now; this is what tells two hours on one request from
+ * a request that has just begun. Absent when the tail has read no prompt
+ * and read the whole file, so there is nothing to count from (INV-11).
+ */
+sincePrompt?: SincePrompt, };
 
 export type AgentStatus = "busy" | "idle" | "waiting" | "unknown";
 
@@ -379,6 +389,15 @@ kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" } | { "type": "seen"
  * reading is rather than present it as now.
  */
 export type SessionUsage = { contextPct?: number, contextSize?: number, costUsd?: number, at: number, };
+
+/**
+ * The last prompt a person typed, as far as the transcript tail has read.
+ *
+ * `at` is absent when that prompt is older than the backfill reached: the
+ * clock is then unknown, and `calls` is a floor — the calls in what was read —
+ * rather than a count (INV-11). Counts only, never what was said.
+ */
+export type SincePrompt = { at?: number, calls: number, };
 
 /**
  * One delegate in an agent's tree, and everything below it.

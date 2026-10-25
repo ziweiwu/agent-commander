@@ -26,7 +26,7 @@
 }
 
 .title {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   font-size: var(--text-md);
   overflow: hidden;
   text-overflow: ellipsis;

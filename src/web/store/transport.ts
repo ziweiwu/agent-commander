@@ -22,7 +22,7 @@ import type {
 import { translate } from '../lib/i18n.ts'
 import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
-import { visitOf } from '../lib/newSince.ts'
+import { followVisit, visitOf } from '../lib/newSince.ts'
 import { useStore } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -621,7 +621,7 @@ function handle(msg: ServerMessage): void {
   switch (msg.type) {
     case 'fleet': {
       const fleetAt = Date.now()
-      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt })
+      useStore.setState({ agents: msg.agents, mock: msg.mock, fleetAt, visit: followVisit(state.visit, msg.agents) })
       // For the next cold start; the shape of the fleet and nothing said in it.
       saveFleetSnapshot(msg.agents, fleetAt)
       // A status change decides whether an echo may be counting down: a message

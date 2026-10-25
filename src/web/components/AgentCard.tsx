@@ -12,7 +12,15 @@ import { useStore } from '../store/store.ts'
 import { DelegationTree } from './DelegationTree.tsx'
 import { ICON_BUTTON, ICON_INLINE, ICON_MARK, Icon } from './ui/Icon.tsx'
 import type { IconName } from './ui/Icon.tsx'
-import { ageFrom, ageIsTimeInState, railOf, reachOf, type RailState } from '../lib/status.ts'
+import {
+  ageFrom,
+  ageIsTimeInState,
+  railOf,
+  reachOf,
+  sinceOf,
+  type RailState,
+  type SinceFace,
+} from '../lib/status.ts'
 import styles from './AgentCard.module.css'
 
 /**
@@ -153,6 +161,7 @@ export const AgentCard = memo(function AgentCard({
    */
   const since = ageFrom(agent)
   const rel = since === null ? '' : formatRelative(lang, relative(since))
+  const sincePrompt = sinceOf(agent)
   const tok = tokens(agent.tokens)
   /*
    * The one figure with a real denominator (INV-11): Claude Code's own reading
@@ -321,15 +330,19 @@ export const AgentCard = memo(function AgentCard({
              * rather than only in the number, because a screen reader gets no
              * help from position.
              */}
-            {rel && (
-              <span
-                className={styles.age}
-                data-testid="agent-age"
-                data-since={blockedFor ? 'state' : 'activity'}
-                title={blockedFor ? t('ageBlockedTitle') : undefined}
-              >
-                {rel}
-              </span>
+            {sincePrompt ? (
+              <SincePromptAge face={sincePrompt} />
+            ) : (
+              rel && (
+                <span
+                  className={styles.age}
+                  data-testid="agent-age"
+                  data-since={blockedFor ? 'state' : 'activity'}
+                  title={blockedFor ? t('ageBlockedTitle') : undefined}
+                >
+                  {rel}
+                </span>
+              )
             )}
             {newSinceOpened && (
               <span className={styles.newSince} data-testid="agent-new" title={t('cardNewTitle')}>
@@ -526,6 +539,42 @@ export const AgentCard = memo(function AgentCard({
   )
 })
 
+/**
+ * A busy card's age, counted from the last prompt a person typed rather than
+ * from the last write, which for a working agent is always about now (F8).
+ *
+ * The same words twice: the whole sentence where the top line has room for it
+ * beside the name, and a short form where it does not. The line's own width
+ * picks one, so the face gains no row, and the title carries the whole of it
+ * either way. A floor keeps its "at least" in both forms — `≥` in the short
+ * one — because a count is never shown as more than it is (INV-11).
+ */
+function SincePromptAge({ face }: { face: SinceFace }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const clock = face.kind === 'clock' ? formatUptime(lang, uptimeParts(face.at)) : ''
+  const vars = { t: clock, n: face.calls }
+  const floor = face.kind === 'floor'
+  const full = t(floor ? 'sincePromptFloor' : 'sincePrompt', vars)
+  const short = t(floor ? 'sincePromptFloorShort' : 'sincePromptShort', vars)
+  const why = t(floor ? 'sincePromptFloorTitle' : 'sincePromptTitle')
+  return (
+    <span
+      className={`${styles.age} ${styles.since}`}
+      data-testid="agent-age"
+      data-since="prompt"
+      data-floor={floor || undefined}
+      title={`${full}\n${why}`}
+    >
+      <span className={styles.sinceFull} data-testid="agent-since">
+        {full}
+      </span>
+      <span className={styles.sinceShort} data-testid="agent-since-short" aria-hidden="true">
+        {short}
+      </span>
+    </span>
+  )
+}
 
 /**
  * What this card is willing to say about the agent's delegates.
