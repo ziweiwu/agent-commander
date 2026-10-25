@@ -98,6 +98,43 @@ export function withPage(held: HistoryView | null, page: HistoryPage): HistoryVi
   return { sessionId: held.sessionId, lines: [...page.lines, ...held.lines], total: page.total }
 }
 
+/** The two boxes a person types into for one agent: the composer, and the Attach tab's paste line. */
+export type DraftBox = 'chat' | 'paste'
+
+/** What is half-typed into one box, and how tall the box grew to hold it (null: its resting height). */
+export interface Draft {
+  text: string
+  height: number | null
+}
+
+/**
+ * Every half-typed draft, per box and per agent (F1).
+ *
+ * In memory and nowhere else. A draft is the user's own words to an agent,
+ * which is exactly what `saveFleetSnapshot` keeps out of browser storage
+ * (INV-3), so a reload loses it — while a switch to another agent, ‹ Agents on
+ * a phone and ⤢ no longer do, because none of them is a reload.
+ */
+export type Drafts = Record<DraftBox, Record<string, Draft>>
+
+/** The drafts with one entry replaced, or removed when there is nothing left in it. */
+export function withDraft(drafts: Drafts, box: DraftBox, sessionId: string, draft: Draft | null): Drafts {
+  const rest = Object.fromEntries(Object.entries(drafts[box]).filter(([id]) => id !== sessionId))
+  const kept = draft !== null && draft.text !== '' ? { ...rest, [sessionId]: draft } : rest
+  return { ...drafts, [box]: kept }
+}
+
+/**
+ * The drafts for sessions still worth holding: the fleet's, plus the one on
+ * screen — which may be absent from the fleet for the seconds after a `/clear`
+ * while the route follows it, and is still being typed into.
+ */
+export function prunedDrafts(drafts: Drafts, keep: ReadonlySet<string>): Drafts {
+  const prune = (held: Record<string, Draft>) =>
+    Object.fromEntries(Object.entries(held).filter(([sessionId]) => keep.has(sessionId)))
+  return { chat: prune(drafts.chat), paste: prune(drafts.paste) }
+}
+
 export interface AppState {
   /* server-driven */
   agents: Agent[]
@@ -230,6 +267,7 @@ export interface AppState {
    * agent, made here for a just-cleared one.
    */
   expectSession: string | null
+  drafts: Drafts
 
   /* actions */
   setSidebar: (state: SidebarState) => void
@@ -255,6 +293,10 @@ export interface AppState {
   clearHistory: () => void
   /** Expect a session the fleet has not broadcast yet; null once it arrives. */
   setExpectSession: (sessionId: string | null) => void
+  /** Hold what is typed into one agent's box; null, or empty text, lets it go. */
+  keepDraft: (box: DraftBox, sessionId: string, draft: Draft | null) => void
+  /** Drop the drafts of sessions that have left the fleet. */
+  pruneDrafts: (live: readonly string[]) => void
   addPending: (text: string) => void
   /**
    * Re-decide which echoes may be counting down, after a status change.
@@ -388,6 +430,7 @@ export const useStore = create<AppState>()((set, get) => ({
   exited: [],
   answerRefused: null,
   expectSession: null,
+  drafts: { chat: {}, paste: {} },
 
   setSidebar: (sidebar) => {
     saveSidebar(sidebar)
@@ -468,6 +511,16 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setExpectSession: (expectSession) => set({ expectSession }),
+
+  keepDraft: (box, sessionId, draft) =>
+    set((s) => ({ drafts: withDraft(s.drafts, box, sessionId, draft) })),
+  pruneDrafts: (live) =>
+    set((s) => {
+      const keep = new Set(live)
+      if (s.selected !== null) keep.add(s.selected)
+      const held = [...Object.keys(s.drafts.chat), ...Object.keys(s.drafts.paste)]
+      return held.every((sessionId) => keep.has(sessionId)) ? s : { drafts: prunedDrafts(s.drafts, keep) }
+    }),
 
   /** Echo a sent message locally so sending feels instant. */
   addPending: (text) => {

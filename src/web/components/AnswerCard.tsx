@@ -272,6 +272,15 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         </p>
       )}
 
+      {prompt?.detail !== undefined && (
+        <>
+          <p className={styles.label}>{t(detailLabel(prompt.tool))}</p>
+          <pre className={styles.detail} data-testid="answer-detail">
+            {prompt.detail}
+          </pre>
+        </>
+      )}
+
       {/*
         * The agent's own account of the command, kept apart from the command:
         * one is a claim and the other is the fact (TODO §13d).
@@ -286,15 +295,6 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         <p className={styles.warning} role="note" data-testid="answer-sandbox">
           {t('answerSandboxOff')}
         </p>
-      )}
-
-      {prompt?.detail !== undefined && (
-        <>
-          <p className={styles.label}>{t(detailLabel(prompt.tool))}</p>
-          <pre className={styles.detail} data-testid="answer-detail">
-            {prompt.detail}
-          </pre>
-        </>
       )}
 
       {answerable && drawn && (

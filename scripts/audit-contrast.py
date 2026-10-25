@@ -26,6 +26,9 @@ TOKENS = Path(__file__).resolve().parent.parent / "src" / "web" / "styles" / "to
 # How far back to look for the `@media` line that a nested block sits inside.
 MEDIA_QUERY_LOOKBACK = 60
 
+FULL = 1.0
+"""A mix at 100%: the token itself, for an edge that is drawn at full strength."""
+
 # fg token, bg token, required ratio, what it is
 PAIRS = [
     ("text", "bg", 4.5, "body text on the page"),
@@ -68,10 +71,73 @@ PAIRS = [
 # Surfaces built with color-mix rather than a flat token. Auditing only flat
 # pairs missed the mock-mode banner entirely: amber text on its own 18% amber
 # wash measures 4.04:1 in light, and the banner is on screen on every route.
-# fg token, (tint token, base token, tint fraction), required ratio, what it is
 COMPOSITES = [
     ("text", ("waiting", "bg", 0.18), 4.5, "mock-mode banner text"),
+    ("text", ("waiting", "bg", 0.18), 4.5, "notification nudge text"),
+    ("waiting", ("waiting", "panel", 0.14), 4.5, "waiting pill in the agent header"),
+    ("text", ("waiting", "panel", 0.14), 4.5, "blocked banner text"),
+    ("waiting", ("waiting", "panel", 0.14), 4.5, "blocked banner heading"),
+    ("text", ("accent", "panel", 0.12), 4.5, "help: Tailscale detected"),
+    ("text", ("waiting", "panel", 0.12), 4.5, "help: Tailscale missing"),
+    ("danger", ("danger", "panel", 0.10), 4.5, "help: funnel warning"),
+    ("danger", ("danger", "panel", 0.10), 4.5, "new-agent dialog error"),
+    ("text", ("danger", "panel", 0.10), 4.5, "confirm dialog: what is lost"),
+    ("danger", ("danger", "panel", 0.12), 4.5, "destructive button, hovered"),
+    ("text", ("focus", "panel", 0.16), 4.5, "settings menu: the chosen item"),
+    ("dim", ("focus", "panel", 0.16), 4.5, "settings menu: its icon"),
+    ("text", ("focus", "panel", 0.16), 4.5, "primary button in a dialog"),
+    ("text", ("focus", "bg", 0.16), 4.5, "primary button, folder browser"),
+    ("text", ("focus", "bg", 0.15), 4.5, "pressed filter chip"),
+    ("text", ("focus", "panel", 0.15), 4.5, "pressed chip, new-agent dialog"),
+    (("waiting", "panel-2", FULL), "panel-2", 3.0, "Open terminal button edge"),
+    (("danger", "panel-2", FULL), "panel-2", 3.0, "destructive button edge"),
+    ("focus", ("focus", "panel", 0.16), 3.0, "primary button edge on its fill"),
 ]
+"""
+Every wash the stylesheets draw something on, and every control edge drawn as
+a mix. Each side is a token, or `(tint, base, fraction)`: the
+`color-mix(in srgb, var(--tint) N%, transparent)` a rule writes, flattened over
+the surface it actually sits on. A control's edge is measured over the
+`--panel-2` fill of the button it outlines (WCAG 1.4.11); one drawn at the full
+token is written `FULL`, so a later mix there is a one-number change here.
+"""
+
+
+def surface(spec: str | tuple[str, str, float], tokens: dict[str, str]) -> str | None:
+    """The hex a token or a flattened mix comes to in one palette, or None if a token is missing."""
+    if isinstance(spec, str):
+        return tokens.get(spec)
+    tint, base, fraction = spec
+    if tint not in tokens or base not in tokens:
+        return None
+    return composite(tokens[tint], tokens[base], fraction)
+
+
+def describe(spec: str | tuple[str, str, float]) -> str:
+    """How an entry names one side of a pair, for the report."""
+    if isinstance(spec, str):
+        return f"--{spec}"
+    tint, base, fraction = spec
+    return f"--{tint} {round(fraction * 100)}% over --{base}"
+
+
+def audit_composites(tokens: dict[str, str]) -> int:
+    """Measure every composite pair in one palette; returns how many fail."""
+    failures = 0
+    for fg, bg, need, label in COMPOSITES:
+        front, back = surface(fg, tokens), surface(bg, tokens)
+        if front is None or back is None:
+            print(f"  SKIP  {label} (missing a token)")
+            continue
+        value = ratio(front, back)
+        ok = value >= need
+        if not ok:
+            failures += 1
+        print(
+            f"  {'PASS' if ok else 'FAIL'}  {value:5.2f}:1 (need {need})  "
+            f"{label:36} {front} on {back} ({describe(fg)} on {describe(bg)})"
+        )
+    return failures
 
 
 def composite(tint: str, base: str, fraction: float) -> str:
@@ -177,19 +243,7 @@ def main() -> int:
                 f"{label:36} {tokens[fg]} on {tokens[bg]}"
             )
 
-        for fg, (tint, base, fraction), need, label in COMPOSITES:
-            if fg not in tokens or tint not in tokens or base not in tokens:
-                print(f"  SKIP  {label} (missing a token)")
-                continue
-            surface = composite(tokens[tint], tokens[base], fraction)
-            value = ratio(tokens[fg], surface)
-            ok = value >= need
-            if not ok:
-                failures += 1
-            print(
-                f"  {'PASS' if ok else 'FAIL'}  {value:5.2f}:1 (need {need})  "
-                f"{label:36} {tokens[fg]} on {surface} (composited)"
-            )
+        failures += audit_composites(tokens)
 
     print(f"\n{len(found)} palette(s) audited, {failures} failing pair(s)")
     return 1 if failures else 0

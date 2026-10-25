@@ -10,6 +10,7 @@ import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
+import { useDraft } from '../hooks/useDraft.ts'
 import { useStore } from '../store/store.ts'
 import {
   interruptAndSend,
@@ -219,9 +220,7 @@ export function Chat({ agent }: { agent: Agent }) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const answerRef = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
-  const [draft, setDraft] = useState('')
-  /** The synchronous truth about the draft; `draft` is only for rendering. */
-  const draftRef = useRef('')
+  const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('chat', agent.sessionId, inputRef)
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
   const pictureRef = useRef<HTMLInputElement>(null)
   const [attaching, setAttaching] = useState(false)
@@ -462,7 +461,7 @@ export function Chat({ agent }: { agent: Agent }) {
     // on an idle one the two modes are the same act, so the Escape is not sent.
     if (interrupting) interruptAndSend(text)
     else sendMessage(text)
-    setDraft('')
+    clearDraft()
     setPinned(true)
     inputRef.current?.focus()
   }
@@ -482,17 +481,18 @@ export function Chat({ agent }: { agent: Agent }) {
    * leave the draft alone: whatever is half-written there is the user's.
    */
   const attachPicture = async (file: File) => {
+    const sessionId = agent.sessionId
     setAttaching(true)
-    const answer = await uploadPicture(agent.sessionId, file)
+    const answer = await uploadPicture(sessionId, file)
     setAttaching(false)
     if (!answer.ok) {
       showToast(t('pictureFailed', { error: answer.error }))
       return
     }
-    const before = draftRef.current
+    const held = useStore.getState().drafts.chat[sessionId]
+    const before = held?.text ?? ''
     const spaced = before.length === 0 || /\s$/.test(before) ? before : `${before} `
-    draftRef.current = `${spaced}${answer.path} `
-    setDraft(draftRef.current)
+    writeDraft(sessionId, `${spaced}${answer.path} `, held?.height ?? null)
     showToast(t('picturePlaced'))
     inputRef.current?.focus()
   }
@@ -700,8 +700,6 @@ export function Chat({ agent }: { agent: Agent }) {
               attachable ? t('messagePlaceholder', { name: shortName(agent) }) : t('messageDisabled')
             }
             onChange={(e) => {
-              draftRef.current = e.target.value
-              setDraft(e.target.value)
               /*
                * Grow to fit, and let the stylesheet decide the ceiling.
                *
@@ -715,6 +713,7 @@ export function Chat({ agent }: { agent: Agent }) {
                */
               e.target.style.height = 'auto'
               e.target.style.height = `${e.target.scrollHeight}px`
+              writeDraft(agent.sessionId, e.target.value, e.target.scrollHeight)
             }}
             /*
              * A screenshot pasted here takes the attach button's path: the

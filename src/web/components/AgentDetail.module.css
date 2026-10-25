@@ -130,15 +130,6 @@
   padding-bottom: 6px;
 }
 
-/* The tab row has spare width where the header has none, so on a phone the
-   icon buttons live here and the agent's name gets the header to itself. */
-.tabActions {
-  margin-left: auto;
-  display: flex;
-  gap: 6px;
-  padding-bottom: 4px;
-}
-
 /*
  * The word next to the ⤢ in the tab row.
  *
@@ -340,7 +331,7 @@
   color: var(--waiting);
 }
 .cta {
-  border-color: color-mix(in srgb, var(--waiting) 55%, transparent);
+  border-color: var(--waiting);
 }
 
 /* On a narrow screen the detail is the whole screen, not a column beside one. */
@@ -354,11 +345,12 @@
 .sheet .head {
   gap: 8px;
   padding: 8px 12px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  row-gap: 0;
   align-items: center;
 }
 .sheet .head h2 {
-  flex: 1;
+  flex: 1 1 8ch;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -448,8 +440,8 @@
      * the right order and it costs nothing to get: the name is the identity and
      * it should be the last thing to go.
      *
-     * Only above the desktop cut. Below it `.sheet .head` already says nowrap
-     * for its own reasons.
+     * Only above the desktop cut. Below it `.sheet .head` wraps instead, so the
+     * tabs can drop to a second row rather than push ⤢ off the sheet (FR-DET-2).
      */
     flex-wrap: nowrap;
   }

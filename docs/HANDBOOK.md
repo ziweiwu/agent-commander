@@ -187,6 +187,11 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
+  What you have half-typed stays with the agent you typed it for: open another
+  agent and its own box comes back, go ‹ Agents on a phone or ⤢ to full screen
+  and the text is still there when you return. It is kept in memory only, so a
+  reload loses it, and only a send that went clears it. The Attach tab's paste
+  line keeps its text per agent the same way.
 - **Attach** — the actual terminal, live. Full keyboard passthrough, so you can
   answer a permission dialog, hit Esc to interrupt, or arrow through a menu.
 

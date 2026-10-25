@@ -275,9 +275,6 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }
-.warn {
-  color: var(--waiting);
-}
 /* Which CLI this is, shown only when it is not the default one. */
 .kind {
   font-family: var(--font-mono);
@@ -459,5 +456,11 @@
   /* A 44px target on a control that sits between two tappable cards. */
   .disclosure {
     padding: 12px 13px;
+  }
+}
+
+@media (pointer: coarse), (max-width: 560px) {
+  .disclosure {
+    min-height: 44px;
   }
 }

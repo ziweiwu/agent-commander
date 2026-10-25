@@ -49,6 +49,8 @@ export function resetStore(): void {
     historyPending: false,
     toast: null,
     expectSession: null,
+    exited: [],
+    drafts: { chat: {}, paste: {} },
   })
 }
 

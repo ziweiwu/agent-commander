@@ -34,6 +34,40 @@ const PROFILES = [
  * would make two runs incomparable.
  */
 const ENGINE = process.env.ENGINE === 'webkit' ? webkit : chromium
+
+/**
+ * FR-UI-2's floor for a tap target, in both directions.
+ *
+ * It was 40 tall by 32 wide here while the requirement said 44, so the fleet
+ * card's Details toggle passed at 41.5px on touch. The sweep only ever ran with
+ * an agent open, too, so nothing measured the fleet a phone sees first.
+ */
+const TOUCH_FLOOR = 44
+
+/** How much of a target's label a finding quotes, and how many targets one finding lists. */
+const LABEL_CHARS = 16
+const LISTED = 6
+
+/** Every visible touch target under the floor on the screen as it stands. */
+async function reportSmallTargets(page, where) {
+  const small = await page.$$eval(
+    TOUCH_TARGETS,
+    (targets, { floor, labelChars }) =>
+      targets
+        .filter((target) => target.offsetParent !== null)
+        .map((target) => {
+          const box = target.getBoundingClientRect()
+          const label = (target.textContent || target.tagName).trim().slice(0, labelChars)
+          return { label, h: Math.round(box.height), w: Math.round(box.width) }
+        })
+        .filter((found) => found.h > 0 && (found.h < floor || found.w < floor)),
+    { floor: TOUCH_FLOOR, labelChars: LABEL_CHARS },
+  )
+  if (small.length === 0) return
+  const named = small.map((found) => `${found.label}(${found.w}x${found.h})`).slice(0, LISTED)
+  add('med', 'touch', `${where}: ${small.length} small target(s): ${named.join(', ')}`)
+}
+
 const browser = await ENGINE.launch()
 
 for (const { name, device } of PROFILES) {
@@ -74,6 +108,8 @@ for (const { name, device } of PROFILES) {
   // 3. Horizontal overflow at rest.
   const ov = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: window.innerWidth }))
   if (ov.s > ov.i + 1) add('high', 'overflow', `${name}: list overflows horizontally (${ov.s} > ${ov.i})`)
+
+  await reportSmallTargets(page, `${name} fleet`)
 
   /*
    * 4. Open an agent -> chat. Asked for by capability, not by position: a
@@ -199,14 +235,7 @@ for (const { name, device } of PROFILES) {
     }
   }
 
-  // 8. Tap targets across the whole UI.
-  const small = await page.$$eval(TOUCH_TARGETS, (els) =>
-    els
-      .filter((e) => e.offsetParent !== null)
-      .map((e) => ({ t: (e.textContent || e.tagName).trim().slice(0, 16), h: Math.round(e.getBoundingClientRect().height), w: Math.round(e.getBoundingClientRect().width) }))
-      .filter((x) => x.h > 0 && (x.h < 40 || x.w < 32)),
-  )
-  if (small.length) add('med', 'touch', `${name}: ${small.length} small target(s): ${small.map((s) => `${s.t}(${s.w}x${s.h})`).slice(0, 6).join(', ')}`)
+  await reportSmallTargets(page, `${name} agent`)
 
   await ctx.close()
 }

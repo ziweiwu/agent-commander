@@ -15,6 +15,7 @@ import {
 } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
+import { useDraft } from '../hooks/useDraft.ts'
 import { Button } from './ui/Button.tsx'
 import { ShiftTabButton } from './ShiftTabButton.tsx'
 import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
@@ -406,7 +407,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   const exited = usePaneExited(agent)
   const history = useStore((s) => (s.history?.sessionId === agent.sessionId ? s.history : null))
   const historyPending = useStore((s) => s.historyPending)
-  const [draft, setDraft] = useState('')
+  const boxRef = useRef<HTMLTextAreaElement>(null)
   /*
    * INV-2's "exactly once", which React state cannot hold on its own: `draft`
    * is read from a closure and `setDraft('')` does not land until React
@@ -415,9 +416,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
    * The ref is the authority and is cleared synchronously, which is the same
    * shape the message composer uses for the same reason.
    */
-  const draftRef = useRef('')
-  /* Held only to put the box back to one line once its text has gone. */
-  const boxRef = useRef<HTMLTextAreaElement>(null)
+  const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('paste', agent.sessionId, boxRef)
   const coarse = useIsCoarse()
   const { wrapRef, scaleRef, termRef, term, guarded, typed } = usePaneTerm({
     agent,
@@ -440,11 +439,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   const takeDraft = (): string => {
     const text = draftRef.current
     if (text.length === 0) return ''
-    draftRef.current = ''
-    setDraft('')
-    // The inline height `onChange` wrote outlives the text it was measured
-    // for, so an emptied box would keep the depth of the paste it just sent.
-    if (boxRef.current) boxRef.current.style.height = ''
+    clearDraft()
     return text
   }
 
@@ -653,10 +648,10 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         disabled={exited}
         ref={boxRef}
         onChange={(e) => {
-          draftRef.current = e.target.value
-          setDraft(e.target.value)
           e.target.style.height = 'auto'
-          e.target.style.height = `${Math.min(e.target.scrollHeight, COMPOSE_MAX_HEIGHT)}px`
+          const height = Math.min(e.target.scrollHeight, COMPOSE_MAX_HEIGHT)
+          e.target.style.height = `${height}px`
+          writeDraft(agent.sessionId, e.target.value, height)
         }}
         onKeyDown={(e) => {
           /*
