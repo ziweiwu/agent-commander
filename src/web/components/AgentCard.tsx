@@ -101,6 +101,12 @@ export interface AgentCardProps {
    */
   tree?: AgentTree
   selected: boolean
+  /**
+   * It did something since it was last opened in this app (F6). Decided by
+   * the list, which also counts these for the group heading; `isNewSinceOpened`
+   * keeps it to idle Claude cards.
+   */
+  newSinceOpened?: boolean
   onSelect: (sessionId: string) => void
 }
 
@@ -138,6 +144,7 @@ export const AgentCard = memo(function AgentCard({
   agent,
   tree,
   selected,
+  newSinceOpened = false,
   onSelect,
 }: AgentCardProps) {
   const t = useTranslate()
@@ -336,6 +343,11 @@ export const AgentCard = memo(function AgentCard({
                   {rel}
                 </span>
               )
+            )}
+            {newSinceOpened && (
+              <span className={styles.newSince} data-testid="agent-new" title={t('cardNewTitle')}>
+                {t('cardNew')}
+              </span>
             )}
           </div>
 

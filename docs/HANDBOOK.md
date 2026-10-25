@@ -107,6 +107,25 @@ opens the fold: the token count, the full path, the session's original name and
 the delegation tree. A blocked agent whose terminal has gone loses the wash and
 the **Answer** button, because there is nothing left to answer from.
 
+**New since you last opened it in this app.** An idle agent that has done
+something since it was last on screen here says **new** (新) beside its age,
+in the plain text colour — never amber, which is the hand's — and the Idle
+heading counts them: `Idle 7 · 2 new`. Opening the agent on a tab that is on
+screen clears it, on the laptop and the phone alike, because the server keeps
+the record rather than each browser. A tab in the background does not: it
+shows nobody anything. The server keeps it in memory only, so a restart
+forgets it and starts with no marks, and so does a session it sees for the
+first time. Busy, waiting and terminal cards never carry it, nor does any card
+while the connection is down. It is not "unread": you may have read every
+word in tmux, and all this app can know is what it showed.
+
+Opening such an agent draws a line in its conversation where the new part
+begins — *New since you last opened this · 3h ago — 2 replies, 41 tool calls*
+— and keeps it there for the whole visit. When the conversation as read does
+not reach back that far, the line goes at the top and says *at least*. When
+the new part is taller than the screen the conversation opens at the line
+rather than at the bottom; **Jump to latest** takes you the rest of the way.
+
 An agent that has handed work to a subagent reads `busy · delegated`, and its
 last-activity clock follows the subagent's transcript rather than its own. Its
 own transcript stops growing the moment it delegates, so without both of those a
@@ -912,7 +931,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1701 tests: 741 Rust (the server) + 960 vitest (the web app)
+npm test           # 1740 tests: 752 Rust (the server) + 988 vitest (the web app)
 npm run e2e        # 458 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone

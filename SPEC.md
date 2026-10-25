@@ -304,6 +304,21 @@ the default for an unrecognised kind is deny.
   *`transcript::inv11_since_prompt_*`,
   `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
   `test/ui/card-since-prompt.test.tsx`.*
+- **FR-CARD-10** — An idle Claude agent's card MUST say **new** (新) beside its
+  age when the agent's `lastActivityAt` is past `seenThrough`, the server's
+  in-memory record of the agent's own transcript time at the last moment a tab
+  that was on screen had it open, and the Idle heading MUST count those cards
+  (`Idle 7 · 2 new`). The record MUST live on the server, so opening an agent
+  on the laptop clears the mark on the phone; a hidden tab MUST NOT move it;
+  and the first frame carrying a session's transcript time MUST seed it as
+  backlog, so a fresh server shows no marks. Busy, waiting, inferred and
+  terminal cards, and every card while the fleet is stale, MUST carry no mark,
+  and it MUST be drawn in `--text` or `--dim`, never amber. The wording MUST be
+  "new since opened in this app", never "unread", "done" or "ready": the
+  reader may have followed the agent in tmux, and all this app knows is what
+  it showed. **(INV-11, INV-14)** *`seen::tests`,
+  `routes::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`,
+  `test/ui/new-since.test.tsx`, `e2e/new-since.spec.ts`.*
 
 ### 3.3 Delegates
 
@@ -415,6 +430,24 @@ over the list with a back control; on a wide one, a second column.
   **(INV-2, INV-11)**. The button MUST be offered on exactly the condition the
   composer is — an agent with a pane — and MUST NOT grow a gate of its own.
   *`test/ui/picture.test.tsx`, `routes::a_picture_is_stored_and_its_path_comes_back_to_be_typed`.*
+- **FR-CHAT-15** — Opening an agent with something new since it was last
+  opened in this app (FR-CARD-10) MUST draw a divider, in the day separator's
+  style, before the first message past `seenThrough`, reading *New since you
+  last opened this · 3h ago — 2 replies, 41 tool calls*. It MUST be placed
+  from `seenThrough` as it stood before this visit's own focus moved it, and
+  held for the whole visit; its counts stop where the agent had got when the
+  visit began. Where the agent had got MUST come from a caught-up fleet: every
+  fleet frame carries `caughtUp`, false from the moment the server idles its
+  enricher until that enricher's first full pass after resuming, so a visit
+  begun before it follows the agent's activity until the caught-up frame, and
+  one begun on a caught-up fleet never follows — what arrives while the reader
+  is here, their own sends included, is not news. When nothing read is at or before `seenThrough` the transcript
+  tail did not reach that far, so it MUST go at the top and say *at least*.
+  When the new part is taller than the view, the chat MUST open scrolled to the
+  divider, with *Jump to latest* for the rest. Nothing newer MUST mean no
+  divider. **(INV-11)** *`test/ui/new-since.test.tsx`,
+  `test/ui/new-since-visit.test.tsx`,
+  `enrich::tests::f6_caught_up_only_after_the_first_pass_following_a_resume`.*
 
 ### 4.2 Answering a blocked agent
 
@@ -1195,10 +1228,10 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CHAT-15, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |
