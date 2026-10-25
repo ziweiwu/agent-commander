@@ -113,6 +113,15 @@ own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
 
+A **working** card's age counts from the last prompt you typed rather than its
+last write, which for a working agent is always about now: `47m since your
+prompt · 214 calls`, the calls being the agent's own tool calls since — never
+its delegates'. Task notifications, SDK sends and compactions do not restart
+it. When your prompt is older than the part of the transcript the app read, it
+shows no clock and says `at least 214 calls in what was read`; when no prompt
+was read at all, the card keeps the ordinary age. On a narrow card it shortens
+to `47m · 214 calls` (or `≥214 calls`), with the whole sentence on hover.
+
 ### Delegates
 
 Every card carries a line about what the agent handed out — `4 delegates ·

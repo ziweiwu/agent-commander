@@ -2493,7 +2493,8 @@ async fn pump_timeline(
         }
     }
     // INV-5: a transcript that cannot be read must not kill the session view.
-    let Ok(read) = tail.read().await else { return };
+    let Ok(mut read) = tail.read().await else { return };
+    leave_the_prompt_count_to_the_enricher(&mut read.patch);
     if !read.patch.is_empty() {
         app.deps.source.enrich(session_id, read.patch);
     }
@@ -2533,6 +2534,17 @@ async fn pump_timeline(
             prompt,
         });
     }
+}
+
+/// The enricher's tail is the one that counts since the last prompt.
+///
+/// This tail opened when the agent did, so its backfill starts later in the
+/// file than the enricher's, which has been reading since the server started.
+/// For a prompt between the two starts one would say "214 calls since 47m"
+/// and the other "at least 150 calls", each overwriting the other on every
+/// read — a card flipping between a clock and no clock while it sits open.
+fn leave_the_prompt_count_to_the_enricher(patch: &mut crate::sources::AgentPatch) {
+    patch.since_prompt = None;
 }
 
 /// The prompt as the pane shows it, where the transcript alone cannot say.
