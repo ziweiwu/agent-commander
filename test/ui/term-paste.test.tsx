@@ -100,7 +100,7 @@ describe('the terminal takes text without a keyboard shortcut', () => {
 
     await waitFor(() => expect(runText).toHaveBeenCalledTimes(1))
     expect(runText).toHaveBeenCalledWith('deploy')
-    // Enter no longer stages: the staged copy would be a second send (INV-2).
+    /** Enter no longer stages: the staged copy would be a second send (INV-2). */
     expect(sendText).not.toHaveBeenCalled()
   })
 
@@ -299,7 +299,7 @@ describe('plain Enter in the box runs the text', () => {
     expect(input().value).toBe('ni')
   })
 
-  /* Blank text is refused again in `runText` itself, which is mocked here. */
+  /** Blank text is refused again in `runText` itself, which is mocked here. */
   it('runs nothing from an empty line', async () => {
     const user = userEvent.setup()
     open()

@@ -42,7 +42,7 @@ test.describe('the terminal takes text without a keyboard', () => {
 
     await expect.poll(() => sent.length).toBe(1)
     expect(sent[0]).toContain('echo from-a-phone')
-    // Stage is text, not a submission (INV-2).
+    /** Stage is text, not a submission (INV-2). */
     expect(sent[0]).toContain('"submit":false')
     // The server accepted it; a refusal would come back as a toast.
     await expect(page.getByTestId('toast')).toHaveCount(0)
@@ -119,7 +119,7 @@ test.describe('Enter in the box runs the text', () => {
 
     const box = page.getByTestId('term-compose-input')
     await box.fill('echo run-me')
-    // Three presses in a row: a key repeat, or a double tap on a return key.
+    /** Three presses in a row: a key repeat, or a double tap on a return key. */
     await box.press('Enter')
     await box.press('Enter')
     await box.press('Enter')
@@ -167,7 +167,7 @@ test.describe('Enter in the box runs the text', () => {
   })
 })
 
-/*
+/**
  * A tap on the pane on a touch screen. @phone: the phone projects have
  * `hasTouch` and `isMobile` (Chromium and WebKit). The tap opens the keyboard
  * in the composer box, where the line is seen before Enter runs it. Playwright
@@ -201,13 +201,15 @@ test.describe('tapping the pane on a touch screen', () => {
 
     await wrap.tap()
     await expect.poll(() => boxFocused(page)).toBe(true)
-    // The tap itself sends nothing (INV-2).
+    /** The tap itself sends nothing (INV-2). */
     expect(sent).toHaveLength(0)
 
     await page.keyboard.type('ls')
     await page.keyboard.press('Enter')
-    // Typing stays in the box until Enter: the only frame is the submitted
-    // line, so a frame per key would fail the length check.
+    /**
+     * Typing stays in the box until Enter: the only frame is the submitted
+     * line, so a frame per key would fail the length check.
+     */
     await expect.poll(() => sent.length).toBeGreaterThan(0)
     await page.waitForTimeout(300)
     expect(sent).toHaveLength(1)

@@ -224,6 +224,12 @@ pub trait TailApi: Send + Sync + 'static {
     async fn tool_result(&mut self, _tool_use_id: &str) -> Option<ToolResultView> {
         None
     }
+
+    /// The file the reads come from, once one has been found, so a reader
+    /// can be woken by a write rather than only by a tick.
+    fn path(&self) -> Option<std::path::PathBuf> {
+        None
+    }
 }
 
 /// Account-level quota, watched from the file the statusLine bridge writes.

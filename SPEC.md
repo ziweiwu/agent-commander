@@ -1214,12 +1214,12 @@ requirements in this document look like refusals to be helpful.
 | Source | Used for |
 |---|---|
 | `~/.claude/sessions/<pid>.json` | session list, status, cwd, pane id |
-| the CLI's own `--json` listing | authoritative presence, reconciled periodically |
+| the CLI's own `--json` listing | authoritative liveness, asked only where a session file cannot settle it |
 | `~/.claude/projects/*/<sessionId>.jsonl` | the timeline, tailed by byte offset |
 | `…/<sessionId>/subagents/agent-*.meta.json` | the delegation tree |
 | `tmux capture-pane` / `send-keys` | the Attach tab, and delivering input |
 | `tmux capture-pane -S -E` | earlier output, one page per press |
-| `ps -axo pid,ppid,etime,command` | what a busy agent is running, once per pass |
+| kernel process table (macOS) / `ps` elsewhere, busy agents' trees only | what a busy agent is running, once per pass |
 | `~/.claude/agent-commander/rate-limits.json` | the quota meters |
 
 - **NFR-OPS-3** — Polling cost MUST be bounded by *properties*, not by a

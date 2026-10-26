@@ -44,13 +44,13 @@ describe('tapping the terminal on a touch screen', () => {
   it('focuses the composer box, and only on the tap', async () => {
     setViewport((q) => q.includes('pointer: coarse'))
     open()
-    // Mounting is deferred until the box has a width; give it its attempts.
+    /** Mounting is deferred until the box has a width; give it its attempts. */
     await waitFor(() => expect(document.querySelector('.xterm')).not.toBeNull())
     expect(document.activeElement).not.toBe(box())
 
     fireEvent.click(screen.getByTestId('term-wrap'))
     expect(document.activeElement).toBe(box())
-    // The box, not xterm's hidden input: that one sends each key unseen.
+    /** The box, not xterm's hidden input: that one sends each key unseen. */
     expect(focus).not.toHaveBeenCalled()
   })
 

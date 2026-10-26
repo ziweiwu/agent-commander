@@ -152,7 +152,7 @@ describe('after a /clear the browser was not told about', () => {
   })
 })
 
-/*
+/**
  * A session the dialog just started is listed under a placeholder until the
  * agent registers; the real id has no process link to the placeholder, only
  * the tmux session they share.

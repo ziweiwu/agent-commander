@@ -37,8 +37,10 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   compactAgentContext: vi.fn(),
 }))
 
-// Prompted once, so it has a conversation to load: the cases below are about
-// one that exists and has not arrived, not one that has not begun.
+/**
+ * Prompted once, so it has a conversation to load: the cases below are about
+ * one that exists and has not arrived, not one that has not begun.
+ */
 const idle = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1', lastPrompt: 'hi' })
 const unprompted = () => agent({ sessionId: 'a', status: 'idle', paneId: '%1', name: 'scratch', cwd: '/tmp/scratch' })
 
@@ -124,7 +126,7 @@ describe('the Chat tab', () => {
     expect(notice).not.toMatch(/may have ended/)
   })
 
-  /*
+  /**
    * A session started and never prompted keeps no transcript, so the loading
    * notice never ended and then turned into "the server may have restarted".
    * The card already says why; the chat says the same, by name and folder.

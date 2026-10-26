@@ -127,8 +127,10 @@ describe('NewAgentDialog', () => {
     )
   })
 
-  // A session started from here is usually left to work alone, so it starts in
-  // auto mode unless the user picks otherwise.
+  /**
+   * A session started from here is usually left to work alone, so it starts in
+   * auto mode unless the user picks otherwise.
+   */
   it('starts in auto mode when the mode is left alone', async () => {
     const user = userEvent.setup()
     startAgent.mockResolvedValue({ ok: true, tmuxSession: 'claude-1', cwd: '/x' })

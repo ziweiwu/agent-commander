@@ -226,12 +226,14 @@ describe('computeScale (height)', () => {
   })
 })
 
-// The Attach terminal re-renders at a bigger font when it has room, then
-// re-measures. Row heights round to device pixels, so the same capture
-// normalised to the base font measured 374.4px tall from a 15px render and
-// 356.6px from a 14px render. Those are the numbers from 1186x720 with the
-// topbar wrapped (term-wrap flipped 823px <-> 867px every frame, for ever);
-// each font's own measurement wanted the other font.
+/**
+ * The Attach terminal re-renders at a bigger font when it has room, then
+ * re-measures. Row heights round to device pixels, so the same capture
+ * normalised to the base font measured 374.4px tall from a 15px render and
+ * 356.6px from a 14px render. Those are the numbers from 1186x720 with the
+ * topbar wrapped (term-wrap flipped 823px <-> 867px every frame, for ever);
+ * each font's own measurement wanted the other font.
+ */
 describe('font choice (feedback loop)', () => {
   const NATURAL_HEIGHT: Record<number, number> = { 14: 356.57, 15: 374.4 }
   const BASE = 13
@@ -266,8 +268,10 @@ describe('font choice (feedback loop)', () => {
     expect(chooseFont(13, 20)).toBe(13)
   })
 
-  // A 14px render that now has to shrink: the transform is applied to the base
-  // font, so staying at 14px would draw the capture 14/13 too large and clipped.
+  /**
+   * A 14px render that now has to shrink: the transform is applied to the base
+   * font, so staying at 14px would draw the capture 14/13 too large and clipped.
+   */
   it.each([14, 15, 20])('returns from %ipx to the base font when it must shrink', (font) => {
     expect(fontForScale(0.9, font)).toBe(BASE)
     expect(fontForScale(1, font)).toBe(BASE)

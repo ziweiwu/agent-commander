@@ -1868,6 +1868,10 @@ impl TailApi for TranscriptTail {
         let path = self.resolve_path().await?;
         crate::outcome::read_result(&path, tool_use_id).await
     }
+
+    fn path(&self) -> Option<PathBuf> {
+        self.path.clone()
+    }
 }
 
 /// Build a tail reader for one session's transcript, or None when it has no

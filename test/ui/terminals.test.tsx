@@ -173,7 +173,7 @@ describe('opening one', () => {
     expect(useStore.getState().fleet.kinds).toBe('all')
   })
 
-  /*
+  /**
    * Starting something used to close the dialog and leave the reader on
    * whatever was open before, to find the new card in the list themselves.
    * It opens on the placeholder the server lists it under, and the route is

@@ -44,7 +44,7 @@ describe('successorOf', () => {
   })
 })
 
-/*
+/**
  * A just-started session has no process to follow, so the thread is the tmux
  * session the server started it in — the same key `pending.rs` drops the
  * placeholder by.

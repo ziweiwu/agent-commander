@@ -249,8 +249,10 @@ describe('sortAgents', () => {
     expect(sortAgents(list, 'recent').map((a) => a.name)).toEqual(['new', 'mid', 'old'])
   })
 
-  // A session started a moment ago has done nothing yet, and its start is the
-  // newest thing on the list — it must not sink below a session idle for hours.
+  /**
+   * A session started a moment ago has done nothing yet, and its start is the
+   * newest thing on the list — it must not sink below a session idle for hours.
+   */
   it('counts a start with no activity since as recent', () => {
     const list = [
       make('quiet', { lastActivityAt: now - 3_600_000 }),

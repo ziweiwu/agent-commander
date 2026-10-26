@@ -313,7 +313,7 @@ export function Chat({ agent }: { agent: Agent }) {
    */
   const paneExited = useStore((s) => s.exited.includes(agent.sessionId))
   const busy = agent.status === 'busy'
-  /*
+  /**
    * `Escape` stops a turn. An agent busy only with a background command has
    * no turn to stop: one press does nothing, and a second opens the CLI's
    * Rewind dialog. So it is offered only against a turn.

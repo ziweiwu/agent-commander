@@ -502,9 +502,46 @@ where they can drift without making this file wrong.
   count, so a read can stop mid-character — the tailer holds those bytes back
   through a `StringDecoder` rather than decoding each chunk alone, which turned
   any non-ASCII conversation into U+FFFD.
-- **The expensive authority is not on the fast path.** `claude agents --json`
-  costs ~680ms, so it reconciles on a slow tick while the session list refreshes
-  from local file reads.
+- **The expensive authority is not on the fast path, and is asked only a
+  question.** `claude agents --json` costs ~680ms. A session file whose
+  `procStart` names the process holding its pid now is listed without asking.
+  The CLI is asked when something is open — an id it has not vouched for that
+  the file cannot settle, a pid whose process start moved, a call that failed —
+  and otherwise only on a slow backstop. A file naming *another* process is a
+  ghost: it is held back from every fleet, the very first one included, until
+  the CLI vouches for it, and once the CLI has declined it, it is not asked about
+  again until its pid holds a new process, the file goes away, or the backstop
+  asks. A file that says nothing of its process is settled the same way after
+  two answers leave it out. **A ghost never
+  reaches a tab** — and one whose file carries a readable `procStart` does not
+  reach one even for the moment before the CLI first answers. A file with no
+  `procStart`, or one this cannot read, is the CLI's to decide, as before, so
+  that kind can still show until the CLI's first answer. A CLI that has never
+  answered and whose call failed is no answer to wait for: a contradicted file
+  is then shown rather than the fleet left empty.
+- **The session list is pushed; the tick checks what no write announces.** A
+  write to a session file arrives through the directory watch. The tick checks
+  that each listed process is alive and is still the one that started — two
+  syscalls a session — and reads the directory only when that fails, while a
+  spawn waits to register, while the watch is young enough to have missed a
+  write, and on a slow backstop. A refresh asked for while one is in flight is
+  owed, not dropped, since no tick would otherwise read the change it missed —
+  and one call pays at most three reads for it, so a watch that reports the
+  server's own reads (inotify does) cannot keep it reading for ever. The watch
+  counts writes, not opens, and one that fails is no longer trusted.
+- **The process table is read for the busy agents, not for the machine.** On
+  macOS the enricher takes one `sysctl` snapshot of every process's record,
+  off the async threads, and reads arguments only under the busy agents' roots
+  — exactly `argc` of them, so an empty argument never lets the environment
+  onto a card; elsewhere it runs `ps`. A placeholder's pid 0 is no root.
+- **The focused transcript is pushed by its own writes.** A turn reaches the
+  focused tab when the file is written, not at the next tick, and a file
+  streamed to many times a second is read at most every 150ms; the tick stays
+  for the pane's prompt, which nothing on disk announces. A write wakes the
+  same read the tick makes, so it carries what the tick's did — the events,
+  the prompt, each call's outcome, and a reset when the file is replaced — and
+  it never wakes the read of what a tool call returned, which stays one read
+  per tap (below).
 - **The quota cache is `stat`-ed before it is read**, and `fs.watch` sits on top
   as a low-latency path rather than as the guarantee: on macOS it silently drops
   writes landing within a few ms of the watch being registered, which is
@@ -611,6 +648,41 @@ restarted in between.
 - `registry::inv4_asks_once_for_a_ghost_not_once_per_scan` — an unconfirmed session is asked about at
   once rather than at the next 30s reconcile, and a ghost is asked about once
   rather than once per scan
+- `registry::inv4_a_file_naming_its_own_process_is_listed_without_asking` — no
+  CLI call for a file the kernel agrees with; `inv4_an_unmoved_start_asks_nothing`
+  and `inv4_the_periodic_pass_is_quiet_with_nothing_to_ask` keep the periodic
+  pass silent with nothing open, and `inv4_an_open_question_is_asked_until_the_cli_settles_it`
+  and `inv4_a_failed_call_is_retried_on_the_next_period` are the other half;
+  `inv4_a_silent_file_the_cli_keeps_refusing_waits_for_the_backstop` is where
+  an open question ends
+- `registry::inv4_a_file_naming_another_process_never_reaches_the_fleet` — the
+  ghost is held from the first fleet on, before the CLI has ever answered;
+  `inv4_a_declined_ghost_is_not_asked_about_every_period`,
+  `inv4_a_contradicted_file_the_cli_lists_is_shown`,
+  `inv4_a_pid_another_process_now_holds_is_dropped_and_asked_about` and
+  `inv4_a_listed_session_whose_pid_is_handed_on_is_dropped` and
+  `inv4_a_cli_that_never_answers_does_not_empty_the_fleet` cover the rest of
+  the rule, and `inv4_lstart_is_read_as_a_utc_wall_clock`,
+  `inv4_either_reading_of_a_zoneless_start_is_the_same_process` and
+  `inv4_evidence_is_silent_without_both_sides` the parse
+- `registry::inv4_a_settled_tick_skips_the_read_while_nothing_moved` — no read
+  while nothing moved, but a read while the watch is young or absent;
+  `inv4_a_pid_handed_on_makes_the_quiet_tick_read`,
+  `inv4_a_process_that_died_makes_the_quiet_tick_read`,
+  `inv4_a_spawn_waiting_to_register_keeps_the_tick_reading` and
+  `inv4_a_refresh_asked_for_mid_flight_reads_again` are what it must still not
+  miss, and `inv4_a_refresh_wanted_again_after_every_read_leaves_the_rest_to_the_tick`
+  is what keeps a watch that echoes reads from spinning
+- `procs::inv4_the_kernel_reader_finds_a_child_under_its_root_and_nothing_else` — the
+  busy agents' trees, and nothing else, from the kernel, with the record's
+  pid, parent and start where the offsets say;
+  `a_pid_that_is_no_process_is_no_root`,
+  `reads_the_arguments_and_stops_before_the_environment`,
+  `an_empty_argument_never_lets_the_environment_into_argv` and their neighbours
+  cover the roots and the argument parse
+- `routes::inv4_a_written_turn_reaches_the_focused_tab_before_the_tick` — a
+  turn written to the focused transcript reaches the tab with the tick an hour
+  away, so the write is what delivered it
 - `routes::the_tree_is_not_resent_when_it_has_not_changed` — the graph is served with an `ETag`, a matching
   `If-None-Match` gets a bare 304, a real change gets a new tag and a body, and
   a stale or unknown tag is answered in full rather than with a 304
@@ -667,13 +739,15 @@ than answering with nothing, so the server cuts the reply to the depth. The
 read goes to the pane directly, never through the hub, and never touches the
 viewer's frame diff.
 
-*What a busy agent is running.* One `ps` over the whole machine per enrichment
+*What a busy agent is running.* One read of the process table per enrichment
 pass, however many agents there are — never one per agent — and none at all
 while nothing is busy or while no browser is connected, because it runs inside
-the same pass the `watched` flag gates. What it finds travels as a command and a
-start time, never a duration: `ps` reports elapsed time to the second, so a
-duration recomputed each pass would change every tick and re-broadcast the
-fleet for a process that had not. The pid says whether it is the same process,
+the same pass the `watched` flag gates. On macOS that read is one kernel
+snapshot with arguments fetched only under the busy agents; elsewhere it is one
+`ps` over the machine. What it finds travels as a command and a start time,
+never a duration: `ps` reports elapsed time to the second, so a duration
+recomputed each pass would change every tick and re-broadcast the fleet for a
+process that had not. The pid says whether it is the same process,
 and the first reading's start time stands while it is.
 
 - `routes::inv4_the_first_browser_starts_the_work_and_the_last_to_leave_stops_it`
@@ -1162,7 +1236,7 @@ remains the guard for everything that types.
   own hand once the server has verified the exit, rather than relying on the
   route to notice the id gone — that noticing is what now waits. Only a *different* id on a pid whose old file is
   gone counts as succession; the same id on the same pid is the reused-pid
-  ghost the presence check exists to drop, and a second file claiming a live
+  ghost the liveness check exists to drop, and a second file claiming a live
   session's pid still gets the question.
 
 - **Compact** sends `/compact` and is deliberately **not verified**, because the

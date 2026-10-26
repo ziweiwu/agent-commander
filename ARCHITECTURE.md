@@ -93,8 +93,9 @@ render into the same object. They fail independently on purpose.
 ### Discovery — who exists
 
 ```
-~/.claude/sessions/<pid>.json ──2s + fs.watch──► toAgent()      registry.ts:67
-claude agents --json          ──30s────────────► presence filter
+~/.claude/sessions/<pid>.json ──fs.watch + 2s──► toAgent()      registry.ts:67
+  └ procStart vs kernel start ─────────────────► liveness filter
+claude agents --json          ──when asked─────► liveness filter
 PendingStore (tmux list-panes)─────────────────► synthetic agents
                                                       ▼
                                          Registry.#agents ──┐
@@ -127,11 +128,48 @@ is inferred from `window_activity` and marked as inferred all the way to the
 pill (INV-11), and can never be `waiting`.
 
 Two sources with different jobs. The session files are authoritative for
-everything, including the tmux pane id the CLI does not expose, and are cheap
-enough to re-read every `TICK_MS = 2_000` (`registry.ts:24`) with `fs.watch` on
-top. `claude agents --json` costs ~680ms and is asked only every
-`RECONCILE_MS = 30_000` (`registry.ts:23`), for one question: is this pid still
-really a session? A pid can be reused; the CLI is the authority on what is live.
+everything, including the tmux pane id the CLI does not expose. A write to one
+is pushed by `fs.watch`. The 2s tick (`registry.rs` `TICK`) checks only what no
+write announces — that each listed process is alive and is still the process
+that started — and re-reads the directory when that check fails, while a spawn
+waits to register, for the first 10s after the watch is armed (macOS drops
+writes landing just after a watch is registered), and every 30s regardless
+(`REREAD`, `SETTLING`). Re-reading every tick was most of what an idle server
+spent. The watch counts writes, not reads: inotify reports every open, and a
+watch that counted the server's own reads answered each with another. A watch
+that reports an error is no longer trusted, and every tick reads. One refresh
+call re-reads at most `READS_PER_REFRESH` times for requests that arrived while
+it read, and leaves anything still owed to the next tick.
+
+`claude agents --json` costs ~680ms and answers one question: is this pid still
+really a session? A pid can be reused. Most of the time the file answers it
+first: Claude Code writes the start of its own process into the file as
+`procStart` (`ps -o lstart`, UTC), and a file naming the process that holds its
+pid now is the answer the CLI would give — measured against the real CLI, it
+listed exactly the sessions whose `procStart` matched, interactive and
+`claude -p` alike. Such a file is listed without asking. A file naming
+*another* process is a ghost, held back from every fleet — the first one
+included — until the CLI vouches for it, so it never reaches a tab. The
+CLI is asked when a question is open (an id with no readable `procStart` it has
+not vouched for, a contradicted file it has not yet declined, a pid whose start
+moved, a call that failed), every `RECONCILE` = 30s while one stays open, and
+otherwise only as a 5-minute backstop (`BACKSTOP`). A question is settled when
+the CLI declines it: a contradicted file at the first answer that leaves it out,
+a silent one after `SILENT_MISSES` = 2, since one miss can be the CLI lagging a
+file written just before it was asked. A settled id waits for the backstop,
+whose call can still list it. It stays the authority wherever the file is
+silent or contradicted; it is no longer asked to confirm what the file and the
+kernel already agree on. A CLI that has never answered holds a contradicted
+file back only until its first call fails — after that there is no answer
+coming, and holding them would empty the fleet for as long as the CLI stays
+broken. On a platform where a process's start cannot be read, every period
+asks, as before.
+
+This is *liveness* — whether the process behind a session file is still the
+one that wrote it — and the word is kept apart on purpose from *presence*,
+which since INV-14's amendment means somebody is at a tab (`presence.rs`). The
+two never meet: liveness decides which cards exist, presence decides whether a
+push is held back.
 
 `PendingStore` covers a gap that has no other cover: a freshly spawned `claude`
 writes no session file until it has started up, and in an unfamiliar directory it
@@ -158,8 +196,12 @@ to stop. See "Where it is fragile", item 8.
 `transcript.rs` turns JSONL into events plus a `Partial<Agent>` patch. Two
 independent tails run over the same file: `FleetEnricher` every
 `TICK_MS = 5000` (`enrich.ts:14`) so cards for agents you are *not* looking at
-still move, and one per focused tab every `TIMELINE_MS = 1000` (`routes.ts:43`)
-for the conversation. They hold separate byte offsets; this is deliberate, and
+still move, and one per focused tab for the conversation — on each write to the
+transcript, at most one read per `WRITE_GAP` = 150ms, and every
+`TIMELINE_MS = 1000` (`routes.rs`) regardless, for the pane's prompt that
+nothing on disk announces. The watch follows the tail to a new file when the
+session moves to one, and one that cannot be set up is retried every
+`WATCH_RETRY` = 30s rather than every tick. They hold separate byte offsets; this is deliberate, and
 `mock.rs` documents the bug that appears when a single drain-on-read queue is
 shared between them.
 
@@ -184,8 +226,11 @@ read, because most agents never delegate and the common case should cost one
 syscall.
 
 `procs.rs` is the enricher's other source, and the only one that is not a file
-Claude Code wrote. One `ps` over the machine per pass, when anything is busy,
-names the tool process each busy agent is inside — the newest non-shell child of
+Claude Code wrote. One read of the process table per pass, when anything is
+busy — on macOS a single `sysctl(KERN_PROC_ALL)` snapshot off the async
+threads, with arguments read only for the processes under the busy agents'
+pids; elsewhere one `ps` over the machine — names the tool process each busy
+agent is inside — the newest non-shell child of
 its pid — and when it started. That is the whole activity signal a CLI with no
 transcript has, and for a Claude agent it adds the one thing the transcript's
 `Bash: cargo test` cannot say, which is how long. It travels as a command and a
@@ -333,18 +378,22 @@ way round for a claim this app cannot check.
 
 ## What is pushed, what is polled
 
-Pushed: two `fs.watch` registrations, `AgentSource.onChange` and
+Pushed: three `fs.watch` registrations (the session directory, the quota
+file, the focused agent's transcript), `AgentSource.onChange` and
 `LimitsApi.onChange` → WebSocket broadcasts, the four client messages, and
 `hub.wake(paneId)` after every write.
 
 | What | Interval | Constant |
 |---|---|---|
-| Session-file scan | 2s | `registry.ts:24` |
-| `claude agents --json` reconcile | 30s | `registry.ts:23` |
+| Session liveness check (`kill` + process start, per listed session) | 2s | `registry.rs` `TICK` |
+| Session-directory re-read nothing else asked for (see above) | 30s | `registry.rs` `REREAD` |
+| `claude agents --json`, while a question is open | 30s | `registry.rs` `RECONCILE` |
+| `claude agents --json`, with none open | 5m | `registry.rs` `BACKSTOP` |
 | Fleet-wide transcript enrichment | 5s | `enrich.ts:14` |
-| Process table, in the same pass, while anything is busy | 5s | `enrich.rs`, `procs.rs` |
+| Process table of the busy agents' trees, in the same pass, while any is busy | 5s | `enrich.rs`, `procs.rs` |
 | Earlier output above the pane | on request, one page per press | `routes.rs` `on_history` |
-| Focused-agent transcript tail | 1s | `routes.ts:43` |
+| What a tool call returned | on request, one read per tap — never on a transcript write | `routes.rs` `on_tool_result` |
+| Focused-agent transcript tail: on each write (at most every 150ms), plus a 1s tick for the pane's prompt | 1s | `routes.rs` `TIMELINE_MS`, `WRITE_GAP` |
 | Quota file `stat` | 2s | `limits.ts:37` |
 | Pane capture (focused + attached only) | 140ms → 1s | `pane-hub.ts:40`, `:42` |
 | …while an echo is expected, after a write | 25ms for ≤1s | `pane-hub.ts:76`, `:58` |
@@ -718,9 +767,11 @@ their absence would otherwise read as an oversight.
   tail per agent, every five seconds — ran with no browser connected at all.
   `routes.rs` reports the viewer count and `main.rs` idles the enricher on it.
 - **An agent that has just started is visible now, not in thirty seconds.** A
-  session id the presence check had not confirmed was skipped until the next
+  session id the liveness check had not confirmed was skipped until the next
   30s reconcile. `registry.rs` asks the CLI immediately, and `#asked` is what
   stops a ghost turning that into a 2s loop. `test/registry-presence.test.ts`.
+  Most new sessions no longer ask at all: a file whose `procStart` names its
+  own process is listed on the pass that reads it.
 - **A tmux that could not answer is not a session that has gone.** `pending.rs`
   spawned its own `tmux` and read any error as "the window closed", including
   the `EAGAIN` that `pane.rs` retries four times. It now goes through `pane.rs`

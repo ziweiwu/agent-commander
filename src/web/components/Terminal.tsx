@@ -472,7 +472,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       ref={wrapRef}
       className={`${styles.wrap} ${term?.overflowing ? styles.pannable : ''}`}
       data-testid="term-wrap"
-      /*
+      /**
        * A tap on a touch screen opens the phone's keyboard in the box below.
        *
        * Not in xterm's own input. That is a hidden off-screen textarea with
@@ -684,7 +684,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         spellCheck={false}
         enterKeyHint="send"
       />
-      {/*
+      {/**
         * Two verbs, two buttons, not a mode on one. A mode makes the same press
         * mean different things on different days, which is the wrong shape for
         * the one control in this app that runs a command in somebody's live

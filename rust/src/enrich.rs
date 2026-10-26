@@ -275,7 +275,8 @@ impl FleetEnricher {
     /*
      * What each busy agent is running, from one read of the process table.
      *
-     * INV-4: one `ps` per pass however many agents there are, none at all when
+     * INV-4: one read per pass however many agents there are, of only what
+     * runs under the busy ones where the platform allows, none at all when
      * nothing is busy — an idle agent has no tool call to name — and none while
      * no browser is connected, because this runs inside the same pass the
      * `watched` flag already gates.
@@ -291,7 +292,7 @@ impl FleetEnricher {
         let Some(procs) = &self.procs else { return false };
         let anything_busy = agents.iter().any(|a| a.status == AgentStatus::Busy);
         let table = match anything_busy {
-            true => procs.table(now_ms()).await,
+            true => procs.table(now_ms(), &busy_roots(agents)).await,
             false => None,
         };
         let unreadable = anything_busy && table.is_none();
@@ -321,6 +322,12 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Where each busy agent's walk starts: its own process. A placeholder's pid
+/// 0 is not one — a walk from it reaches init, and the whole machine with it.
+fn busy_roots(agents: &[Agent]) -> Vec<i64> {
+    agents.iter().filter(|a| a.status == AgentStatus::Busy && a.pid > 0).map(|a| a.pid).collect()
+}
+
 /// Only a busy agent is running anything; an idle one's claim is cleared.
 fn next_running(agent: &Agent, table: Option<&ProcTable>) -> Option<RunningProcess> {
     if agent.status != AgentStatus::Busy {
@@ -332,8 +339,10 @@ fn next_running(agent: &Agent, table: Option<&ProcTable>) -> Option<RunningProce
 /// The same process, so nothing to re-send.
 ///
 /// `since` is deliberately not compared: `ps` reports elapsed time to the
-/// second, so a start time recomputed each pass drifts by up to a second and
-/// would re-broadcast the fleet every tick for a process that has not changed.
+/// second, so where it is the reader a start time recomputed each pass drifts
+/// by up to a second and would re-broadcast the fleet every tick for a process
+/// that has not changed. The kernel reader's start does not drift, but the
+/// card must read the same whichever reader saw it.
 /// The pid says whether it is the same process; the first reading's `since`
 /// stands for as long as it is.
 fn same_process(current: &Option<RunningProcess>, next: &Option<RunningProcess>) -> bool {
@@ -975,8 +984,9 @@ mod tests {
         }
     }
 
-    /// How far apart the fake puts two passes. Real `ps` reports elapsed time
-    /// to the second, so a start time recomputed a pass later *drifts* — and a
+    /// How far apart the fake puts two passes. `ps`, the reader off macOS,
+    /// reports elapsed time to the second, so a start time recomputed a pass
+    /// later *drifts* — and a
     /// fake that answers every pass against the same instant makes the drift
     /// impossible, which is what a test for `since` stability must see.
     /// Without this, reverting `same_process` to compare `since` passed 19 runs
@@ -985,7 +995,7 @@ mod tests {
 
     #[async_trait]
     impl ProcApi for FakeProcs {
-        async fn table(&self, now: i64) -> Option<ProcTable> {
+        async fn table(&self, now: i64, _roots: &[i64]) -> Option<ProcTable> {
             let reads = {
                 let mut reads = self.reads.lock().unwrap();
                 *reads += 1;
@@ -1069,8 +1079,9 @@ mod tests {
         assert_eq!(procs.reads(), 0);
     }
 
-    /// INV-4: the same process a pass later is not news. `ps` reports elapsed
-    /// time to the second, so a start time recomputed each pass drifts; the
+    /// INV-4: the same process a pass later is not news. `ps`, the reader off
+    /// macOS, reports elapsed time to the second, so a start time recomputed
+    /// each pass drifts; the
     /// pid is what says it is the same process, and the first `since` stands.
     #[tokio::test]
     async fn inv4_the_same_process_is_not_rebroadcast() {

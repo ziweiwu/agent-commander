@@ -113,7 +113,7 @@ describe('the standalone interrupt', () => {
     expect(screen.queryByTestId('chat-interrupt')).toBeNull()
   })
 
-  /*
+  /**
    * Busy, but its turn is over and only a background command is running.
    * Escape stops a turn, not that command: measured on Claude Code 2.1.302,
    * one press did nothing and a second opened its Rewind dialog.

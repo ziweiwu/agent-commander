@@ -67,7 +67,7 @@
   margin-right: 3px;
   font-size: var(--text-xs);
 }
-/* Which kinds of session: a select dressed as the chips it sits beside. */
+/** Which kinds of session: a select dressed as the chips it sits beside. */
 .kinds {
   font: inherit;
   font-size: var(--text-sm);
@@ -87,7 +87,7 @@
     min-height: 40px;
   }
 }
-/* Under 16px, iOS zooms the page on focusing a select. */
+/** Under 16px, iOS zooms the page on focusing a select. */
 @media (pointer: coarse) {
   .kinds {
     font-size: 16px;

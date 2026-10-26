@@ -187,7 +187,7 @@ export function NewAgentDialog() {
    */
   const [terminal, setTerminal] = useState(false)
   const [model, setModel] = useState('default')
-  /*
+  /**
    * Auto rather than "whatever the CLI would do": the owner starts sessions
    * from here to leave them working, often from a phone, and a session that
    * stops at its first permission prompt is waiting on someone who is not
@@ -271,7 +271,7 @@ export function NewAgentDialog() {
       rememberDir(result.cwd)
       setDir('')
       setName('')
-      /*
+      /**
        * Open what was just started. It is listed under a placeholder until it
        * registers, which the route is told to wait for, and then followed to
        * its real id by tmux session — so the panel stays on it rather than
