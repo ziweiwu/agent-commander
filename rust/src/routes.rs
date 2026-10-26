@@ -6864,7 +6864,7 @@ mod tests {
     async fn inv4_a_burst_of_writes_is_read_at_most_once_per_write_gap() {
         const WRITES: usize = 30;
         const APART: Duration = Duration::from_millis(20);
-        const MOST_READS: usize = WRITES / 3;
+        const READS_AT_THE_EDGES: u128 = 2;
         let dir = tempfile::tempdir().unwrap();
         let transcript = dir.path().join("fresh.jsonl");
         std::fs::write(&transcript, "first\n").unwrap();
@@ -6875,16 +6875,19 @@ mod tests {
         let before = counted.load(Ordering::SeqCst);
 
         let mut text = String::from("first\n");
+        let started = Instant::now();
         for line in 0..WRITES {
             text.push_str(&format!("line {line}\n"));
             std::fs::write(&transcript, &text).unwrap();
             tokio::time::sleep(APART).await;
         }
+        let burst = started.elapsed();
         tokio::time::sleep(WRITE_GAP * 2).await;
 
         let reads = counted.load(Ordering::SeqCst) - before;
+        let most_reads = burst.as_millis() / WRITE_GAP.as_millis() + READS_AT_THE_EDGES;
         assert!(reads >= 1, "the burst was never read");
-        assert!(reads <= MOST_READS, "{reads} reads for {WRITES} writes {APART:?} apart");
+        assert!(reads as u128 <= most_reads, "{reads} reads for {WRITES} writes over {burst:?}, at most {most_reads}");
     }
 
     /// A session that moves on to a new transcript, resumed or `/clear`ed, is
