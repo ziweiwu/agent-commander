@@ -4288,16 +4288,42 @@ mod tests {
 
     /// A tail over a real file: one event per line written since the last
     /// read, and the file's path, so the pump can watch it.
+    ///
+    /// `counted` is every read, shared with the test. With `moves_to` set, a
+    /// read that finds [`MOVE_ON`] follows the session to that file, the way
+    /// a resumed or `/clear`ed session's tail does.
     struct FileTail {
         path: PathBuf,
         read_lines: usize,
         reads: usize,
+        counted: Arc<AtomicUsize>,
+        moves_to: Option<PathBuf>,
+    }
+
+    /// The line that sends a [`FileTail`] on to its `moves_to` file.
+    const MOVE_ON: &str = "moved";
+
+    impl FileTail {
+        fn over(path: PathBuf) -> Self {
+            Self { path, read_lines: 0, reads: 0, counted: Arc::default(), moves_to: None }
+        }
+
+        fn moving_on(&mut self, lines: &[&str]) {
+            if !lines.contains(&MOVE_ON) {
+                return;
+            }
+            if let Some(next) = self.moves_to.take() {
+                self.path = next;
+                self.read_lines = 0;
+            }
+        }
     }
 
     #[async_trait]
     impl TailApi for FileTail {
         async fn read(&mut self) -> anyhow::Result<TailRead> {
             self.reads += 1;
+            self.counted.fetch_add(1, Ordering::SeqCst);
             let text = std::fs::read_to_string(&self.path)?;
             let lines: Vec<&str> = text.lines().collect();
             let events = lines[self.read_lines..]
@@ -4316,6 +4342,7 @@ mod tests {
                 })
                 .collect();
             self.read_lines = lines.len();
+            self.moving_on(&lines);
             Ok(TailRead { events, first: self.reads == 1, ..Default::default() })
         }
 
@@ -4338,7 +4365,7 @@ mod tests {
         add_agent(&parts.source, "fresh", crate::agent_kinds::CLAUDE_KIND);
         let path = transcript.clone();
         let tails = Arc::new(move |_agent: &Agent| {
-            Some(Box::new(FileTail { path: path.clone(), read_lines: 0, reads: 0 }) as Box<dyn TailApi>)
+            Some(Box::new(FileTail::over(path.clone())) as Box<dyn TailApi>)
         });
         let port = serve_with_tails_every(&parts, tails, TICK_LONGER_THAN_THE_TEST).await;
         let mut client = open(port).await;
@@ -6809,6 +6836,96 @@ mod tests {
         let moved = next_msg(&mut client, |m| is_type(m, "seen") && m["seenThrough"][SESSION] == REPLIED_AT).await;
         assert!(moved.is_some(), "the tab is told, so another device would be too");
         assert_eq!(h.app.viewers.seen.current()[SESSION], REPLIED_AT);
+    }
+
+    /// Long enough for a new file watch to be registered before a write,
+    /// which macOS otherwise drops; well short of any tick a test must beat.
+    const WATCH_SETTLES: Duration = Duration::from_millis(150);
+
+    /// One focused tab on agent `fresh`, read through `tail`, with the tick an
+    /// hour away, so only a write can wake a read. Returns once the first
+    /// timeline has arrived and the watch has had time to settle.
+    async fn focused_on_a_written_tail(tail: impl Fn() -> FileTail + Send + Sync + 'static) -> Client {
+        let parts = harness_parts(FakePanes::new());
+        add_agent(&parts.source, "fresh", crate::agent_kinds::CLAUDE_KIND);
+        let tails = Arc::new(move |_agent: &Agent| Some(Box::new(tail()) as Box<dyn TailApi>));
+        let port = serve_with_tails_every(&parts, tails, TICK_LONGER_THAN_THE_TEST).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":"fresh"})).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "timeline")).await.is_some());
+        tokio::time::sleep(WATCH_SETTLES).await;
+        client
+    }
+
+    /// INV-4: an agent streaming an answer appends many times a second, and
+    /// the pushed tail reads at most once per `WRITE_GAP` however many writes
+    /// woke it, so a burst is a handful of reads, not one read per write.
+    #[tokio::test]
+    async fn inv4_a_burst_of_writes_is_read_at_most_once_per_write_gap() {
+        const WRITES: usize = 30;
+        const APART: Duration = Duration::from_millis(20);
+        const MOST_READS: usize = WRITES / 3;
+        let dir = tempfile::tempdir().unwrap();
+        let transcript = dir.path().join("fresh.jsonl");
+        std::fs::write(&transcript, "first\n").unwrap();
+        let counted = Arc::new(AtomicUsize::new(0));
+        let (path, shared) = (transcript.clone(), counted.clone());
+        let tail = move || FileTail { counted: shared.clone(), ..FileTail::over(path.clone()) };
+        let _client = focused_on_a_written_tail(tail).await;
+        let before = counted.load(Ordering::SeqCst);
+
+        let mut text = String::from("first\n");
+        for line in 0..WRITES {
+            text.push_str(&format!("line {line}\n"));
+            std::fs::write(&transcript, &text).unwrap();
+            tokio::time::sleep(APART).await;
+        }
+        tokio::time::sleep(WRITE_GAP * 2).await;
+
+        let reads = counted.load(Ordering::SeqCst) - before;
+        assert!(reads >= 1, "the burst was never read");
+        assert!(reads <= MOST_READS, "{reads} reads for {WRITES} writes {APART:?} apart");
+    }
+
+    /// A session that moves on to a new transcript, resumed or `/clear`ed, is
+    /// watched on the new file. A watch left on the old one never fires again,
+    /// and with the tick an hour away this turn would never arrive.
+    #[tokio::test]
+    async fn inv4_a_tail_that_moves_to_a_new_file_is_woken_by_writes_to_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (old, new) = (dir.path().join("old.jsonl"), dir.path().join("new.jsonl"));
+        std::fs::write(&old, "first\n").unwrap();
+        std::fs::write(&new, "").unwrap();
+        let (from, to) = (old.clone(), new.clone());
+        let tail = move || FileTail { moves_to: Some(to.clone()), ..FileTail::over(from.clone()) };
+        let mut client = focused_on_a_written_tail(tail).await;
+
+        std::fs::write(&old, format!("first\n{MOVE_ON}\n")).unwrap();
+        let moved = |m: &serde_json::Value| is_type(m, "timeline") && m["events"][0]["text"] == MOVE_ON;
+        assert!(next_msg(&mut client, moved).await.is_some(), "the old file's last write was not read");
+        tokio::time::sleep(WATCH_SETTLES).await;
+
+        std::fs::write(&new, "on the new file\n").unwrap();
+        let arrived = |m: &serde_json::Value| is_type(m, "timeline") && m["events"][0]["text"] == "on the new file";
+        assert!(next_msg(&mut client, arrived).await.is_some(), "the watch stayed on the old file");
+    }
+
+    /// A watch whose events have stopped for good is dropped, and the wait
+    /// runs out the tick: a closed channel answers at once, every time, and
+    /// read as a write it would turn the pump into a loop that never sleeps.
+    #[tokio::test]
+    async fn inv4_a_watch_whose_events_stopped_is_dropped_rather_than_spun_on() {
+        const TICK: Duration = Duration::from_millis(100);
+        let (events, arrivals) = mpsc::unbounded_channel();
+        drop(events);
+        let watcher = notify::recommended_watcher(|_: notify::Result<notify::Event>| {}).unwrap();
+        let writes = FileWrites { _watcher: watcher, arrivals };
+        let mut watch = TranscriptWatch { writes: Some(writes), ..Default::default() };
+
+        let started = Instant::now();
+        watch.until_written_or(TICK).await;
+        assert!(started.elapsed() >= TICK, "a closed channel ended the wait early");
+        assert!(watch.writes.is_none(), "a watch with no more events was kept");
     }
 }
 

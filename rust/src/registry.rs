@@ -2432,6 +2432,16 @@ mod tests {
         start_of: Arc<StartReader>,
         pending: Option<Arc<dyn PendingMerge>>,
     ) -> Arc<LiveSource> {
+        quiet_source_rereading(dir, start_of, pending, LONGER_THAN_THE_TEST)
+    }
+
+    /// `quiet_source`, re-reading the directory every `reread` regardless.
+    fn quiet_source_rereading(
+        dir: &Path,
+        start_of: Arc<StartReader>,
+        pending: Option<Arc<dyn PendingMerge>>,
+        reread: Duration,
+    ) -> Arc<LiveSource> {
         let config = SourceConfig {
             dir: dir.into(),
             runner: FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO),
@@ -2439,7 +2449,7 @@ mod tests {
             tick: LONGER_THAN_THE_TEST,
             reconcile_every: LONGER_THAN_THE_TEST,
         };
-        let quiet = Quiet { backstop: Some(LONGER_THAN_THE_TEST), reread: Some(LONGER_THAN_THE_TEST) };
+        let quiet = Quiet { backstop: Some(LONGER_THAN_THE_TEST), reread: Some(reread) };
         let src = LiveSource::assembled(config, start_of, quiet);
         *src.inner.armed_at.lock().unwrap() = Some(settled_watch());
         src
@@ -2938,5 +2948,24 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("condition not met in time");
+    }
+
+    /// INV-4: a watch that stops delivering without reporting an error is
+    /// caught by `REREAD` alone. With the watch settled and every process
+    /// unmoved, nothing else makes the tick read, so this is the backstop that
+    /// bounds how stale a silently dead watch can leave the fleet.
+    #[tokio::test]
+    async fn inv4_a_settled_unmoved_tick_reads_again_once_reread_has_passed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (_start, start_of) = movable_start();
+        let src = quiet_source_rereading(dir.path(), start_of, None, REREAD);
+        write_session(dir.path(), "live-one.json", live_session("live-one"));
+        Arc::clone(&src.inner).reconcile().await;
+        assert_eq!(src.list().len(), 1);
+        assert!(!src.inner.must_read(), "a read just now, a settled watch, nothing moved");
+
+        let last_read = Instant::now().checked_sub(REREAD).expect("the clock reaches back past one re-read");
+        *src.inner.read_at.lock().unwrap() = Some(last_read);
+        assert!(src.inner.must_read(), "a read older than REREAD must be made again");
     }
 }
