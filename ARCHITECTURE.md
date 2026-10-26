@@ -94,8 +94,8 @@ render into the same object. They fail independently on purpose.
 
 ```
 ~/.claude/sessions/<pid>.json ──fs.watch + 2s──► toAgent()      registry.ts:67
-  └ procStart vs kernel start ─────────────────► presence filter
-claude agents --json          ──when asked─────► presence filter
+  └ procStart vs kernel start ─────────────────► liveness filter
+claude agents --json          ──when asked─────► liveness filter
 PendingStore (tmux list-panes)─────────────────► synthetic agents
                                                       ▼
                                          Registry.#agents ──┐
@@ -165,15 +165,24 @@ coming, and holding them would empty the fleet for as long as the CLI stays
 broken. On a platform where a process's start cannot be read, every period
 asks, as before.
 
+This is *liveness* — whether the process behind a session file is still the
+one that wrote it — and the word is kept apart on purpose from *presence*,
+which since INV-14's amendment means somebody is at a tab (`presence.rs`). The
+two never meet: liveness decides which cards exist, presence decides whether a
+push is held back.
+
 `PendingStore` covers a gap that has no other cover: a freshly spawned `claude`
 writes no session file until it has started up, and in an unfamiliar directory it
 stops on a workspace-trust prompt *first*. Without a synthetic entry the agent is
 invisible in the fleet and the prompt blocking it can only be answered from the
 terminal this app exists to avoid.
 
-Status is not derived for a Claude agent. `toStatus` (`registry.ts:41`) is a
-four-value whitelist over what Claude Code itself wrote — `busy`, `idle`, `waiting`,
-otherwise `unknown`. See "Where it is fragile", item 14.
+Status is not derived for a Claude agent. `registry::to_status` is a whitelist
+over what Claude Code itself wrote — `busy`, `shell`, `idle`, `waiting`, otherwise
+`unknown`. `shell` (the turn is over, a background Bash command is still running)
+is read as `busy`, which is what `claude agents --json` reports for it too, and
+marked `backgroundShell` so the chat does not offer an `Escape` that has no turn
+to stop. See "Where it is fragile", item 8.
 
 ### Transcript — what they are doing
 
@@ -383,6 +392,7 @@ file, the focused agent's transcript), `AgentSource.onChange` and
 | Fleet-wide transcript enrichment | 5s | `enrich.ts:14` |
 | Process table of the busy agents' trees, in the same pass, while any is busy | 5s | `enrich.rs`, `procs.rs` |
 | Earlier output above the pane | on request, one page per press | `routes.rs` `on_history` |
+| What a tool call returned | on request, one read per tap — never on a transcript write | `routes.rs` `on_tool_result` |
 | Focused-agent transcript tail: on each write (at most every 150ms), plus a 1s tick for the pane's prompt | 1s | `routes.rs` `TIMELINE_MS`, `WRITE_GAP` |
 | Quota file `stat` | 2s | `limits.ts:37` |
 | Pane capture (focused + attached only) | 140ms → 1s | `pane-hub.ts:40`, `:42` |
@@ -409,6 +419,12 @@ The heartbeat is what makes "who is watching" answerable. A closed tab says so;
 a phone that went to sleep on the far side of Tailscale says nothing at all, and
 without a ping the server would go on polling for it until the OS noticed the
 dead connection — which can be hours.
+
+"Who is at a tab", which the push channel asks (INV-14), needs one more fact
+than "who is watching": that a visible tab is being used. That is pushed too,
+never polled: a `present` message on a pointer, key or touch, at most once per
+30 seconds (`PRESENCE_REPORT_MS`, `transport.ts`), held server-side as
+`last_input_at` per tab and read against `PRESENCE_WINDOW` (`presence.rs`).
 
 Every loop re-arms after its work rather than on a wall clock, through `Poller`
 (`poll.rs`); `PaneLoop` has its own copy of the same rule with the extra cadences
@@ -670,6 +686,21 @@ nothing about the `<script>` that URL then pulls in, so `GET`/`HEAD` under
 whole boundary, which is why nothing under it may ever serve agent state, and
 why a miss there 404s instead of falling through to the shell.
 
+It is also the only place a response is cached or compressed, and both lean on
+that boundary. `serve_asset` hands the prefix to tower-http's `ServeDir`, which
+picks the brotli or gzip copy the build wrote beside each compiled file
+(`precompress` in `vite.config.ts`) by `Accept-Encoding`, and answers
+`If-Modified-Since`; `Vary: Accept-Encoding` is added on top because `ServeDir`
+does not send it. A name carrying Vite's content hash (`is_content_hashed`) is
+served `immutable` for a year, since new bytes always get a new name; the
+manifest and the icons share the prefix with fixed names and get `no-cache`,
+like the document, so they revalidate to a 304 instead. Compression stays
+inside the prefix because a compressed response leaks the length of whatever
+secret shares it with attacker-chosen text (BREACH), and the token, the cookie
+and the conversation all live outside it (INV-3). Nothing re-sends the bundle
+to a phone that already holds it, which is INV-4's rule about the tree, applied
+to the bytes the page is made of.
+
 **7. A known reconcile gap is documented and unfixed** (`chat.ts:139`): a message
 sent in the second before backfill arrives was baselined against an empty history.
 Re-baselining on backfill was tried and reverted, because it cannot tell "this
@@ -677,9 +708,11 @@ backfill contains an older copy" from "this backfill contains mine" — and bein
 wrong that way sends a delivered message to a live agent twice. It is a real
 limitation, not an oversight, and it currently lives only in a source comment.
 
-**8. Status is trusted wholesale from Claude Code's session file.** `toStatus`
-(`registry.ts:41`) is a whitelist over a field this app does not write, with
-`unknown` as the only fallback. Knowing which agents are blocked is the entire
+**8. Status is trusted wholesale from Claude Code's session file.**
+`registry::to_status` is a whitelist over a field this app does not write, with
+`unknown` as the only fallback. It drifts when the CLI adds a value: `shell`
+arrived unannounced, and every session with a background command running read
+as `unknown` until the whitelist was taught it. Knowing which agents are blocked is the entire
 purpose of the dashboard, and that judgement has no independent corroboration —
 notably, the two liveness signals the app *does* compute, `delegating` and
 `attachBlockedReason`, are deliberately separate fields rather than statuses. This
@@ -734,7 +767,7 @@ their absence would otherwise read as an oversight.
   tail per agent, every five seconds — ran with no browser connected at all.
   `routes.rs` reports the viewer count and `main.rs` idles the enricher on it.
 - **An agent that has just started is visible now, not in thirty seconds.** A
-  session id the presence check had not confirmed was skipped until the next
+  session id the liveness check had not confirmed was skipped until the next
   30s reconcile. `registry.rs` asks the CLI immediately, and `#asked` is what
   stops a ghost turning that into a 2s loop. `test/registry-presence.test.ts`.
   Most new sessions no longer ask at all: a file whose `procStart` names its

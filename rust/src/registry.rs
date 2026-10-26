@@ -8,7 +8,7 @@
 //!     announces — a process that died or a pid handed on — and re-reads the
 //!     directory only when that, a waiting spawn or the watch's youth says to.
 //!     It carries the `tmux` pane id, which the supported CLI does not expose.
-//!   - `claude agents --json` is authoritative for *presence*, but costs ~680ms
+//!   - `claude agents --json` is authoritative for *liveness*, but costs ~680ms
 //!     per call, so it is never on the fast path (INV-4). Collapsing the two
 //!     into one poll is the mistake this comment exists to prevent: the fleet
 //!     list would then refresh at best twice a second on a good machine and
@@ -163,9 +163,15 @@ impl<T: Clone + Send + 'static> Default for Listeners<T> {
 /*  Pure helpers                                                              */
 /* -------------------------------------------------------------------------- */
 
+/// What Claude Code wrote, as a status.
+///
+/// `shell` means the turn is over but a background Bash command it started is
+/// still running. `claude agents --json` reports this as `busy` itself, and it
+/// is busy in the sense INV-8 guards: the command finishing wakes the agent
+/// into a new turn of its own.
 fn to_status(raw: Option<&str>) -> AgentStatus {
     match raw {
-        Some("busy") => AgentStatus::Busy,
+        Some("busy" | "shell") => AgentStatus::Busy,
         Some("idle") => AgentStatus::Idle,
         Some("waiting") => AgentStatus::Waiting,
         // Missing or unrecognised is an absence of evidence, and stays
@@ -294,7 +300,7 @@ pub fn process_start(_pid: i64) -> Option<u64> {
 /// pid now.
 ///
 /// Claude Code writes `ps -o lstart` of its own process into the file, which
-/// is what the CLI's presence answer turns on: a file naming the process that
+/// is what the CLI's liveness answer turns on: a file naming the process that
 /// holds its pid is a live session, and one naming another is a file that
 /// outlived its process on a pid the kernel has handed on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -454,13 +460,15 @@ pub fn to_agent(file: &serde_json::Value) -> Option<Agent> {
     let cwd = non_empty_field(file, "cwd")?.to_string();
 
     let (session, pane) = parse_tmux_ref(file.get("tmux").and_then(|t| t.as_str()));
+    let status = file.get("status").and_then(|s| s.as_str());
     let mut agent = Agent {
         session_id,
         pid,
         name: non_empty_field(file, "name").map(str::to_string).unwrap_or_else(|| format!("pid {pid}")),
         folder: folder_of(&cwd),
         cwd,
-        status: to_status(file.get("status").and_then(|s| s.as_str())),
+        status: to_status(status),
+        background_shell: (status == Some("shell")).then_some(true),
         // Spelled out rather than left to `Default`, which would be `""` — a
         // kind that matches no spec and therefore denies every capability, with
         // no chat tab, no controls and nothing on screen to say why.
@@ -552,7 +560,7 @@ pub async fn read_session_id_in(dir: &Path, pid: i64) -> Option<String> {
     parsed.get("sessionId").and_then(|s| s.as_str()).map(str::to_string)
 }
 
-/// The supported presence check. `None` when the CLI is unavailable — which is
+/// The supported liveness check. `None` when the CLI is unavailable — which is
 /// not the same as "no sessions", and is why the caller keeps the previous
 /// answer instead of emptying the fleet.
 pub async fn read_cli_session_ids(runner: &dyn CommandRunner) -> Option<HashSet<String>> {
@@ -613,6 +621,7 @@ fn changed(before: &HashMap<String, Agent>, after: &HashMap<String, Agent>) -> b
     for (id, agent) in after {
         let Some(previous) = before.get(id) else { return true };
         if previous.status != agent.status
+            || previous.background_shell != agent.background_shell
             || previous.name != agent.name
             || previous.cwd != agent.cwd
             || previous.waiting_for != agent.waiting_for
@@ -932,7 +941,7 @@ impl Inner {
         PassOutcome { published, met_an_unrecognised_id: ledger.met_an_unrecognised_id }
     }
 
-    /// The presence bookkeeping, locked in the one order every pass takes it.
+    /// The liveness bookkeeping, locked in the one order every pass takes it.
     fn ledger(&self) -> Ledger<'_> {
         Ledger {
             known: self.known.lock().unwrap(),
@@ -1002,7 +1011,7 @@ impl Inner {
         });
     }
 
-    /// Cross-check presence against the supported CLI, dropping ghosts.
+    /// Cross-check liveness against the supported CLI, dropping ghosts.
     async fn reconcile(self: Arc<Self>) {
         // Dropped, not queued: a second ~680ms subprocess started while the
         // first is still running would buy nothing and would be the first step
@@ -1176,7 +1185,7 @@ fn is_unconfirmed(agent: &Agent, known: &Option<HashSet<String>>) -> bool {
 /// under neither id, and a browser open on it had nowhere to be but the fleet.
 ///
 /// Two things have to be true of the session it replaces. It must be under a
-/// *different* id: the same id on the same pid is the ghost the presence check
+/// *different* id: the same id on the same pid is the ghost the liveness check
 /// exists for — a session file outliving its process, on a pid something else
 /// now holds — and it must keep being dropped once the CLI stops listing it.
 /// And it must be *gone from disk*: `/clear` rewrites one file, so the old id
@@ -1234,7 +1243,8 @@ fn carry_enrichment_forward(
 /// Known consequence, carried across deliberately: a `waitingFor` that the
 /// session file stops reporting lingers until something clears it. It is
 /// invisible in practice because the UI only renders it while `status` is
-/// `waiting`, and `status` *is* overwritten every pass.
+/// `waiting`, and `status` *is* overwritten every pass. `background_shell` is
+/// read off the same field as `status`, so it moves with it every pass too.
 fn overlay(prev: &mut Agent, next: Agent) {
     // Always present in a record we accepted at all.
     prev.pid = next.pid;
@@ -1242,6 +1252,7 @@ fn overlay(prev: &mut Agent, next: Agent) {
     prev.cwd = next.cwd;
     prev.folder = next.folder;
     prev.status = next.status;
+    prev.background_shell = next.background_shell;
     prev.kind = next.kind;
     prev.started_at = next.started_at;
     // Conditionally present: absent means "unchanged", not "cleared".
@@ -1772,6 +1783,49 @@ mod tests {
         assert_eq!(c.status, AgentStatus::Unknown);
     }
 
+    /// Claude Code writes `shell` when its turn has ended but a Bash command it
+    /// started in the background is still running. That is a reported state,
+    /// not an absence of one: `claude agents --json` lists the same session as
+    /// `busy`, and the CLI's own fleet view draws it as working.
+    #[test]
+    fn a_session_with_a_background_shell_running_is_busy() {
+        let a = to_agent(&serde_json::json!({
+            "sessionId": "a", "pid": UNCHECKED_PID, "cwd": "/x", "status": "shell",
+        }))
+        .expect("agent");
+        assert_eq!(a.status, AgentStatus::Busy);
+        assert_eq!(a.background_shell, Some(true));
+
+        let turn = to_agent(&serde_json::json!({
+            "sessionId": "b", "pid": UNCHECKED_PID, "cwd": "/x", "status": "busy",
+        }))
+        .expect("agent");
+        assert_eq!(turn.background_shell, None);
+    }
+
+    /// The command exiting wakes the agent into a turn, and its status stays
+    /// `busy` throughout. The flag is what moved, so it must not linger on the
+    /// "absent means unchanged" rule, and the fleet must hear about it: the
+    /// interrupt it was hiding means something again.
+    #[test]
+    fn a_background_shell_ending_in_a_turn_clears_the_flag_and_is_a_change() {
+        let record = |status: &str| {
+            to_agent(&serde_json::json!({
+                "sessionId": "a", "pid": UNCHECKED_PID, "cwd": "/x", "status": status,
+            }))
+            .expect("agent")
+        };
+        let mut merged = record("shell");
+        let before = HashMap::from([("a".to_string(), merged.clone())]);
+
+        overlay(&mut merged, record("busy"));
+        assert_eq!(merged.status, AgentStatus::Busy);
+        assert_eq!(merged.background_shell, None);
+
+        let after = HashMap::from([("a".to_string(), merged)]);
+        assert!(changed(&before, &after));
+    }
+
     /// A session file is a Claude Code session, and the record has to say so.
     ///
     /// `Agent` derives `Default`, so a forgotten field is `""` — a kind that
@@ -1872,13 +1926,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cli_presence_is_none_when_the_binary_is_absent() {
+    async fn cli_liveness_is_none_when_the_binary_is_absent() {
         let cli = FakeCli::new(None, Duration::ZERO);
         assert!(read_cli_session_ids(cli.as_ref()).await.is_none());
     }
 
     #[tokio::test]
-    async fn cli_presence_is_none_when_the_output_is_not_a_list() {
+    async fn cli_liveness_is_none_when_the_output_is_not_a_list() {
         let cli = FakeCli::new(Some("not json"), Duration::ZERO);
         assert!(read_cli_session_ids(cli.as_ref()).await.is_none());
         let cli = FakeCli::new(Some(r#"{"sessionId":"a"}"#), Duration::ZERO);
@@ -1886,7 +1940,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cli_presence_collects_session_ids() {
+    async fn cli_liveness_collects_session_ids() {
         let cli = FakeCli::new(Some(r#"[{"sessionId":"a"},{},{"sessionId":"b"}]"#), Duration::ZERO);
         let ids = read_cli_session_ids(cli.as_ref()).await.expect("ids");
         assert_eq!(ids.len(), 2);
@@ -2017,7 +2071,7 @@ mod tests {
         src.stop();
     }
 
-    /// The CLI is the authority on presence: a session file whose id the CLI
+    /// The CLI is the authority on liveness: a session file whose id the CLI
     /// does not list is a ghost from a reused pid and is dropped.
     #[tokio::test]
     async fn drops_a_session_the_cli_does_not_confirm() {
@@ -2058,10 +2112,10 @@ mod tests {
         src.stop();
     }
 
-    /// Pending entries are ours, not the CLI's, so the presence filter must not
+    /// Pending entries are ours, not the CLI's, so the liveness filter must not
     /// eat the session someone just spawned.
     #[tokio::test]
-    async fn a_pending_session_survives_the_presence_filter() {
+    async fn a_pending_session_survives_the_liveness_filter() {
         struct OnePending;
         #[async_trait]
         impl PendingMerge for OnePending {
@@ -2163,7 +2217,7 @@ mod tests {
 
     /// A source with no loops running, so a test drives `refresh` and
     /// `reconcile` itself and every `claude agents --json` is one it asked for.
-    fn presence_source(dir: &Path, cli: Arc<FakeCli>) -> Arc<LiveSource> {
+    fn liveness_source(dir: &Path, cli: Arc<FakeCli>) -> Arc<LiveSource> {
         LiveSource::configured(SourceConfig {
             dir: dir.into(),
             runner: cli,
@@ -2186,7 +2240,7 @@ mod tests {
     async fn inv4_does_not_wait_for_the_slow_reconcile_to_show_a_new_agent() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         write_session(dir.path(), "live-one.json", live_session("live-one"));
         Arc::clone(&src.inner).reconcile().await;
@@ -2208,19 +2262,19 @@ mod tests {
     }
 
     /// The thing that has to be true for the above to be safe: a ghost that is
-    /// never confirmed must not turn the 30s reconcile into a 2s one.
+    /// never confirmed must not turn the 30s reconcile into a 2s one. The ghost
+    /// is a session file whose process is alive but which the CLI will never
+    /// confirm: a reused pid, which is what the liveness check exists for.
     #[tokio::test]
     async fn inv4_asks_once_for_a_ghost_not_once_per_scan() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         write_session(dir.path(), "live-one.json", live_session("live-one"));
         Arc::clone(&src.inner).reconcile().await;
         let asked_so_far = cli.calls.load(Ordering::SeqCst);
 
-        // A session file whose process is alive but which the CLI will never
-        // confirm: a reused pid, which is what the presence check exists for.
         write_session(dir.path(), "ghost.json", live_session("ghost"));
         for _ in 0..5 {
             src.inner.refresh().await;
@@ -2238,7 +2292,7 @@ mod tests {
     async fn inv4_asks_again_when_the_same_id_comes_back_after_its_file_went_away() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         write_session(dir.path(), "live-one.json", live_session("live-one"));
         Arc::clone(&src.inner).reconcile().await;
@@ -2266,7 +2320,7 @@ mod tests {
     async fn inv8_a_cleared_session_is_listed_under_its_new_id_on_sight() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"before"}]"#), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         write_session(dir.path(), "own-pid.json", live_session("before"));
         Arc::clone(&src.inner).reconcile().await;
@@ -2288,13 +2342,13 @@ mod tests {
     }
 
     /// The other half of the rule above: the *same* id under the same pid is
-    /// the ghost, and vouching for it would resurrect exactly what the presence
+    /// the ghost, and vouching for it would resurrect exactly what the liveness
     /// check drops.
     #[tokio::test]
     async fn inv8_succession_does_not_vouch_for_a_ghost_under_its_own_id() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         write_session(dir.path(), "own-pid.json", live_session("live-one"));
         Arc::clone(&src.inner).reconcile().await;
@@ -2306,14 +2360,14 @@ mod tests {
         assert_eq!(src.list().len(), 0, "a ghost was vouched for");
     }
 
-    /// With no presence answer yet there is nothing to be unrecognised
+    /// With no liveness answer yet there is nothing to be unrecognised
     /// against, and everything on disk is shown. A refresh here must not spawn
     /// anything.
     #[tokio::test]
     async fn inv4_does_not_ask_before_the_cli_has_ever_answered() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some(r#"[{"sessionId":"live-one"}]"#), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         write_session(dir.path(), "live-one.json", live_session("live-one"));
         src.inner.refresh().await;
@@ -2329,7 +2383,7 @@ mod tests {
     async fn inv4_asks_even_when_the_pass_publishes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let cli = FakeCli::new(Some("[]"), Duration::ZERO);
-        let src = presence_source(dir.path(), cli.clone());
+        let src = liveness_source(dir.path(), cli.clone());
 
         Arc::clone(&src.inner).reconcile().await;
         let asked_so_far = cli.calls.load(Ordering::SeqCst);
@@ -2352,7 +2406,7 @@ mod tests {
         (start, Arc::new(move |_pid| Some(reader.load(Ordering::SeqCst))))
     }
 
-    /// `presence_source`, reading process starts from `start_of` and allowed
+    /// `liveness_source`, reading process starts from `start_of` and allowed
     /// to stay quiet for `backstop` with nothing to ask.
     fn anchored_source(
         dir: &Path,

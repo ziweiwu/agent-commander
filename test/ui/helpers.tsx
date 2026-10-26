@@ -19,6 +19,8 @@ export function resetStore(): void {
     // an empty `agents` here is a confirmed-empty fleet. The first-frame tests
     // set this back to null themselves (INV-11).
     fleetAt: Date.now(),
+    seenThrough: null,
+    visit: null,
     limits: null,
     env: null,
     mock: false,
@@ -28,7 +30,7 @@ export function resetStore(): void {
     attached: false,
     fullscreen: false,
     newAgentOpen: false,
-    fleet: { query: '', filter: 'all', sort: 'recent', dir: 'desc', terminals: false },
+    fleet: { query: '', filter: 'all', sort: 'recent', dir: 'desc', kinds: 'claude' },
     // Both persist per browser, so a test that collapses the column would
     // otherwise hand the next one a fleet list that is not on screen.
     sidebar: 'expanded',
@@ -47,8 +49,14 @@ export function resetStore(): void {
     frame: null,
     history: null,
     historyPending: false,
+    outcomes: {},
+    toolResults: {},
     toast: null,
     expectSession: null,
+    exited: [],
+    drafts: { chat: {}, paste: {} },
+    hopped: null,
+    startingTask: null,
   })
 }
 

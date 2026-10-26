@@ -112,6 +112,16 @@ describe('the standalone interrupt', () => {
     open(working({ status: 'idle' }))
     expect(screen.queryByTestId('chat-interrupt')).toBeNull()
   })
+
+  /**
+   * Busy, but its turn is over and only a background command is running.
+   * Escape stops a turn, not that command: measured on Claude Code 2.1.302,
+   * one press did nothing and a second opened its Rewind dialog.
+   */
+  it('is not offered when the only work is a background command', () => {
+    open(working({ backgroundShell: true }))
+    expect(screen.queryByTestId('chat-interrupt')).toBeNull()
+  })
 })
 
 describe('what Send does to a working agent', () => {
@@ -169,6 +179,20 @@ describe('what Send does to a working agent', () => {
     await user.click(screen.getByTestId('composer-send'))
 
     expect(transport.sendMessage).toHaveBeenCalledWith('next task please')
+    expect(transport.interruptAndSend).not.toHaveBeenCalled()
+  })
+
+  it('sends normally in interrupt mode when the only work is a background command', async () => {
+    const user = userEvent.setup()
+    open(working({ backgroundShell: true }))
+
+    await openMenu(user)
+    await user.click(screen.getByTestId('send-mode-interrupt'))
+    await user.type(screen.getByTestId('composer-input'), 'check the build log')
+    expect(screen.getByTestId('composer-send').textContent).toBe('Send')
+
+    await user.click(screen.getByTestId('composer-send'))
+    expect(transport.sendMessage).toHaveBeenCalledWith('check the build log')
     expect(transport.interruptAndSend).not.toHaveBeenCalled()
   })
 })

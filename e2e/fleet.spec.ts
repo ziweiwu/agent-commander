@@ -24,24 +24,29 @@ test.describe('the fleet', () => {
 
   /*
    * The terminal is the one session kind that answers none of the questions
-   * this list asks, so it is out of scope until asked for — and the chip that
-   * admits it is what keeps that a filter rather than a fleet with a hole in
-   * it (INV-11). The choice persists like the other three.
+   * this list asks, so the fleet shows Claude alone until asked otherwise —
+   * and the scope switch, which counts every kind, is what keeps that a filter
+   * rather than a fleet with a hole in it (INV-11). Terminals can be shown on
+   * their own, and the choice persists like the other three.
    */
-  test('keeps terminals out of the fleet until the chip admits them', async ({ page }) => {
+  test('scopes the fleet to Claude, terminals or both', async ({ page }) => {
     await openFleet(page)
-    const chip = page.getByTestId('terminal-chip')
+    const kinds = page.getByTestId('kind-select')
 
     await expect(card(page, AGENT.terminal)).toHaveCount(0)
-    await expect(chip).toBeVisible()
-    await expect(chip).toHaveAttribute('aria-pressed', 'false')
+    await expect(kinds).toHaveValue('claude')
 
-    await chip.click()
+    await kinds.selectOption('terminals')
     await expect(card(page, AGENT.terminal)).toBeVisible()
+    await expect(card(page, AGENT.busy)).toHaveCount(0)
 
     await page.reload()
-    await expect(page.getByTestId('agent-card').first()).toBeVisible()
     await expect(card(page, AGENT.terminal)).toBeVisible()
+    await expect(kinds).toHaveValue('terminals')
+
+    await kinds.selectOption('all')
+    await expect(card(page, AGENT.terminal)).toBeVisible()
+    await expect(card(page, AGENT.busy)).toBeVisible()
   })
 
   /*
@@ -51,7 +56,7 @@ test.describe('the fleet', () => {
    */
   test('opens a terminal on its terminal, with no conversation to offer', async ({ page }) => {
     await openFleet(page)
-    await page.getByTestId('terminal-chip').click()
+    await page.getByTestId('kind-select').selectOption('terminals')
     await card(page, AGENT.terminal).click()
 
     await expect(page.getByTestId('agent-detail')).toBeVisible()

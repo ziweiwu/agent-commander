@@ -21,7 +21,8 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use crate::sources::{AgentPatch, TailApi, TailRead};
 use crate::types::{
-    now_ms, Agent, GoalState, NoticeKind, PendingPrompt, PromptOption, TimelineEvent, TimelineKind, Question,
+    now_ms, Agent, GoalState, NoticeKind, Outcome, PendingPrompt, PromptOption, Question, Refusals,
+    RefusedBy, SincePrompt, TimelineEvent, TimelineKind, ToolOutcome, ToolResultView,
 };
 
 /// On first read, at least this much of the transcript is loaded...
@@ -185,7 +186,7 @@ fn slash_command(text: &str) -> Option<String> {
 /// parser is narrower than `Date.parse` — it accepts the RFC 3339 shape Claude
 /// Code actually writes (`2026-08-14T00:57:52.725Z`, plus `+HH:MM` offsets) —
 /// and takes the same fallback for anything else.
-fn record_time(rec: &Value) -> i64 {
+pub(crate) fn record_time(rec: &Value) -> i64 {
     rec.get("timestamp")
         .and_then(Value::as_str)
         .and_then(parse_iso8601_ms)
@@ -939,6 +940,30 @@ pub struct ParseResult {
     pub opened: Vec<(String, PendingPrompt)>,
     /// `tool_use` ids answered by a `tool_result` in this batch.
     pub answered: Vec<String>,
+    /// How each of those calls ended, as its result record says.
+    pub outcomes: Vec<ToolOutcome>,
+    /// When each call of this agent's own that auto mode refused was answered.
+    /// A delegate's sidechain is its own conversation, and is not counted.
+    pub refused_at: Vec<i64>,
+    /// The timestamp of the first record in the batch that carries one: where
+    /// the window this batch belongs to starts.
+    pub first_at: Option<i64>,
+    /// The last prompt a person typed in this batch, and this agent's own
+    /// calls after it.
+    pub prompted: PromptTally,
+}
+
+/// One batch's share of "since your last prompt".
+///
+/// `at` is the newest prompt `describe::is_typed_by_a_person` accepts, and
+/// `calls` counts this agent's `tool_use` blocks after it — or after the start
+/// of the batch when it holds no such prompt, so the tail can add them on.
+/// A delegate's calls are its own effort, counted on its own node (INV-13),
+/// never here.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PromptTally {
+    pub at: Option<i64>,
+    pub calls: u32,
 }
 
 impl ParseResult {
@@ -948,6 +973,10 @@ impl ParseResult {
             patch: AgentPatch::default(),
             opened: Vec::new(),
             answered: Vec::new(),
+            outcomes: Vec::new(),
+            refused_at: Vec::new(),
+            first_at: None,
+            prompted: PromptTally::default(),
         }
     }
 }
@@ -992,6 +1021,9 @@ struct Batch<'a> {
 impl Batch<'_> {
     /// Read one record into the batch.
     fn read(&mut self, rec: &Value, sets: &RecordSets) {
+        if self.out.first_at.is_none() {
+            self.out.first_at = text_field(rec, "timestamp").and_then(parse_iso8601_ms);
+        }
         let kind = rec.get("type").and_then(Value::as_str).unwrap_or("");
         if sets.state.contains(kind) {
             self.read_session_state(rec);
@@ -1007,6 +1039,9 @@ impl Batch<'_> {
         // something ever write: see `describe.rs`.
         if let Some(description) = crate::describe::description_from(rec) {
             self.out.patch.description = Some(description);
+        }
+        if is_a_person_prompting_this_agent(rec, kind) {
+            self.out.prompted = PromptTally { at: Some(record_time(rec)), calls: 0 };
         }
         if is_compaction(rec, kind) {
             self.push_compaction(rec);
@@ -1065,6 +1100,7 @@ impl Batch<'_> {
             notice: Some(notice),
             tokens_before: compact.and_then(|meta| number_field(meta, "preTokens")),
             tokens_after: compact.and_then(|meta| number_field(meta, "postTokens")),
+            tool_use_id: None,
         });
     }
 
@@ -1140,6 +1176,7 @@ impl Batch<'_> {
             notice: None,
             tokens_before: None,
             tokens_after: None,
+            tool_use_id: None,
         });
     }
 
@@ -1153,10 +1190,27 @@ impl Batch<'_> {
             }
             said.extend(text_field(block, "text"));
         }
+        self.read_outcomes(rec);
         if !is_the_user_speaking(rec) {
             return String::new();
         }
         said.join("\n")
+    }
+
+    /// How each call this record answers ended, and whether auto mode refused
+    /// one of this agent's own.
+    fn read_outcomes(&mut self, rec: &Value) {
+        let results = crate::outcome::result_blocks(rec);
+        let only = (results.len() == 1).then_some(rec);
+        let own = rec.get("isSidechain").and_then(Value::as_bool) != Some(true);
+        for block in results {
+            let Some(id) = text_field(block, "tool_use_id") else { continue };
+            let outcome = crate::outcome::outcome_of(block, id, only);
+            if own && outcome.outcome == Outcome::Refused && outcome.by == Some(RefusedBy::AutoMode) {
+                self.out.refused_at.push(record_time(rec));
+            }
+            self.out.outcomes.push(outcome);
+        }
     }
 
     fn push_assistant_blocks(
@@ -1191,6 +1245,7 @@ impl Batch<'_> {
             notice: None,
             tokens_before: None,
             tokens_after: None,
+            tool_use_id: None,
         });
     }
 
@@ -1206,6 +1261,9 @@ impl Batch<'_> {
                 self.out.opened.push((id.to_string(), pending_prompt(name, block.get("input"))));
             }
         }
+        if context.sidechain != Some(true) {
+            self.out.prompted.calls = self.out.prompted.calls.saturating_add(1);
+        }
         let delegated = sets.subagent_tools.contains(name);
         if delegated {
             self.subagents += 1;
@@ -1220,6 +1278,7 @@ impl Batch<'_> {
             notice: None,
             tokens_before: None,
             tokens_after: None,
+            tool_use_id: text_field(block, "id").map(str::to_string),
         });
     }
 
@@ -1237,6 +1296,18 @@ impl Batch<'_> {
         }
         self.out
     }
+}
+
+/// A prompt a person typed to this agent, rather than to one of its delegates.
+///
+/// The person half is `describe`'s, so the card's subject and its clock cannot
+/// disagree about who spoke: task notifications, SDK sends and compaction
+/// summaries are machinery and restart nothing. A sidechain record is a
+/// delegate's brief from its parent, not the user speaking.
+fn is_a_person_prompting_this_agent(rec: &Value, kind: &str) -> bool {
+    kind == "user"
+        && rec.get("isSidechain").and_then(Value::as_bool) != Some(true)
+        && crate::describe::is_typed_by_a_person(rec)
 }
 
 fn is_compaction(rec: &Value, kind: &str) -> bool {
@@ -1263,7 +1334,7 @@ pub fn parse_lines(lines: &[&str], seq: &mut dyn FnMut() -> String) -> ParseResu
 ///
 /// Whatever follows the last newline is a record still being written, and is
 /// left out the same way `read_next` holds a torn line back.
-fn records_from_the_end(buf: &[u8]) -> impl Iterator<Item = (usize, &[u8])> + '_ {
+pub(crate) fn records_from_the_end(buf: &[u8]) -> impl Iterator<Item = (usize, &[u8])> + '_ {
     let mut end = buf.iter().rposition(|b| *b == b'\n');
     std::iter::from_fn(move || {
         let stop = end?;
@@ -1395,6 +1466,18 @@ pub struct TranscriptTail {
     open_calls: Vec<(String, PendingPrompt)>,
     /// The prompt the last read reported, so a change can be noticed.
     reported_prompt: Option<PendingPrompt>,
+    /// Auto mode's refusals in what this tail has read, and where that starts.
+    refusals: Option<Refusals>,
+    window_since: Option<i64>,
+    /// When a person last typed a prompt, as far as this tail has read.
+    prompt_at: Option<i64>,
+    /// This agent's own calls since `prompt_at`, or since the read began when
+    /// no prompt has been read.
+    calls_since_prompt: u32,
+    /// Whether the read began at the transcript's first byte, so that a prompt
+    /// it has not seen is one that was never written rather than one the
+    /// backfill did not reach back to.
+    read_from_the_top: bool,
 }
 
 impl TranscriptTail {
@@ -1412,6 +1495,11 @@ impl TranscriptTail {
             total_subagents: 0,
             open_calls: Vec::new(),
             reported_prompt: None,
+            refusals: None,
+            window_since: None,
+            prompt_at: None,
+            calls_since_prompt: 0,
+            read_from_the_top: false,
         }
     }
 
@@ -1445,6 +1533,52 @@ impl TranscriptTail {
                 continue;
             }
             self.open_calls.push((id.clone(), prompt.clone()));
+        }
+    }
+
+    /// Count this batch's refusals into the running window, and put the
+    /// window on the patch once there is anything in it.
+    ///
+    /// The window starts at the first record this tail ever read, which for a
+    /// long session is wherever the backfill began, so the count is labelled
+    /// with that and never passed off as the session's (INV-11).
+    fn track_refusals(&mut self, result: &mut ParseResult) {
+        if self.window_since.is_none() {
+            self.window_since = result.first_at;
+        }
+        for at in &result.refused_at {
+            let since = self.window_since.unwrap_or(*at);
+            let held = self.refusals.get_or_insert(Refusals { count: 0, last_at: *at, since });
+            held.count += 1;
+            held.last_at = held.last_at.max(*at);
+        }
+        result.patch.refusals = self.refusals;
+    }
+
+    /// Fold one batch's prompt and calls into the running count.
+    fn track_prompt(&mut self, tally: PromptTally) {
+        match tally.at {
+            Some(at) => {
+                self.prompt_at = Some(at);
+                self.calls_since_prompt = tally.calls;
+            }
+            None => self.calls_since_prompt = self.calls_since_prompt.saturating_add(tally.calls),
+        }
+    }
+
+    /// What the card may say about the time since the last prompt (INV-11).
+    ///
+    /// A prompt read gives a clock and an exact count. None read, in a read
+    /// that began mid-file, gives no clock and a floor — the prompt is older
+    /// than the backfill — and only once there is a call to put a floor
+    /// under. None read in the whole file gives nothing at all.
+    pub fn since_prompt(&self) -> Option<SincePrompt> {
+        match self.prompt_at {
+            Some(at) => Some(SincePrompt { at: Some(at), calls: self.calls_since_prompt }),
+            None if !self.read_from_the_top && self.calls_since_prompt > 0 => {
+                Some(SincePrompt { at: None, calls: self.calls_since_prompt })
+            }
+            None => None,
         }
     }
 
@@ -1504,6 +1638,9 @@ impl TranscriptTail {
         if first && self.offset == 0 && size > BACKFILL_BYTES {
             self.offset = self.backfill_start(&path, size).await;
         }
+        if first {
+            self.read_from_the_top = self.offset == 0;
+        }
         // Checked even when the transcript has not grown by a byte: that
         // silence is exactly what a delegated run looks like from here.
         if size == self.offset {
@@ -1514,6 +1651,7 @@ impl TranscriptTail {
                 first,
                 prompt,
                 prompt_changed,
+                outcomes: Vec::new(),
             };
         }
 
@@ -1537,7 +1675,14 @@ impl TranscriptTail {
         };
         self.apply_batch(&mut result).await;
         let (prompt, prompt_changed) = self.report_prompt();
-        TailRead { events: result.events, patch: result.patch, first, prompt, prompt_changed }
+        TailRead {
+            events: result.events,
+            patch: result.patch,
+            first,
+            prompt,
+            prompt_changed,
+            outcomes: result.outcomes,
+        }
     }
 
     /// Nothing was read, and this is not a replacement of what the client holds.
@@ -1548,6 +1693,7 @@ impl TranscriptTail {
             first: false,
             prompt: None,
             prompt_changed: false,
+            outcomes: Vec::new(),
         }
     }
 
@@ -1593,6 +1739,10 @@ impl TranscriptTail {
             // The file this tracked has been replaced, so every call it was
             // holding open belongs to a transcript that no longer exists.
             self.open_calls.clear();
+            self.refusals = None;
+            self.window_since = None;
+            self.prompt_at = None;
+            self.calls_since_prompt = 0;
             first = true;
         }
         first
@@ -1668,6 +1818,9 @@ impl TranscriptTail {
     /// subagent of this session is doing.
     async fn apply_batch(&mut self, result: &mut ParseResult) {
         self.track_calls(result);
+        self.track_refusals(result);
+        self.track_prompt(result.prompted);
+        result.patch.since_prompt = Some(self.since_prompt());
         self.total_tokens += result.patch.tokens.unwrap_or(0);
         self.total_subagents += result.patch.subagents.unwrap_or(0);
         if self.total_tokens > 0 {
@@ -1709,6 +1862,11 @@ impl TranscriptTail {
 impl TailApi for TranscriptTail {
     async fn read(&mut self) -> anyhow::Result<TailRead> {
         Ok(self.read_next().await)
+    }
+
+    async fn tool_result(&mut self, tool_use_id: &str) -> Option<ToolResultView> {
+        let path = self.resolve_path().await?;
+        crate::outcome::read_result(&path, tool_use_id).await
     }
 
     fn path(&self) -> Option<PathBuf> {
@@ -2329,6 +2487,7 @@ mod tests {
             notice: None,
             tokens_before: None,
             tokens_after: None,
+            tool_use_id: None,
         }
     }
 
@@ -2643,6 +2802,31 @@ mod tests {
         let out = tail.read_next().await;
         assert!(out.first);
         assert_eq!(out.events.iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["fresh"]);
+    }
+
+    #[tokio::test]
+    async fn a_replacement_counts_refusals_afresh_from_the_new_file() {
+        let (root, file) = projects();
+        let refusal = |id: &str| {
+            result_record(
+                id,
+                json!({ "content": "denied", "is_error": true }),
+                json!({ "permissionDecision": {
+                    "decision": "reject", "reasonType": "classifier", "source": "config",
+                } }),
+            )
+        };
+        let before = format!("{}\n{}\n{}\n", said("go"), refusal("toolu_1"), refusal("toolu_2"));
+        append(&file, before.as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        assert_eq!(tail.read_next().await.patch.refusals.expect("two refusals").count, 2);
+
+        fs::write(&file, format!("{}\n", refusal("toolu_3"))).unwrap();
+        let out = tail.read_next().await;
+        assert!(out.first);
+        let held = out.patch.refusals.expect("the new file's refusal");
+        assert_eq!(held.count, 1);
+        assert_eq!(held.since, held.last_at);
     }
 
     #[tokio::test]
@@ -3009,6 +3193,392 @@ mod tests {
         assert_eq!(d.write(&bytes[3..]), "检b");
         // Bytes that can never be valid are replaced, not held forever.
         assert_eq!(d.write(&[0xff, b'x']), "\u{FFFD}x");
+    }
+
+    /// A call's result record with the fields Claude Code puts beside its
+    /// `message`: the shape read from this machine's transcripts, with the
+    /// conversation's own words replaced.
+    fn result_record(id: &str, block: Value, beside: Value) -> String {
+        let mut rec = json!({
+            "type": "user",
+            "timestamp": "2026-10-25T14:07:00.000Z",
+            "cwd": "/Users/demo/project",
+            "entrypoint": "cli",
+            "gitBranch": "main",
+            "isSidechain": false,
+            "parentUuid": "p-1",
+            "promptId": "q-1",
+            "sessionId": SESSION,
+            "sourceToolAssistantUUID": "a-1",
+            "userType": "external",
+            "uuid": "u-1",
+            "version": "2.1.290",
+            "message": { "role": "user", "content": [block] },
+        });
+        let mut block_id = rec["message"]["content"][0].clone();
+        block_id["tool_use_id"] = json!(id);
+        block_id["type"] = json!("tool_result");
+        rec["message"]["content"][0] = block_id;
+        for (key, value) in beside.as_object().unwrap() {
+            rec[key] = value.clone();
+        }
+        rec.to_string()
+    }
+
+    fn call(id: &str, name: &str, input: Value) -> String {
+        assistant(json!([{ "type": "tool_use", "id": id, "name": name, "input": input }]))
+    }
+
+    fn outcome_for<'a>(out: &'a ParseResult, id: &str) -> &'a ToolOutcome {
+        out.outcomes.iter().find(|o| o.tool_use_id == id).expect("an outcome for the call")
+    }
+
+    /// FR-CHAT-16: an edit says how much it changed, counted from the `+` and
+    /// `-` that open its recorded hunk lines, and the row it belongs to is
+    /// keyed by the call's id.
+    #[test]
+    fn reads_an_edit_s_hunk_counts() {
+        let edit = call("toolu_e", "Edit", json!({ "file_path": "src/app.ts" }));
+        let result = result_record(
+            "toolu_e",
+            json!({ "content": "The file src/app.ts has been updated." }),
+            json!({
+                "permissionDecision": { "decision": "accept", "reasonType": "classifier", "source": "config" },
+                "toolUseResult": {
+                    "filePath": "src/app.ts",
+                    "userModified": false,
+                    "structuredPatch": [
+                        { "oldStart": 1, "oldLines": 3, "newStart": 1, "newLines": 4,
+                          "lines": [" keep", "-gone", "+one", "+two"] },
+                        { "oldStart": 40, "oldLines": 1, "newStart": 41, "newLines": 1,
+                          "lines": [" -- a context line that looks like a removal", "+three"] },
+                    ],
+                },
+            }),
+        );
+        let out = parse(&[&edit, &result]);
+        assert_eq!(out.events[0].tool_use_id.as_deref(), Some("toolu_e"));
+        let outcome = outcome_for(&out, "toolu_e");
+        assert_eq!(outcome.outcome, Outcome::Ok);
+        assert_eq!((outcome.added, outcome.removed), (Some(3), Some(1)));
+        assert!(out.refused_at.is_empty());
+    }
+
+    /// FR-CHAT-16: a refusal is read from `permissionDecision` and nowhere
+    /// else, with the classifier's own category kept for the row.
+    #[test]
+    fn reads_a_classifier_refusal_from_permission_decision() {
+        let result = result_record(
+            "toolu_r",
+            json!({ "content": "Permission for this action has been denied.", "is_error": true }),
+            json!({
+                "permissionDecision": {
+                    "decision": "reject",
+                    "reasonType": "classifier",
+                    "reasonCode": "classifier:auto-mode",
+                    "classifierCategory": "irreversible_local_destruction",
+                    "source": "config",
+                },
+                "toolUseResult": "Error: Permission for this action has been denied.",
+            }),
+        );
+        let out = parse(&[&call("toolu_r", "Bash", json!({ "command": "rm -rf dist" })), &result]);
+        let outcome = outcome_for(&out, "toolu_r");
+        assert_eq!(outcome.outcome, Outcome::Refused);
+        assert_eq!(outcome.by, Some(RefusedBy::AutoMode));
+        assert_eq!(outcome.category.as_deref(), Some("irreversible_local_destruction"));
+        assert_eq!(out.refused_at.len(), 1, "counted for the card's fold");
+    }
+
+    /// A hook's refusal names the hook, and is not counted as auto mode's.
+    #[test]
+    fn reads_a_hook_refusal() {
+        let result = result_record(
+            "toolu_h",
+            json!({ "content": "PreToolUse:Bash hook returned blocking error", "is_error": true }),
+            json!({
+                "permissionDecision": {
+                    "decision": "reject",
+                    "reasonType": "hook",
+                    "reasonCode": "hook:PreToolUse",
+                    "source": "hook",
+                },
+            }),
+        );
+        let out = parse(&[&result]);
+        let outcome = outcome_for(&out, "toolu_h");
+        assert_eq!(outcome.outcome, Outcome::Refused);
+        assert_eq!(outcome.by, Some(RefusedBy::Hook));
+        assert_eq!(outcome.category, None);
+        assert!(out.refused_at.is_empty(), "the fold counts auto mode's refusals only");
+    }
+
+    /// INV-11: an error whose words read like a refusal is still only an error
+    /// when no decision rejected it, and an accepted call that errored failed.
+    #[test]
+    fn reads_a_null_decision_error_is_failed_not_refused() {
+        let denied_in_words = json!({ "content": "Permission to use Bash has been denied.", "is_error": true });
+        let null = result_record("toolu_n", denied_in_words.clone(), json!({ "permissionDecision": null }));
+        let absent = result_record("toolu_a", denied_in_words, json!({}));
+        let accepted = result_record(
+            "toolu_x",
+            json!({ "content": "Exit code 1", "is_error": true }),
+            json!({ "permissionDecision": { "decision": "accept", "reasonType": "rule", "source": "config" } }),
+        );
+        let out = parse(&[&null, &absent, &accepted]);
+        for id in ["toolu_n", "toolu_a", "toolu_x"] {
+            let outcome = outcome_for(&out, id);
+            assert_eq!(outcome.outcome, Outcome::Failed, "{id}");
+            assert_eq!(outcome.by, None, "{id}");
+        }
+        assert!(out.refused_at.is_empty());
+    }
+
+    /// A decision sits beside the record's message, so it cannot be pinned on
+    /// one of several calls the record answers; none of them is called refused.
+    #[test]
+    fn a_decision_on_a_record_answering_several_calls_is_pinned_on_none() {
+        let mut rec: Value = serde_json::from_str(&result_record(
+            "toolu_1",
+            json!({ "content": "ok" }),
+            json!({ "permissionDecision": { "decision": "reject", "reasonType": "classifier", "source": "config" } }),
+        ))
+        .unwrap();
+        rec["message"]["content"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({ "type": "tool_result", "tool_use_id": "toolu_2", "content": "ok" }));
+        let out = parse(&[&rec.to_string()]);
+        assert_eq!(outcome_for(&out, "toolu_1").outcome, Outcome::Ok);
+        assert_eq!(outcome_for(&out, "toolu_2").outcome, Outcome::Ok);
+    }
+
+    /// The fold's count: auto mode's refusals in what the tail has read, with
+    /// the time its window starts, the same caveat `tokens` carries.
+    #[tokio::test]
+    async fn the_tail_counts_auto_mode_refusals_from_where_its_window_starts() {
+        let (root, file) = projects();
+        let refusal = |id: &str| {
+            result_record(
+                id,
+                json!({ "content": "denied", "is_error": true }),
+                json!({ "permissionDecision": {
+                    "decision": "reject", "reasonType": "classifier", "source": "config",
+                } }),
+            )
+        };
+        append(&file, format!("{}\n{}\n", said("go"), refusal("toolu_1")).as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let first = tail.read_next().await.patch.refusals.expect("one refusal");
+        assert_eq!(first.count, 1);
+        assert_eq!(first.since, parse_iso8601_ms("2026-08-14T00:57:52.725Z").unwrap());
+        append(&file, format!("{}\n", refusal("toolu_2")).as_bytes());
+        let next = tail.read_next().await;
+        let held = next.patch.refusals.expect("still counted");
+        assert_eq!((held.count, held.since), (2, first.since));
+        assert_eq!(held.last_at, parse_iso8601_ms("2026-10-25T14:07:00.000Z").unwrap());
+        assert_eq!(next.outcomes.len(), 1, "the outcome rides on the read that reached it");
+    }
+
+    /// INV-4: a tap reads back from the end within a bound. A result written
+    /// further back than that is not found rather than read for.
+    #[tokio::test]
+    async fn a_tool_result_read_looks_back_no_further_than_its_bound() {
+        let (root, file) = projects();
+        let wanted = result_record("toolu_old", json!({ "content": "far back" }), json!({}));
+        append(&file, format!("{wanted}\n").as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let near = tail.tool_result("toolu_old").await.expect("found while it is near the end");
+        assert_eq!(near.output.as_deref(), Some("far back"));
+
+        let filler = format!("{}\n", said(&"x".repeat(64 * 1024)));
+        let past_the_bound = crate::outcome::RESULT_SCAN_BYTES as usize / filler.len() + 1;
+        append(&file, filler.repeat(past_the_bound).as_bytes());
+        assert!(tail.tool_result("toolu_old").await.is_none());
+    }
+
+    /// The reply is capped: the tail of a long output, never its head, and the
+    /// number of bytes that were left out so the box can say there is more.
+    #[tokio::test]
+    async fn a_long_output_is_sent_as_its_tail_with_what_was_left_out() {
+        let (root, file) = projects();
+        let cap = crate::outcome::RESULT_CAP_BYTES;
+        let output = format!("{}{}", "a".repeat(cap * 2), "z".repeat(cap));
+        let rec = result_record("toolu_big", json!({ "content": output }), json!({}));
+        append(&file, format!("{rec}\n").as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let view = tail.tool_result("toolu_big").await.expect("found");
+        assert_eq!(view.output.as_deref(), Some("z".repeat(cap).as_str()));
+        assert_eq!(view.omitted, (cap * 2) as u64);
+        assert_eq!(view.at, parse_iso8601_ms("2026-10-25T14:07:00.000Z").unwrap());
+    }
+
+    /// An edit's expansion is its hunks, and says so when the person changed
+    /// it in the dialog before it was applied.
+    #[tokio::test]
+    async fn an_edit_s_result_is_its_hunks_and_says_when_you_changed_it() {
+        let (root, file) = projects();
+        let rec = result_record(
+            "toolu_e",
+            json!({ "content": "updated" }),
+            json!({ "toolUseResult": {
+                "userModified": true,
+                "structuredPatch": [{
+                    "oldStart": 3, "oldLines": 1, "newStart": 3, "newLines": 1, "lines": ["-a", "+b"],
+                }],
+            } }),
+        );
+        append(&file, format!("{rec}\n").as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let view = tail.tool_result("toolu_e").await.expect("found");
+        let hunks = view.hunks.expect("hunks");
+        assert_eq!((hunks[0].old_start, hunks[0].new_start), (3, 3));
+        assert_eq!(hunks[0].lines, ["-a", "+b"]);
+        assert_eq!(view.output, None);
+        assert_eq!(view.user_modified, Some(true));
+    }
+
+    /// When the person typed the prompt every test below counts from.
+    const PROMPTED_AT: &str = "2026-08-14T01:00:00.000Z";
+
+    fn typed(text: &str, prompted_at: &str) -> String {
+        format!(
+            "{}\n",
+            json!({
+                "type": "user",
+                "timestamp": prompted_at,
+                "promptSource": "typed",
+                "message": { "content": text },
+            })
+        )
+    }
+
+    /// One tool call, as its own assistant record.
+    fn call_record(id: &str) -> Value {
+        let block = json!({ "type": "tool_use", "id": id, "name": "Bash", "input": { "command": "ls" } });
+        json!({
+            "type": "assistant",
+            "timestamp": "2026-08-14T01:30:00.000Z",
+            "message": { "content": [block] },
+        })
+    }
+
+    /// The same call made by a delegate, in the parent's file.
+    fn delegate_call(id: &str) -> String {
+        let mut record = call_record(id);
+        record["isSidechain"] = json!(true);
+        format!("{record}\n")
+    }
+
+    /// `n` of this agent's own tool calls, one record each.
+    fn calls(n: usize) -> String {
+        (0..n).map(|i| format!("{}\n", call_record(&format!("c{i}")))).collect()
+    }
+
+    fn at_ms(iso: &str) -> i64 {
+        parse_iso8601_ms(iso).expect("a fixture timestamp")
+    }
+
+    async fn since_after(file_text: &str) -> (TranscriptTail, Option<SincePrompt>) {
+        let (root, file) = projects();
+        fs::write(&file, file_text).unwrap();
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let read = tail.read_next().await;
+        let since = read.patch.since_prompt.expect("a read that parsed says what it knows");
+        drop(root);
+        (tail, since)
+    }
+
+    /// Claude Code writes its own machinery as `user` records too: a task
+    /// notification, an SDK send, the summary a compaction leaves. None of them
+    /// is the person asking, and a clock any of them restarted would say a
+    /// two-hour run had just begun.
+    #[tokio::test]
+    async fn inv11_since_prompt_system_sdk_and_compaction_prompts_do_not_reset_it() {
+        const BEFORE: usize = 3;
+        const AFTER: usize = 4;
+        let machinery = [
+            json!({ "type": "user", "timestamp": "2026-08-14T02:00:00.000Z",
+                    "promptSource": "system", "message": { "content": "<task-notification>done</task-notification>" } }),
+            json!({ "type": "user", "timestamp": "2026-08-14T02:01:00.000Z",
+                    "promptSource": "sdk", "message": { "content": "run the sweep" } }),
+            json!({ "type": "user", "timestamp": "2026-08-14T02:02:00.000Z", "origin": { "kind": "human" },
+                    "isCompactSummary": true, "message": { "content": "This session is being continued…" } }),
+            json!({ "type": "system", "subtype": "compact_boundary", "timestamp": "2026-08-14T02:03:00.000Z" }),
+        ];
+        let mut text = typed("fix the locale layout", PROMPTED_AT);
+        text.push_str(&calls(BEFORE));
+        for record in &machinery {
+            text.push_str(&format!("{record}\n"));
+        }
+        text.push_str(&calls(AFTER));
+        let (_, since) = since_after(&text).await;
+        assert_eq!(
+            since,
+            Some(SincePrompt { at: Some(at_ms(PROMPTED_AT)), calls: (BEFORE + AFTER) as u32 })
+        );
+    }
+
+    /// A delegate's work is its own, and is counted on its own node (INV-13).
+    /// Its records in the parent's file — the brief it was handed and every
+    /// call it made — neither restart the clock nor add to the count; the
+    /// call that handed the work over is this agent's own, and does.
+    #[tokio::test]
+    async fn inv11_since_prompt_delegate_events_are_excluded() {
+        const OWN: usize = 2;
+        let mut text = typed("sweep the locales", PROMPTED_AT);
+        text.push_str(&calls(OWN));
+        let mut handed_over = call_record("task");
+        handed_over["message"]["content"][0]["name"] = json!("Task");
+        text.push_str(&format!("{handed_over}\n"));
+        let brief = json!({ "type": "user", "timestamp": "2026-08-14T02:00:00.000Z", "isSidechain": true,
+                            "promptSource": "typed", "message": { "content": "sweep every locale" } });
+        text.push_str(&format!("{brief}\n"));
+        const DELEGATE_CALLS: usize = 5;
+        for i in 0..DELEGATE_CALLS {
+            text.push_str(&delegate_call(&format!("d{i}")));
+        }
+        let (_, since) = since_after(&text).await;
+        assert_eq!(since, Some(SincePrompt { at: Some(at_ms(PROMPTED_AT)), calls: (OWN + 1) as u32 }));
+    }
+
+    /// A transcript read from its first byte with no prompt in it — a session
+    /// only ever driven by the SDK — has nothing to count from. No clock, and
+    /// no count either: the card keeps the age it had.
+    #[tokio::test]
+    async fn inv11_since_prompt_a_prompt_the_tail_never_saw_gives_no_clock() {
+        let sdk = json!({ "type": "user", "timestamp": PROMPTED_AT, "promptSource": "sdk",
+                          "message": { "content": "run the sweep" } });
+        let text = format!("{sdk}\n{}", calls(3));
+        let (tail, since) = since_after(&text).await;
+        assert_eq!(since, None);
+        assert_eq!(tail.since_prompt(), None);
+    }
+
+    /// The prompt is further back than the backfill reached. The calls in what
+    /// was read are a floor, not a count, and there is no clock to show — then
+    /// the next prompt typed gives both, and the floor is gone.
+    #[tokio::test]
+    async fn inv11_since_prompt_a_partial_backfill_gives_at_least() {
+        const READ: usize = 6;
+        let (root, file) = projects();
+        let mut text = typed("start the long run", PROMPTED_AT);
+        text.push_str(&tool_output(BACKFILL_SCAN_BYTES as usize));
+        text.push_str(&calls(READ));
+        fs::write(&file, &text).unwrap();
+
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let first = tail.read_next().await;
+        assert_eq!(first.patch.since_prompt, Some(Some(SincePrompt { at: None, calls: READ as u32 })));
+
+        append(&file, calls(2).as_bytes());
+        let more = tail.read_next().await;
+        assert_eq!(more.patch.since_prompt, Some(Some(SincePrompt { at: None, calls: (READ + 2) as u32 })));
+
+        const NEXT_AT: &str = "2026-08-14T03:00:00.000Z";
+        append(&file, format!("{}{}", typed("now the docs", NEXT_AT), calls(1)).as_bytes());
+        let after = tail.read_next().await;
+        assert_eq!(after.patch.since_prompt, Some(Some(SincePrompt { at: Some(at_ms(NEXT_AT)), calls: 1 })));
     }
 }
 

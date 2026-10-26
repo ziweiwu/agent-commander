@@ -121,6 +121,18 @@ chose to run — and it is simultaneously the one thing you open this on a phone
 to do, which is why it must be grantable without also granting arbitrary
 keystrokes.
 
+**Arriving at an agent by a hop never lands on an answer.** Opening a blocked
+agent by its card puts the keyboard on its first option, because the options
+are what it was opened for and they sit where Shift+Tab cannot reach them. The
+waiting chip, the "Next" button under a spent answer and the ⌥J/⌥K/⌥H chords
+are different: they are pressed in a run, an answer then a hop then an answer,
+and a hand that has just pressed Enter on one agent's option has its next Enter
+already on the way. Landing that on the next agent's option 1 would answer a
+question nobody had read. So a hop focuses the question itself (or the card,
+where the question is not written down), and Enter there sends nothing; the
+"Next" button never navigates on its own; and a hop replaces the history entry
+rather than adding one, so it is never something a back gesture replays.
+
 The chat's optimistic echo is display-only. A pending message is drawn
 immediately so sending feels instant, but it is sent exactly once; `reconcile()`
 only ever *removes* the local copy once the transcript confirms it, and never
@@ -210,8 +222,25 @@ authority is a ref, cleared synchronously, so the second call in the batch finds
 it empty. Quick-prompt chips have no draft to clear and a double tap is two
 separate tasks, so an identical chip within a second is treated as a mis-tap.
 
+The draft itself belongs to the agent it was typed for. It was `useState` in a
+`<Chat>` that nothing keyed by agent, so half a reply to one agent sat in the
+next one's box, one Enter from reaching the wrong session; and ‹ Agents on a
+phone and ⤢ each mounted a fresh composer that started empty. The store now
+holds one draft per agent for the composer and one for the Attach tab's paste
+line, with the height each box had grown to, **in memory only** (INV-3: they
+are the user's own words, which browser storage never holds). A draft is let
+go by a send that went — never by a refused one — or by its session leaving
+the fleet; the agent on screen keeps its draft through the gap after a
+`/clear`. The ref above is still what a burst reads.
+
 - `test/ui/burst-send.test.tsx` — asserts one send from a burst of three, for
   Enter, for the Send button, and for a double-tapped chip
+- `test/ui/draft-per-agent.test.tsx` — A→B→A gives each box back its own text,
+  closing and reopening the panel and ⤢ both keep it, a send clears only the
+  draft it took, a refused send keeps it, the box height comes back with it,
+  nothing reaches browser storage, departed sessions are pruned, and the paste
+  line behaves the same; `e2e/mobile.spec.ts` holds it through ‹ Agents in a
+  real browser
 - `pane::tests` (the picture group) — a picture is pasted and then submitted by
   a second write, left alone for `PICTURE_SETTLE` in between, while ordinary
   text — a path an agent was merely told about included — is not made to wait;
@@ -253,6 +282,9 @@ separate tasks, so an identical chip within a second is treated as a mis-tap.
   past what was offered is not a keystroke to invent
 - `test/ui/answer-card.test.tsx` — the card sends the option index and the
   prompt id, and never a raw key
+- `test/ui/hop.test.tsx` — after the hand-off and after ⌥H, focus is on the
+  question and an Enter writes no `answer` frame; opening by the card still
+  lands on option 1; the hand-off does not navigate until pressed
 - `test/chat.test.ts` — a repeated message stays visible until the transcript
   records *another* copy of it
 
@@ -363,6 +395,18 @@ than an attacker.
   verbatim on npm, and no agent's directory, prompts or output passes through
   them. The same-origin check applies to them in full either way, because it
   applies to everything.
+
+  **The same prefix is the only thing ever served compressed.** The build
+  writes a brotli and a gzip copy beside each compiled script and stylesheet,
+  and `serve_asset` hands one out when the request's `Accept-Encoding` allows
+  it. Nothing else is compressed — not the document, not the API, not the
+  socket — because BREACH recovers a secret from how well a response
+  compresses when that secret shares the response with text an attacker can
+  influence, and the token, the session cookie and every agent's conversation
+  travel on exactly those. The bundle holds none of them, so its compressed
+  length gives nothing away. A compression layer added to the whole router
+  would undo this without failing anything else, which is what the second
+  test below is for.
 - *The address bar, which the token no longer touches.* It arrives once, as
   `?token=…` on the URL the user opened; `cookie_exchange` trades it for an
   `HttpOnly; SameSite=Strict` cookie and redirects to the same path without it.
@@ -397,6 +441,12 @@ than an attacker.
   (`options::inv3_trust_tailnet_serves_without_a_token_on_loopback_only`),
   and the bundle is exempt from the token while the document, the fleet and the
   socket are not
+- `routes::inv3_a_compressed_copy_is_served_only_to_a_client_that_accepts_it`
+  and `routes::inv3_nothing_outside_the_bundle_is_ever_served_compressed` — a
+  compressed copy goes only to a request that offered to read it, and nothing
+  outside `/assets/` is compressed even beside a copy on disk and a request
+  asking for one; `e2e/asset-cache.spec.ts` checks the real build's names and
+  copies from a real browser
 - `test/ui/token.test.tsx` — the page puts no token on any request and none in
   the address bar, even when it was loaded from a URL carrying one
 
@@ -487,7 +537,11 @@ where they can drift without making this file wrong.
 - **The focused transcript is pushed by its own writes.** A turn reaches the
   focused tab when the file is written, not at the next tick, and a file
   streamed to many times a second is read at most every 150ms; the tick stays
-  for the pane's prompt, which nothing on disk announces.
+  for the pane's prompt, which nothing on disk announces. A write wakes the
+  same read the tick makes, so it carries what the tick's did — the events,
+  the prompt, each call's outcome, and a reset when the file is replaced — and
+  it never wakes the read of what a tool call returned, which stays one read
+  per tap (below).
 - **The quota cache is `stat`-ed before it is read**, and `fs.watch` sits on top
   as a low-latency path rather than as the guarantee: on macOS it silently drops
   writes landing within a few ms of the watch being registered, which is
@@ -577,6 +631,9 @@ restarted in between.
   is the only thing that schedules a reconnect; a socket whose server never
   beat is left alone however quiet it goes; a socket replaced while it was
   dying does not take its successor down with it
+- `test/ui/connect-retry.test.tsx` — the reconnect chain survives a
+  constructor that throws, and a `connect()` made while a retry waits cancels
+  it, so one socket is live rather than two
 - `enrich::inv4_stops_tailing_while_no_browser_is_connected` — the enricher idles while no browser is connected, runs
   a pass the moment one arrives, and paces itself by the work rather than by a
   wall clock
@@ -706,6 +763,25 @@ and the first reading's start time stands while it is.
   paging, the untouched diff, the dead pane, and the grant
 - `pane::a_window_past_the_end_of_history_is_cut_to_what_is_there` — the cut,
   against tmux's clamping
+
+*What a tool call returned* is read on the same terms: one `toolResult`
+request per tap, answered only for a tab focused on that session, never
+polled. The read is a tail of its own that scans back from the end of the
+transcript at most `RESULT_SCAN_BYTES` (8 MiB — an edit's record carries the
+whole file it edited, so a few edits to a large file are megabytes) and sends
+at most `RESULT_CAP_BYTES`; a call further back than that is answered as not
+found rather than read for. A miss is still answered, so the row asking is
+never left waiting.
+
+- `routes::inv4_a_tool_result_read_needs_a_focused_viewer`,
+  `routes::a_tool_result_miss_is_answered_with_nothing_and_read_may_ask` — the
+  gate, the miss, the grant and the id bound
+- `transcript::a_tool_result_read_looks_back_no_further_than_its_bound` — the
+  scan bound
+- `e2e/mobile.spec.ts` (`@phone a tool call that says what happened`) — an
+  edit wider than the phone opens in a box that scrolls inside itself, and the
+  document does not scroll sideways (INV-17)
+
 A read that fails is named on the wire, `kind: 'history-failed'`, for the
 reason `answer-refused` is: the browser holds one request at a time, and a
 latch released by any error that happens to name the agent swallowed the reply
@@ -840,7 +916,7 @@ exactly two shapes it will run. The first starts an agent:
 
 ```
 tmux new-session -d -s <generated> -c <validated dir> claude [-n <name>] \
-  [--model <alias>] [--permission-mode <mode>]
+  [--model <alias>] [--permission-mode <mode>] [-- <task>]
 ```
 
 Every value is a separate argv entry — never a shell string — and the session
@@ -851,6 +927,39 @@ anything is spawned; a missing path is refused with an error rather than
 guessed at. Model and permission mode are checked against the fixed allow-lists
 in `rust/src/types.rs` (and re-exported by `options.rs`), so an unrecognised value is refused rather than
 becoming a flag.
+
+**The first task is one free-text argv entry, after `--` and last** (F5,
+amended 2026-10-25). An agent started from a phone used to sit idle until
+someone opened it and typed, so the dialog takes a first task and the CLI gets
+it as its prompt. The name was already free text, as `-n`'s value; the task is
+one more entry of that kind, placed where it cannot be read as a flag: after
+`--`, which stops `claude`'s option parsing (measured: `-- '-n x'` arrived as
+the prompt), and last, so nothing follows it for it to modify. It is trimmed,
+and a blank one adds neither entry. `check_spawn_request` refuses three
+shapes before anything is spawned, so mock mode refuses them in the same words:
+
+- **Over `spawn::MAX_TASK` (8 KiB)**, see INV-12.
+- **A control character other than a line break** (INV-12).
+- **One bare word** of ASCII letters, digits, `-` and `_`. `--` stops option
+  parsing and does *not* stop subcommand dispatch: on Claude Code 2.1.310,
+  `claude --permission-mode default -- doctor` ran `claude doctor` and
+  exited, and the hidden `project` dispatched the same way. `claude --help`
+  leaves hidden subcommands out, and a list copied from it goes stale with
+  the next release that adds one — `purge` deletes a project's state — so the
+  shape every subcommand name has is what is refused, not a list of names.
+
+One character is rewritten rather than refused: tmux reads an argument
+*ending* in `;` as the end of a command and strips it (`a;` arrived as `a`),
+and takes `\;` as an escaped `;`. A task ending in `;` therefore gets the one
+backslash tmux takes back off, and arrives as typed; nothing else in it is
+read by tmux (`$`, `~`, `#{…}`, quotes and inner `;` all arrived as sent).
+
+The task survives the folder-trust prompt: started in a folder Claude Code had
+never trusted, `claude -- 'reply with the single word PONG'` stopped on the
+trust question, and once it was answered, answered PONG. It is sent once, with
+the click `startingRef` already guards (INV-2), and the browser keeps it only
+to quote it in the starting Chat. It is on the `claude` command line, so `ps`
+shows it while the agent runs.
 
 The second opens a **plain terminal** — a tmux session with the user's own
 shell in it and no agent at all:
@@ -919,6 +1028,19 @@ true rather than aspirational.
   for a terminal carries the Attach tab and none of the controls that type
 - `routes::tests` (the new-agent group) — what the dialog chose is what reaches the spawn,
   and an unrecognised alias is a 400 rather than a 500
+- `spawn::inv7_a_task_is_one_entry_after_the_separator` (hostile tasks: a
+  leading `-`, quotes, `;`, `$()`, a line break, tmux formats),
+  `inv7_the_task_comes_after_every_flag_and_last`,
+  `inv7_a_trailing_semicolon_reaches_claude_intact`,
+  `inv7_a_task_that_names_a_subcommand_is_refused` (every name 2.1.310's
+  `--help` lists, and the hidden ones it dispatched), and
+  `inv7_a_bad_task_is_refused_before_anything_is_spawned`
+- `routes::a_read_only_credential_cannot_start_an_agent_with_a_task` — a task
+  is the spawn power, and neither `read` nor `drive` holds it
+- `test/ui/NewAgentDialog.test.tsx` ("the first task") — sent trimmed and only
+  for an agent, never offered for a terminal, kept in the field on a refusal,
+  and sent once for a burst of submits; `e2e/control.spec.ts` — mock mode
+  refuses a one-word or oversized task and keeps it in the field
 - `test/ui/NewAgentDialog.test.tsx` — a rejected directory surfaces the server's
   reason and leaves the dialog open
 
@@ -930,6 +1052,16 @@ with work in flight — it arrives in whatever the agent is drawing and submits
 something nobody wrote — so every action that *types* refuses an agent whose
 status is `busy`. Idle and waiting are allowed: a waiting agent is precisely
 the one you may want to redirect.
+
+A session whose turn has ended with a background Bash command still running is
+`busy` too (Claude Code writes `shell`). The command finishing hands the agent a
+turn nobody typed, and text pasted into the prompt then lands on that turn
+starting. Seen live on Claude Code 2.1.302: `shell`, then `busy` within a second
+of the command exiting, then `idle` after its reply
+(`registry::a_session_with_a_background_shell_running_is_busy`). It is marked
+`backgroundShell` so the conversation offers no Escape: there is no turn for one
+to stop, and a second press opens the Rewind dialog
+(`test/ui/chat-interrupt.test.tsx`).
 
 **Two exceptions, for different reasons.**
 
@@ -1011,13 +1143,17 @@ buttons for one action, on the app's central screen. Model followed the
 others a step later, for the same reason in reverse: left alone in the row, it
 was the one control about the next turn that a phone and a full screen could
 not see. The row keeps Close, which ends the session rather than steering it —
-and **the row itself now folds behind the `⋯` at every width**, where it used to
+and **the row itself now folds behind the `⋮` at every width**, where it used to
 fold only below 900px. The old reasoning was that a desktop has room for it;
 measured, the room cost 3.9% of a 1440x900 screen for a 960x53 band holding one
 103x36 button, so 857px of it was empty. That is the same argument that turned
 the composer strip into a menu, and it was always true here too — the phone was
-just where it hurt first. INV-17 permits the fold because the `⋯` is on screen
-and named at every width. Clear and Compact
+just where it hurt first. INV-17 permits the fold because the `⋮` is on screen
+and named at every width. It is drawn `⋮` rather than the composer's `⋯`
+because the two open different things — this one holds only Close agent — and
+drawn alike they read as one menu in two places; the header's ✕ beside it is
+named "Close panel" for the same reason, since a bare "close" next to "Close
+agent" read as ending the session. Clear and Compact
 are still one *hook* (`web/hooks/useContextActions.ts`) with one caller,
 because their reasoning is a sequence rather than a widget: a `sendingRef` so
 a double click cannot discard the session the first click just created, a
@@ -1100,7 +1236,7 @@ remains the guard for everything that types.
   own hand once the server has verified the exit, rather than relying on the
   route to notice the id gone — that noticing is what now waits. Only a *different* id on a pid whose old file is
   gone counts as succession; the same id on the same pid is the reused-pid
-  ghost the presence check exists to drop, and a second file claiming a live
+  ghost the liveness check exists to drop, and a second file claiming a live
   session's pid still gets the question.
 
 - **Compact** sends `/compact` and is deliberately **not verified**, because the
@@ -1290,6 +1426,14 @@ that `gone` outranks `waiting` in the rail: a question that can be answered
 from nowhere must not wear the mark that means "you can answer this", which is
 the same reasoning that already withholds the card's Answer verb.
 
+**Every waiting mark on the card follows the rail, not the reported status.** A
+waiting card is the one tinted surface on the fleet, and its tint, its amber
+edge, its amber status words and its Answer verb are all keyed on the entry's
+`data-rail`. They were keyed on `data-status`, so a waiting agent whose pane had
+exited kept an amber stripe and amber words beside a struck red ring. Now it
+says `waiting · dialog open` in the plain colour, because that is what it
+reported, with nothing on it that invites a tap.
+
 **And the age says what it is the age of.** For an agent that reported itself
 waiting the card reads it as how long it has been blocked, not when it last
 wrote. It is the same field and the same number — for an agent that stopped to
@@ -1297,13 +1441,45 @@ ask, the last thing that happened *is* that it stopped — so nothing new is
 measured; what changes is only what the card calls it, and an agent with no
 recorded activity is given no such sentence at all.
 
+**And a working card's age counts from your prompt, not its last write.** A
+busy agent writes every few seconds, so its age read about now whether it had
+ground on one request for two hours or had just begun — the one card whose age
+said nothing. It now reads "47m since your prompt · 214 calls": when a person
+last typed a prompt, and this agent's own tool calls since, from the enricher's
+existing tail (INV-4: no new read). Three rules keep it inside what is known:
+
+- **The prompt is the one `describe` already trusts.** A task notification, an
+  SDK send and a compaction summary are machinery; a clock any of them
+  restarted would say a two-hour run had just begun.
+- **Counts only, and only its own.** A delegate's calls are its effort, counted
+  on its own node (INV-13's precedent); its records in the parent's file
+  neither restart the clock nor add to the count. What was said is never
+  carried.
+- **Absent when unknown, a floor when partial.** The tail backfills a bounded
+  window. A prompt older than that window gives no clock and "at least 214
+  calls in what was read" — a lower bound said as one. A transcript read whole
+  with no prompt in it has nothing to count from, and the card keeps the age
+  it had. The detail view's own tail starts later in the file, so it leaves
+  the figure to the enricher's rather than overwrite a clock with a floor.
+
+- `transcript::inv11_since_prompt_*` — machinery does not restart it,
+  delegates are excluded, a prompt never read gives nothing, a partial backfill
+  gives a floor that the next prompt replaces
+- `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`
+  — a count that moves on a tick where nothing else does must still broadcast
+- `test/ui/card-since-prompt.test.tsx` — busy Claude cards only, both
+  languages, the "at least" wording, the fallback, and no row added to the face
+
 - `test/status.test.ts` — what the two channels may claim, without a DOM: the
   hand refused to an inferred status, `gone` outranking `waiting`, delegation
   as a modifier rather than a fifth shape, reach independent of state, and the
   age refusing to read as time-in-state for a status this app worked out
 - `test/ui/status-rail.test.tsx` — the card drawing it, the rail staying
-  `aria-hidden` so the words beside it carry the meaning, and
-  `attachBlockedReason` reaching the reader rather than being invented
+  `aria-hidden` so the words beside it carry the meaning,
+  `attachBlockedReason` reaching the reader rather than being invented, and
+  every rule in `AgentCard.module.css` that paints a waiting colour keyed on
+  the rail, with a waiting agent whose pane has exited drawn with no wash, no
+  amber and no verb
 
 **An inferred status may never be `waiting`.** An agent blocked on a permission
 prompt and an agent that has finished both sit there emitting nothing; no
@@ -1380,6 +1556,51 @@ made once, not one the browser may repeat from memory.
   is not a zero
 - `test/ui/fleet-snapshot.test.tsx` — what is remembered, what is not, and
   that an empty fleet is forgotten
+
+**Amended: "new" says what this app showed, never what the reader read.** An
+idle card may carry the word *new* (F6) when its agent has done something since
+it was last opened on a tab that was on screen. The tempting words — *unread*,
+*done*, *ready* — are each a claim this app cannot back: the reader may have
+followed the whole thing in tmux, and an idle agent may have stopped for any
+reason (INV-13's quiet rule). So the claim is the narrow one, *new since opened
+in this app*, and every part of it is measured rather than guessed:
+
+- **The time is the agent's own.** The server keeps `seenThrough[session]`
+  (`seen.rs`) as the agent's `lastActivityAt` — a transcript timestamp, never
+  this machine's clock — at the last moment a tab on screen had it open. A
+  card is new when its `lastActivityAt` is past that. A terminal's activity is
+  a pane clock, so terminals are not tracked at all.
+- **On screen is the evidence, and a hidden tab is none.** A session open on a
+  tab in the background has been shown to nobody, so it does not move the
+  record. The same `visible` the push channel reads (INV-14) decides it, and
+  the record lives on the server so the laptop and the phone agree.
+- **Only an idle Claude card says it.** A busy card is still moving, so *new*
+  would be noise; a waiting card already has the hand; an inferred status is
+  not a transcript time. And it is the plain text colour, never amber: amber
+  is the hand's, and this asks nothing of the reader.
+- **A memory says nothing new.** While the socket is down no card carries the
+  mark, and nothing on this side clears one: only the server's record moves
+  it, so no mark changes until the connection is back.
+- **The conversation's divider counts a floor when that is all it has.** The
+  line *New since you last opened this · 3h ago — 2 replies, 41 tool calls*
+  sits before the first message past `seenThrough`, placed from where the
+  conversation stood when the visit began and held there. When the transcript
+  tail did not reach back that far it goes at the top and says *at least*.
+
+- `seen::tests` — a visible focus advances the record, a hidden one does not,
+  the first frame is backlog, a new transcript record after a focus is new,
+  it never moves back, and a terminal is never tracked
+- `routes::tests::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`
+  — the same over a real socket, and every tab is told
+- `test/ui/new-since.test.tsx` — the mark is on idle Claude cards only, beside
+  the age, never amber, absent while stale; the heading counts it; the divider
+  sits where the news begins, says *at least* at the top, is absent when
+  nothing is newer, holds while the record moves, and opens the view at itself
+  when the news is taller than it
+- `test/ui/new-since-visit.test.tsx` — the divider is placed from the record
+  as it stood before this tab's own focus moved it
+- `e2e/new-since.spec.ts` — a fixture that moves while its only tab is hidden
+  is marked, and opening it clears the mark
 
 ### Two more places the same rule bit
 
@@ -1582,6 +1803,54 @@ absence-of-evidence rule the Prune button was removed for.
   written and compared, and dropped in the merge between, so no card carried
   one and nothing failed
 
+**A tool call says how it ended, from the fields written to say so.** A row
+used to name what the agent *asked* for and nothing more: an edit read as a
+path, and a call auto mode refused looked exactly like one that ran. Each call
+now carries its `tool_use_id`, and when the result record is read the server
+sends a `ToolOutcome` beside the timeline's events — `ok`, `failed` or
+`refused`, who refused it, the classifier's category, and an edit's `+`/`-`
+counts from the prefixes of its recorded `structuredPatch` lines. Three rules
+keep it inside the record:
+
+- **A refusal is read from `permissionDecision` and nowhere else.** Never from
+  the words of the error: an error saying "denied" with a null or absent
+  decision is `failed`, because the words are the CLI's and can change, and
+  "refused" is a claim about who stopped the call. Who is named only where the
+  decision names them — `classifier` is auto mode, `hook` a hook, a `user*`
+  source the person — and a deny rule or a safety check is called `refused`
+  with nobody beside it rather than guessed at.
+- **A record-level field describes a record's only result.** The decision and
+  `toolUseResult` sit beside `message`, so on a record answering several calls
+  they cannot say which; none of those calls is called refused, and none gets
+  counts. On this machine's 38k result records none that answered several
+  calls carried a decision.
+- **What a call returned is a memory, and is captioned as one.** Opening a row
+  reads the record back — on a tap, for the focused tab, the history read's
+  terms (INV-4) — and shows the hunks or the output's tail, cut near 32 KB with
+  how much was left out. It reads "as recorded at 14:07 — the file may have
+  changed since", and "you changed this before it was applied" where the
+  record says `userModified`. It is held in memory and nowhere else (INV-3).
+
+The card's fold counts auto mode's refusals the way it counts `tokens`: over
+the window that was read, labelled with where that window starts — "auto mode
+refused 3 actions · last 4m ago (since 14:02)". A delegate's sidechain is its
+own conversation and is not counted. A refusal never pushes: INV-14 is
+unchanged, and this is a fact waiting to be asked about.
+
+- `transcript::reads_an_edit_s_hunk_counts`,
+  `transcript::reads_a_classifier_refusal_from_permission_decision`,
+  `transcript::reads_a_hook_refusal`,
+  `transcript::reads_a_null_decision_error_is_failed_not_refused`,
+  `transcript::a_decision_on_a_record_answering_several_calls_is_pinned_on_none`
+  — each reading from a record shaped like the ones on disk
+- `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`,
+  `transcript::an_edit_s_result_is_its_hunks_and_says_when_you_changed_it`,
+  `transcript::a_long_output_is_sent_as_its_tail_with_what_was_left_out`
+- `test/ui/message-tools.test.tsx` — the row's words, the expansion, its
+  caption, a miss said to be one, and nothing a result held written to
+  browser storage
+- `test/ui/card-usage.test.tsx` — the fold's count, age and window
+
 ## INV-12 — Input to a live agent is bounded
 
 No client can queue unbounded work into a running agent. Writes are charged
@@ -1617,6 +1886,23 @@ an agent, and a tab switching views quickly is not what this guards.
   and is reported once rather than 5,000 times; a briskly typed sentence is
   never refused; the budget refills after a burst; and an oversized frame is
   refused before it is parsed
+
+**A first task is bounded too, and tighter than a paste** (F5). It reaches the
+agent on the `tmux new-session` command line rather than through a buffer, and
+the tmux client packs that whole command into one message: measured on tmux
+3.6a, 16,364 bytes of arguments was the most it would send, and one more was
+refused with "command too long". So `spawn::MAX_TASK` is 8 KiB rather than
+`MAX_PASTE`, leaving the other half for the folder, the name and the flags,
+and the new-agent route reads a body big enough for a task at that cap after
+JSON has escaped it. A control character other than a line break is refused
+in it: a task is typed into a dialog, and the line break is the one a person
+types there.
+
+- `spawn::inv12_a_task_over_the_cap_is_refused`, counted in bytes as tmux
+  counts; `a_task_at_the_cap_still_fits_on_tmux_s_command_line`;
+  `inv12_a_task_with_a_control_character_is_refused`
+- `routes::a_first_task_at_its_cap_reaches_the_spawn_whole` — a task at the
+  cap made of characters JSON doubles still fits the request
 
 ## INV-13 — A delegation tree claims only what the sidecars say
 
@@ -1862,23 +2148,85 @@ to a channel that reaches a phone on its own — an ntfy topic or a Telegram bot
 `--notify-link` a link to the card, so the answer still goes through the card
 and its pane check (INV-2, INV-16): nothing is answered from a lock screen.
 
-The four rules above bind it word for word. The first fleet the server sees is
-backlog; a standing block never re-fires; unblocked-then-blocked is news; and
-**a visible tab is the notification** — the client says on every heartbeat and
-on every `visibilitychange` whether it is on screen, and while any browser is,
-the transition is consumed and nothing is pushed, the way Claude Code's own
-Remote Control holds its pushes while you are at the terminal. An inferred
-status never fires, checked here a second time. A push that fails is logged
-and not retried: the next transition sends its own.
+**What a push may say is narrower than what the card says.** The card leads a
+name Claude Code made up (`ziweiwu-35`) with the conversation's title, its
+description or its last prompt, and a push titled with the raw name named a
+session nobody had seen on screen. The push cannot borrow the card's choice:
+it leaves the machine for ntfy.sh or Telegram, and all three are conversation
+(INV-3). So a derived name goes out as `folder · branch` — both on the card's
+face and on `prefs.ts`'s list of what is not conversation — and a name
+somebody chose goes out as it is. The browser's own notification and the
+screen-reader live region stay on the device, so they use the card's name
+(`displayName`). The body is English unless the server is started with
+`--notify-lang zh`; a server flag, because the browser's language is a
+preference and preferences never reach the server (FR-UI-12).
+
+The four rules above bind it word for word, but for the last. The first fleet
+the server sees is backlog; a standing block never re-fires;
+unblocked-then-blocked is news; and **a tab somebody is at is the
+notification** — while one is, the transition is consumed and nothing is
+pushed, the way Claude Code's own Remote Control holds its pushes while you are
+at the terminal. An inferred status never fires, checked here a second time. A
+push that fails is logged and not retried: the next transition sends its own.
+
+**Amended again: on screen is not the same as somebody there.** The rule used
+to be "a visible tab is the notification", with visibility the only signal: the
+client says on every heartbeat and every `visibilitychange` whether it is on
+screen. A desk tab left on screen when its owner walked away therefore
+silenced every push to the phone in their pocket — the one device the push
+exists for. So for the push, a tab counts as somebody being there only while it
+is visible **and** has felt a pointer, a key or a touch within
+`PRESENCE_WINDOW` (three minutes, `presence.rs`). The client reports that input
+as a `present` message on `pointerdown`, `keydown` and `touchstart`, at most
+once per `PRESENCE_REPORT_MS` (30 seconds) and never on a timer (INV-4); the
+server keeps `last_input_at` per tab. A hidden tab never counts, however
+recently it was used. A visible tab nobody has touched lately does not hold a
+push back, so the mistake this rule makes is a duplicate — the phone buzzes
+beside a screen already showing the block — and never a missed alert. The one
+miss it still allows is bounded by the window: a block that begins within three
+minutes of the last touch is taken as seen. The browser's own notification is
+per-device and unchanged: it still stands down while its own tab is visible.
 
 - `push::tests` — the first frame is backlog; a watched transition fires once,
-  and again only after it clears; a visible tab consumes it; an inferred
+  and again only after it clears; a tab somebody is at consumes it; an inferred
   status never fires; a push without an address carries no link; the channel
   spec is parsed and refused in words; an ntfy push is one outbound POST with
-  the documented headers, against a local server
-- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`
+  the documented headers, against a local server; a derived name is pushed as
+  its folder and branch (`a_derived_name_is_pushed_as_its_folder_and_branch`);
+  seeded title, description, prompt and activity strings reach no push in
+  either language (`inv3_no_conversation_text_reaches_a_push`); and
+  `--notify-lang zh` writes the body in Chinese
+- `options::a_push_link_has_to_be_a_url_and_needs_a_channel`,
+  `options::a_push_language_is_en_or_zh_and_needs_a_channel`
+- `test/ui/notify.test.tsx` — the notification is titled with `displayName`,
+  and the live region names agents the same way
+- `presence::tests` — a visible tab nobody has used is nobody; one used just
+  now is somebody; a hidden tab never is; input older than `PRESENCE_WINDOW`
+  lapses; one attended tab among idle ones is enough, and a closed one counts
+  for nothing
+- `routes::tests::inv14_*` — over a real socket: a tab that only says it is
+  visible no longer holds a push back, one that also reports input does, and a
+  hidden one never does
 - `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
-  connect, on every beat, and the moment that changes
+  connect, on every beat, and the moment that changes; it reports a pointer, a
+  key or a touch at most once per `PRESENCE_REPORT_MS`, never on a timer or for
+  any other event, and at once on a new socket
+
+**Amended: the backlog rule also governs "new since opened in this app".**
+The card's *new* (F6, INV-11) is a transition too — the agent moved past what
+this app last showed — and it fails the same way a notification does if a
+fresh start counts as one. So it takes the first rule word for word: the first
+frame that carries a session's transcript time seeds `seenThrough` as backlog,
+and a fresh server shows no marks. The record is in memory only, so a restart
+is that fresh start. "Carries its transcript time" matters: the enricher idles
+until somebody connects (INV-4), and before its first read a session has no
+`lastActivityAt`; seeding from nothing would have marked every card the moment
+that read landed. A session that leaves the fleet is forgotten and is backlog
+again if it returns. The cost is the mirror of the push's: an agent's very
+first activity, seen before any record of it existed, is never marked.
+
+- `seen::tests::inv14_the_first_frame_is_backlog_so_a_fresh_server_shows_no_marks`,
+  `seen::tests::inv14_a_session_is_seeded_by_its_first_transcript_time_not_before`
 
 ## INV-15 — A silent family is a question, never a verdict
 
@@ -2277,7 +2625,11 @@ lines and about half open with a `cd`, so a first-line card was approving a
 directory change — and says when the call asks to leave the sandbox
 (`sandbox_off`, 178 calls that went unmarked). `summarize_tool` also reads
 `url`, `query`, `function`, `key` and `text`, which is what 10.4% of tool calls
-carried while the generic arm looked only for a description or a path.
+carried while the generic arm looked only for a description or a path. The
+fact comes first: the command is drawn above the agent's description of it, at
+the body size in `--font-mono` — it was below it, at 11px in the browser's own
+Courier, because its `<pre>` named no family. `test/pre-font.test.ts` fails any
+`<pre>` whose class sets none; `test/ui/answer-card.test.tsx` holds the order.
 
 - `transcript::prompt_tests` (the set group) — every question travels with its
   own `multiSelect`; the pane picks the question; the review page reads as a
@@ -2300,10 +2652,11 @@ carried while the generic arm looked only for a description or a path.
   Chat tab against the mock server, ticks, `→` and `Submit answers` included
 
 **The terminal has two verbs, and they are two controls rather than a mode.**
-The paste line stages text at the prompt without running it, which is what
-lets a reader see what actually landed before it executes — on a phone, typing
-into somebody's live shell, that is the whole point of the field existing.
-`Run` is the other verb: the same `paste` with `submit`, which the server
+`Stage` puts the paste line's text at the prompt without running it, which is
+what lets a reader see what actually landed before it executes. Plain Enter in
+the box used to be Stage; the owner asked for Enter to run, so it is now `Run`
+(and Cmd/Ctrl+Enter still is), and Stage is a button only, which keeps the one
+press from meaning two things. `Run` is the same `paste` with `submit`, which the server
 stages through a file and appends the newline to itself, so a multi-line
 script arrives as one write rather than as a race between its lines and its
 Enter. Both are explicit presses, so INV-2 is untouched; what is refused is a
@@ -2314,9 +2667,14 @@ Verified against a real `bash` pane rather than only a fixture: `Run` executed
 a one-liner and a three-line `for` loop as a block, and `Send` left its text at
 the prompt with the file it would have written absent from disk.
 
-- `test/ui/term-paste.test.tsx` — Run runs and Send stages, a multi-line script
-  keeps its newlines, a double press runs once (INV-2), and neither verb is
-  offered once the pane has exited
+- `test/ui/term-paste.test.tsx` — Run and Enter run, Stage stages, a multi-line
+  script keeps its newlines, a repeated Enter or double press runs once
+  (INV-2), Shift+Enter is a newline, an IME's Enter runs nothing, and neither
+  verb is offered once the pane has exited
+- `test/ui/term-tap.test.tsx` — a tap on the capture focuses the composer box on
+  a touch screen only, never on mount, never for an exited pane
+- `e2e/term-paste.spec.ts` — the same against a real server, plus a touch-emulated
+  tap whose typed line runs on Enter, exactly once
 
 ## INV-17 — Every shape is the whole app
 
@@ -2409,12 +2767,20 @@ synchronously, because two presses in one React batch would otherwise each read
 the same uncleared line and send it twice.
 
 **The disclosures are part of the contract, not an implementation detail.**
-The agent's settings row folds behind `⋯` in the tab strip, the fleet's filters
+The agent's settings row folds behind `⋮` in the tab strip, the fleet's filters
 are hidden while the sheet covers the list they filter, and the fleet column
 itself can be collapsed away behind a named toggle in the topbar. All three are
-allowed *because* something reaches them: the `⋯` is on screen and named, leaving
+allowed *because* something reaches them: the `⋮` is on screen and named, leaving
 the sheet brings the filters back, and the toggle stays drawn while the column is
 gone. An action with nothing to reach it is not folded away, it is missing.
+
+**The waiting group goes off screen with the list, and a chip takes its
+place.** In the sheet, with the column collapsed and in full screen, "✋ 2 ›"
+counts the other agents that need you and opens the next one — in the topbar
+slot the filters leave, or full screen's own header — and the ⌥J/⌥K/⌥H chords
+work in all of them. Three shapes had lost the one fact this app exists to
+show; `test/ui/one-place.test.tsx` holds the chip to exactly one copy in each
+shape and none beside the list.
 
 The settings row used to fold only below 900px, on the stated grounds that a
 desktop has room for it. It folds at every width now — see INV-8 for the
@@ -2458,7 +2824,7 @@ knowing the padding it had changed and not the four stacked bands it had not.
 
 What the bar bought, and what it cost, both belong here. It bought: the fleet
 column down from a 430px track to a 288px preference that collapses away, the
-settings row folded behind its `⋯` at every width, the status facts moved into
+settings row folded behind its `⋮` at every width, the status facts moved into
 the header's own row on a desktop, the 46px the hover timestamps were renting
 handed back, and the filters following the list they filter. It cost nothing
 that says anything — every trim is whitespace, and the two things that looked
@@ -2530,10 +2896,22 @@ anything laid out from it.
   desktop, tablet and phone on Chromium and phone and tablet again on WebKit,
   plus a landscape phone driven by resizing. Also asserts no layout scrolls
   sideways, including the empty state with a 300-character query in it, and
-  that every visible control is hittable and named
+  that every visible control is hittable and named — at the project's own size
+  and again on a 320px phone. Hittable includes not cut off: `checkVisibility()`
+  is true for a control an `overflow: hidden` ancestor has clipped, which is how
+  ⤢ sat past the 320px sheet's edge with this sweep green, so the control's
+  centre has to lie inside every box that clips it
+- `e2e/mobile.spec.ts` — the sheet's header at 320, 375, 390 and 430px, for an
+  idle agent and a blocked one: every header control inside the sheet, and at
+  least 60px of the agent's name (FR-DET-2)
+- `e2e/header.spec.ts` — the desktop panel's header at 901, 1024 and 1180px
+  with the fleet column open, for the six fullest fixtures: at least 96px of
+  the agent's name, and every header control inside every box that clips it
+  (FR-DET-2)
 - `npm run audit:a11y` — WCAG 2.2 AA at five profiles (desktop, tablet both
   ways, phone both ways) in both themes, which is where contrast and naming
-  are judged; `npm run audit:mobile` carries the 16px input rule
+  are judged; `npm run audit:mobile` carries the 16px input rule and FR-UI-2's
+  44px tap floor, on the phone's fleet before an agent is opened as well as after
 
 ## INV-18 — A link goes where the text says, and nowhere else
 

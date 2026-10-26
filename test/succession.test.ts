@@ -7,7 +7,7 @@
  * stranger, and a placeholder has no process to follow.
  */
 import { describe, expect, it } from 'vitest'
-import { successorOf } from '../src/web/lib/succession.ts'
+import { claimantOf, placeholderId, successorOf } from '../src/web/lib/succession.ts'
 import { agent } from './helpers/agent.ts'
 
 const PID = 4421
@@ -41,5 +41,27 @@ describe('successorOf', () => {
   it('has nothing to follow from a placeholder', () => {
     const placeholder = { sessionId: 'pending-x', pid: 0, paneId: '%7' }
     expect(successorOf(placeholder, [agent({ sessionId: 'real', pid: 0, paneId: '%7' })])).toBeNull()
+  })
+})
+
+/**
+ * A just-started session has no process to follow, so the thread is the tmux
+ * session the server started it in — the same key `pending.rs` drops the
+ * placeholder by.
+ */
+describe('claimantOf', () => {
+  const id = placeholderId('claude-1-thing')
+  const real = agent({ sessionId: 'real', pid: 9, tmuxSession: 'claude-1-thing' })
+
+  it('finds the session that registered in the placeholder’s tmux session', () => {
+    expect(claimantOf(id, [agent({ sessionId: 'x', tmuxSession: 'other' }), real])).toBe(real)
+  })
+
+  it('never names the placeholder itself', () => {
+    expect(claimantOf(id, [agent({ sessionId: id, pid: 0, tmuxSession: 'claude-1-thing' })])).toBeNull()
+  })
+
+  it('follows nothing for an id that is not a placeholder', () => {
+    expect(claimantOf('real', [real])).toBeNull()
   })
 })

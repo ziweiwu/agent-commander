@@ -16,6 +16,7 @@
  */
 import type { Agent } from '../../shared/types.ts'
 import { translate, type Lang } from './i18n.ts'
+import { displayName } from './naming.ts'
 
 /**
  * `null` until the first frame has been seen: everything in that frame is
@@ -70,7 +71,26 @@ export function shouldNudge(fresh: Agent[], env: NudgeEnv): boolean {
   return fresh.length > 0 && !env.enabled && !env.dismissed && env.supported
 }
 
-/** Notify for every watched transition, and say which agents those were. */
+/**
+ * What the screen-reader live region says about agents that just became
+ * blocked: how many, and each by the name its card leads with. It is read
+ * aloud on this device and goes nowhere else, so it may use the card's name
+ * even where that comes from the conversation — the push the server sends
+ * cannot (`push.rs`).
+ */
+export function blockedAnnouncement(fresh: Agent[]): string {
+  return `${fresh.length}: ${fresh.map(displayName).join(', ')}`
+}
+
+/**
+ * Notify for every watched transition, and say which agents those were.
+ *
+ * Titled with the name the card leads with (`displayName`), not the session's
+ * own: Claude Code names an unnamed session after its folder and two hex
+ * digits, so three alerts read "ziweiwu-35", "ziweiwu-ee", "ziweiwu-4a" over
+ * cards that said something else. A notification stays on this device, so the
+ * card's choice is safe to show here.
+ */
 export function notifyBlocked(agents: Agent[], env: NotifyEnv): Agent[] {
   const fresh = freshlyBlocked(agents)
   if (fresh.length === 0 || !env.enabled) return fresh
@@ -85,7 +105,7 @@ export function notifyBlocked(agents: Agent[], env: NotifyEnv): Agent[] {
       const body = agent.waitingFor
         ? translate(env.lang, 'notifyBody', { reason: agent.waitingFor })
         : translate(env.lang, 'notifyBodyPlain')
-      const note = new Notification(agent.name, {
+      const note = new Notification(displayName(agent), {
         body,
         // One notification per agent: a re-fire for the same session replaces
         // rather than stacks, so a flapping agent cannot fill the tray.

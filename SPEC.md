@@ -106,7 +106,11 @@ app; every field is read from something else's record.
 
 - **FR-STATUS-1** — Status MUST be one of `busy`, `waiting`, `idle`, `unknown`,
   and `unknown` MUST be the default for an unset or unrecognised value: an
-  absent status is not a claim. *`types.rs::AgentStatus`.*
+  absent status is not a claim. Claude Code's `shell` (its turn is over, a
+  background Bash command is still running) MUST read as `busy`, as `claude
+  agents --json` reports it, marked `backgroundShell` (FR-CHAT-9).
+  *`types.rs::AgentStatus`,
+  `registry::a_session_with_a_background_shell_running_is_busy`.*
 - **FR-STATUS-2** — `waitingFor` MUST only be present when status is `waiting`,
   and MUST come from the closed set the CLI writes: `dialog open`, `permission
   prompt`, `input needed`, `sandbox request`, `goal proposal`, `worker request`.
@@ -173,7 +177,9 @@ the default for an unrecognised kind is deny.
   *`test/ui/SortControl.test.tsx`.*
 - **FR-FLEET-5** — An agent with no value for the active sort key MUST sort last
   in **both** directions. Unknown is not a claim that it is the smallest.
-  **(INV-11)** *`test/fleet-ui.test.ts`.*
+  **(INV-11)** `recent` reads a session's last activity, or its start when it
+  has done nothing since, so a session opened a moment ago is the newest rather
+  than unknown. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-6** — The search box MUST filter on name, folder, branch, activity
   and status, and MUST narrow the same list the status chips and sort do.
 - **FR-FLEET-7** — The active status filter, sort key and sort direction MUST
@@ -237,7 +243,18 @@ the default for an unrecognised kind is deny.
   What decides whether they fit is the agent's *name*, which no breakpoint
   knows, so the wrap MUST be a `flex-wrap` rather than a media query, and the
   name is what elides. Full screen MUST be drawn once rather than once per
-  layout. *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`.*
+  layout. On the phone sheet the header's actions come before the tabs, so it
+  is the tabs that drop and ⤢ stays inside the sheet; a `nowrap` there once
+  held everything to one row, which put ⤢ past a 320px sheet's clipped edge and
+  gave the name about 0px up to 390. The name MUST keep at least 60px.
+  On the desktop panel the name MUST keep twelve characters: when they, the
+  status, the tabs and the actions do not fit, the tabs and the actions drop to
+  a second row together. Holding that header to one row by shrinking left the
+  name 0-36px at 901px and 20px at 1180px with the fleet column open. The
+  folder and the facts take only what the row leaves, so they never cause the
+  wrap themselves.
+  *`test/ui/one-place.test.tsx`, `e2e/responsive.spec.ts`, `e2e/mobile.spec.ts`,
+  `e2e/header.spec.ts`.*
 - **FR-DET-1** — The line under the agent's tabs MUST carry only what it can
   actually say, and MUST NOT be drawn when that is nothing. A mode reading of
   "not reported yet" is the ordinary state, because Claude Code writes the
@@ -267,6 +284,56 @@ the default for an unrecognised kind is deny.
   *`describe::inv11_only_a_person_describes_a_session`,
   `transcript::inv11_the_description_follows_the_work_while_the_title_stays_put`,
   `test/ui/card-description.test.tsx`.*
+- **FR-CARD-8** — The fold's disclosure MUST be a column beside the card, as
+  tall as it, named in words (*Details* / *详情*) and carrying `aria-expanded`;
+  it was a strip under every card, the same word fourteen times, and its labels
+  sat at four heights across one row of cards. A **waiting** card that can be
+  reached MUST be the one tinted surface on the fleet (`--wash-waiting`, solved
+  per palette), and every waiting mark on a card — that tint, its coloured
+  edge, the amber status words, the Answer verb — MUST follow the rail, never
+  the reported status, so a waiting agent whose pane has exited carries none
+  of them. Idle and working cards carry no coloured edge. **(INV-11)**
+  *`test/ui/card-diet.test.tsx`, `test/ui/status-rail.test.tsx`.*
+- **FR-CARD-9** — A **busy Claude** card's age MUST count from the last prompt
+  a person typed, not from the last write, and MUST say so with the agent's
+  own tool calls since: "47m since your prompt · 214 calls". A working agent
+  writes every few seconds, so the old age read about now for two hours on one
+  request as for a request just begun. The prompt is the one FR-CARD-7 already
+  trusts (`describe::is_typed_by_a_person`): system, SDK and compaction
+  prompts MUST NOT restart it, and a delegate's calls MUST NOT be counted —
+  they are its own effort, on its own node **(INV-13)**. A prompt older than
+  the transcript tail's backfill MUST give no clock and a floor, "at least 214
+  calls in what was read"; a transcript read whole with no prompt in it MUST
+  give the old age. Counts only, never what was said. The figures ride the
+  enricher's existing tail and add no read **(INV-4)**. Where the top line is
+  too narrow for the sentence beside the name it MUST shorten to "47m · 214
+  calls" or "≥214 calls" rather than add a row to the face. **(INV-11)**
+  *`transcript::inv11_since_prompt_*`,
+  `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
+  `test/ui/card-since-prompt.test.tsx`.*
+- **FR-CARD-10** — An idle Claude agent's card MUST say **new** (新) beside its
+  age when the agent's `lastActivityAt` is past `seenThrough`, the server's
+  in-memory record of the agent's own transcript time at the last moment a tab
+  that was on screen had it open, and the Idle heading MUST count those cards
+  (`Idle 7 · 2 new`). The record MUST live on the server, so opening an agent
+  on the laptop clears the mark on the phone; a hidden tab MUST NOT move it;
+  and the first frame carrying a session's transcript time MUST seed it as
+  backlog, so a fresh server shows no marks. Busy, waiting, inferred and
+  terminal cards, and every card while the fleet is stale, MUST carry no mark,
+  and it MUST be drawn in `--text` or `--dim`, never amber. The wording MUST be
+  "new since opened in this app", never "unread", "done" or "ready": the
+  reader may have followed the agent in tmux, and all this app knows is what
+  it showed. **(INV-11, INV-14)** *`seen::tests`,
+  `routes::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`,
+  `test/ui/new-since.test.tsx`, `e2e/new-since.spec.ts`.*
+- **FR-CARD-11** — The fold MUST count the tool calls auto mode refused, over
+  the window of the transcript that was read, with the age of the newest and
+  where that window starts: "auto mode refused 3 actions · last 4m ago (since
+  14:02)". The same caveat `tokens` carries, for the same reason — a backfill
+  that starts part-way through a session cannot count all of it. A refusal
+  MUST NOT push (INV-14). **(INV-11)**
+  *`test/ui/card-usage.test.tsx`,
+  `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
 
 ### 3.3 Delegates
 
@@ -321,6 +388,26 @@ over the list with a back control; on a wide one, a second column.
   its own case the generic reading finds no description, path, pattern or
   command and the row reads as the bare word "Skill".
   *`transcript::names_the_skill_a_skill_call_ran`.*
+- **FR-CHAT-16** — A tool call MUST say how it ended, in words, in the third
+  column of its row: `+12 −3` for an edit, counted from the `+` and `-` that
+  open its recorded hunk lines; `refused · auto mode · <category in words>`;
+  or `failed`. The danger hue MAY underline the last two and MUST NOT carry
+  them alone. A refusal MUST be read from `permissionDecision` and never from
+  the words of an error, because those are the CLI's and "refused" is a claim
+  about who stopped the call; an error with no rejecting decision is `failed`.
+  A call whose result is on record MUST open on a tap to show its hunks or
+  the tail of its output, about 32 KB at most with how much was left out, in a
+  box that scrolls inside itself — on a phone the page MUST NOT scroll
+  sideways (INV-17). The box MUST be captioned as a record ("as recorded at
+  14:07 — the file may have changed since", plus "you changed this before it
+  was applied" where the record says so), MUST be read only on a tap for the
+  focused agent (INV-4), and MUST NOT be written to browser storage (INV-3).
+  **(INV-11)** *`transcript::reads_an_edit_s_hunk_counts`,
+  `transcript::reads_a_classifier_refusal_from_permission_decision`,
+  `transcript::reads_a_hook_refusal`,
+  `transcript::reads_a_null_decision_error_is_failed_not_refused`,
+  `routes::inv4_a_tool_result_read_needs_a_focused_viewer`,
+  `test/ui/message-tools.test.tsx`, `e2e/mobile.spec.ts`.*
 - **FR-CHAT-13** — A slash command the user typed MUST read as the command it
   ran. Claude Code stores one as `<command-name>` markup with the arguments
   beside it, and rendering the record verbatim put three tags on screen with
@@ -356,6 +443,10 @@ over the list with a back control; on a wide one, a second column.
   in, not the language the interface is set to. *`test/promptLang.test.ts`.*
 - **FR-CHAT-9** — While the agent is working, the conversation MUST show that it
   is, and MUST offer a way to stop it from here rather than only from Attach.
+  The one exception is an agent busy only with a background command
+  (`backgroundShell`). It still shows as working, but MUST NOT be offered the
+  stop or *Interrupt & send*: `Escape` stops a turn, not that command, and a
+  second press opens the CLI's Rewind dialog.
   *`test/ui/chat-interrupt.test.tsx`.*
 - **FR-CHAT-10** — With the connection down, the composer MUST refuse rather
   than accept text it cannot deliver, and MUST say why. **(INV-2)**
@@ -374,6 +465,24 @@ over the list with a back control; on a wide one, a second column.
   **(INV-2, INV-11)**. The button MUST be offered on exactly the condition the
   composer is — an agent with a pane — and MUST NOT grow a gate of its own.
   *`test/ui/picture.test.tsx`, `routes::a_picture_is_stored_and_its_path_comes_back_to_be_typed`.*
+- **FR-CHAT-15** — Opening an agent with something new since it was last
+  opened in this app (FR-CARD-10) MUST draw a divider, in the day separator's
+  style, before the first message past `seenThrough`, reading *New since you
+  last opened this · 3h ago — 2 replies, 41 tool calls*. It MUST be placed
+  from `seenThrough` as it stood before this visit's own focus moved it, and
+  held for the whole visit; its counts stop where the agent had got when the
+  visit began. Where the agent had got MUST come from a caught-up fleet: every
+  fleet frame carries `caughtUp`, false from the moment the server idles its
+  enricher until that enricher's first full pass after resuming, so a visit
+  begun before it follows the agent's activity until the caught-up frame, and
+  one begun on a caught-up fleet never follows — what arrives while the reader
+  is here, their own sends included, is not news. When nothing read is at or before `seenThrough` the transcript
+  tail did not reach that far, so it MUST go at the top and say *at least*.
+  When the new part is taller than the view, the chat MUST open scrolled to the
+  divider, with *Jump to latest* for the rest. Nothing newer MUST mean no
+  divider. **(INV-11)** *`test/ui/new-since.test.tsx`,
+  `test/ui/new-since-visit.test.tsx`,
+  `enrich::tests::f6_caught_up_only_after_the_first_pass_following_a_resume`.*
 
 ### 4.2 Answering a blocked agent
 
@@ -462,8 +571,14 @@ epistemic rather than functional.
   hardware keyboard to send the chord with. A hardware Shift+Tab pressed in
   the terminal MUST do the same thing and MUST NOT send plain `Tab`, which is
   a different key — autocomplete — and was what it sent. Both go through the
-  control action the server composes, never as a key (INV-8).
-  *`test/ui/term-mode.test.tsx`, `test/ui/key-map.test.tsx`.*
+  control action the server composes, never as a key (INV-8). On a touch
+  screen a **tap on the capture** MUST focus the composer box under it, so the
+  phone's keyboard opens on a visible line that Enter runs — not xterm's hidden
+  input, which sends each key unseen; nothing MUST take focus on mount there, a
+  drag that pans an overflowing capture MUST NOT count as a tap, and the tap
+  itself MUST send nothing. **(INV-2)**
+  *`test/ui/term-mode.test.tsx`, `test/ui/key-map.test.tsx`,
+  `test/ui/term-tap.test.tsx`, `e2e/term-paste.spec.ts`.*
 - **FR-ATT-9** — `Ctrl-C`, `Ctrl-D` and `Escape` MUST require a confirmation
   step, and the server MUST refuse them unless the client states the user was
   asked. **(INV-6)** *`test/ui/key-map.test.tsx`, `control::tests`.*
@@ -495,11 +610,15 @@ epistemic rather than functional.
   system — reading the clipboard for the user is refused on WebKit, and
   therefore on every browser on iOS. It MUST be a textarea rather than an
   `<input>`, which strips CR and LF and so delivered a pasted snippet as one
-  run-together command. What it sends MUST be text and MUST NOT be submitted;
-  running it is the `Enter` key beside it, which is also what lets the reader
-  see what landed — so the field MUST grow to show a pasted snippet, up to a
-  bound past which it scrolls rather than pushing the pane off a phone. It
-  MUST send exactly once however many times the press is repeated. **(INV-2, INV-17)** *`test/ui/term-paste.test.tsx`,
+  run-together command. Plain `Enter` in it (and a phone keyboard's send key)
+  MUST put the text at the prompt and run it, as the **Run** button does;
+  Shift+Enter MUST type a newline, and an IME's committing `Enter` MUST NOT
+  run anything. A separate **Stage** button MUST put the text at the prompt
+  without submitting it, so the reader can still see what landed before it
+  runs — a second button rather than a mode, because one press must not mean
+  two things. The field MUST grow to show a pasted snippet, up to a bound past
+  which it scrolls rather than pushing the pane off a phone. Either verb MUST
+  send exactly once however many times the press is repeated. **(INV-2, INV-17)** *`test/ui/term-paste.test.tsx`,
   `e2e/term-paste.spec.ts`.*
 
 ---
@@ -572,7 +691,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 - **FR-CTL-12** — Shift+Tab, Model, Goal, Compact and Clear MUST live in the
   composer's menu beside the message box, and nowhere else. The panel's control
-  row sits above the tabs, folds behind `⋯` on a phone and does not exist in
+  row sits above the tabs, folds behind `⋮` on a phone and does not exist in
   full screen — which is exactly where a conversation gets long enough to want
   compacting, and where its model is read — so the composer is the one surface
   every layout keeps; the row keeps Close, which ends the session rather than
@@ -614,8 +733,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 - **FR-SPAWN-1** — **New agent** MUST ask for a directory — typed, picked from a
   folder browser, or chosen from the directories already in use — plus an
-  optional name, model and permission mode, and MUST start the CLI there in a
-  fresh *detached* tmux session.
+  optional name, model, permission mode and first task (FR-SPAWN-7), and MUST start the CLI there in a
+  fresh *detached* tmux session. The permission mode MUST start on `auto`;
+  choosing *Default* passes no flag, so the CLI's own setting applies.
 - **FR-SPAWN-2** — The new session MUST appear in the list within a couple of
   seconds through the same discovery path as every other session — never by
   being inserted client-side. *`e2e/fleet.spec.ts`.*
@@ -627,6 +747,32 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-SPAWN-4** — On a machine that cannot spawn anything, the dialog MUST
   refuse to offer a form rather than presenting one that will fail.
   *`test/ui/NewAgentDialog.test.tsx`.*
+- **FR-SPAWN-5** — A successful start MUST open the session it started, on the
+  tab its kind has, and the panel MUST stay on it when its placeholder is
+  replaced by the registered session in the same tmux session. Focus MUST stay
+  in the opened session rather than return to **New agent**.
+  *`test/ui/terminals.test.tsx`, `test/succession.test.ts` (`claimantOf`).*
+- **FR-SPAWN-6** — A session that is starting, or is up and has never been
+  prompted, MUST say so on its Chat tab by name and folder, rather than
+  "loading" or "the server may have restarted": it keeps no transcript yet, so
+  neither of those is true. A starting session this tab gave a first task MUST
+  quote it there — "Starting in ~/x with your task: …" — so the reader knows it
+  will begin without them, behind the folder-trust question if there is one.
+  **(INV-11)** *`test/ui/chat-loading.test.tsx`.*
+- **FR-SPAWN-7** — An agent MAY be started with a **first task**, so a session
+  left to work from a phone does not sit idle until someone opens it and types.
+  The field MUST be offered and sent for an agent only, never for a terminal,
+  where a shell would receive it as words. The task MUST reach `claude` as
+  exactly one argv entry after `--`, last on the command line, sent once with
+  the click that starts the agent and never again **(INV-2)**. The server MUST
+  refuse it before spawning when it is over `spawn::MAX_TASK` (tmux carries the
+  whole command line in one 16 KiB message), holds a control character other
+  than a line break **(INV-12)**, or is one bare word — `claude` dispatches a
+  word that names one of its subcommands as that subcommand even after `--`,
+  measured on 2.1.310, and `--help` does not list them all **(INV-7)**. A
+  refused task MUST stay in the field. *`spawn::inv7_a_task_*`,
+  `spawn::inv12_a_task_*`, `routes::a_read_only_credential_cannot_start_an_agent_with_a_task`,
+  `test/ui/NewAgentDialog.test.tsx`, `e2e/control.spec.ts`.*
 
 ### 6.1a Opening a plain terminal
 
@@ -648,10 +794,12 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Shift+Tab. This follows from the capability table rather than from a check
   written a second time. **(INV-7)** *`test/ui/terminals.test.tsx`,
   `e2e/fleet.spec.ts`.*
-- **FR-TERM-4** — Terminals MUST be out of the fleet's scope by default, and the
-  chip that admits them MUST be visible whenever there is one to admit, so a
-  hidden session is a filter the user can see rather than a fleet with a hole in
-  it. The choice MUST survive a reload, like the status filter and the sort.
+- **FR-TERM-4** — Terminals MUST be out of the fleet's scope by default. The
+  scope control — Claude, terminals alone, or both, each with its count — MUST
+  be visible whenever there is a terminal to admit or terminals alone are
+  showing, so a hidden session is a filter the user can see rather than a fleet
+  with a hole in it. The choice MUST survive a reload, like the status filter
+  and the sort.
   **(INV-11)** *`test/fleet-ui.test.ts`, `e2e/fleet.spec.ts`.*
 
 ### 6.2 The folder browser
@@ -682,6 +830,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   **(INV-11)**
 - **FR-PRUNE-5** — The control MUST be unavailable while the fleet view is not
   live: a card from a dropped connection is a memory, not a reading. **(INV-11)**
+- **FR-PRUNE-6** — On a phone the control MUST sit at the foot of the Idle
+  group, under the sessions it closes, rather than in a full-width row above
+  Needs you; with no Idle group on screen it MUST stay in the toolbar, so a
+  filter never takes it off the phone. **(INV-17)** *`test/ui/prune.test.tsx`.*
 
 ---
 
@@ -735,7 +887,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 | Grant | Covers |
 |---|---|
-| `read` | the fleet, transcripts, frames, `/api/env` |
+| `read` | the fleet, transcripts (a tool call's recorded result among them), frames, `/api/env` |
 | `respond` | answering the question an agent is blocked on |
 | `drive` | pastes, keystrokes, mode, model, compact, clear, close |
 | `spawn` | starting new agents, and the folder picker |
@@ -810,8 +962,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-NOTIFY-3** — A standing block MUST NOT re-fire; an agent that unblocks and
   blocks again is news again. A flapping agent MUST replace its own notification
   rather than stack copies. **(INV-14)**
-- **FR-NOTIFY-4** — A visible tab MUST NOT notify: the waiting group at the top
-  of the screen is already the notification. **(INV-14)**
+- **FR-NOTIFY-4** — A visible tab MUST NOT notify: what is on screen is already
+  the notification. That is the waiting group at the top of the list where the
+  list is shown, and the waiting chip (FR-NOTIFY-10) where an open agent has
+  taken the list off the screen — the phone's sheet, a collapsed column, full
+  screen. The premise used to be the group alone, which was false in exactly
+  those three shapes: nothing on screen said another agent was blocked.
+  **(INV-14)**
 - **FR-NOTIFY-5** — Notifications MUST be off by default, and enabling them MUST
   be the gesture that carries the browser's own permission prompt. Turning the
   preference on MUST start from "now" rather than replaying everything already
@@ -827,6 +984,41 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   Notification API MUST get a disabled toggle that says so rather than one that
   silently does nothing. **(INV-11, INV-14)** *`test/ui/notify.test.tsx`.*
 - **FR-NOTIFY-7** — Clicking a notification MUST open that agent.
+- **FR-NOTIFY-8** — A notification and the live region MUST name an agent by
+  the name its card leads with. A push sent off the machine (`--notify`) MUST
+  carry no conversation text: a name Claude Code derived goes out as
+  `folder · branch`, never as the session's title, description or a prompt.
+  The push body's language MUST be a server flag (`--notify-lang`), never the
+  browser's preference. **(INV-3, INV-14, FR-UI-12)** *`push::tests`,
+  `test/ui/notify.test.tsx`.*
+- **FR-NOTIFY-9** — A push MUST be held back only while some tab is on screen
+  **and** has had a pointer, key or touch within `PRESENCE_WINDOW` (three
+  minutes). A visible tab with no recent input MUST NOT hold it back, and a
+  hidden tab never does: the failure this allows is a duplicate alert, never a
+  missed one. The tab MUST report input only on `pointerdown`, `keydown` and
+  `touchstart`, at most once per `PRESENCE_REPORT_MS` (30 seconds), never on a
+  timer. Amended from "any visible tab holds every push back", because a desk
+  tab left on screen silenced the phone. FR-NOTIFY-4, the browser's own
+  notification, is per-device and unchanged. **(INV-14, INV-4)**
+  *`presence::tests`, `routes::tests::inv14_*`, `test/ui/heartbeat.test.tsx`.*
+- **FR-NOTIFY-10** — Where the list is off the screen while an agent is open, a
+  chip ("✋ 2 ›") MUST count the *other* agents that need you and open the next
+  one. It is drawn in the topbar slot the filters leave in the sheet and with
+  the column collapsed, and in full screen's header; never beside the list, and
+  never at zero. "Need you" is the hand the card draws (`lib/hop.ts`
+  `needsYou`): reported `waiting`, a pane that is still there, and not a
+  `starting up` placeholder — counted over the whole fleet, never the filtered
+  view. Next follows the list's sort and wraps round. It opens on the Chat tab
+  and replaces the history entry, so swipe-back lands on the fleet. With the
+  socket down it MUST go muted and say "as of" the last frame **(INV-11)**. Its
+  accessible name says the count, the agent it opens and how long that one has
+  waited, in both languages. After a single question is answered from the
+  card, the card MUST offer "Next: ‹name› · waiting 14m ⌥H" — the agent ⌥H
+  opens — and MUST NOT go there until pressed. Arriving by the chip, that
+  button or a chord MUST focus the question, never its first option, so an
+  Enter already on its way answers nothing **(INV-2)**.
+  *`test/fleet-ui.test.ts`, `test/ui/hop.test.tsx`, `test/ui/one-place.test.tsx`,
+  `e2e/hop.spec.ts`.*
 
 ---
 
@@ -838,6 +1030,12 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   (which crosses the breakpoint by being turned over), and a single-column phone
   sheet — and MUST survive a rotation mid-conversation without losing which agent
   is open, which tab it is on, what is half-typed, or the terminal's column count.
+  What is half-typed MUST also survive navigation, and stay with the agent it
+  was typed for: switching agents, ‹ Agents and back, and ⤢ each keep it, in
+  the composer and in the Attach tab's paste line alike. It is held in memory
+  per agent, never in browser storage **(INV-3)**, and let go only by a send
+  that went or by the agent leaving the fleet.
+  *`test/ui/draft-per-agent.test.tsx`, `e2e/mobile.spec.ts`.*
   The stylesheets MUST cut at exactly two widths, 900px and 560px, and the root
   element carries `data-layout` naming which of the three is on. Eleven
   breakpoints, each measured and each right, were more than a reader could
@@ -880,7 +1078,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   `e2e/empty.spec.ts`.*
 - **FR-UI-2** — Text inputs MUST be at least 16px so iOS does not zoom the page,
   tap targets MUST be at least 44px, and safe-area insets MUST keep content clear
-  of a notch in both orientations. *`scripts/audit-mobile.mjs`.*
+  of a notch in both orientations. The audit measures 44 in both directions, on
+  the fleet with no agent open as well as with one open: it used to take 40 by
+  32, with an agent open, and passed the fleet card's 41.5px Details toggle.
+  *`scripts/audit-mobile.mjs`.*
 - **FR-UI-3** — The conversation MUST fill a phone screen with the message box
   pinned above the home indicator.
 - **FR-UI-4** — The app MUST ship a web manifest so a phone can install it to the
@@ -912,7 +1113,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   each other. *`scripts/audit-contrast.py`, `test/scheme.test.ts`.*
 - **FR-UI-9** — Palettes MUST be generated, never hand-edited, and the generator's
   output MUST be checked byte-for-byte so a hand edit fails the suite rather than
-  surviving until the next regeneration. *`test/scheme.test.ts`.*
+  surviving until the next regeneration. Translucent washes and edges are
+  generated too (`--tint-*`, `--edge-*`): no stylesheet MAY write `color-mix(`
+  itself, and every tint MUST be measured by an `audit-contrast.py` composite
+  over the surface it is drawn on. *`test/scheme.test.ts`,
+  `test/overlays.test.ts`, `scripts/audit-contrast.py`.*
 - **FR-UI-10** — The scheme menu MUST stay open while a palette is picked, unlike
   the theme and language rows: choosing a palette means trying two or three.
   It MUST still close like every other layer: on Escape, handing focus back to
@@ -941,6 +1146,14 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Enter` / `Shift+Enter` | in the message box: send / newline |
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
+| `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
+| `⌥H` | open the agent that has needed you longest, on Chat; "Nothing needs you" when none does |
+
+  The ⌥ chords work from the message box, with the column collapsed and in full
+  screen. They match the physical key (`e.code`), because macOS Option rewrites
+  the character; they do nothing while an input method is composing, and
+  nothing inside the terminal, where every key is the agent's. `Alt` stands in
+  for `⌥` on Windows and Linux. *`test/ui/hop.test.tsx`.*
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*
@@ -1001,7 +1214,7 @@ requirements in this document look like refusals to be helpful.
 | Source | Used for |
 |---|---|
 | `~/.claude/sessions/<pid>.json` | session list, status, cwd, pane id |
-| the CLI's own `--json` listing | authoritative presence, reconciled periodically |
+| the CLI's own `--json` listing | authoritative liveness, asked only where a session file cannot settle it |
 | `~/.claude/projects/*/<sessionId>.jsonl` | the timeline, tailed by byte offset |
 | `…/<sessionId>/subagents/agent-*.meta.json` | the delegation tree |
 | `tmux capture-pane` / `send-keys` | the Attach tab, and delivering input |
@@ -1041,22 +1254,22 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, NFR-SEC-11 … 14 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
-| INV-4 — bounded polling cost | FR-ATT-12, NFR-OPS-3 |
+| INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-16, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
-| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
+| INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-SPAWN-7, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
-| INV-12 — input is bounded | NFR-SEC-15 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
-| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6 |
+| INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
-| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14 |
+| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |
 | INV-18 — a link goes where the text says | FR-CHAT-11 |
 
 ---

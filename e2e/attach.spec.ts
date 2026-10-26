@@ -108,7 +108,41 @@ test.describe('the terminal', () => {
     expect(await rendered()).toBeLessThanOrEqual(600)
   })
 
-  test('INV-6 asks before sending a key that discards work', async ({ page }) => {
+  test('settles at a size where two font steps disagree @desktop', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/\S/, {
+      timeout: 15_000,
+    })
+    /**
+     * 1186x720 with the topbar wrapped: the capture measures 5% taller from a
+     * 15px render than from a 14px one, so each font wanted the other and
+     * term-wrap flipped between 823px and 867px on every frame, for ever.
+     */
+    await page.setViewportSize({ width: 1186, height: 720 })
+    await page.waitForTimeout(600)
+    const widths = await page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const seen: number[] = []
+          const wrap = document.querySelector('[data-testid="term-wrap"]')!
+          const tick = () => {
+            seen.push(Math.round(wrap.getBoundingClientRect().width))
+            if (seen.length < 40) requestAnimationFrame(tick)
+            else resolve(seen)
+          }
+          tick()
+        }),
+    )
+    expect(new Set(widths).size, `term-wrap widths ${[...new Set(widths)]}`).toBe(1)
+  })
+
+  /**
+   * @desktop: these are hardware keys typed into the pane. On a touch screen a
+   * tap on the pane opens the composer box instead (FR-ATT-8), and the same
+   * keys come from the keybar, which asks the same question.
+   */
+  test('INV-6 asks before sending a key that discards work @desktop', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()
@@ -130,7 +164,7 @@ test.describe('the terminal', () => {
     await expect(page.getByTestId('toast')).toHaveCount(0)
   })
 
-  test('INV-6 sends it once the user has said yes', async ({ page }) => {
+  test('INV-6 sends it once the user has said yes @desktop', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()
@@ -146,7 +180,31 @@ test.describe('the terminal', () => {
     await expect(page.getByTestId('toast')).toHaveCount(0)
   })
 
-  test('Escape belongs to the agent inside the terminal', async ({ page }) => {
+  /**
+   * The touch half of the two tests above, run on every touch project (phone
+   * and tablet): a touch screen has no Ctrl key, so the keybar sends it, and
+   * it asks first exactly as a typed one does (INV-6).
+   */
+  test('INV-6 asks before the keybar sends Ctrl-C', async ({ page, hasTouch }) => {
+    test.skip(!hasTouch, 'the keybar is the touch route; desktop is covered above')
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+
+    const asked: string[] = []
+    page.on('dialog', (dialog) => {
+      asked.push(dialog.message())
+      void dialog.dismiss()
+    })
+
+    await page.getByTestId('keybar').getByRole('button', { name: 'Ctrl-C' }).tap()
+
+    await expect.poll(() => asked.length).toBe(1)
+    expect(asked[0]).toMatch(/C-c|interrupt|discard/i)
+    await expect(page.getByTestId('toast')).toHaveCount(0)
+  })
+
+  test('Escape belongs to the agent inside the terminal @desktop', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()

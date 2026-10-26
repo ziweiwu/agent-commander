@@ -135,3 +135,21 @@ describe('the help page and the machine it names', () => {
     expect(second.container.textContent).not.toMatch(/someones-laptop/)
   })
 })
+
+/**
+ * The page's copy buttons were the one label on it written as a literal, so a
+ * Chinese page offered "copy" beside every command, and announced it in English.
+ */
+describe('the copy buttons follow the interface language', () => {
+  beforeEach(resetStore)
+
+  it('say 复制 in Chinese, on the button and in its accessible name', () => {
+    useStore.setState({ lang: 'zh-CN' })
+    renderApp(<Help onClose={() => {}} />)
+
+    const copies = screen.getAllByRole('button', { name: /^复制：/ })
+    expect(copies.length).toBeGreaterThan(0)
+    expect(copies.map((button) => button.textContent)).toEqual(copies.map(() => '复制'))
+    expect(screen.queryAllByRole('button', { name: /^copy:/ })).toEqual([])
+  })
+})

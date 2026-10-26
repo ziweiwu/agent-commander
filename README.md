@@ -14,7 +14,10 @@ a laptop or from a phone.
 ## What it does
 
 - **One list of every agent**, grouped **Needs you → Working → Idle**, with the
-  folder, branch, current activity and delegates on each card. A **status rail**
+  folder, branch, current activity and delegates on each card. A working card
+  says how long since your last prompt and how many tool calls the agent has
+  made since (`47m since your prompt · 214 calls`), because its last write is
+  always about now. A **status rail**
   down the left says which is which in one column of shapes — a raised hand for
   an agent waiting on you, a turning arc for one working, a ring for idle, a
   struck ring for a session whose terminal has gone. Beside it, whether this
@@ -26,24 +29,43 @@ a laptop or from a phone.
   When an agent is waiting on something it did not write down — a trust prompt,
   a model picker — the card says so plainly and hands you its live terminal and
   the keys instead of pretending to know the question.
+- **The next one that needs you, without the list.** With an agent open on a
+  phone, with the column collapsed or in full screen, **✋ 2 ›** counts the other
+  agents waiting on you and opens the next. After an answer the card offers the
+  one that has waited longest, and ⌥J / ⌥K / ⌥H walk the fleet from the
+  keyboard — landing on the question, never on an option a stray Enter could
+  press.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
   never resizes it: it is a capture, not a second terminal. **Earlier output**
   reads back through its scrollback a page at a time, including for a pane
   whose process has exited. Under it is a line to paste into, because a capture
   is not something a phone can paste into — the paste is your OS's, so a script
   keeps its newlines. Two verbs, so the choice is yours rather than a setting's:
-  **Send** puts it at the prompt so you can see what landed, and **Run** puts it
-  there and runs it.
+  **Stage** puts it at the prompt so you can see what landed, and **Run**
+  (or plain Enter) puts it there and runs it. On a phone, tapping the capture
+  opens the keyboard and types straight into the shell.
 - **Plain terminals, not only agents.** **+ New agent** offers a **Terminal**
   as well: a tmux session running your own shell in a folder you pick. It gets
   an Attach tab and none of the controls that type Claude Code's slash commands
   at whatever is in the pane.
+- **Tool calls that say what happened.** Each call in the conversation reads
+  how it ended — `Edit src/app.ts  +12 −3`, `refused · auto mode ·
+  irreversible local destruction`, or `failed` — from the fields Claude Code
+  records for that, never from the wording of an error. Tap one to see the
+  diff or the end of its output as it was recorded; the card's fold counts
+  what auto mode refused.
 - **What a busy agent is running**, read from the process table: the tool
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.
 - **Steer a running session**: message it, switch model or permission mode,
   set a goal, compact or clear its context, or close it.
 - **Notifications** when an agent starts waiting on you, off by default.
+- **New since you last opened it here.** An idle agent that has done
+  something since it was last on screen in this app says **new** beside its
+  age, and the Idle heading counts them (`Idle 7 · 2 new`). Opening it on any
+  device clears the mark on every device, and the conversation draws a line
+  where the new part begins. It never says "unread": you may have followed it
+  in the terminal, and all the app knows is what it showed you.
 - **Works on a phone** over Tailscale, and keeps working when the network does
   not: a sleeping phone's socket is noticed and replaced rather than left
   looking live, and the conversation says it is loading rather than claiming the
@@ -112,16 +134,24 @@ agent-commander --token auto \
 ```
 
 For Telegram use `--notify telegram:<chat_id>` with the bot token in
-`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`.
-A push fires only when an agent *becomes* blocked while no browser tab is on
-screen — the open tab is the notification otherwise — and only ever goes out;
-nothing is answered from the lock screen.
+`AGENT_COMMANDER_TELEGRAM_TOKEN` or `~/.claude/agent-commander/telegram-token`,
+and add `--notify-lang zh` for a push written in Chinese. A session Claude Code
+named itself is pushed as its folder and branch (`kb-vault · main`), never as
+anything said in the conversation, since the push goes through ntfy.sh or
+Telegram.
+A push fires only when an agent *becomes* blocked while nobody is at a browser
+tab — one on screen and touched in the last three minutes is the notification
+otherwise, so a desk tab left open does not silence the phone — and only ever
+goes out; nothing is answered from the lock screen.
 
 ## Use
 
 1. Open <http://127.0.0.1:4317>. Agents that need you are at the top.
 2. Tap a card. **Chat** shows the conversation, with an answer card when the
-   agent is blocked. **Attach** shows the terminal.
+   agent is blocked. **Attach** shows the terminal. Whatever you half-type stays
+   with that agent while you look at another one or go full screen. The
+   header's **✕** closes the panel; **Close agent**, which ends the session,
+   sits alone behind the **⋮** beside it.
 3. Tables and links in a reply are rendered as such — a link is tappable
    wherever it appears, including in a tool call's argument.
 4. The **⋯** beside Send holds everything that is not typing: common replies,
@@ -133,9 +163,11 @@ nothing is answered from the lock screen.
    Pasting a screenshot into the box does the same.
 6. Press `/` to filter, `↑` `↓` to move, `Enter` to open, `Esc` to close.
 
-Start a new agent — or a plain terminal — with **+ New agent**, and prune
-sessions you opened and never used with **Prune**. Terminals are kept out of
-the fleet at rest; the **terminals** chip in the header admits them.
+Start a new agent — or a plain terminal — with **+ New agent**; it opens as
+soon as it starts and stays open while it registers. Give an agent a **first
+task** there and it starts working on it straight away. Prune sessions you opened
+and never used with **Prune**. The fleet shows Claude sessions at rest; the
+select in the header switches it to **terminals** alone, or to **both**.
 
 ## Safety
 

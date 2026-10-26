@@ -1,14 +1,20 @@
-import { memo, useState } from 'react'
+import { memo, useId, useState } from 'react'
+import type { Hunk, ToolResultView } from '../../shared/types.ts'
 import {
+  outcomeWords,
   parseBlocks,
   parseInline,
   parseLinks,
   type ChatMessage,
+  type OutcomeWords,
   type Span,
   type ToolCall,
 } from '../lib/chat.ts'
 import { clock } from '../lib/format.ts'
+import { textLang } from '../lib/promptLang.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { useStore, type ToolResultEntry } from '../store/store.ts'
+import { requestToolResult } from '../store/transport.ts'
 import styles from './Message.module.css'
 import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 
@@ -214,15 +220,16 @@ function RichText({ text }: { text: string }) {
    * thing INV-17's keyboard clause exists to prevent, reintroduced by a
    * container added for a feature most messages never use.
    */
+  const lang = textLang(text)
   if (blocks.length === 1 && blocks[0]?.kind === 'p') {
     return (
-      <div className={`${styles.text} ${styles.para}`} data-testid="message-text">
+      <div className={`${styles.text} ${styles.para}`} data-testid="message-text" lang={lang}>
         <Inline text={blocks[0].text} />
       </div>
     )
   }
   return (
-    <div className={`${styles.text} ${styles.blocks}`} data-testid="message-text">
+    <div className={`${styles.text} ${styles.blocks}`} data-testid="message-text" lang={lang}>
       {blocks.map((block, i) =>
         block.kind === 'table' ? (
           <Table key={i} block={block} />
@@ -246,31 +253,11 @@ function Tools({ message }: { message: ChatMessage }) {
   const collapsible = hidden > 1
   const shown = collapsible && !open ? tools.slice(0, VISIBLE_TOOLS) : tools
 
-  const row = (call: ToolCall) => (
-    <div
-      key={call.id}
-      className={`${styles.tool} ${call.subagent ? styles.subagent : ''}`}
-      data-testid="tool-call"
-      title={call.text ? `${call.tool}: ${call.text}` : call.tool}
-    >
-      <span className={styles.toolName}>{call.tool}</span>
-      {/*
-        * Through the inline parser, so a `WebFetch` argument — which is
-        * usually nothing but a URL — is a link here as it would be in a
-        * sentence. Same gate, same INV-18: `parseInline` is the only thing
-        * that ever produces an href, and this is not a way around it.
-        */}
-      {call.text && (
-        <span className={styles.toolArg}>
-          <Spans spans={parseLinks(call.text)} />
-        </span>
-      )}
-    </div>
-  )
-
   return (
     <div className={styles.tools}>
-      {shown.map(row)}
+      {shown.map((call) => (
+        <ToolRow key={call.id} call={call} />
+      ))}
       {collapsible && (
         <button
           type="button"
@@ -286,6 +273,177 @@ function Tools({ message }: { message: ChatMessage }) {
         </button>
       )}
     </div>
+  )
+}
+
+type Translate = ReturnType<typeof useTranslate>
+
+/** An outcome in the reader's words: `+12 −3`, `failed`, `refused · auto mode · …`. */
+function sayOutcome(words: OutcomeWords, translate: Translate): string {
+  if (words.kind === 'ok') return words.counts
+  if (words.kind === 'failed') return translate('outcomeFailed')
+  const by = {
+    autoMode: translate('refusedByAutoMode'),
+    hook: translate('refusedByHook'),
+    you: translate('refusedByYou'),
+  }
+  return [translate('outcomeRefused'), words.by && by[words.by], words.category].filter(Boolean).join(' · ')
+}
+
+/**
+ * One call: its name, what it was called on, and how it ended. A call whose
+ * result is on record opens to show it.
+ *
+ * The argument goes through the inline parser, so a `WebFetch` argument —
+ * which is usually nothing but a URL — is a link here as it would be in a
+ * sentence. Same gate, same INV-18: `parseInline` is the only thing that ever
+ * produces an href, and this is not a way around it.
+ */
+function ToolRow({ call }: { call: ToolCall }) {
+  const [open, setOpen] = useState(false)
+  const [asked, setAsked] = useState<Asked>('sent')
+  const panel = useId()
+  const toolUseId = call.outcome ? call.toolUseId : undefined
+  const toggle = () => {
+    if (!open && toolUseId) setAsked(requestToolResult(toolUseId) ? 'sent' : 'offline')
+    setOpen((was) => !was)
+  }
+  return (
+    <>
+      <div
+        className={`${styles.tool} ${call.subagent ? styles.subagent : ''}`}
+        data-testid="tool-call"
+        title={call.text ? `${call.tool}: ${call.text}` : call.tool}
+      >
+        {toolUseId ? (
+          <ToolButton call={call} shown={open ? 'open' : 'closed'} panel={panel} onToggle={toggle} />
+        ) : (
+          <span className={styles.toolName}>{call.tool}</span>
+        )}
+        {call.text && (
+          <span className={styles.toolArg}>
+            <Spans spans={parseLinks(call.text)} />
+          </span>
+        )}
+        <OutcomeCell call={call} />
+      </div>
+      {open && toolUseId && <ToolResult id={panel} tool={call.tool} toolUseId={toolUseId} asked={asked} />}
+    </>
+  )
+}
+
+/** Whether a row's result is on screen. */
+type Shown = 'open' | 'closed'
+
+/**
+ * The name of a call that can open, as the button that opens it.
+ *
+ * The button is stretched over the whole row, so a tap anywhere on a phone
+ * opens it while a link in the argument stays a link (INV-18) rather than a
+ * link inside a button, which is not a thing a page may contain.
+ */
+function ToolButton(props: { call: ToolCall; shown: Shown; panel: string; onToggle: () => void }) {
+  const t = useTranslate()
+  const open = props.shown === 'open'
+  return (
+    <button
+      type="button"
+      className={styles.toolButton}
+      data-testid="tool-expand"
+      aria-expanded={open}
+      aria-controls={open ? props.panel : undefined}
+      aria-label={`${props.call.tool} — ${t('toolResultShow')}`}
+      onClick={props.onToggle}
+    >
+      <span className={styles.toolName}>{props.call.tool}</span>
+    </button>
+  )
+}
+
+function OutcomeCell({ call }: { call: ToolCall }) {
+  const t = useTranslate()
+  const words = outcomeWords(call.outcome)
+  if (!words) return null
+  return (
+    <span className={styles.outcome} data-testid="tool-outcome" data-kind={words.kind}>
+      {sayOutcome(words, t)}
+    </span>
+  )
+}
+
+/** Whether a row's request went out, or could not for want of a socket. */
+type Asked = 'sent' | 'offline'
+
+/** What the row says while its record is not in hand. */
+function statusKey(entry: ToolResultEntry | undefined, asked: Asked) {
+  if (entry?.state === 'missing') return 'toolResultMissing'
+  return !entry && asked === 'offline' ? 'toolResultOffline' : 'toolResultReading'
+}
+
+/**
+ * What a call returned, as it was recorded — never as the file is now.
+ *
+ * It scrolls inside its own box, both ways, so a long line in a diff can never
+ * push the page sideways on a phone (INV-17), and its caption says when the
+ * record was written, because a diff read back later is a memory (INV-11).
+ */
+function ToolResult(props: { id: string; tool: string; toolUseId: string; asked: Asked }) {
+  const t = useTranslate()
+  const entry: ToolResultEntry | undefined = useStore((s) => s.toolResults[props.toolUseId])
+  const label = t('toolResultLabel', { tool: props.tool })
+  return (
+    <div id={props.id} className={styles.result} data-testid="tool-result" role="region" aria-label={label}>
+      {entry?.state === 'ready' ? (
+        <Recorded view={entry.view} label={label} />
+      ) : (
+        <p className={styles.resultCaption} data-testid="tool-result-status">
+          {t(statusKey(entry, props.asked))}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/** The bytes a reply left out, as a reader counts them. */
+function size(bytes: number): string {
+  const KIB = 1024
+  return bytes < KIB ? `${bytes} B` : `${Math.ceil(bytes / KIB)} KB`
+}
+
+function Recorded({ view, label }: { view: ToolResultView; label: string }) {
+  const t = useTranslate()
+  const time = clock(view.at)
+  const caption = [t(view.hunks ? 'toolResultEditAt' : 'toolResultAt', { time })]
+  if (view.userModified) caption.push(t('toolResultUserModified'))
+  const more = view.omitted > 0 ? size(view.omitted) : null
+  return (
+    <>
+      <p className={styles.resultCaption} data-testid="tool-result-caption">
+        {caption.join(' · ')}
+      </p>
+      {more && !view.hunks && <p className={styles.resultMore}>{t('toolResultMoreBefore', { size: more })}</p>}
+      <div className={styles.resultBody} data-testid="tool-result-body" tabIndex={0} aria-label={label}>
+        <pre className={styles.resultText}>
+          {view.hunks ? view.hunks.map((hunk, i) => <HunkLines key={i} hunk={hunk} />) : view.output}
+        </pre>
+      </div>
+      {more && view.hunks && <p className={styles.resultMore}>{t('toolResultMoreAfter', { size: more })}</p>}
+    </>
+  )
+}
+
+/** One hunk under its header, each line marked by the prefix it carries. */
+function HunkLines({ hunk }: { hunk: Hunk }) {
+  const kind = (line: string) => (line.startsWith('+') ? 'add' : line.startsWith('-') ? 'del' : 'ctx')
+  return (
+    <>
+      <span className={styles.hunkHead}>{`@@ -${hunk.oldStart} +${hunk.newStart} @@\n`}</span>
+      {hunk.lines.map((line, i) => (
+        <span key={i} className={styles.hunkLine} data-line={kind(line)}>
+          {`${line}\n`}
+        </span>
+      ))}
+    </>
   )
 }
 

@@ -31,6 +31,14 @@ statusInferred?: boolean,
  */
 waitingFor?: string, 
 /**
+ * Busy only because a Bash command it started in the background is still
+ * running: its turn is over. Claude Code writes this status as `shell`.
+ *
+ * `Escape` stops a turn, not that command, so nothing offers it here. One
+ * press does nothing and a second opens the CLI's Rewind dialog.
+ */
+backgroundShell?: boolean, 
+/**
  * Which agent CLI this is — see `agent_kinds.rs`.
  *
  * Not optional, so every construction site has to say: a silent default
@@ -78,7 +86,23 @@ running?: RunningProcess,
  * denominator: `tokens` above is output only, from a capped tail, and was
  * once shown as spend (INV-11). Absent until the bridge has written.
  */
-usage?: SessionUsage, };
+usage?: SessionUsage, 
+/**
+ * The tool calls auto mode refused, counted only over the part of the
+ * transcript this app has read and labelled with where that part starts —
+ * the same bargain `tokens` makes (INV-11). Absent until one is read.
+ */
+refusals?: Refusals, 
+/**
+ * When the person last typed a prompt, and how many tool calls this
+ * agent's own transcript has made since — never a delegate's.
+ *
+ * A busy card's age counts from the last write, which for a working agent
+ * is always about now; this is what tells two hours on one request from
+ * a request that has just begun. Absent when the tail has read no prompt
+ * and read the whole file, so there is nothing to count from (INV-11).
+ */
+sincePrompt?: SincePrompt, };
 
 export type AgentStatus = "busy" | "idle" | "waiting" | "unknown";
 
@@ -97,7 +121,7 @@ unknown?: boolean, };
 
 export type ChangedRow = { row: number, text: string, };
 
-export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong", visible?: boolean | null, } | { "type": "ping" };
+export type ClientMessage = { "type": "focus", sessionId: string | null, } | { "type": "attach", sessionId: string, on: boolean, } | { "type": "paste", sessionId: string, text: string, submit: boolean, seq?: number, } | { "type": "key", sessionId: string, key: string, confirmed?: boolean, } | { "type": "answer", sessionId: string, promptId: string, choice: number, } | { "type": "history", sessionId: string, before: number, lines: number, } | { "type": "pong", visible?: boolean | null, } | { "type": "ping" } | { "type": "present" } | { "type": "toolResult", sessionId: string, toolUseId: string, };
 
 /**
  * `{ ok: true, detail? } | { ok: false, error }`
@@ -144,7 +168,27 @@ met: boolean, at: number, reason?: string,
  */
 fresh?: boolean, };
 
-export type NewAgentRequest = { cwd: string, name?: string, model?: string, permissionMode?: string, };
+/**
+ * One hunk of a recorded edit, as Claude Code's `structuredPatch` holds it.
+ */
+export type Hunk = { oldStart: number, newStart: number, 
+/**
+ * Each line keeps its ` `, `+` or `-` prefix.
+ */
+lines: Array<string>, };
+
+export type NewAgentRequest = { cwd: string, name?: string, model?: string, permissionMode?: string, 
+/**
+ * The agent's first task, typed into the dialog and sent once with the
+ * click that starts it (INV-2).
+ *
+ * It reaches `claude` as one argv entry after `--`, the last on the
+ * command line (INV-7). `spawn::check_task` refuses it before anything is
+ * spawned when it is too long for tmux to carry, holds a control
+ * character other than a line break, or is one bare word, which the CLI
+ * would run as a subcommand of its own.
+ */
+task?: string, };
 
 /**
  * `{ ok: true, tmuxSession, cwd } | { ok: false, error }`
@@ -165,6 +209,11 @@ export type NewTerminalRequest = { cwd: string, name?: string, };
  * Which compaction notice a `Notice` event is reporting.
  */
 export type NoticeKind = "compacted" | "compactedAuto";
+
+/**
+ * How a tool call ended, as its result record says.
+ */
+export type Outcome = "ok" | "failed" | "refused";
 
 /**
  * A question the agent is waiting on, read out of its own transcript.
@@ -306,6 +355,27 @@ export type RateLimits = { fiveHour?: UsageWindow, sevenDay?: UsageWindow,
 at: number, };
 
 /**
+ * Auto mode's refusals in the window of a transcript that was read.
+ *
+ * `since` is the first record of that window, so "3 refused" can never read
+ * as the session's total when the backfill started part-way through it.
+ */
+export type Refusals = { count: number, 
+/**
+ * When the newest of them was written.
+ */
+lastAt: number, 
+/**
+ * When the first record that was read was written.
+ */
+since: number, };
+
+/**
+ * Who refused a call, as `permissionDecision` names it.
+ */
+export type RefusedBy = "autoMode" | "hook" | "you";
+
+/**
  * One process under a busy agent — see `procs.rs` for how it is chosen.
  */
 export type RunningProcess = { pid: number, 
@@ -335,7 +405,12 @@ tmux: boolean, port: number, platform: string,
  */
 version: string, };
 
-export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boolean, } | { "type": "limits", limits: RateLimits | null, } | { "type": "timeline", sessionId: string, events: Array<TimelineEvent>, reset: boolean, 
+export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boolean, 
+/**
+ * False while the transcript fields may be frozen: from the moment
+ * the enricher idles until its first full pass after resuming (F6).
+ */
+caughtUp: boolean, } | { "type": "limits", limits: RateLimits | null, } | { "type": "timeline", sessionId: string, events: Array<TimelineEvent>, reset: boolean, 
 /**
  * What this agent is blocked on, when its transcript says.
  *
@@ -343,13 +418,19 @@ export type ServerMessage = { "type": "fleet", agents: Array<Agent>, mock: boole
  * goes out for every agent many times a minute, and this is only ever
  * wanted for the one being read.
  */
-prompt?: PendingPrompt, } | { "type": "frame", frame: Frame, } | { "type": "history", sessionId: string, before: number, lines: Array<string>, total: number, } | { "type": "paste-ack", sessionId: string, seq: number, } | { "type": "error", sessionId?: string, message: string, 
+prompt?: PendingPrompt, 
+/**
+ * How the tool calls whose results this read reached ended. A result
+ * is plumbing and draws no event of its own, so it travels beside the
+ * events, keyed on the call's `toolUseId`.
+ */
+outcomes?: Array<ToolOutcome>, } | { "type": "frame", frame: Frame, } | { "type": "history", sessionId: string, before: number, lines: Array<string>, total: number, } | { "type": "paste-ack", sessionId: string, seq: number, } | { "type": "error", sessionId?: string, message: string, 
 /**
  * `kind` names the condition; `message` is only how to say it. The
  * pane-exit case is the one state a viewer must react to
  * structurally, because INV-1 means there is no pty to report it.
  */
-kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" };
+kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" } | { "type": "toolResult", sessionId: string, toolUseId: string, result?: ToolResultView, } | { "type": "seen", seenThrough: { [key in string]: number }, };
 
 /**
  * One session's context-window usage and cost, from Claude Code's statusLine.
@@ -360,6 +441,15 @@ kind?: ErrorKind, } | { "type": "ping" } | { "type": "pong" };
  * reading is rather than present it as now.
  */
 export type SessionUsage = { contextPct?: number, contextSize?: number, costUsd?: number, at: number, };
+
+/**
+ * The last prompt a person typed, as far as the transcript tail has read.
+ *
+ * `at` is absent when that prompt is older than the backfill reached: the
+ * clock is then unknown, and `calls` is a floor — the calls in what was read —
+ * rather than a count (INV-11). Counts only, never what was said.
+ */
+export type SincePrompt = { at?: number, calls: number, };
 
 /**
  * One delegate in an agent's tree, and everything below it.
@@ -444,9 +534,51 @@ notice?: NoticeKind,
 /**
  * Context tokens either side of a compaction, for the notice above.
  */
-tokensBefore?: number, tokensAfter?: number, };
+tokensBefore?: number, tokensAfter?: number, 
+/**
+ * For a tool call: the `tool_use` id its result will name, which is what
+ * a `ToolOutcome` and a `toolResult` request are keyed on.
+ */
+toolUseId?: string, };
 
 export type TimelineKind = "user" | "assistant" | "tool" | "subagent" | "notice";
+
+/**
+ * What became of one tool call, sent when its result record is read.
+ */
+export type ToolOutcome = { toolUseId: string, outcome: Outcome, 
+/**
+ * Absent where the decision names nobody this app can put a word to —
+ * a deny rule, a safety check — rather than guessed (INV-11).
+ */
+by?: RefusedBy, 
+/**
+ * The classifier's own category, e.g. `irreversible_local_destruction`.
+ */
+category?: string, 
+/**
+ * Lines an edit added and removed, counted from the `+` and `-` prefixes
+ * of its recorded hunks.
+ */
+added?: number, removed?: number, };
+
+/**
+ * A tool call's result as it was recorded, for the one row a reader opened.
+ *
+ * Either the edit's hunks or the tail of what the tool returned, cut to a
+ * bound; `omitted` is how many bytes were left out, so the box can say there
+ * is more rather than pass a part off as the whole.
+ */
+export type ToolResultView = { 
+/**
+ * When the result record was written.
+ */
+at: number, hunks?: Array<Hunk>, output?: string, omitted: number, 
+/**
+ * The person changed the edit in the permission dialog before it was
+ * applied. Present only when the record says `true`.
+ */
+userModified?: boolean, };
 
 /**
  * One quota window, as a percentage used and when it refills.

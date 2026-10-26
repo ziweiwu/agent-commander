@@ -4,8 +4,15 @@ import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore, type Conn, type Reach } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
-import { countByGroup, inScope, isTerminal, type StatusFilter } from '../lib/filter.ts'
-import { successorOf } from '../lib/succession.ts'
+import {
+  KIND_SCOPES,
+  countByGroup,
+  inScope,
+  isTerminal,
+  type KindScope,
+  type StatusFilter,
+} from '../lib/filter.ts'
+import { claimantOf, successorOf } from '../lib/succession.ts'
 import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
 import { useVisualViewport } from '../hooks/useVisualViewport.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
@@ -20,6 +27,9 @@ import { Button, Chip } from './ui/Button.tsx'
 import { UsageChips } from './UsageChips.tsx'
 import styles from './App.module.css'
 import { ICON_MARK, Icon } from './ui/Icon.tsx'
+import { WaitingChip } from './WaitingChip.tsx'
+import { agentPath } from '../lib/hop.ts'
+import { useHopKeys } from '../hooks/useHop.ts'
 
 /** Holds the delegation-graph poll while the fleet list is unmounted. */
 function TreePoll() {
@@ -52,6 +62,7 @@ export function App() {
   }, [layout])
   // The height the sheet actually has once an on-screen keyboard is up.
   useVisualViewport()
+  useHopKeys()
 
   const mock = useStore((s) => s.mock)
   const conn = useStore((s) => s.conn)
@@ -151,7 +162,7 @@ export function App() {
         return
       }
 
-      if (typing && target !== searchRef.current) return
+      if (e.altKey || (typing && target !== searchRef.current)) return
 
       if (e.key === 'ArrowDown' || e.key === 'j') {
         e.preventDefault()
@@ -183,6 +194,7 @@ export function App() {
           agent<span>-commander</span>
         </h1>
         {!narrow && selected !== null && !solo && <SidebarToggle />}
+        {(sheetMode || fleetHidden) && !fullscreen && <WaitingChip />}
         {solo ? <span className={styles.spacer} /> : <Filters />}
         <UsageChips />
         <Button
@@ -261,7 +273,7 @@ function Filters() {
   const filter = useStore((s) => s.fleet.filter)
   const setFilter = useStore((s) => s.setFilter)
   const fleet = useStore((s) => s.fleet)
-  const setTerminals = useStore((s) => s.setTerminals)
+  const setKinds = useStore((s) => s.setKinds)
   // The status chips count what the list is actually about, so a hidden
   // terminal is missing from "8 idle" as well as from the list below it.
   const inFleet = inScope(agents, fleet)
@@ -292,6 +304,17 @@ function Filters() {
     </Chip>
   )
 
+  const kindCount: Record<KindScope, number> = {
+    claude: agents.length - terminals,
+    terminals,
+    all: agents.length,
+  }
+  const kindLabel: Record<KindScope, Key> = {
+    claude: 'filterKindClaude',
+    terminals: 'filterTerminals',
+    all: 'filterKindAll',
+  }
+
   return (
     <div className={styles.filters}>
       {chip('all', t('filterAll'), inFleet.length)}
@@ -299,25 +322,31 @@ function Filters() {
       {counts.busy > 0 && chip('busy', t('filterBusy'), counts.busy)}
       {counts.idle > 0 && chip('idle', t('filterIdle'), counts.idle)}
       {/*
-        * Rendered only when there are terminals to admit, and then always —
-        * including while they are showing, which is the press that puts them
-        * away again. A count of hidden sessions that appears nowhere would be
-        * a fleet with a hole in it (INV-11); this is a filter you can see.
+        * Rendered whenever there are terminals to tell apart from Claude, and
+        * while terminals alone are showing, so the way back never vanishes.
+        * Every kind carries its count, the ones out of scope included: a count
+        * of hidden sessions that appears nowhere would be a fleet with a hole
+        * in it (INV-11); this is a filter you can see.
+        *
+        * A select rather than three chips: this bar has about one chip's width
+        * to spare at 1280px, and wrapping it to a second row costs every
+        * screen below it the height of that row.
         */}
-      {terminals > 0 && (
-        <Chip
-          data-testid="terminal-chip"
-          aria-pressed={fleet.terminals}
-          title={t('filterTerminalsHint')}
-          onClick={() => setTerminals(!fleet.terminals)}
+      {(terminals > 0 || fleet.kinds === 'terminals') && (
+        <select
+          className={styles.kinds}
+          data-testid="kind-select"
+          aria-label={t('filterKinds')}
+          title={t('filterKindsHint')}
+          value={fleet.kinds}
+          onChange={(e) => setKinds(e.target.value as KindScope)}
         >
-          {fleet.terminals && (
-            <span className={styles.chipMark}>
-              <Icon name="check" size={ICON_MARK} />
-            </span>
-          )}
-          <b>{terminals}</b> {t('filterTerminals')}
-        </Chip>
+          {KIND_SCOPES.map((key) => (
+            <option key={key} value={key}>
+              {`${kindCount[key]} ${t(kindLabel[key])}`}
+            </option>
+          ))}
+        </select>
       )}
     </div>
   )
@@ -360,12 +389,6 @@ const EXPECT_MS = 8000
  * read, and the fleet is the honest place to be once the wait is over.
  */
 const FOLLOW_MS = 4000
-
-/** The route for one agent, on the tab the reader is already on. */
-function agentPath(sessionId: string, tab: 'chat' | 'attach'): string {
-  const base = `/agent/${encodeURIComponent(sessionId)}`
-  return tab === 'attach' ? `${base}/term` : base
-}
 
 export function FleetRoute() {
   const navigate = useNavigate()
@@ -412,6 +435,7 @@ export function FleetRoute() {
 
   useEffect(() => {
     focusAgent(sessionId ?? null)
+    if (useStore.getState().hopped !== sessionId) useStore.setState({ hopped: null })
   }, [sessionId])
 
   /*
@@ -464,7 +488,10 @@ export function FleetRoute() {
    */
   useEffect(() => {
     if (!expectSession) return
-    if (agents.some((a) => a.sessionId === expectSession)) {
+    if (
+      agents.some((a) => a.sessionId === expectSession) ||
+      claimantOf(expectSession, agents)
+    ) {
       setExpectSession(null)
       return
     }
@@ -483,9 +510,19 @@ export function FleetRoute() {
    * agent that does not come back has ended. A frame that changes something
    * else must not restart that clock, which is why the deadline is kept
    * rather than the delay.
+   *
+   * A just-started session is the one case with no process to follow: its
+   * placeholder is replaced by whatever registers in the same tmux session
+   * (`claimantOf`), and that is checked first, because the replacement can
+   * arrive before the placeholder was ever listed.
    */
   useEffect(() => {
     if (!sessionId || agent || agents.length === 0) return
+    const claimant = claimantOf(sessionId, agents)
+    if (claimant) {
+      navigate(agentPath(claimant.sessionId, wantTab), { replace: true })
+      return
+    }
     if (sessionId === expectSession) return
     const prior = lastSeen.current
     if (!prior || prior.sessionId !== sessionId) {

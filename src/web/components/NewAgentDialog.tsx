@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { loadEnv, startAgent, startTerminal } from '../store/transport.ts'
 import { tildePath } from '../lib/format.ts'
+import { admitting } from '../lib/filter.ts'
+import { placeholderId } from '../lib/succession.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
 import type { Key } from '../lib/i18n.ts'
-import { MODE_KEY, NEW_AGENT_MODES } from '../lib/modes.ts'
-import { MODEL_ALIASES } from '../../shared/types.ts'
+import { MODE_KEY, NEW_AGENT_DEFAULT_MODE, NEW_AGENT_MODES } from '../lib/modes.ts'
+import { MODEL_ALIASES, type NewAgentRequest } from '../../shared/types.ts'
 import { Button, Chip } from './ui/Button.tsx'
 import { FolderBrowser } from './FolderBrowser.tsx'
 import styles from './NewAgentDialog.module.css'
@@ -15,6 +18,7 @@ import styles from './NewAgentDialog.module.css'
 const RECENT_KEY = 'agent-commander.recentDirs'
 const DEFAULT_DIR_KEY = 'agent-commander.defaultDir'
 const RECENT_MAX = 6
+const TASK_ROWS = 3
 
 /**
  * Modes settable at spawn time and the models on offer, both from the lists the
@@ -115,16 +119,64 @@ function AgentOptions({ model, mode, onModel, onMode }: AgentOptionsProps) {
   )
 }
 
+/**
+ * The agent's first task, sent once with Start (F5).
+ *
+ * A textarea rather than a line, so Enter types a line break instead of
+ * submitting the form: one keystroke too early would start the agent on half a
+ * task, and nothing can take it back once it is on the command line.
+ */
+function FirstTaskField({ value, onChange }: { value: string; onChange: (task: string) => void }) {
+  const t = useTranslate()
+  return (
+    <label className={styles.field}>
+      <span className={styles.label}>{t('newAgentTask')}</span>
+      <textarea
+        className={`${styles.input} ${styles.task}`}
+        data-testid="new-agent-task"
+        value={value}
+        rows={TASK_ROWS}
+        placeholder={t('newAgentTaskPlaceholder')}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <span className={styles.hint}>{t('newAgentTaskHint')}</span>
+    </label>
+  )
+}
+
+/** The four things this dialog asks about an agent beside its folder, as typed and picked. */
+interface AgentChoice {
+  name: string
+  model: string
+  mode: string
+  task: string
+}
+
+/** What the dialog chose for an agent, as the request carries it: defaults and blanks left out. */
+function agentOptions(choice: AgentChoice): Omit<NewAgentRequest, 'cwd'> {
+  return {
+    ...(choice.name.trim() ? { name: choice.name.trim() } : {}),
+    ...(choice.model !== 'default' ? { model: choice.model } : {}),
+    ...(choice.mode !== 'default' ? { permissionMode: choice.mode } : {}),
+    ...(choice.task.trim() ? { task: choice.task.trim() } : {}),
+  }
+}
+
 export function NewAgentDialog() {
   const t = useTranslate()
   const open = useStore((s) => s.newAgentOpen)
   const setOpen = useStore((s) => s.setNewAgentOpen)
-  const setTerminals = useStore((s) => s.setTerminals)
+  const kinds = useStore((s) => s.fleet.kinds)
+  const setKinds = useStore((s) => s.setKinds)
+  const setExpectSession = useStore((s) => s.setExpectSession)
+  const setStartingTask = useStore((s) => s.setStartingTask)
+  const navigate = useNavigate()
   const agents = useStore((s) => s.agents)
   const env = useStore((s) => s.env)
 
   const [dir, setDir] = useState('')
   const [name, setName] = useState('')
+  const [task, setTask] = useState('')
   /*
    * Which of the two things this dialog opens.
    *
@@ -135,7 +187,13 @@ export function NewAgentDialog() {
    */
   const [terminal, setTerminal] = useState(false)
   const [model, setModel] = useState('default')
-  const [mode, setMode] = useState('default')
+  /**
+   * Auto rather than "whatever the CLI would do": the owner starts sessions
+   * from here to leave them working, often from a phone, and a session that
+   * stops at its first permission prompt is waiting on someone who is not
+   * there. Pinned as a flag so it holds even where settings say otherwise.
+   */
+  const [mode, setMode] = useState(NEW_AGENT_DEFAULT_MODE)
   const [browsing, setBrowsing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -196,28 +254,37 @@ export function NewAgentDialog() {
     setBusy(true)
     setError('')
     const named = name.trim() ? { name: name.trim() } : {}
+    const options = agentOptions({ name, model, mode, task })
     const result = terminal
       ? await startTerminal(dir.trim(), named)
-      : await startAgent(dir.trim(), {
-          ...named,
-          ...(model !== 'default' ? { model } : {}),
-          ...(mode !== 'default' ? { permissionMode: mode } : {}),
-        })
+      : await startAgent(dir.trim(), options)
     startingRef.current = false
     setBusy(false)
     if (result.ok) {
       /*
-       * Terminals are out of the fleet by default, and that default is about
-       * the sessions you did not ask for. This one you just asked for, so
-       * hiding it would read as the button having done nothing — which is
-       * exactly how this first shipped, and exactly how it was reported.
+       * The fleet's scope is about the sessions you did not ask for. This one
+       * you just asked for, so hiding it would read as the button having done
+       * nothing — which is exactly how terminals first shipped, and exactly
+       * how it was reported.
        */
-      if (terminal) setTerminals(true)
+      setKinds(admitting(kinds, terminal ? 'terminals' : 'claude'))
       rememberDir(result.cwd)
       setDir('')
       setName('')
+      /**
+       * Open what was just started. It is listed under a placeholder until it
+       * registers, which the route is told to wait for, and then followed to
+       * its real id by tmux session — so the panel stays on it rather than
+       * leaving the reader to find it in the list, or closing under them when
+       * the id changes.
+       */
+      const id = placeholderId(result.tmuxSession)
+      const sent = terminal ? undefined : options.task
+      setStartingTask(sent ? { sessionId: id, text: sent } : null)
+      if (sent) setTask('')
+      setExpectSession(id)
       close()
-      // The new process registers itself; the fleet picks it up on the next tick.
+      navigate(`/agent/${encodeURIComponent(id)}${terminal ? '/term' : ''}`)
     } else {
       setError(t(terminal ? 'newTerminalFailed' : 'newAgentFailed', { error: result.error }))
     }
@@ -335,6 +402,8 @@ export function NewAgentDialog() {
                 {t(terminal ? 'newTerminalNameHint' : 'newAgentNameHint')}
               </span>
             </label>
+
+            {!terminal && <FirstTaskField value={task} onChange={setTask} />}
 
             {/*
               * Withheld rather than disabled for a terminal: both are flags on

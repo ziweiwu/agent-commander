@@ -2,12 +2,16 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { emptyNotice } from '../lib/chat.ts'
-import { dayMark } from '../lib/format.ts'
-import { formatDay, translate } from '../lib/i18n.ts'
+import { dayMark, relative, tildePath } from '../lib/format.ts'
+import { isUnused } from '../lib/filter.ts'
+import { PENDING_PREFIX } from '../lib/succession.ts'
+import { formatDay, formatRelative, translate } from '../lib/i18n.ts'
+import { dividerFor, type Divider } from '../lib/newSince.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
+import { useDraft } from '../hooks/useDraft.ts'
 import { useStore } from '../store/store.ts'
 import {
   interruptAndSend,
@@ -18,11 +22,12 @@ import {
 } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
 import { AnswerCard } from './AnswerCard.tsx'
+import { HandOff, useHandOff } from './HandOff.tsx'
 import { ChatControls } from './ChatControls.tsx'
 import { Message, WorkingIndicator } from './Message.tsx'
 import { Button } from './ui/Button.tsx'
 import styles from './Chat.module.css'
-import { ICON_MARK, Icon } from './ui/Icon.tsx'
+import { ICON_BUTTON, Icon } from './ui/Icon.tsx'
 
 /** Distance from the bottom within which the view keeps following new messages. */
 const PIN_SLACK = 60
@@ -51,6 +56,18 @@ const VIEWPORT_EDGE_PX = 8
 const REPLIES_GAP_PX = 6
 /** What the attach button offers and a paste is taken over for. */
 const PICTURE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+
+/**
+ * What a hop lands on: the question, or the card when the question is not
+ * written down. Never an option — the Enter a hand was already on its way to
+ * press must answer nothing (INV-2).
+ */
+function headingOf(card: HTMLElement): HTMLElement | null {
+  return (
+    card.querySelector<HTMLElement>('[data-testid="answer-question"]') ??
+    card.querySelector<HTMLElement>('[data-testid="answer-card"]')
+  )
+}
 
 /**
  * The picture a paste carries, if it carries one.
@@ -87,6 +104,68 @@ const QUICK_PROMPTS = [
   'quickBlocked',
   'quickSummarise',
 ] as const
+
+/** Whether this conversation has not begun, by the evidence the card shows. */
+function freshness(agent: Agent): 'starting' | 'unprompted' | null {
+  if (agent.sessionId.startsWith(PENDING_PREFIX)) return 'starting'
+  return isUnused(agent) ? 'unprompted' : null
+}
+
+/**
+ * What an empty conversation says, and the first task quoted under it while
+ * an agent this tab started is still coming up (F5).
+ *
+ * The quote is the task as the dialog sent it, held in the store under the
+ * placeholder's id; another tab, or this one after a reload, has nothing to
+ * quote and says what it says about any starting agent.
+ */
+function EmptyNotice({ agent }: { agent: Agent }) {
+  const t = useTranslate()
+  const timelineAt = useStore((s) => s.timelineAt)
+  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
+  const startingTask = useStore((s) => s.startingTask)
+  const task = startingTask?.sessionId === agent.sessionId ? startingTask.text : null
+  const notice = emptyNotice({ timelineAt, timelineStalledAt, fresh: freshness(agent), task })
+  return (
+    <div className={styles.notice} data-testid="chat-notice">
+      {t(notice, { name: shortName(agent), folder: tildePath(agent.cwd) })}
+      {notice === 'chatStartingTask' && (
+        <>
+          <blockquote className={styles.startingTask} data-testid="chat-starting-task">
+            {task}
+          </blockquote>
+          {t('chatStartingTaskTrust')}
+        </>
+      )}
+    </div>
+  )
+}
+
+/**
+ * Where this visit's news begins (F6), drawn as a day separator is.
+ *
+ * "New since you last opened this", never "unread": the reader may have
+ * followed it in the terminal, and all this app knows is what it showed
+ * (INV-11). The counts stop where the agent had got when the visit began, and
+ * say "at least" when the transcript tail did not reach back far enough.
+ */
+function NewSinceLine({ divider, since, anchor }: { divider: Divider; since: number; anchor: React.Ref<HTMLDivElement> }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const replies = t(divider.replies === 1 ? 'newSinceReplyOne' : 'newSinceReplyMany', { n: divider.replies })
+  const tools = t(divider.tools === 1 ? 'newSinceToolOne' : 'newSinceToolMany', { n: divider.tools })
+  const when = formatRelative(lang, relative(since))
+  return (
+    <div
+      ref={anchor}
+      className={styles.daySep}
+      data-testid="new-since"
+      data-at-least={divider.atLeast || undefined}
+    >
+      <span>{t(divider.atLeast ? 'newSinceAtLeast' : 'newSince', { when, replies, tools })}</span>
+    </div>
+  )
+}
 
 export function Chat({ agent }: { agent: Agent }) {
   const t = useTranslate()
@@ -180,8 +259,6 @@ export function Chat({ agent }: { agent: Agent }) {
   }, [menuOpen])
   const messages = useStore((s) => s.messages)
   const conn = useStore((s) => s.conn)
-  const timelineAt = useStore((s) => s.timelineAt)
-  const timelineStalledAt = useStore((s) => s.timelineStalledAt)
   const prompt = useStore((s) => s.prompt)
   /*
    * INV-16, and the two halves it is about are inside the card rather than
@@ -210,10 +287,12 @@ export function Chat({ agent }: { agent: Agent }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const answerRef = useRef<HTMLDivElement>(null)
+  const hopped = useStore((s) => s.hopped === agent.sessionId)
+  /** The agent a hop has already put the focus on, so it is done once per arrival. */
+  const landedRef = useRef<string | null>(null)
+  const handOff = useHandOff(agent.sessionId, prompt?.id)
   const [pinned, setPinned] = useState(true)
-  const [draft, setDraft] = useState('')
-  /** The synchronous truth about the draft; `draft` is only for rendering. */
-  const draftRef = useRef('')
+  const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('chat', agent.sessionId, inputRef)
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
   const pictureRef = useRef<HTMLInputElement>(null)
   const [attaching, setAttaching] = useState(false)
@@ -234,6 +313,12 @@ export function Chat({ agent }: { agent: Agent }) {
    */
   const paneExited = useStore((s) => s.exited.includes(agent.sessionId))
   const busy = agent.status === 'busy'
+  /**
+   * `Escape` stops a turn. An agent busy only with a background command has
+   * no turn to stop: one press does nothing, and a second opens the CLI's
+   * Rewind dialog. So it is offered only against a turn.
+   */
+  const interruptible = busy && agent.backgroundShell !== true
   /*
    * INV-11, on the one screen where the user acts rather than reads.
    *
@@ -273,7 +358,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * mode is armed, and the Send button then says what it will do.
    */
   /** Send itself stops the agent, so a separate stop would be the same act twice. */
-  const interrupting = busy && sendMode === 'interrupt'
+  const interrupting = interruptible && sendMode === 'interrupt'
 
   const chooseSendMode = (next: SendMode) => {
     if (next === sendMode) return
@@ -327,8 +412,18 @@ export function Chat({ agent }: { agent: Agent }) {
     showToast(result.ok ? t('shiftTabSent') : t('controlFailed', { error: result.error }))
   }
 
+  /**
+   * F6: where this visit's news begins, placed from where the conversation
+   * stood when the visit began and held there while the reader works down.
+   */
+  const visit = useStore((s) => s.visit)
+  const ownVisit = visit?.sessionId === agent.sessionId ? visit : null
+  const divider = useMemo(() => dividerFor(messages, ownVisit), [messages, ownVisit])
+  const dividerRef = useRef<HTMLDivElement>(null)
+  const dividerPlacedFor = useRef<string | null>(null)
+
   const rows = useMemo(() => {
-    const out: Array<{ key: string; day?: string; message?: (typeof messages)[number] }> = []
+    const out: Array<{ key: string; day?: string; newSince?: true; message?: (typeof messages)[number] }> = []
     let lastDay = ''
     for (const message of messages) {
       const day = formatDay(lang, dayMark(message.at))
@@ -336,10 +431,11 @@ export function Chat({ agent }: { agent: Agent }) {
         lastDay = day
         out.push({ key: `day-${day}-${message.id}`, day })
       }
+      if (message.id === divider?.before) out.push({ key: 'new-since', newSince: true })
       out.push({ key: message.id, message })
     }
     return out
-  }, [messages, lang])
+  }, [messages, lang, divider?.before])
 
   /*
    * Follow the conversation only while the user is already at the bottom.
@@ -360,6 +456,23 @@ export function Chat({ agent }: { agent: Agent }) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages.length, busy, pinned])
+
+  /**
+   * Open at the divider when what is new is taller than the view, once per
+   * visit; "Jump to latest" covers the rest. Declared after the follow above
+   * so it has the last word on the first paint, and it unpins so the follow
+   * does not take the view straight back down.
+   */
+  useLayoutEffect(() => {
+    const line = dividerRef.current
+    const box = scrollRef.current
+    if (!line || !box || dividerPlacedFor.current === agent.sessionId) return
+    dividerPlacedFor.current = agent.sessionId
+    const top = line.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop
+    if (box.scrollHeight - top <= box.clientHeight) return
+    box.scrollTop = top
+    setPinned(false)
+  }, [divider, agent.sessionId])
 
   /*
    * Stay pinned when the box itself changes height, not only when a message
@@ -390,6 +503,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * composer, or the previous question's buttons. Mid-sentence, it stays put.
    */
   useEffect(() => {
+    if (!hopped) landedRef.current = null
     if (coarse) return
     /*
      * Only where the card actually offers an answer. `answering` now covers a
@@ -405,14 +519,20 @@ export function Chat({ agent }: { agent: Agent }) {
       inputRef.current?.focus()
       return
     }
+    const heading = hopped && answerRef.current ? headingOf(answerRef.current) : null
+    if (heading && landedRef.current !== agent.sessionId) {
+      landedRef.current = agent.sessionId
+      heading.focus()
+      return
+    }
     const active = document.activeElement
     const idle =
       !active ||
       active === document.body ||
       (active === inputRef.current && draftRef.current === '') ||
       answerRef.current?.contains(active) === true
-    if (idle) option.focus()
-  }, [agent.sessionId, coarse, answering, prompt?.id])
+    if (idle) (heading ?? option).focus()
+  }, [agent.sessionId, coarse, answering, prompt?.id, hopped])
 
   // The mis-tap guard is per agent. Sending the same prompt to one agent and
   // then to the next is two deliberate instructions, however fast the switch.
@@ -446,9 +566,9 @@ export function Chat({ agent }: { agent: Agent }) {
     draftRef.current = ''
     // Interrupting is only meaningful against an agent that is actually working;
     // on an idle one the two modes are the same act, so the Escape is not sent.
-    if (sendMode === 'interrupt' && busy) interruptAndSend(text)
+    if (interrupting) interruptAndSend(text)
     else sendMessage(text)
-    setDraft('')
+    clearDraft()
     setPinned(true)
     inputRef.current?.focus()
   }
@@ -468,17 +588,18 @@ export function Chat({ agent }: { agent: Agent }) {
    * leave the draft alone: whatever is half-written there is the user's.
    */
   const attachPicture = async (file: File) => {
+    const sessionId = agent.sessionId
     setAttaching(true)
-    const answer = await uploadPicture(agent.sessionId, file)
+    const answer = await uploadPicture(sessionId, file)
     setAttaching(false)
     if (!answer.ok) {
       showToast(t('pictureFailed', { error: answer.error }))
       return
     }
-    const before = draftRef.current
+    const held = useStore.getState().drafts.chat[sessionId]
+    const before = held?.text ?? ''
     const spaced = before.length === 0 || /\s$/.test(before) ? before : `${before} `
-    draftRef.current = `${spaced}${answer.path} `
-    setDraft(draftRef.current)
+    writeDraft(sessionId, `${spaced}${answer.path} `, held?.height ?? null)
     showToast(t('picturePlaced'))
     inputRef.current?.focus()
   }
@@ -506,9 +627,10 @@ export function Chat({ agent }: { agent: Agent }) {
 
   return (
     <div className={styles.pane} data-testid="chat">
-      {answering && (
+      {(answering || handOff.shown) && (
         <div className={styles.answer} ref={answerRef}>
-          <AnswerCard agent={agent} prompt={prompt} />
+          {answering && <AnswerCard agent={agent} prompt={prompt} onAnswered={handOff.arm} />}
+          {handOff.shown && <HandOff from={agent.sessionId} />}
         </div>
       )}
       <div className={styles.region}>
@@ -523,20 +645,21 @@ export function Chat({ agent }: { agent: Agent }) {
         >
           <div className={styles.list} data-testid="chat-list">
             {messages.length === 0 ? (
-              <div className={styles.notice} data-testid="chat-notice">
-                {t(emptyNotice({ timelineAt, timelineStalledAt }))}
-              </div>
+              <EmptyNotice agent={agent} />
             ) : (
               <>
-                {rows.map((row) =>
-                  row.day ? (
+                {rows.map((row) => {
+                  if (row.newSince && divider && ownVisit) {
+                    return <NewSinceLine key={row.key} divider={divider} since={ownVisit.seenThrough} anchor={dividerRef} />
+                  }
+                  return row.day ? (
                     <div key={row.key} className={styles.daySep}>
                       <span>{row.day}</span>
                     </div>
                   ) : (
                     <Message key={row.key} message={row.message!} />
-                  ),
-                )}
+                  )
+                })}
                 {agent.status === 'busy' && <WorkingIndicator />}
               </>
             )}
@@ -683,8 +806,6 @@ export function Chat({ agent }: { agent: Agent }) {
               attachable ? t('messagePlaceholder', { name: shortName(agent) }) : t('messageDisabled')
             }
             onChange={(e) => {
-              draftRef.current = e.target.value
-              setDraft(e.target.value)
               /*
                * Grow to fit, and let the stylesheet decide the ceiling.
                *
@@ -698,6 +819,7 @@ export function Chat({ agent }: { agent: Agent }) {
                */
               e.target.style.height = 'auto'
               e.target.style.height = `${e.target.scrollHeight}px`
+              writeDraft(agent.sessionId, e.target.value, e.target.scrollHeight)
             }}
             /*
              * A screenshot pasted here takes the attach button's path: the
@@ -834,7 +956,7 @@ export function Chat({ agent }: { agent: Agent }) {
               </Button>
             </div>
           )}
-          {busy && !interrupting && (
+          {interruptible && !interrupting && (
             <Button
               type="button"
               variant="compact"
@@ -851,7 +973,7 @@ export function Chat({ agent }: { agent: Agent }) {
                   reader. Spelling it out costs the message box 70px on a small
                   phone, and the box is what the row is for. */}
               <span className={styles.stopGlyph}>
-                <Icon name="stop" size={ICON_MARK} />
+                <Icon name="stop" size={ICON_BUTTON} />
               </span>
               <span className={styles.stopLabel}>{t('interrupt')}</span>
             </Button>
@@ -865,7 +987,7 @@ export function Chat({ agent }: { agent: Agent }) {
           >
             {/* The button says what it will do, which is what makes asking once
                 at the toggle enough rather than asking on every send. */}
-            {sendMode === 'interrupt' && busy ? t('interruptAndSend') : t('send')}
+            {interrupting ? t('interruptAndSend') : t('send')}
           </Button>
         </div>
         {sendable ? (

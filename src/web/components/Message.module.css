@@ -11,7 +11,10 @@
   margin-top: 12px;
 }
 .you {
-  background: color-mix(in srgb, var(--busy) 10%, transparent);
+  background: var(--panel-2);
+  width: fit-content;
+  max-width: 100%;
+  align-self: flex-start;
 }
 .pending {
   opacity: 0.6;
@@ -35,7 +38,7 @@
   top: 6px;
   width: 42px;
   text-align: right;
-  font: 11px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
   color: var(--faint);
   opacity: 0;
   transition: opacity 0.1s;
@@ -51,18 +54,18 @@
   margin-bottom: 2px;
 }
 .who {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   font-size: var(--text-sm);
 }
 .whoYou {
-  color: var(--busy);
+  color: var(--text);
 }
 .whoAgent {
   color: var(--accent);
 }
 .time {
   color: var(--faint);
-  font: 11px var(--font-mono);
+  font: var(--text-xs) var(--font-mono);
 }
 .state {
   color: var(--faint);
@@ -71,9 +74,12 @@
 }
 
 .text {
-  font-size: var(--text-base);
-  line-height: 1.5;
+  font-size: var(--text-md);
+  line-height: var(--leading-prose);
   overflow-wrap: anywhere;
+}
+.text:lang(zh) {
+  line-height: 1.75;
 }
 
 /*
@@ -103,7 +109,8 @@
   white-space: pre-wrap;
 }
 .text code {
-  font: 12px var(--font-mono);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius-xs);
@@ -111,11 +118,11 @@
   overflow-wrap: anywhere;
 }
 .text strong {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 .text em {
   font-style: italic;
-  color: var(--dim);
+  color: inherit;
 }
 /* `--busy` rather than `--focus`: the contrast audit holds `busy` to 4.5:1 as
    text on both surfaces in every scheme, and `focus` only to 3:1 as a ring.
@@ -135,25 +142,30 @@
 .tools {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 0;
   margin-top: 5px;
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
 }
 .tool {
-  display: flex;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: minmax(5ch, max-content) minmax(0, 1fr) auto;
+  column-gap: 8px;
   align-items: baseline;
-  font: 12px/1.5 var(--font-mono);
+  font: var(--text-sm) / 1.6 var(--font-mono);
   color: var(--dim);
-  padding: 1px 0 1px 10px;
-  border-left: 2px solid var(--line);
+  border: 0;
+  padding: 0;
   min-width: 0;
+  position: relative;
 }
 .toolName {
-  color: var(--busy);
-  flex: none;
-}
-.subagent {
-  border-left-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--text);
+  font-weight: var(--weight-strong);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .subagent .toolName {
   color: var(--accent);
@@ -163,6 +175,75 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.toolButton {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.toolButton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+.toolArg a {
+  position: relative;
+  z-index: 1;
+}
+
+.outcome {
+  grid-column: 3;
+  font: var(--text-sm) var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--dim);
+  text-align: right;
+}
+.outcome[data-kind='refused'],
+.outcome[data-kind='failed'] {
+  color: var(--danger);
+}
+
+.result {
+  min-width: 0;
+  margin: 2px 0 6px;
+}
+.resultCaption,
+.resultMore {
+  margin: 0 0 4px;
+  font-size: var(--text-xs);
+  color: var(--dim);
+}
+.resultMore {
+  margin: 4px 0 0;
+}
+.resultBody {
+  max-height: min(40vh, 320px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.resultText {
+  margin: 0;
+  padding: 6px 8px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  font: var(--text-xs) / 1.5 var(--font-mono);
+  white-space: pre;
+  color: var(--text);
+}
+.hunkHead,
+.hunkLine[data-line='ctx'] {
+  color: var(--dim);
 }
 /*
  * A control, and held to a control's floor.
@@ -179,9 +260,8 @@
   background: none;
   border: 0;
   color: var(--dim);
-  font: 12px var(--font-mono);
-  padding: 2px 0 2px 10px;
-  border-left: 2px solid var(--line);
+  font: var(--text-sm) var(--font-mono);
+  padding: 2px 0;
   cursor: pointer;
   text-align: left;
 }
@@ -204,13 +284,21 @@
  * conversation rather than sitting in the fixed chrome.
  */
 @media (max-width: 560px) {
-  .toggle {
+  .toggle,
+  .toolButton {
     min-height: 44px;
+  }
+  .toolButton {
+    min-width: 44px;
   }
 }
 @media (pointer: coarse) {
-  .toggle {
+  .toggle,
+  .toolButton {
     min-height: 44px;
+  }
+  .toolButton {
+    min-width: 44px;
   }
 }
 
@@ -229,7 +317,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--busy);
   animation: blink 1.2s infinite;
 }
 .dots i:nth-child(2) {
@@ -304,6 +392,9 @@
  * it is hidden outright, as it always was — there is no pointer to hover with.
  */
 @media (min-width: 901px) {
+  .text {
+    line-height: 1.6;
+  }
   .gutter {
     left: auto;
     right: 4px;
@@ -344,7 +435,7 @@
   vertical-align: top;
 }
 .table th {
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   color: var(--text);
   background: var(--panel-2);
   white-space: nowrap;

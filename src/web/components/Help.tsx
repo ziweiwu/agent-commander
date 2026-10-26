@@ -122,6 +122,14 @@ export function Help({ onClose }: { onClose: () => void }) {
             <kbd>Enter</kbd> / <kbd>Shift+Enter</kbd>
           </dt>
           <dd>{t('keyEnterSend')}</dd>
+          <dt>
+            <kbd>⌥J</kbd> / <kbd>⌥K</kbd>
+          </dt>
+          <dd>{t('keyHopList')}</dd>
+          <dt>
+            <kbd>⌥H</kbd>
+          </dt>
+          <dd>{t('keyHopWaiting')}</dd>
         </dl>
       </section>
 
@@ -203,13 +211,14 @@ export function Help({ onClose }: { onClose: () => void }) {
  * one user who cannot see that it happened.
  */
 function CodeRow({ text, display = text }: { text: string; display?: string }) {
+  const t = useTranslate()
   const [copied, setCopied] = useState(false)
   return (
     <div className={styles.codeRow}>
       <code>{display}</code>
       <Button
         variant="compact"
-        aria-label={`copy: ${display}`}
+        aria-label={t('helpCopyLabel', { text: display })}
         onClick={async () => {
           try {
             await navigator.clipboard.writeText(text)
@@ -220,7 +229,7 @@ function CodeRow({ text, display = text }: { text: string; display?: string }) {
           }
         }}
       >
-        {copied ? '✓' : 'copy'}
+        {copied ? '✓' : t('helpCopy')}
       </Button>
     </div>
   )

@@ -151,3 +151,35 @@ describe('after a /clear the browser was not told about', () => {
     expect(path()).toBe('/')
   })
 })
+
+/**
+ * A session the dialog just started is listed under a placeholder until the
+ * agent registers; the real id has no process link to the placeholder, only
+ * the tmux session they share.
+ */
+describe('a just-started session', () => {
+  const placeholder = agent({ sessionId: 'pending:x', tmuxSession: 'x', pid: 7001 })
+  const real = agent({ sessionId: 'real', tmuxSession: 'x', pid: 7002 })
+
+  it('follows the placeholder to the id that registers in its tmux session', () => {
+    vi.useFakeTimers()
+    try {
+      useStore.setState({ agents: [placeholder, bystander], selected: 'pending:x' })
+      shell('/agent/pending%3Ax/term')
+      fleet([bystander, real])
+      expect(path()).toBe('/agent/real/term')
+      act(() => {
+        vi.advanceTimersByTime(PAST_THE_WAIT_MS)
+      })
+      expect(path()).toBe('/agent/real/term')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('follows even when the real session arrives before the placeholder was listed', () => {
+    useStore.setState({ agents: [bystander, real], selected: null })
+    shell('/agent/pending%3Ax')
+    expect(path()).toBe('/agent/real')
+  })
+})

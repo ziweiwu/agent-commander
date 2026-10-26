@@ -15,9 +15,18 @@ export interface FleetState {
   filter: StatusFilter
   sort: SortKey
   dir: SortDir
-  /** Whether plain terminals are part of the fleet this view is about. */
-  terminals: boolean
+  /** Which kinds of session the fleet is about: Claude, plain terminals, or both. */
+  kinds: KindScope
 }
+
+/**
+ * Claude sessions and plain terminals answer different questions, so the
+ * fleet shows one or the other or both, and says which. A boolean "with
+ * terminals" could only ever add shells to the agents, never show the shells
+ * alone, which is the view someone looking for a terminal they opened wants.
+ */
+export const KIND_SCOPES = ['claude', 'terminals', 'all'] as const
+export type KindScope = (typeof KIND_SCOPES)[number]
 
 /** A plain shell this app opened, with no agent inside it. */
 export function isTerminal(agent: Agent): boolean {
@@ -33,12 +42,22 @@ export function isTerminal(agent: Agent): boolean {
  * status chips report and pushes the agents that *do* need you further down,
  * which is why it is out of scope rather than merely sorted last.
  *
- * Out of scope, not hidden: the chip that admits them says how many there are,
- * so this is a filter the user can see rather than a fleet with a hole in it
- * (INV-11).
+ * So the default scope is Claude alone. Out of scope, not hidden: the scope
+ * switch says how many of each kind there are, so this is a filter the user
+ * can see rather than a fleet with a hole in it (INV-11).
  */
 export function inScope(agents: Agent[], state: FleetState): Agent[] {
-  return state.terminals ? agents : agents.filter((a) => !isTerminal(a))
+  if (state.kinds === 'all') return agents
+  const terminals = state.kinds === 'terminals'
+  return agents.filter((a) => isTerminal(a) === terminals)
+}
+
+/** One kind of session, as opposed to the scope that shows both. */
+export type SessionKind = Exclude<KindScope, 'all'>
+
+/** The narrowest scope that still shows a session of this kind. */
+export function admitting(scope: KindScope, kind: SessionKind): KindScope {
+  return scope === 'all' || scope === kind ? scope : 'all'
 }
 
 /**
@@ -174,9 +193,19 @@ export function sortAgents(agents: Agent[], sort: SortKey, dir: SortDir = 'desc'
         return byNameDirected(a, b)
       case 'recent':
       default:
-        return compare(a.lastActivityAt, b.lastActivityAt) || byName(a, b)
+        return compare(recencyOf(a), recencyOf(b)) || byName(a, b)
     }
   })
+}
+
+/**
+ * When a session last did anything: its last activity, or its start when it
+ * has done nothing since. Starting is itself the newest thing a just-opened
+ * session did, so it belongs at the top of "newest" rather than at the bottom
+ * with the sessions nobody knows anything about (FR-FLEET-5).
+ */
+function recencyOf(agent: Agent): number | undefined {
+  return agent.lastActivityAt ?? (agent.startedAt || undefined)
 }
 
 /** Age of a session, or undefined when it never reported a start time. */

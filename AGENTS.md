@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1537 tests: 724 Rust (the server) + 813 vitest (the web app)
+npm test              # 1793 tests: 795 Rust (the server) + 998 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 406 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 468 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -181,6 +181,14 @@ a checkout where the two have drifted. Edit the generator, never the output.
 | `scripts/gen-ui-icons.py` | `src/web/lib/icon-paths.ts` | `test/icons.test.ts` |
 | `scripts/gen-icons.py` | `src/web/public/assets/icon-*.png` | `test/mac-app.test.ts` |
 
+**A wash or a translucent edge is a token too.** `gen-themes.py` emits every
+`color-mix()` the app draws as `--tint-*` or `--edge-*` (`OVERLAYS`), plus the
+waiting card's opaque `--wash-waiting`, solved per palette. A module never
+writes `color-mix(` itself — `test/overlays.test.ts` fails one that does — so
+`audit-contrast.py` can read each tint's strength from `tokens.css` and measure
+everything drawn on it; a tint no `COMPOSITES` entry measures fails the audit.
+A new tint means a line in `OVERLAYS` and a line in `COMPOSITES`.
+
 **The last two are different scripts and the names are one word apart.**
 `gen-icons.py` draws the *application* icon — the PWA PNGs and the macOS
 `.iconset`, one picture of three lanes. `gen-ui-icons.py` draws the
@@ -217,7 +225,7 @@ the keys the answer card sends (`mock-set`, reserved for
 one whose pane has exited, so the Attach tab's
 dead-pane notice is a thing you can look at, and one plain terminal — which is
 *not* on screen at rest, because terminals are out of the fleet's scope until
-the chip admits them, and a filter with nothing behind it cannot be looked at. `--mock-empty` serves the
+the header's kind select admits them, and a filter with nothing behind it cannot be looked at. `--mock-empty` serves the
 same server with no agents in it, which is the only way to see the
 confirmed-empty screen rather than the loading one. The delegation trees behind them are
 awkward on purpose too: a depth-3 chain, a delegate the user stopped, one node
@@ -299,10 +307,16 @@ commit.
   percentage and cost to `sessions/<session_id>.json`; `usage.rs` reads the
   second inside the enrichment pass. `--install-statusline` is unchanged.
 - **Push goes out through `--notify`, and only out.** `push.rs` posts to an
-  ntfy topic or a Telegram bot when an agent *becomes* waiting while no browser
-  reports itself visible (INV-14, server-side); `--notify-link` is this app's
+  ntfy topic or a Telegram bot when an agent *becomes* waiting while nobody is
+  at a tab — visible *and* used within `PRESENCE_WINDOW`, from the client's
+  throttled `present` reports (`presence.rs`, INV-14 server-side; visible alone
+  let a desk tab silence the phone); `--notify-link` is this app's
   address on the phone so the push opens the card. It is off unless the flag is
-  given, and there is no channel in mock mode to point a review agent at.
+  given, and there is no channel in mock mode to point a review agent at. A
+  push leaves the machine, so it never carries conversation text: a name Claude
+  Code made up goes out as `folder · branch`, not as the card's title, and
+  `--notify-lang zh` is how the body becomes Chinese (FR-UI-12 keeps the
+  browser's language off the server).
 - **`bin` points at a launcher, not at the server.** The server is a Rust
   binary, and `bin` has to name something node can run, so
   `scripts/launch.mjs` finds `rust/target/release/agent-commander` and execs it.
@@ -381,6 +395,16 @@ commit.
   `list-panes` format string, so it costs no round trip — but it is also the
   kind of field that reads as decoration in a diff. Remove it and the terminal
   a user just opened never appears in the fleet, with nothing failing.
+- **An argv entry is not as inert as it looks, twice over.** tmux reads any
+  argument *ending* in `;` as the end of a command, even one handed to it as
+  its own argv entry: `a;` reaches the program as `a`, and an entry ending in
+  `;` with more arguments after it starts a new tmux command
+  (`-n 'x;' --model opus` fails with "unknown command: --model"). And
+  `claude`'s `--` stops option parsing but not subcommand dispatch:
+  `claude … -- doctor` runs `claude doctor`. Both were measured for the first
+  task (INV-7), which is why it goes last, gets a backslash before a trailing
+  `;`, and may not be one bare word. The name and the `-c` folder get the same
+  backslash.
 - **`Registry.enrich()` is a blind shallow merge** with two callers writing
   different field sets, and `undefined` overwrites. That is load-bearing for
   goal-clear and a trap for any new patch producer. A new `AgentPatch` field
@@ -397,12 +421,32 @@ commit.
   that went into proving the *parser* was right was spent on the one component
   that had never been wrong.
 
+  `refusals` (auto mode's refusals in the window read, for the fold) was added
+  after the guard below existed and touched all four the first time; the guard
+  is what says so if a fifth producer forgets one.
+
   Only `card_fields` is safe by construction: it is a struct literal with no
   `..` rest, so a new field is a compile error there. The other three are now
   held by `sources::tests::every_patch_field_is_named_by_the_three_functions_that_carry_it`,
   which parses the struct and fails naming the field and the function that
   forgot it. Verified the way a guard has to be — by deleting `description`
   from `merge_patch` and watching it go red.
+
+  `differs` was the fifth place and nothing held it, so a field it forgot
+  still reached the card, but only on a tick where some other field moved.
+  `sincePrompt` would have been that field — its call count moves while
+  everything else on a working card stands still. It is held now by
+  `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`,
+  which reads every `field: patch.field` out of `card_fields` and fails naming
+  any `differs` does not compare. Seen red by deleting `since_prompt` from
+  `differs`.
+
+  **`sincePrompt` is the enricher's alone.** The detail view's tail opens when
+  an agent is opened, so its backfill starts later in the file than the
+  enricher's and can see a floor where the enricher sees a clock. `routes.rs`
+  clears the field from that tail's patch (`leave_the_prompt_count_to_the_enricher`)
+  rather than let the two overwrite each other on every read. `tokens` has the
+  same two-tail shape and was left as it is.
 - **A new wire type has to be named in `wire::render_once()` or `gen:types`
   emits nothing.** ts-rs exports from a *root list*, not from the `#[derive]`:
   `types.rs`'s `render_once` calls `export_all` on each root, and a type nobody
@@ -476,6 +520,20 @@ commit.
   INV-4 tail-count flake that used to sit beside it went away with the port:
   `enrich.rs`'s cadence re-arms after the work instead of on a wall clock, so a
   slow pass no longer drops a tick.
+- **`hop.test.tsx`'s hand-off tests were not load, though they looked it.**
+  "names the agent blocked longest…" and "lands on the question…" failed 4
+  full runs in 10 at load ~24, fast (80-180ms) and on an assertion rather than
+  a timeout: the click wrote its `answer` to a socket the test was not
+  watching. "goes muted… while the socket is down" closes its socket, which
+  arms `retryLater`'s 500ms real timer, and `transport.ts` is one module per
+  file — so the timer fired inside a later test, `connect()` opened a second
+  socket and `send` wrote to that. Under load, 500ms is long enough to land in
+  any test after it. `connect()` now cancels a pending retry itself, so the
+  explicit call supersedes the scheduled one (production only ever called it
+  with none pending, from `main.tsx` and `onReturn`). A 1.1s pause before the
+  click made it fail every run; with the fix 12 of 12 full runs passed. Any
+  test that closes a socket on real timers leaks the same timer to the next
+  test in its file; fake timers, as `return.test.tsx` uses, discard it.
 - **WebKit times out under a loaded machine, and it is not always the same
   spec.** Measured on 2026-09-06 at load average 8.7: a full run failed
   `responsive.spec.ts` "every control on screen can be hit and announced" on
@@ -564,6 +622,14 @@ commit.
   candidate**; the terminal is the most sensitive thing on the page and it is
   never the thing you changed.
 
+- **The store's `selected` lags the URL by one effect, and a fast second key
+  found the gap.** `FleetRoute` calls `focusAgent` from an effect, so for a
+  frame after `navigate` the route names one agent and the store another. The
+  e2e for ⌥J then ⌥K went to the wrong place every run on desktop, because
+  Playwright pressed the second chord inside that frame. `useHop` now calls
+  `focusAgent` itself before navigating; anything else that reads `selected` in
+  a key handler straight after a navigation has the same gap.
+
 - **`codesign` runs before the smoke test, not after.** The launched thing is a
   Mach-O now rather than a script, and on Apple silicon an *invalid* signature is
   a kernel kill rather than a warning. Signing first means the smoke test runs
@@ -648,6 +714,16 @@ commit.
   people tap. The same blindness ran the other way in `audit-workspace.mjs`,
   which measured the tablet at 80.9% with a fine pointer and 79.5% with the
   coarse one it actually has.
+
+- **"Visible" is not "on screen".** `checkVisibility()` and Playwright's
+  `isVisible()` are both true for a control an `overflow: hidden` ancestor has
+  cut off, so the phone sheet's ⤢ sat at x 325-369 inside a 320px sheet with the
+  "every control can be hit" sweep green — and no project even ran at 320.
+  `e2e/responsive.spec.ts` now follows a control's centre through every box
+  that clips it, and sweeps 320px too. The same audit took a 40-by-32 floor
+  against FR-UI-2's 44 and never looked at the fleet with no agent open, which
+  is how a 41.5px Details toggle passed: a floor written in a gate is a claim
+  to check against the requirement it cites.
 
 - **Playwright's default click waits for the element to be *stable*, and beside
   a live capture that wait can never end.** `page.click` requires two

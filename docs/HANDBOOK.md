@@ -100,11 +100,30 @@ reason it's blocked, e.g. `waiting · dialog open`), the folder it's scoped to
 output tokens, and a live one-line summary of what it's doing — `Edit:
 src/app.ts`, `Task → Rerun the exhaustive sweep`.
 
+A card blocked on you is the only tinted card on the screen, a warm wash behind
+it with an amber edge, so it can be found out of the corner of an eye; idle and
+working cards are plain. The chevron down the card's right edge (*Details*)
+opens the fold: the token count, the full path, the session's original name,
+the delegation tree, and — once auto mode has refused anything — *auto mode
+refused 3 actions · last 4m ago (since 14:02)*, counted over the part of the
+transcript that was read and saying where that starts, as the token count does.
+A refusal never sends a notification; it waits in the fold. A blocked agent whose terminal has gone loses the wash and
+the **Answer** button, because there is nothing left to answer from.
+
 An agent that has handed work to a subagent reads `busy · delegated`, and its
 last-activity clock follows the subagent's transcript rather than its own. Its
 own transcript stops growing the moment it delegates, so without both of those a
 perfectly healthy run looks like an agent that quietly died — which is the one
 thing this dashboard exists to catch.
+
+A **working** card's age counts from the last prompt you typed rather than its
+last write, which for a working agent is always about now: `47m since your
+prompt · 214 calls`, the calls being the agent's own tool calls since — never
+its delegates'. Task notifications, SDK sends and compactions do not restart
+it. When your prompt is older than the part of the transcript the app read, it
+shows no clock and says `at least 214 calls in what was read`; when no prompt
+was read at all, the card keeps the ordinary age. On a narrow card it shortens
+to `47m · 214 calls` (or `≥214 calls`), with the whole sentence on hover.
 
 ### Delegates
 
@@ -152,9 +171,30 @@ Settings carries an **Alerts** toggle: with it on, an agent that *starts*
 waiting raises an OS notification — but only while the tab is hidden (a
 visible fleet is already the notification), and never for agents that were
 already blocked when the page opened. Clicking the notification opens that
-agent. The toggle asks for the browser's permission when you turn it on; if
-the browser cannot show notifications at all (Safari on iOS outside an
-installed web app), the toggle says so instead of pretending.
+agent, and it is titled with the name the agent's card leads with. The toggle
+asks for the browser's permission when you turn it on; if the browser cannot
+show notifications at all (Safari on iOS outside an installed web app), the
+toggle says so instead of pretending.
+
+### Other agents that need you, while one is open
+
+The list's **Needs you** group is the notification while the list is on
+screen. Three shapes take it off: the phone's sheet, a collapsed column, and
+full screen. In those, a chip — **✋ 2 ›** — sits where the filters were (or in
+full screen's header) and counts the *other* agents waiting on you. Tap it and
+the next one opens on its conversation, in the list's own sort order, wrapping
+round. It replaces the page rather than stacking another, so swipe-back still
+lands on the fleet however many agents you went through. It is absent when
+nobody else is waiting, and it skips an agent whose pane has gone, one still
+starting up, and any status the app only guessed at. While the connection is
+down it goes grey and says *as of* when it last heard.
+
+After you answer a single question from the card, the card offers **Next:
+‹name› · waiting 14m ⌥H** — the agent that has been waiting longest. It never
+moves you on by itself; press it (or ⌥H) when you are ready. Arriving that way
+— or by the chip, or a chord below — puts the keyboard on the new agent's
+*question*, not its first option, so an Enter you were already pressing answers
+nothing.
 
 The app ships a web manifest, so on a phone it can be added to the Home Screen
 and opens full-screen like an installed app.
@@ -187,6 +227,17 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
+  The conversation itself reads as prose: on a desktop it is held to a 46em
+  measure at 14px, each message is marked with the language it is written in
+  (by the same test), so Chinese gets a taller line and a Chinese face rather
+  than whatever the browser falls back to, and is never slanted by a fake
+  italic. What the agent did sits under its words as one ruled list, the tool
+  name first and its argument beside it.
+  What you have half-typed stays with the agent you typed it for: open another
+  agent and its own box comes back, go ‹ Agents on a phone or ⤢ to full screen
+  and the text is still there when you return. It is kept in memory only, so a
+  reload loses it, and only a send that went clears it. The Attach tab's paste
+  line keeps its text per agent the same way.
 - **Attach** — the actual terminal, live. Full keyboard passthrough, so you can
   answer a permission dialog, hit Esc to interrupt, or arrow through a menu.
 
@@ -240,6 +291,16 @@ the screen with the message box pinned to the bottom, above the home indicator.
 Inputs are 16px so iOS does not zoom the page when you tap them, tap targets are
 44px, and safe-area insets keep content clear of the notch in both orientations.
 
+Only the first visit downloads the app. Its scripts and stylesheets are named
+after their contents, so the browser may keep them for a year without asking
+again, and a later visit — including a push tap after iOS has evicted the page
+— fetches the 4KB document and paints from what its cache still holds. The first visit gets them compressed:
+about 146KB instead of 555KB, and the terminal behind a permission or plan
+prompt as 64KB instead of 305KB. A rebuild changes the names, so an update is
+never stuck behind a cached copy. Only these files are compressed; the API and
+the live connection never are, because they carry the token and your agents'
+conversations (INV-3).
+
 When the keyboard comes up, the sheet lays itself out in what is left of the
 screen rather than under the keys: the message box stays visible, the last
 message stays visible above it, and the same is true of the new-agent dialog
@@ -262,11 +323,18 @@ to long-press for its own Paste menu. Reading the clipboard for you is not the
 answer either: on WebKit, and so on every browser on iOS, that is refused
 outright. So the line is an ordinary text field, the paste is your operating
 system's, and it keeps its newlines, which matters the moment you paste more
-than one line of shell. Enter sends what is in it to the prompt and does *not*
-run it — `Enter` in the key row above does that — so you can see what actually
-landed before it goes anywhere. The box grows to show a pasted snippet and
-scrolls past a few lines, rather than pushing the pane off the screen.
-Shift+Enter types a newline by hand.
+than one line of shell. Enter (or the phone keyboard's send key) puts what is
+in it at the prompt and runs it, as does **Run**; **Stage** puts it at the
+prompt without running it, so you can see what actually landed before it goes
+anywhere. The box grows to show a pasted snippet and scrolls past a few lines,
+rather than pushing the pane off the screen. Shift+Enter types a newline by
+hand.
+
+On a touch screen, tapping the capture opens the phone's keyboard in that box,
+so a line is typed where you can read and correct it, then Enter runs it. The
+keys a phone lacks (arrows, Tab, Esc, Ctrl-C) are on the bar beside it. Nothing
+is focused until you tap, and dragging to pan a wide pane does not count as a
+tap. On a desktop the pane itself takes your keystrokes, one by one.
 
 **Earlier output**, beside Fit width, answers "what did it print before this":
 one press reads the 200 lines above the pane's visible screen out of tmux's
@@ -295,6 +363,13 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
+| `⌥J` / `⌥K` | open the next / previous agent down the list, on the tab you are on |
+| `⌥H` | open the agent that has needed you longest; a toast says *Nothing needs you* when none does |
+
+The ⌥ chords are `Alt` on Windows and Linux. They go by the key you press
+rather than the character Option makes of it, wait while a Pinyin or other
+input method is composing, and do nothing inside the terminal, where every key
+belongs to the agent.
 
 ## Claude usage
 
@@ -414,6 +489,10 @@ it is busy, so a keystroke never interleaves with a tool call in flight. On a
 phone they collapse behind a `⋯` button, because the row cost 111px of a 568px
 screen.
 
+**Close agent** now sits alone behind the **⋮** in the panel header — vertical,
+so it is not mistaken for the composer's **⋯** — and the header's **✕** ("Close
+panel") only closes the panel; the agent keeps running.
+
 **Shift+Tab, Goal, Compact and Clear also sit in the composer's menu**, beside
 the message box. The panel's row is above the tabs and does not exist in full
 screen, which is precisely where a conversation gets long enough to want
@@ -431,12 +510,31 @@ without the run burying the reply. A skill names itself; a slash command you
 typed reads as `/goal ship it` rather than as the markup Claude Code stores it
 as.
 
+Each call also says how it ended, in a column of its own: an edit reads
+`Edit src/app.ts  +12 −3`, counted from its recorded diff; a call auto mode
+stopped reads `refused · auto mode · irreversible local destruction`; one that
+errored reads `failed`. Those two are in the danger colour, but the words are
+always there. A refusal is read from the decision Claude Code records, never
+guessed from an error message, so an error that merely mentions permission is
+`failed`.
+
+Tap a call that has finished to see what it did: an edit's diff, or the last
+32 KB or so of what a command printed, with how much was left out. It opens in
+a box that scrolls on its own, so a long line never pushes a phone sideways,
+and it reads *as recorded at 14:07 — the file may have changed since*, plus
+*you changed this before it was applied* when you edited it in the permission
+dialog. It is read when you tap, for the agent you are looking at, from the
+last 8 MB of the transcript; nothing of it is kept in the browser.
+
 The agent's header is one row: the way back, its name, its status, the Chat
 and Attach tabs, and the header's own buttons. They used to be two, which came
 to 108px of a phone screen while the tab row was two-fifths full. If the name
 is long enough that they cannot share a line, the tabs drop to their own —
 which is a wrap rather than a breakpoint, because what decides it is the name
-and no breakpoint knows that.
+and no breakpoint knows that. On a desktop the name always keeps about twelve
+characters; when a narrow window cannot fit that beside the status, the tabs
+and the buttons, the tabs and the buttons move to a second row together rather
+than squeezing the name to an ellipsis.
 
 **Shift+Tab** sits in the composer's menu and in the terminal's key bar, since
 deciding that the next step should run in plan mode happens while watching the
@@ -561,7 +659,21 @@ couple of seconds, because the new process registers itself the same way every
 other session does. Directories from running agents are offered as shortcuts.
 The server validates the directory before spawning, and checks the model and
 permission mode against fixed allow-lists so an unrecognised value is refused
-rather than becoming a flag — see INV-7.
+rather than becoming a flag — see INV-7. The permission mode starts on
+**Auto**, because a session started here is usually left to work on its own;
+pick *Default* to fall back to whatever your Claude Code settings say.
+
+**First task** is optional, for agents only. What you type there is handed to
+`claude` as its opening prompt, once, with the click that starts it, so the
+agent gets going without you having to open it and type. The starting Chat
+quotes it until the session registers. In a folder Claude Code has not trusted
+yet, the trust question still comes first — answer it on the Attach tab and
+the task goes in after. The server refuses a task over 8 KB (tmux carries the
+whole command line in one 16 KB message), one with a control character other
+than a line break, and one of a single plain word like `doctor` or `purge`:
+`claude` runs a word that names one of its own subcommands as that
+subcommand, `--` notwithstanding. A refused task stays in the field.
+The task is part of the `claude` command line, so `ps` shows it for as long as the agent runs.
 
 ## Opening a plain terminal
 
@@ -577,9 +689,12 @@ commands into the pane. That is the same capability table Claude sessions are
 governed by, not a second set of checks.
 
 **Terminals stay out of the fleet until you ask for them.** The list answers
-"which agent needs me", and a shell never does — so a chip beside the status
-filters says how many there are and admits them when pressed, and the choice
-sticks across a reload. They are out of scope rather than hidden: a session
+"which agent needs me", and a shell never does — so a select beside the status
+filters scopes the fleet to Claude, to terminals alone, or to both, with
+each kind's count in its option, and the choice sticks across a reload. It is a
+select rather than three chips because the header has about one chip's width
+to spare at 1280px, and a wrapped header costs every screen below it a row.
+They are out of scope rather than hidden: a session
 this app knows about and shows nowhere would be a fleet with a hole in it.
 
 The session is marked with a tmux option as it is created, and that marker is
@@ -592,7 +707,9 @@ otherwise the fleet fills with husks that look merely quiet.
 Sessions accumulate: you open one in a directory, get distracted, and it sits
 there for a week holding a tmux pane and a `claude` process without ever having
 been asked anything. **Prune N unused** appears beside *New agent* whenever the
-fleet contains any, and closes them.
+fleet contains any, and closes them. On a phone it sits at the foot of the Idle
+group instead, under the sessions it would close, so it does not push the agents
+that need you down the screen.
 
 "Unused" is deliberately the narrowest claim the data supports: the session is
 `idle`, it has a pane, and it carries no activity line, no token spend, no
@@ -615,7 +732,7 @@ memory rather than a reading (INV-11).
 | Source | Used for |
 |---|---|
 | `~/.claude/sessions/<pid>.json` | Session list, status, cwd, and the tmux pane id. Read when a file is written, plus every 30s; every 2s only checks that each listed process is still the one that started. |
-| `claude agents --json` | Authoritative presence check. Costs ~680ms, so it runs only while a session's own file cannot settle whether it is live — every 30s until the CLI answers — and otherwise every 5 minutes. |
+| `claude agents --json` | Authoritative liveness check. Costs ~680ms, so it runs only while a session's own file cannot settle whether it is live — every 30s until the CLI answers — and otherwise every 5 minutes. |
 | `~/.claude/projects/*/<sessionId>.jsonl` | The timeline, tailed incrementally by byte offset. |
 | `…/<sessionId>/subagents/agent-*.meta.json` | The delegation tree — each delegate's type, brief and parent, written by Claude Code. Read only while the fleet list is mounted. |
 | `tmux capture-pane` / `send-keys` | The Attach tab, and delivering your input. |
@@ -636,6 +753,10 @@ observer that can never move your terminal. See [INVARIANTS.md](INVARIANTS.md).
     --print-url     print the full URL, token and all, then keep serving
     --grant <list>  limit what is allowed: read,respond,drive,spawn (default: all)
     --browse-root <d>  root the folder picker is confined to (default: home)
+    --notify <to>   push when an agent starts needing you: an ntfy topic URL
+                    (https://ntfy.sh/<topic>) or telegram:<chat_id>
+    --notify-link <url>  this app's address on the phone, so a push opens the card
+    --notify-lang <en|zh>  the language a push is written in (default en)
     --mock          serve fixture agents, touching nothing real
     --install-statusline
                     add the quota bridge to ~/.claude/settings.json and exit
@@ -655,6 +776,25 @@ agent-commander --rotate-token     # prints the new token; every old link now 40
 
 A literal `--token` is still an override for that run and is never written to
 the store.
+
+`--notify` sends a push off the machine when an agent *becomes* blocked, so a
+phone in a pocket hears about it: an ntfy topic, with an access token in
+`AGENT_COMMANDER_NTFY_TOKEN` if the server wants one, or `telegram:<chat_id>`
+with the bot token in `AGENT_COMMANDER_TELEGRAM_TOKEN` or
+`~/.claude/agent-commander/telegram-token`. `--notify-link` is this app's
+address on the phone, so tapping the push opens the card. A push is titled
+with the agent's name — or, for a name Claude Code made up such as
+`ziweiwu-35`, with its folder and branch (`kb-vault · main`) — and never with
+the conversation's title or a prompt, because it goes to ntfy.sh or Telegram
+(INV-3). Its body says what the agent is waiting for, in English or, with
+`--notify-lang zh`, in Chinese. That is a server flag and not the language
+menu, because no preference ever reaches the server (FR-UI-12).
+
+No push goes while you are at a browser tab: one that is on screen and has had
+a click, a key or a touch in the last three minutes is already the
+notification. A tab merely left on screen does not count, so a desk you walked
+away from does not silence the phone; at worst the phone buzzes beside a screen
+already showing the block.
 
 **The token only appears in a URL once.** Open the link and the server trades it
 for an `HttpOnly; SameSite=Strict` cookie and redirects to the same address
@@ -733,7 +873,7 @@ filesystem. `--grant` separates those.
 
 | Grant | What it covers |
 |---|---|
-| `read` | the fleet, transcripts, frames, `/api/env` |
+| `read` | the fleet, transcripts (a tool call's recorded result among them), frames, `/api/env` |
 | `respond` | answering the question an agent is blocked on |
 | `drive` | pastes, keystrokes, `mode`, `model`, `compact`, `clear`, `close` |
 | `spawn` | starting new agents, and the folder picker |
@@ -794,8 +934,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1197 tests: 597 Rust (the server) + 600 vitest (the web app)
-npm run e2e        # 401 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1793 tests: 795 Rust (the server) + 998 vitest (the web app)
+npm run e2e        # 468 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

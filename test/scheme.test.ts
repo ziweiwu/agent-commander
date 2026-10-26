@@ -135,7 +135,7 @@ describe('the schemes in the menu are the schemes in the stylesheet', () => {
     const required = [
       'bg', 'panel', 'panel-2', 'line', 'line-strong',
       'text', 'dim', 'faint',
-      'busy', 'waiting', 'idle', 'accent', 'danger', 'focus', 'shadow',
+      'busy', 'waiting', 'wash-waiting', 'idle', 'accent', 'danger', 'focus', 'shadow',
     ]
     const blocks = [...css.matchAll(/(:root[^{]*)\{([^{}]*)\}/g)].filter(([, , body]) =>
       (body as string).includes('--bg:'),

@@ -16,6 +16,7 @@ import type {
   RateLimits,
   ServerEnv,
   TimelineEvent,
+  ToolResultView,
 } from '../../shared/types.ts'
 import {
   buildMessages,
@@ -23,8 +24,10 @@ import {
   pendingMessage,
   reconcile,
   type ChatMessage,
+  type Outcomes,
 } from '../lib/chat.ts'
-import type { FleetState, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
+import type { FleetState, KindScope, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
+import type { SeenThrough, Visit } from '../lib/newSince.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
   applyLang,
@@ -33,7 +36,7 @@ import {
   clampSidebarWidth,
   loadDir,
   loadFilter,
-  loadTerminals,
+  loadKinds,
   loadLang,
   loadSort,
   loadScheme,
@@ -43,7 +46,7 @@ import {
   loadSidebarWidth,
   saveDir,
   saveFilter,
-  saveTerminals,
+  saveKinds,
   saveLang,
   saveSort,
   saveScheme,
@@ -74,6 +77,15 @@ export interface HistoryView {
   total: number
 }
 
+/**
+ * Where one opened row's read stands: asked and unanswered, answered with
+ * nothing found, or answered.
+ */
+export type ToolResultEntry =
+  | { state: 'pending' }
+  | { state: 'missing' }
+  | { state: 'ready'; view: ToolResultView }
+
 /** One answer to a `history` request, as the wire carries it. */
 export interface HistoryPage {
   sessionId: string
@@ -98,6 +110,49 @@ export function withPage(held: HistoryView | null, page: HistoryPage): HistoryVi
   return { sessionId: held.sessionId, lines: [...page.lines, ...held.lines], total: page.total }
 }
 
+/** The two boxes a person types into for one agent: the composer, and the Attach tab's paste line. */
+export type DraftBox = 'chat' | 'paste'
+
+/** What is half-typed into one box, and how tall the box grew to hold it (null: its resting height). */
+export interface Draft {
+  text: string
+  height: number | null
+}
+
+/**
+ * Every half-typed draft, per box and per agent (F1).
+ *
+ * In memory and nowhere else. A draft is the user's own words to an agent,
+ * which is exactly what `saveFleetSnapshot` keeps out of browser storage
+ * (INV-3), so a reload loses it — while a switch to another agent, ‹ Agents on
+ * a phone and ⤢ no longer do, because none of them is a reload.
+ */
+export type Drafts = Record<DraftBox, Record<string, Draft>>
+
+/** The drafts with one entry replaced, or removed when there is nothing left in it. */
+export function withDraft(drafts: Drafts, box: DraftBox, sessionId: string, draft: Draft | null): Drafts {
+  const rest = Object.fromEntries(Object.entries(drafts[box]).filter(([id]) => id !== sessionId))
+  const kept = draft !== null && draft.text !== '' ? { ...rest, [sessionId]: draft } : rest
+  return { ...drafts, [box]: kept }
+}
+
+/**
+ * The drafts for sessions still worth holding: the fleet's, plus the one on
+ * screen — which may be absent from the fleet for the seconds after a `/clear`
+ * while the route follows it, and is still being typed into.
+ */
+export function prunedDrafts(drafts: Drafts, keep: ReadonlySet<string>): Drafts {
+  const prune = (held: Record<string, Draft>) =>
+    Object.fromEntries(Object.entries(held).filter(([sessionId]) => keep.has(sessionId)))
+  return { chat: prune(drafts.chat), paste: prune(drafts.paste) }
+}
+
+/** A first task, and the placeholder of the agent it was started with. */
+export interface StartingTask {
+  sessionId: string
+  text: string
+}
+
 export interface AppState {
   /* server-driven */
   agents: Agent[]
@@ -116,6 +171,23 @@ export interface AppState {
    * lets the view say when it stopped being able to make that claim.
    */
   fleetAt: number | null
+  /**
+   * How far each session has been shown in this app, as the server last said
+   * (F6). Null until it has said, which is no marks rather than every mark:
+   * the remembered fleet painted on a cold start carries none.
+   */
+  seenThrough: SeenThrough | null
+  /**
+   * Where the open conversation stood when this visit to it began, for the
+   * divider in Chat. Set when the selection changes, or by the first record to
+   * arrive after it, and held until the next selection.
+   */
+  visit: Visit | null
+  /**
+   * Whether the last fleet frame was caught up: false from when the server's
+   * enricher idled until its first pass after resuming, and until a frame says.
+   */
+  caughtUp: boolean
   /** Account-level quota, or null when nothing has reported it. */
   limits: RateLimits | null
   env: ServerEnv | null
@@ -207,6 +279,18 @@ export interface AppState {
   history: HistoryView | null
   /** A history request is out and unanswered; the next waits for it. */
   historyPending: boolean
+  /**
+   * How each call in the conversation on screen ended, by `toolUseId`. Only
+   * ever set from a `timeline` frame, and dropped with the conversation.
+   */
+  outcomes: Outcomes
+  /**
+   * What the calls a reader opened returned, by `toolUseId`: read on a tap,
+   * for the focused agent only (INV-4), and held in memory and nowhere else.
+   * A diff or a command's output is the agent's work, which browser storage
+   * never holds (INV-3); it goes with the conversation.
+   */
+  toolResults: Readonly<Record<string, ToolResultEntry>>
   toast: string | null
   /** Sessions whose pane the server told us has exited. */
   exited: string[]
@@ -230,6 +314,25 @@ export interface AppState {
    * agent, made here for a just-cleared one.
    */
   expectSession: string | null
+  drafts: Drafts
+  /**
+   * The agent this page went to by a hop — the waiting chip, the hand-off
+   * after an answer, or a ⌥ chord — rather than by choosing its card. Arriving
+   * that way focuses the question rather than its first option, so the Enter
+   * a hand was already on its way to press answers nothing (INV-2). Null once
+   * an agent is opened any other way.
+   */
+  hopped: string | null
+  /**
+   * The first task the agent just started from this tab was given, under its
+   * placeholder id, so its starting Chat can quote it (F5).
+   *
+   * One slot, in memory only: the task is the user's own words to an agent,
+   * which INV-3 keeps out of browser storage, and it is worth quoting only
+   * while that placeholder is on screen. It is never sent again from here —
+   * the server already has it, on the command line it started (INV-2).
+   */
+  startingTask: StartingTask | null
 
   /* actions */
   setSidebar: (state: SidebarState) => void
@@ -242,7 +345,7 @@ export interface AppState {
   setLang: (lang: Lang) => void
   setQuery: (query: string) => void
   setFilter: (filter: StatusFilter) => void
-  setTerminals: (shown: boolean) => void
+  setKinds: (scope: KindScope) => void
   setSort: (sort: SortKey) => void
   setDir: (dir: SortDir) => void
   setFullscreen: (on: boolean) => void
@@ -253,8 +356,15 @@ export interface AppState {
   /** A page of history arrived: prepend it, if it is the page that was asked for. */
   addHistory: (page: HistoryPage) => void
   clearHistory: () => void
+  /** A `toolResult` reply arrived; `view` is absent when nothing was found. */
+  addToolResult: (toolUseId: string, view: ToolResultView | undefined) => void
   /** Expect a session the fleet has not broadcast yet; null once it arrives. */
   setExpectSession: (sessionId: string | null) => void
+  /** Hold what is typed into one agent's box; null, or empty text, lets it go. */
+  keepDraft: (box: DraftBox, sessionId: string, draft: Draft | null) => void
+  /** Drop the drafts of sessions that have left the fleet. */
+  pruneDrafts: (live: readonly string[]) => void
+  setStartingTask: (task: StartingTask | null) => void
   addPending: (text: string) => void
   /**
    * Re-decide which echoes may be counting down, after a status change.
@@ -338,6 +448,9 @@ export const useStore = create<AppState>()((set, get) => ({
   trees: [],
   treesEtag: null,
   fleetAt: null,
+  seenThrough: null,
+  visit: null,
+  caughtUp: false,
   limits: null,
   env: null,
   // Read from the document rather than waiting for the first WebSocket frame.
@@ -363,7 +476,7 @@ export const useStore = create<AppState>()((set, get) => ({
     filter: loadFilter(),
     sort: loadSort(),
     dir: loadDir(),
-    terminals: loadTerminals() === 'on',
+    kinds: loadKinds(),
   },
   sidebar: loadSidebar(),
   sidebarWidth: loadSidebarWidth(),
@@ -384,10 +497,15 @@ export const useStore = create<AppState>()((set, get) => ({
   frame: null,
   history: null,
   historyPending: false,
+  outcomes: {},
+  toolResults: {},
   toast: null,
   exited: [],
   answerRefused: null,
   expectSession: null,
+  drafts: { chat: {}, paste: {} },
+  hopped: null,
+  startingTask: null,
 
   setSidebar: (sidebar) => {
     saveSidebar(sidebar)
@@ -430,9 +548,9 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setQuery: (query) => set((s) => ({ fleet: { ...s.fleet, query } })),
-  setTerminals: (terminals) => {
-    saveTerminals(terminals ? 'on' : 'off')
-    set((s) => ({ fleet: { ...s.fleet, terminals } }))
+  setKinds: (kinds) => {
+    saveKinds(kinds)
+    set((s) => ({ fleet: { ...s.fleet, kinds } }))
   },
   setFilter: (filter) => {
     saveFilter(filter)
@@ -461,6 +579,10 @@ export const useStore = create<AppState>()((set, get) => ({
       s.historyPending ? { historyPending: false, history: withPage(s.history, page) } : s,
     ),
   clearHistory: () => set({ history: null, historyPending: false }),
+  addToolResult: (toolUseId, view) =>
+    set((s) => ({
+      toolResults: { ...s.toolResults, [toolUseId]: view ? { state: 'ready', view } : { state: 'missing' } },
+    })),
   showToast: (toast) => {
     window.clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => set({ toast: null }), 5000)
@@ -468,6 +590,17 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setExpectSession: (expectSession) => set({ expectSession }),
+
+  keepDraft: (box, sessionId, draft) =>
+    set((s) => ({ drafts: withDraft(s.drafts, box, sessionId, draft) })),
+  pruneDrafts: (live) =>
+    set((s) => {
+      const keep = new Set(live)
+      if (s.selected !== null) keep.add(s.selected)
+      const held = [...Object.keys(s.drafts.chat), ...Object.keys(s.drafts.paste)]
+      return held.every((sessionId) => keep.has(sessionId)) ? s : { drafts: prunedDrafts(s.drafts, keep) }
+    }),
+  setStartingTask: (startingTask) => set({ startingTask }),
 
   /** Echo a sent message locally so sending feels instant. */
   addPending: (text) => {
@@ -509,8 +642,8 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   rebuildChat: () => {
-    const { events, pending } = get()
-    const messages = reconcile(buildMessages(events), pending)
+    const { events, outcomes, pending } = get()
+    const messages = reconcile(buildMessages(events, outcomes), pending)
     const survived = pending.filter((p) => messages.some((m) => m.id === p.id))
     // Anything the transcript has now confirmed no longer needs its timer.
     for (const p of pending) {
@@ -531,6 +664,8 @@ export const useStore = create<AppState>()((set, get) => ({
       frame: null,
       history: null,
       historyPending: false,
+      outcomes: {},
+      toolResults: {},
       prompt: null,
       answerRefused: null,
       attached: false,

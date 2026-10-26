@@ -26,6 +26,7 @@
   --faint: #909499;
   --busy: #6ea5dd;
   --waiting: #d7af6a;
+  --wash-waiting: #2f2411;
   --idle: #909499;
   --accent: #64b176;
   --danger: #f37d89;
@@ -66,7 +67,11 @@
      written out by hand is a stack nobody compares to anything. The boot shell
      in `index.html` keeps its own copy on purpose, for the same reason it
      hard-codes two colours — it paints before this file is loaded. */
-  --font-ui: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, sans-serif;
+  /** The CJK faces sit after `system-ui` so Latin keeps the system face and a
+      Chinese run picks a face drawn for it, rather than whatever fallback the
+      browser reaches first — on Windows that is a serif SimSun beside sans. */
+  --font-ui: ui-sans-serif, -apple-system, 'SF Pro Text', system-ui, 'PingFang SC',
+    'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* Type scale. Six steps; anything between them was drift. */
@@ -79,12 +84,36 @@
   /* 16px is not a scale step but a requirement: iOS zooms a focused field
      under it. Used verbatim in the coarse-pointer rules. */
 
+  /** Line heights and the one strong weight. `--leading-ui` is a control or a
+      code line, `--leading-prose` is running text; `--weight-strong` is every
+      bold the app draws, so the agent name is 14/600 in the card, the panel
+      header and full screen alike rather than 600 in one and 650 in two.
+      `test/font-scale.test.ts` refuses a px size written outside the scale. */
+  --leading-ui: 1.4;
+  --leading-prose: 1.5;
+  --weight-strong: 600;
+
   /* Radius scale. */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-pill: 999px;
+
+  /** Translucent tints and edges, generated from `OVERLAYS` in gen-themes.py.
+      Every wash a module draws is one of these, so audit-contrast.py can find
+      it; the opaque waiting-card surface is `--wash-waiting`, solved per palette
+      above. */
+  --tint-waiting: color-mix(in srgb, var(--waiting) 12%, transparent);
+  --tint-accent: color-mix(in srgb, var(--accent) 12%, transparent);
+  --tint-danger: color-mix(in srgb, var(--danger) 12%, transparent);
+  --tint-focus: color-mix(in srgb, var(--focus) 16%, transparent);
+  --tint-banner: color-mix(in srgb, var(--waiting) 18%, transparent);
+  --edge-busy: color-mix(in srgb, var(--busy) 45%, transparent);
+  --edge-waiting: color-mix(in srgb, var(--waiting) 45%, transparent);
+  --edge-accent: color-mix(in srgb, var(--accent) 45%, transparent);
+  --edge-danger: color-mix(in srgb, var(--danger) 45%, transparent);
+  --edge-neutral: color-mix(in srgb, var(--line-strong) 55%, transparent);
 
   color-scheme: dark;
 }
@@ -102,6 +131,7 @@
   --faint: #636467;
   --busy: #0a5c9e;
   --waiting: #634502;
+  --wash-waiting: #fff2dd;
   --idle: #636467;
   --accent: #03682e;
   --danger: #b0193e;
@@ -146,6 +176,7 @@
     --faint: #636467;
     --busy: #0a5c9e;
     --waiting: #634502;
+    --wash-waiting: #fff2dd;
     --idle: #636467;
     --accent: #03682e;
     --danger: #b0193e;
@@ -191,6 +222,7 @@
   --faint: #909499;
   --busy: #6ea5dd;
   --waiting: #d7af6a;
+  --wash-waiting: #2f2411;
   --idle: #909499;
   --accent: #64b176;
   --danger: #f37d89;
@@ -238,6 +270,7 @@
   --faint: #7a97b6;
   --busy: #6ba8d2;
   --waiting: #d0b275;
+  --wash-waiting: #2e2411;
   --idle: #7a97b6;
   --accent: #7dae72;
   --danger: #ea838c;
@@ -257,6 +290,7 @@
   --faint: #50667d;
   --busy: #005f8e;
   --waiting: #604601;
+  --wash-waiting: #fff2da;
   --idle: #50667d;
   --accent: #276717;
   --danger: #a82841;
@@ -277,6 +311,7 @@
     --faint: #50667d;
     --busy: #005f8e;
     --waiting: #604601;
+    --wash-waiting: #fff2da;
     --idle: #50667d;
     --accent: #276717;
     --danger: #a82841;
@@ -297,6 +332,7 @@
   --faint: #7a97b6;
   --busy: #6ba8d2;
   --waiting: #d0b275;
+  --wash-waiting: #2e2411;
   --idle: #7a97b6;
   --accent: #7dae72;
   --danger: #ea838c;
@@ -324,6 +360,7 @@
   --faint: #779aa5;
   --busy: #68a7db;
   --waiting: #d2b269;
+  --wash-waiting: #2d2411;
   --idle: #779aa5;
   --accent: #6db070;
   --danger: #f37f73;
@@ -343,6 +380,7 @@
   --faint: #6e6447;
   --busy: #045e95;
   --waiting: #604700;
+  --wash-waiting: #fef3da;
   --idle: #6e6447;
   --accent: #04691a;
   --danger: #b11d1e;
@@ -363,6 +401,7 @@
     --faint: #6e6447;
     --busy: #045e95;
     --waiting: #604700;
+    --wash-waiting: #fef3da;
     --idle: #6e6447;
     --accent: #04691a;
     --danger: #b11d1e;
@@ -383,6 +422,7 @@
   --faint: #779aa5;
   --busy: #68a7db;
   --waiting: #d2b269;
+  --wash-waiting: #2d2411;
   --idle: #779aa5;
   --accent: #6db070;
   --danger: #f37f73;
@@ -405,6 +445,7 @@
   --faint: #a78f74;
   --busy: #70a5d7;
   --waiting: #d4af72;
+  --wash-waiting: #2e2311;
   --idle: #a78f74;
   --accent: #67af7b;
   --danger: #eb808f;
@@ -424,6 +465,7 @@
   --faint: #7a5823;
   --busy: #035691;
   --waiting: #5b3f03;
+  --wash-waiting: #fff2dd;
   --idle: #7a5823;
   --accent: #04612f;
   --danger: #a9023e;
@@ -444,6 +486,7 @@
     --faint: #7a5823;
     --busy: #035691;
     --waiting: #5b3f03;
+    --wash-waiting: #fff2dd;
     --idle: #7a5823;
     --accent: #04612f;
     --danger: #a9023e;
@@ -464,6 +507,7 @@
   --faint: #a78f74;
   --busy: #70a5d7;
   --waiting: #d4af72;
+  --wash-waiting: #2e2311;
   --idle: #a78f74;
   --accent: #67af7b;
   --danger: #eb808f;
@@ -487,6 +531,7 @@
   --faint: #978eb3;
   --busy: #83a0de;
   --waiting: #d8af6f;
+  --wash-waiting: #2f2311;
   --idle: #978eb3;
   --accent: #64b07a;
   --danger: #ed7e9a;
@@ -506,6 +551,7 @@
   --faint: #66607b;
   --busy: #38569f;
   --waiting: #654400;
+  --wash-waiting: #fef1de;
   --idle: #66607b;
   --accent: #036833;
   --danger: #aa1e52;
@@ -526,6 +572,7 @@
     --faint: #66607b;
     --busy: #38569f;
     --waiting: #654400;
+    --wash-waiting: #fef1de;
     --idle: #66607b;
     --accent: #036833;
     --danger: #aa1e52;
@@ -546,6 +593,7 @@
   --faint: #978eb3;
   --busy: #83a0de;
   --waiting: #d8af6f;
+  --wash-waiting: #2f2311;
   --idle: #978eb3;
   --accent: #64b07a;
   --danger: #ed7e9a;
@@ -573,6 +621,7 @@
   --faint: #6d97ca;
   --busy: #71a5db;
   --waiting: #d6b06e;
+  --wash-waiting: #2e2311;
   --idle: #6d97ca;
   --accent: #7bae6a;
   --danger: #f0807e;
@@ -592,6 +641,7 @@
   --faint: #51696e;
   --busy: #125d9c;
   --waiting: #634503;
+  --wash-waiting: #fef2dc;
   --idle: #51696e;
   --accent: #286803;
   --danger: #ae202f;
@@ -612,6 +662,7 @@
     --faint: #51696e;
     --busy: #125d9c;
     --waiting: #634503;
+    --wash-waiting: #fef2dc;
     --idle: #51696e;
     --accent: #286803;
     --danger: #ae202f;
@@ -632,6 +683,7 @@
   --faint: #6d97ca;
   --busy: #71a5db;
   --waiting: #d6b06e;
+  --wash-waiting: #2e2311;
   --idle: #6d97ca;
   --accent: #7bae6a;
   --danger: #f0807e;
@@ -659,6 +711,7 @@
   --faint: #878fcb;
   --busy: #af93da;
   --waiting: #c7b46c;
+  --wash-waiting: #2a2510;
   --idle: #878fcb;
   --accent: #4ab461;
   --danger: #f27d77;
@@ -678,6 +731,7 @@
   --faint: #66645d;
   --busy: #6b4998;
   --waiting: #594900;
+  --wash-waiting: #fbf4da;
   --idle: #66645d;
   --accent: #036927;
   --danger: #ad222a;
@@ -698,6 +752,7 @@
     --faint: #66645d;
     --busy: #6b4998;
     --waiting: #594900;
+    --wash-waiting: #fbf4da;
     --idle: #66645d;
     --accent: #036927;
     --danger: #ad222a;
@@ -718,6 +773,7 @@
   --faint: #878fcb;
   --busy: #af93da;
   --waiting: #c7b46c;
+  --wash-waiting: #2a2510;
   --idle: #878fcb;
   --accent: #4ab461;
   --danger: #f27d77;
@@ -744,6 +800,7 @@
   --faint: #94968a;
   --busy: #ac95de;
   --waiting: #e8a971;
+  --wash-waiting: #312113;
   --idle: #94968a;
   --accent: #8aac56;
   --danger: #f47b97;
@@ -763,6 +820,7 @@
   --faint: #616754;
   --busy: #684a9e;
   --waiting: #703e02;
+  --wash-waiting: #fef1e5;
   --idle: #616754;
   --accent: #466301;
   --danger: #b0114e;
@@ -783,6 +841,7 @@
     --faint: #616754;
     --busy: #684a9e;
     --waiting: #703e02;
+    --wash-waiting: #fef1e5;
     --idle: #616754;
     --accent: #466301;
     --danger: #b0114e;
@@ -803,6 +862,7 @@
   --faint: #94968a;
   --busy: #ac95de;
   --waiting: #e8a971;
+  --wash-waiting: #312113;
   --idle: #94968a;
   --accent: #8aac56;
   --danger: #f47b97;

@@ -26,18 +26,44 @@
   }
 }
 
-/*
- * New agent, and — when there is anything to prune — the prune button beside
- * it. They share a row on a wide list and stack on a narrow one, so the phone
- * never has two half-width buttons with a wrapped label in each.
+/**
+ * Filter, sort and the actions, as one row that the column's width wraps.
+ *
+ * Three full-width rows took 157px above the first heading at the desk, for a
+ * sort select stretched to 1290px and two 708px buttons. The bases here put
+ * all three on one row from about 800px of column and leave the 288px list
+ * beside an open agent, and a phone, on three rows as before.
+ */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.search {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+.sort {
+  flex: 1 1 220px;
+  max-width: 340px;
+  min-width: 0;
+}
+
+/**
+ * New agent and, when there is anything to prune, Prune beside it. On a phone
+ * Prune moves to the foot of the Idle group (`FleetList.tsx`), so New agent
+ * takes the row; the phone's wrap is for the case where Prune stays because no
+ * Idle group is on screen, so neither label is ever squeezed.
  */
 .actions {
   display: flex;
+  flex: 0 0 auto;
   gap: 8px;
   align-items: stretch;
 }
 .actions > * {
-  flex: 1;
+  flex: 1 1 auto;
   justify-content: center;
   white-space: nowrap;
 }
@@ -47,31 +73,44 @@
   justify-content: center;
 }
 
-/* Measured as needed below 520px; applied at the phone layout's one cut. */
 @media (max-width: 560px) {
   .actions {
-    flex-direction: column;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
   }
 }
 
+.groupFoot {
+  display: flex;
+  margin-top: 10px;
+}
+.groupFoot > * {
+  flex: 1;
+  justify-content: center;
+}
+
+/**
+ * A heading belongs to the group under it: 8px to its own cards, 10px between
+ * cards, 22px between groups. It sat 4px under the group above and 15px over
+ * its own, because `.groupHead:first-child` matched every heading — each `<h2>`
+ * is the first child of its own `<section>` — so each one read as the footer
+ * of the group before it. Sentence case at 12/600 in `--dim`, no tracking: the
+ * label is read once, not shouted on every scan, and Chinese has no case.
+ */
 .list {
   display: flex;
   flex-direction: column;
+  gap: 22px;
 }
 
 .groupHead {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 14px 2px 8px;
+  margin: 0 2px 8px;
   font-size: var(--text-sm);
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--faint);
-}
-.groupHead:first-child {
-  margin-top: 0;
+  font-weight: var(--weight-strong);
+  color: var(--dim);
 }
 .groupCount {
   font-size: var(--text-xs);
@@ -79,7 +118,12 @@
   background: var(--panel-2);
   border-radius: var(--radius-pill);
   padding: 0 7px;
-  letter-spacing: 0;
+}
+/** New since opened in this app (F6): the plain text colour, never amber, which is the hand's. */
+.groupNew {
+  font-size: var(--text-xs);
+  font-weight: 400;
+  color: var(--text);
 }
 /* The heading carries the hand as well as the colour: colour alone is the
  * one channel a reader may not have (INV-13's rule, applied here). */
@@ -153,7 +197,7 @@
   margin: 0 0 6px;
   overflow-wrap: anywhere;
   color: var(--text);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }
 .emptyBody {
   margin: 0;

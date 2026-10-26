@@ -104,6 +104,11 @@ use crate::control::{check_key, SendableKey, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUC
 /// The most a JSON request body may be.
 const MAX_BODY: usize = 8 * 1024;
 
+/// The most a new-agent request body may be: the ordinary bound, plus room
+/// for a first task at `spawn::MAX_TASK` after JSON has escaped it — a `"`, a
+/// `\` and a line break each travel as two bytes, so the task can double.
+const MAX_NEW_AGENT_BODY: usize = MAX_BODY + 2 * crate::spawn::MAX_TASK;
+
 const MIME_JSON: &str = "application/json; charset=utf-8";
 
 fn mime_for(path: &Path) -> &'static str {
@@ -343,34 +348,19 @@ pub enum Watched {
 #[derive(Default)]
 pub struct Viewers {
     count: AtomicUsize,
-    /// How many of them say their tab is on screen. The push channel's
-    /// "a visible tab is the notification" (INV-14) reads this.
-    visible: AtomicUsize,
+    /// Which tabs are on screen and lately used. The push channel's "somebody
+    /// at a tab is the notification" (INV-14) reads this.
+    pub presence: crate::presence::Presence,
+    /// How far each session has been shown on a tab that was on screen, for
+    /// "new since opened in this app" (F6). Fed by [`track_seen`].
+    pub seen: crate::seen::SeenThrough,
+    /// Whether the enricher has caught up since it last idled; carried on
+    /// every fleet frame.
+    pub caught_up: Arc<crate::enrich::CaughtUp>,
     listener: std::sync::OnceLock<Box<dyn Fn(Watched) + Send + Sync>>,
 }
 
 impl Viewers {
-    /// Whether any connected browser reports itself visible right now.
-    pub fn any_visible(&self) -> bool {
-        self.visible.load(Ordering::SeqCst) > 0
-    }
-
-    fn shown(&self) {
-        self.visible.fetch_add(1, Ordering::SeqCst);
-    }
-
-    fn hidden(&self) {
-        // Saturating: a socket that never said "visible" cannot take the
-        // count below zero on its way out.
-        //
-        // Rust 1.99 deprecated `fetch_update` in favour of `try_update`, which
-        // is only stable since 1.95; `rust-version` is older than that, so
-        // clippy's `incompatible_msrv` refuses the new name. Same method,
-        // older spelling, until the floor moves past 1.95.
-        #[allow(deprecated)]
-        let _ = self.visible.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| Some(n.saturating_sub(1)));
-    }
-
     /// Run this whenever the fleet goes from unwatched to watched, or back.
     pub fn on_change(&self, listener: Box<dyn Fn(Watched) + Send + Sync>) {
         let _ = self.listener.set(listener);
@@ -1097,6 +1087,9 @@ async fn dispatch(State(app): State<Arc<App>>, req: Request<Body>) -> Response {
             return handle_control(&app, body, &session_id, &action).await;
         }
     }
+    if is_public_asset(&method, &path) {
+        return serve_asset(&app, Request::from_parts(parts, body)).await;
+    }
     serve_static(&app, &path).await
 }
 
@@ -1210,7 +1203,69 @@ async fn serve_static(app: &App, pathname: &str) -> Response {
 }
 
 /// What the document is served with: always revalidate, never pin a build.
+/// So is every file under `/assets/` whose name does not change with its
+/// bytes — the manifest and the icons — for the same reason.
 const DOCUMENT_CACHE: &str = "no-cache";
+
+/// What a file named after its own bytes is served with. A build that changes
+/// the bytes changes the name, so a copy the browser already holds is never
+/// the wrong one and never needs asking about again. Over Tailscale on a phone
+/// that is the difference between a push tap painting from cache and one that
+/// waits on half a megabyte of script first.
+const HASHED_ASSET_CACHE: &str = "public, max-age=31536000, immutable";
+
+/// How many characters of content hash Vite writes into a compiled file's name.
+const VITE_HASH_LEN: usize = 8;
+
+/// True for `/assets/<name>-<hash>.js` or `.css`, the names Vite gives what it
+/// compiles. The hash alphabet is base64url, so `-` and `_` may appear in it.
+fn is_content_hashed(pathname: &str) -> bool {
+    let Some(name) = pathname.strip_prefix("/assets/").filter(|n| !n.contains('/')) else {
+        return false;
+    };
+    let Some(stem) = name.strip_suffix(".js").or_else(|| name.strip_suffix(".css")) else {
+        return false;
+    };
+    let stem = stem.as_bytes();
+    let Some(dash) = stem.len().checked_sub(VITE_HASH_LEN + 1).filter(|&at| at > 0) else {
+        return false;
+    };
+    stem[dash] == b'-'
+        && stem[dash + 1..].iter().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+}
+
+/// A file from the bundle, or the brotli or gzip copy of it the build wrote
+/// beside it (`precompress` in `vite.config.ts`), whichever the request accepts.
+///
+/// This is the only place anything is compressed. BREACH recovers a secret
+/// from how well a response compresses when the secret shares that response
+/// with text an attacker can choose; the document, the API and the socket
+/// carry the token and agent state, and nothing under this prefix ever does
+/// (`is_public_asset`).
+///
+/// `ServeDir` chooses the copy by `Accept-Encoding`, q-values included, and
+/// answers `If-Modified-Since`, all from the `fs` feature this crate already
+/// had. It does not say that its choice varied with the request, so `Vary` is
+/// added here, or a shared cache could hand brotli to a client that never
+/// offered to read it.
+async fn serve_asset(app: &App, req: Request<Body>) -> Response {
+    let hashed = is_content_hashed(req.uri().path());
+    let mut files = tower_http::services::ServeDir::new(&app.web_root)
+        .precompressed_br()
+        .precompressed_gzip()
+        .append_index_html_on_directories(false);
+    let Ok(res) = files.try_call(req).await else {
+        return text(StatusCode::INTERNAL_SERVER_ERROR, "could not read the bundle");
+    };
+    let mut res = res.map(Body::new);
+    if res.status().is_success() || res.status() == StatusCode::NOT_MODIFIED {
+        let policy = if hashed { HASHED_ASSET_CACHE } else { DOCUMENT_CACHE };
+        let headers = res.headers_mut();
+        headers.insert(header::CACHE_CONTROL, HeaderValue::from_static(policy));
+        headers.insert(header::VARY, HeaderValue::from_static("accept-encoding"));
+    }
+    res
+}
 
 /// Whether the document being served should say it is a mock fleet.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1274,7 +1329,13 @@ async fn send_file(file: &Path, stamp: MockStamp) -> Option<Response> {
 
 /// Read a small JSON body, refusing anything oversized.
 async fn read_json(body: Body) -> Result<serde_json::Value, Failure> {
-    let bytes: Bytes = axum::body::to_bytes(body, MAX_BODY)
+    read_json_within(body, MAX_BODY).await
+}
+
+/// `read_json` with the bound left to the caller, for the one request — a new
+/// agent — that may carry a first task several times the ordinary bound.
+async fn read_json_within(body: Body, limit: usize) -> Result<serde_json::Value, Failure> {
+    let bytes: Bytes = axum::body::to_bytes(body, limit)
         .await
         .map_err(|_| Failure::server("request body too large"))?;
     serde_json::from_slice(&bytes).map_err(|e| Failure::server(e.to_string()))
@@ -1291,7 +1352,7 @@ fn status_for(failure: &Failure) -> StatusCode {
 
 /// The request body, or the failure the caller should be told about.
 async fn new_agent_request(body: Body) -> Result<NewAgentRequest, Failure> {
-    let parsed = read_json(body).await?;
+    let parsed = read_json_within(body, MAX_NEW_AGENT_BODY).await?;
     if !parsed.get("cwd").map(|value| value.is_string()).unwrap_or(false) {
         return Err(Failure::caller("cwd is required"));
     }
@@ -1682,8 +1743,8 @@ struct ViewerState {
 struct Viewer {
     tx: UnboundedSender<ServerMessage>,
     state: Mutex<ViewerState>,
-    /// Whether this tab last said it was on screen; see `Viewers::visible`.
-    visible: std::sync::atomic::AtomicBool,
+    /// This tab in `Viewers::presence`.
+    tab: crate::presence::TabId,
     /// INV-12: how much this tab may still ask of a live agent. Outside the
     /// state lock because it has its own, and because a refusal must not have
     /// to wait on a pane read holding that one.
@@ -1691,25 +1752,9 @@ struct Viewer {
 }
 
 impl Viewer {
-    /// Record that the tab is on screen, moving the fleet-wide count only on
-    /// a change.
-    fn came_on_screen(&self, viewers: &Viewers) {
-        if !self.visible.swap(true, Ordering::SeqCst) {
-            viewers.shown();
-        }
-    }
-
-    /// Record that the tab is off screen — hidden, or gone — moving the
-    /// fleet-wide count only on a change.
-    fn went_off_screen(&self, viewers: &Viewers) {
-        if self.visible.swap(false, Ordering::SeqCst) {
-            viewers.hidden();
-        }
-    }
-
-    fn new(tx: UnboundedSender<ServerMessage>) -> Self {
+    fn new(tx: UnboundedSender<ServerMessage>, tab: crate::presence::TabId) -> Self {
         Self {
-            visible: std::sync::atomic::AtomicBool::new(false),
+            tab,
             tx,
             state: Mutex::new(ViewerState {
                 focused: None,
@@ -1804,8 +1849,9 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
         }
     });
 
-    let viewer = Arc::new(Viewer::new(tx));
+    let viewer = Arc::new(Viewer::new(tx, app.viewers.presence.arrive()));
     let (off, off_limits) = subscribe_viewer(&viewer, &app);
+    let off_seen = subscribe_to_seen(&viewer, &app);
     app.viewers.joined();
 
     /*
@@ -1856,9 +1902,10 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
 
     off();
     off_limits();
+    off_seen();
     viewer.clear_timers();
     writer.abort();
-    viewer.went_off_screen(&app.viewers);
+    app.viewers.presence.gone(viewer.tab);
     app.viewers.left();
 }
 
@@ -1900,12 +1947,17 @@ fn incoming(frame: Message) -> Incoming {
 /// needs the current one immediately — waiting for the next statusline render
 /// would leave the meters blank for however long the fleet is idle.
 fn subscribe_viewer(viewer: &Arc<Viewer>, app: &Arc<App>) -> (Unsubscribe, Unsubscribe) {
-    viewer.send(ServerMessage::Fleet { agents: app.deps.source.list(), mock: app.mock });
+    viewer.send(ServerMessage::Fleet {
+        agents: app.deps.source.list(),
+        mock: app.mock,
+        caught_up: app.viewers.caught_up.get(),
+    });
     let off = {
         let viewer = viewer.clone();
         let mock = app.mock;
+        let caught_up = app.viewers.caught_up.clone();
         app.deps.source.on_change(Box::new(move |agents| {
-            viewer.send(ServerMessage::Fleet { agents, mock });
+            viewer.send(ServerMessage::Fleet { agents, mock, caught_up: caught_up.get() });
         }))
     };
 
@@ -1917,6 +1969,45 @@ fn subscribe_viewer(viewer: &Arc<Viewer>, app: &Arc<App>) -> (Unsubscribe, Unsub
         }))
     };
     (off, off_limits)
+}
+
+/// Send this tab how far each session has been shown, and every change after.
+///
+/// Subscribed before the first record is sent, so a change in between reaches
+/// it twice rather than not at all; the record is whole each time, so twice is
+/// harmless. The fleet is folded in first, which is what seeds a fresh
+/// server's sessions as backlog before anybody can open one (INV-14).
+fn subscribe_to_seen(viewer: &Arc<Viewer>, app: &Arc<App>) -> Unsubscribe {
+    let off = {
+        let viewer = viewer.clone();
+        app.viewers.seen.on_change(Box::new(move |seen_through| {
+            viewer.send(ServerMessage::Seen { seen_through });
+        }))
+    };
+    mark_shown(app);
+    viewer.send(ServerMessage::Seen { seen_through: app.viewers.seen.current() });
+    off
+}
+
+/// Fold the fleet, and the sessions open on a tab that is on screen, into the
+/// record of what has been shown (F6).
+fn mark_shown(app: &App) {
+    let on_screen = app.viewers.presence.on_screen_sessions();
+    app.viewers.seen.observe(&app.deps.source.list(), &on_screen);
+}
+
+/// F6, wired: every fleet change goes past the record of what has been shown.
+///
+/// Registered once, before any tab subscribes, so a tab hears the record move
+/// before it hears the fleet frame that moved it: an agent whose new activity
+/// is on screen somewhere never flickers "new" in between. The listener stays
+/// for the life of the server, so its handle is let go.
+pub fn track_seen(app: &Arc<App>) {
+    let shown = app.clone();
+    let _keep = app.deps.source.on_change(Box::new(move |agents| {
+        let on_screen = shown.viewers.presence.on_screen_sessions();
+        shown.viewers.seen.observe(&agents, &on_screen);
+    }));
 }
 
 /// Whether this tab's terminal view is open.
@@ -1944,23 +2035,32 @@ struct KeyRequest {
     confirmed: Option<bool>,
 }
 
-async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
-    // A pong asks for nothing, so it is answered before the gate rather than
-    // inside it. Running it through `grant_for_message` would make a server
-    // started with a narrow `--grant` reply to its own heartbeat with an
-    // error, once every beat, for the life of the connection.
-    if let ClientMessage::Pong { visible } = &msg {
-        match visible.unwrap_or(false) {
-            true => viewer.came_on_screen(&app.viewers),
-            false => viewer.went_off_screen(&app.viewers),
+/// Take the messages that ask for nothing, and say whether `msg` was one.
+///
+/// They are answered before the grant gate rather than inside it. Running a
+/// pong through `grant_for_message` would make a server started with a narrow
+/// `--grant` reply to its own heartbeat with an error, once every beat, for the
+/// life of the connection. The client's own probe is answered the same way
+/// and for the same reason — a tab that has just come back asks, and a narrow
+/// grant must not turn the answer into an error — and so is a tab saying it
+/// was used, which reaches no agent and only holds pushes back (INV-14).
+fn answered_before_the_gate(msg: &ClientMessage, viewer: &Viewer, app: &App) -> bool {
+    let presence = &app.viewers.presence;
+    match msg {
+        ClientMessage::Pong { visible: Some(true) } => {
+            presence.on_screen(viewer.tab);
+            mark_shown(app);
         }
-        return;
+        ClientMessage::Pong { .. } => presence.off_screen(viewer.tab),
+        ClientMessage::Present => presence.touched(viewer.tab, std::time::Instant::now()),
+        ClientMessage::Ping => viewer.send(ServerMessage::Pong),
+        _ => return false,
     }
-    // The client's own probe, answered the same way and for the same reason:
-    // a tab that has just come back asks, and a narrow grant must not turn
-    // the answer into an error.
-    if matches!(msg, ClientMessage::Ping) {
-        viewer.send(ServerMessage::Pong);
+    true
+}
+
+async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    if answered_before_the_gate(&msg, viewer, app) {
         return;
     }
     // The socket is checked per message rather than at the handshake: one
@@ -1989,11 +2089,14 @@ async fn handle(msg: ClientMessage, viewer: &Arc<Viewer>, app: &Arc<App>) {
         ClientMessage::Answer { session_id, prompt_id, choice } => {
             on_answer(&Answer { session_id, prompt_id, choice }, viewer, app).await;
         }
+        ClientMessage::ToolResult { session_id, tool_use_id } => {
+            on_tool_result(session_id, tool_use_id, viewer, app).await;
+        }
         ClientMessage::History { session_id, before, lines } => {
             on_history(&session_id, (before, lines), viewer, app).await;
         }
         // Returned above, before the grant gate.
-        ClientMessage::Pong { .. } | ClientMessage::Ping => {}
+        ClientMessage::Pong { .. } | ClientMessage::Ping | ClientMessage::Present => {}
     }
 }
 
@@ -2010,21 +2113,24 @@ fn session_of(message: &ClientMessage) -> Option<&str> {
         | ClientMessage::Paste { session_id, .. }
         | ClientMessage::Key { session_id, .. }
         | ClientMessage::Answer { session_id, .. }
-        | ClientMessage::History { session_id, .. } => Some(session_id),
-        ClientMessage::Pong { .. } | ClientMessage::Ping => None,
+        | ClientMessage::History { session_id, .. }
+        | ClientMessage::ToolResult { session_id, .. } => Some(session_id),
+        ClientMessage::Pong { .. } | ClientMessage::Ping | ClientMessage::Present => None,
     }
 }
 
 fn grant_for_message(message: &ClientMessage) -> Grant {
     match message {
         ClientMessage::Focus { .. }
+        | ClientMessage::ToolResult { .. }
         | ClientMessage::Attach { .. }
         | ClientMessage::History { .. }
         // Never reached — `handle` returns on a pong before asking. Named
         // rather than left to a wildcard so that adding a message cannot
         // acquire `Read` by omission.
         | ClientMessage::Pong { .. }
-        | ClientMessage::Ping => Grant::Read,
+        | ClientMessage::Ping
+        | ClientMessage::Present => Grant::Read,
         ClientMessage::Answer { .. } => Grant::Respond,
         ClientMessage::Paste { .. } | ClientMessage::Key { .. } => Grant::Drive,
     }
@@ -2222,6 +2328,31 @@ async fn on_history(session_id: &str, window: (u32, u32), viewer: &Arc<Viewer>, 
     }
 }
 
+/// What one tool call returned, for the row a reader opened.
+///
+/// The `history` read's terms exactly: one read per request, never polled,
+/// answered only for the agent this tab is focused on (INV-4). The read is a
+/// tail of its own, scanning back from the end of the transcript within a
+/// bound, so the viewer's offset and schedule are untouched. A miss is still
+/// answered — the row is waiting on it — with no result rather than an error.
+async fn on_tool_result(session_id: String, tool_use_id: String, viewer: &Arc<Viewer>, app: &Arc<App>) {
+    if viewer.state.lock().unwrap().focused.as_deref() != Some(session_id.as_str()) {
+        return;
+    }
+    let well_formed = !tool_use_id.is_empty()
+        && tool_use_id.len() <= crate::outcome::MAX_TOOL_USE_ID
+        && tool_use_id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    let tail = well_formed
+        .then(|| app.deps.source.get(&session_id))
+        .flatten()
+        .and_then(|agent| (app.deps.tail_for)(&agent));
+    let result = match tail {
+        Some(mut tail) => tail.tool_result(&tool_use_id).await,
+        None => None,
+    };
+    viewer.send(ServerMessage::ToolResult { session_id, tool_use_id, result });
+}
+
 fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
     viewer.clear_timers();
     {
@@ -2231,6 +2362,8 @@ fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
         st.focused = session_id.clone();
         st.last_prompt_id = None;
     }
+    app.viewers.presence.focus(viewer.tab, session_id.clone());
+    mark_shown(app);
     let Some(session_id) = session_id else { return };
     let Some(agent) = app.deps.source.get(&session_id) else { return };
     /*
@@ -2578,7 +2711,8 @@ async fn pump_timeline(
         }
     }
     // INV-5: a transcript that cannot be read must not kill the session view.
-    let Ok(read) = tail.read().await else { return };
+    let Ok(mut read) = tail.read().await else { return };
+    leave_the_prompt_count_to_the_enricher(&mut read.patch);
     if !read.patch.is_empty() {
         app.deps.source.enrich(session_id, read.patch);
     }
@@ -2610,14 +2744,27 @@ async fn pump_timeline(
         }
         moved
     };
-    if !read.events.is_empty() || read.first || read.prompt_changed || prompt_moved {
+    let news = !read.events.is_empty() || !read.outcomes.is_empty();
+    if news || read.first || read.prompt_changed || prompt_moved {
         viewer.send(ServerMessage::Timeline {
             session_id: session_id.to_string(),
             events: read.events,
             reset: read.first,
             prompt,
+            outcomes: read.outcomes,
         });
     }
+}
+
+/// The enricher's tail is the one that counts since the last prompt.
+///
+/// This tail opened when the agent did, so its backfill starts later in the
+/// file than the enricher's, which has been reading since the server started.
+/// For a prompt between the two starts one would say "214 calls since 47m"
+/// and the other "at least 150 calls", each overwriting the other on every
+/// read — a card flipping between a clock and no clock while it sits open.
+fn leave_the_prompt_count_to_the_enricher(patch: &mut crate::sources::AgentPatch) {
+    patch.since_prompt = None;
 }
 
 /// The prompt as the pane shows it, where the transcript alone cannot say.
@@ -3398,12 +3545,17 @@ pub async fn serve(opts: Options) -> anyhow::Result<()> {
     if !opts.mock {
         enricher.clear_pictures_in(app.pictures.clone());
     }
+    enricher.report_catch_up_to(app.viewers.caught_up.clone());
+    track_seen(&app);
     idle_the_enricher_on_viewers(&app, &enricher);
     if let Some(spec) = &opts.notify {
         let channel = crate::push::Channel::parse(spec, &|key| std::env::var(key).ok())
             .map_err(|why| anyhow::anyhow!(why))?;
-        let notifier =
-            crate::push::Notifier::new(crate::push::HttpPusher::new(channel), opts.notify_link.clone());
+        let notifier = crate::push::Notifier::new(
+            crate::push::HttpPusher::new(channel),
+            opts.notify_link.clone(),
+            opts.notify_lang.unwrap_or_default(),
+        );
         push_on_transitions(&app, notifier);
     }
     let count = app.deps.source.list().len();
@@ -3442,12 +3594,13 @@ fn fleet_for(
 }
 
 /// INV-14, server-side: every fleet change goes past the push tracker, which
-/// fires only for a transition it watched while no browser was visible. The
-/// listener stays for the life of the server, so its handle is let go.
+/// fires only for a transition it watched while nobody was at a tab — on
+/// screen and used within `PRESENCE_WINDOW` (`presence.rs`). The listener
+/// stays for the life of the server, so its handle is let go.
 fn push_on_transitions(app: &Arc<App>, notifier: Arc<crate::push::Notifier>) {
     let viewers = app.clone();
     let _keep = app.deps.source.on_change(Box::new(move |agents| {
-        if viewers.viewers.any_visible() {
+        if viewers.viewers.presence.anyone_there(std::time::Instant::now()) {
             notifier.watched_on_screen(&agents);
             return;
         }
@@ -3789,6 +3942,7 @@ mod tests {
                     notice: None,
                     tokens_before: None,
                     tokens_after: None,
+                    tool_use_id: None,
                 }],
                 patch: AgentPatch::default(),
                 first: self.n == 1,
@@ -3796,7 +3950,68 @@ mod tests {
                 ..Default::default()
             })
         }
+
+        async fn tool_result(&mut self, tool_use_id: &str) -> Option<crate::types::ToolResultView> {
+            (tool_use_id == RECORDED_CALL).then(|| crate::types::ToolResultView {
+                at: 0,
+                hunks: None,
+                output: Some("recorded output".into()),
+                omitted: 0,
+                user_modified: None,
+            })
+        }
     }
+
+    /// A tail that answers every id it is asked for, and counts the asking.
+    struct ResultCountingTail {
+        lookups: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl TailApi for ResultCountingTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            Ok(TailRead::default())
+        }
+
+        async fn tool_result(&mut self, _tool_use_id: &str) -> Option<crate::types::ToolResultView> {
+            self.lookups.fetch_add(1, Ordering::SeqCst);
+            Some(crate::types::ToolResultView {
+                at: 0,
+                hunks: None,
+                output: Some("any".into()),
+                omitted: 0,
+                user_modified: None,
+            })
+        }
+    }
+
+    /// An empty id, or one outside `[A-Za-z0-9_-]`, is answered with nothing
+    /// and never read for: an empty needle matches nearly every record.
+    #[tokio::test]
+    async fn inv4_a_malformed_tool_use_id_is_never_read_for() {
+        let parts = harness_parts(FakePanes::new());
+        let lookups = Arc::new(AtomicUsize::new(0));
+        let counted = lookups.clone();
+        let tails = Arc::new(move |_agent: &Agent| {
+            Some(Box::new(ResultCountingTail { lookups: counted.clone() }) as Box<dyn TailApi>)
+        });
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        for malformed in ["", "toolu \"x", "toolu/../x"] {
+            send_json(&mut client, tool_result_request(SESSION, malformed)).await;
+            let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+            assert!(reply.get("result").is_none(), "{malformed:?} must not be read for");
+        }
+        assert_eq!(lookups.load(Ordering::SeqCst), 0);
+        send_json(&mut client, tool_result_request(SESSION, "toolu_well-formed_1")).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert_eq!(reply["result"]["output"], serde_json::json!("any"));
+        assert_eq!(lookups.load(Ordering::SeqCst), 1);
+    }
+
+    /// The one call `FakeTail` has a result on record for.
+    const RECORDED_CALL: &str = "toolu_recorded";
 
     /// A hub with one polling task per pane, which is all `routes` asks of it.
     struct FakeHub {
@@ -4097,6 +4312,7 @@ mod tests {
                     notice: None,
                     tokens_before: None,
                     tokens_after: None,
+                    tool_use_id: None,
                 })
                 .collect();
             self.read_lines = lines.len();
@@ -4245,6 +4461,7 @@ mod tests {
     async fn start(token: Option<&str>, panes: Arc<FakePanes>, fixtures: Fixtures) -> Harness {
         let parts = harness_parts(panes);
         let app = harness_app(&parts, fixtures, token);
+        track_seen(&app);
         let served = app.clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -5108,16 +5325,12 @@ mod tests {
     #[tokio::test]
     async fn refuses_an_oversized_request_body() {
         let h = plain(FakePanes::new()).await;
-        let payload = format!("{{\"cwd\":\"/tmp\",\"name\":\"{}\"}}", "x".repeat(MAX_BODY * 2));
-        let res = post(
-            h.port,
-            "/api/agents",
-            "Content-Type: application/json\r\n",
-            Some(&payload),
-        )
-        .await;
-        assert!(status(&res).contains("500"), "{}", status(&res));
-        assert!(body(&res).contains("too large"), "{}", body(&res));
+        for (path, limit) in [("/api/terminals", MAX_BODY), ("/api/agents", MAX_NEW_AGENT_BODY)] {
+            let payload = format!("{{\"cwd\":\"/tmp\",\"name\":\"{}\"}}", "x".repeat(limit));
+            let res = post(h.port, path, "Content-Type: application/json\r\n", Some(&payload)).await;
+            assert!(status(&res).contains("500"), "{path}: {}", status(&res));
+            assert!(body(&res).contains("too large"), "{path}: {}", body(&res));
+        }
     }
 
     /* ---- INV-12 and INV-6: the guards must actually be reached ---- */
@@ -6243,4 +6456,359 @@ mod tests {
         assert_eq!(control_route("/api/agents/abc/kill"), None);
         assert_eq!(control_route("/api/agents"), None);
     }
+
+    /// Pushes a server handed to its channel, kept rather than sent.
+    struct Delivered(Mutex<Vec<crate::push::Push>>);
+
+    #[async_trait]
+    impl crate::push::Pusher for Delivered {
+        async fn push(&self, push: &crate::push::Push) -> Result<(), String> {
+            self.0.lock().unwrap().push(push.clone());
+            Ok(())
+        }
+    }
+
+    /// Move the harness agent to `status` and tell every listener, as the
+    /// registry does when a session file changes.
+    fn fleet_moves_to(source: &FakeSource, status: AgentStatus) {
+        let agents = {
+            let mut agents = source.agents.lock().unwrap();
+            agents[0].status = status;
+            agents.clone()
+        };
+        for listener in source.listeners.lock().unwrap().iter().flatten() {
+            listener(agents.clone());
+        }
+    }
+
+    /// How many pushes go out when the harness agent becomes blocked while
+    /// one tab has said `reports` over its socket.
+    async fn pushes_while_a_tab_says(reports: &[serde_json::Value]) -> usize {
+        let h = plain(FakePanes::new()).await;
+        let delivered = Arc::new(Delivered(Mutex::new(Vec::new())));
+        let notifier = crate::push::Notifier::new(delivered.clone(), None, crate::push::PushLang::English);
+        push_on_transitions(&h.app, notifier);
+        let mut client = open(h.port).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "fleet")).await.is_some());
+        for report in reports {
+            send_json(&mut client, report.clone()).await;
+        }
+        send_json(&mut client, serde_json::json!({ "type": "ping" })).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "pong")).await.is_some(), "every report was read");
+
+        fleet_moves_to(&h.source, AgentStatus::Busy);
+        fleet_moves_to(&h.source, AgentStatus::Waiting);
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        let sent = delivered.0.lock().unwrap().len();
+        sent
+    }
+
+    /// INV-14, amended: a desk tab left on screen silenced every push to the
+    /// phone. Visible is no longer enough to be the notification; somebody has
+    /// to have used the tab lately.
+    #[tokio::test]
+    async fn inv14_a_visible_tab_nobody_has_touched_does_not_hold_back_a_push() {
+        let visible = serde_json::json!({ "type": "pong", "visible": true });
+        assert_eq!(pushes_while_a_tab_says(&[visible]).await, 1);
+    }
+
+    #[tokio::test]
+    async fn inv14_a_visible_tab_somebody_just_used_holds_back_the_push() {
+        let visible = serde_json::json!({ "type": "pong", "visible": true });
+        let used = serde_json::json!({ "type": "present" });
+        assert_eq!(pushes_while_a_tab_says(&[visible, used]).await, 0);
+    }
+
+    #[tokio::test]
+    async fn inv14_a_hidden_tab_never_holds_back_a_push() {
+        let used = serde_json::json!({ "type": "present" });
+        let hidden = serde_json::json!({ "type": "pong", "visible": false });
+        assert_eq!(pushes_while_a_tab_says(&[used, hidden]).await, 1);
+    }
+
+    /// A script Vite named after its content, with a `-` and a `_` in the hash
+    /// because its alphabet has both.
+    const HASHED_JS: &str = "index-Cs-nH_0A.js";
+    const HASHED_CSS: &str = "index-CSWKOJY3.css";
+    /// What the build writes beside a hashed file, told apart by their bytes.
+    const BROTLI_COPY: &str = "the brotli copy";
+    const GZIP_COPY: &str = "the gzip copy";
+    const PLAIN_JS: &str = "console.log('plain')\n";
+    const YEAR_LONG: &str = "public, max-age=31536000, immutable";
+
+    /// A built bundle as Vite lays one out: content-hashed names for what it
+    /// compiled, each with a compressed copy beside it, and fixed names for
+    /// what it copied out of `public/`. A compressed copy also sits beside the
+    /// document and a root-level script, where none may ever be served.
+    fn lay_out_a_bundle(root: &Path) {
+        let assets = root.join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        for hashed in [HASHED_JS, HASHED_CSS] {
+            std::fs::write(assets.join(hashed), PLAIN_JS).unwrap();
+            std::fs::write(assets.join(format!("{hashed}.br")), BROTLI_COPY).unwrap();
+            std::fs::write(assets.join(format!("{hashed}.gz")), GZIP_COPY).unwrap();
+        }
+        for fixed in ["manifest.webmanifest", "icon-192.png", "app.js"] {
+            std::fs::write(assets.join(fixed), "fixed name\n").unwrap();
+        }
+        std::fs::write(root.join("index.html.br"), BROTLI_COPY).unwrap();
+        std::fs::write(root.join("app.js.br"), BROTLI_COPY).unwrap();
+    }
+
+    /// The value of one response header, matched without regard to case.
+    fn header_in(response: &str, name: &str) -> Option<String> {
+        let head = response.split_once("\r\n\r\n").map_or(response, |(head, _)| head);
+        head.lines().skip(1).find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.trim().eq_ignore_ascii_case(name).then(|| value.trim().to_string())
+        })
+    }
+
+    #[tokio::test]
+    async fn a_content_hashed_bundle_file_is_kept_for_a_year() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        for hashed in [HASHED_JS, HASHED_CSS] {
+            let res = get(h.port, &format!("/assets/{hashed}"), "").await;
+            assert!(status(&res).contains("200"), "{hashed}: {}", status(&res));
+            assert_eq!(header_in(&res, "cache-control").as_deref(), Some(YEAR_LONG), "{hashed}");
+        }
+    }
+
+    /// Their names never change, so pinning one would strand a phone on it.
+    /// They revalidate on every load instead, which costs a 304 rather than
+    /// the file because each carries a `Last-Modified` to revalidate against.
+    #[tokio::test]
+    async fn the_document_the_manifest_and_the_icons_keep_revalidating() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let hashed = get(h.port, &format!("/assets/{HASHED_JS}"), "").await;
+        assert_eq!(header_in(&hashed, "cache-control").as_deref(), Some(YEAR_LONG));
+        for path in ["/", "/assets/manifest.webmanifest", "/assets/icon-192.png", "/assets/app.js"] {
+            let res = get(h.port, path, "").await;
+            assert!(status(&res).contains("200"), "{path}: {}", status(&res));
+            assert_eq!(header_in(&res, "cache-control").as_deref(), Some("no-cache"), "{path}");
+        }
+        let manifest = get(h.port, "/assets/manifest.webmanifest", "").await;
+        let stamp = header_in(&manifest, "last-modified").expect("the manifest names its date");
+        let again =
+            get(h.port, "/assets/manifest.webmanifest", &format!("If-Modified-Since: {stamp}\r\n"))
+                .await;
+        assert!(status(&again).contains("304"), "{}", status(&again));
+        assert_eq!(header_in(&again, "cache-control").as_deref(), Some("no-cache"));
+    }
+
+    #[tokio::test]
+    async fn inv3_a_compressed_copy_is_served_only_to_a_client_that_accepts_it() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let path = format!("/assets/{HASHED_JS}");
+        for (accepts, encoding, served) in [
+            ("Accept-Encoding: br\r\n", Some("br"), BROTLI_COPY),
+            ("Accept-Encoding: gzip, deflate, br, zstd\r\n", Some("br"), BROTLI_COPY),
+            ("Accept-Encoding: gzip\r\n", Some("gzip"), GZIP_COPY),
+            ("Accept-Encoding: br;q=0, gzip\r\n", Some("gzip"), GZIP_COPY),
+            ("Accept-Encoding: identity\r\n", None, PLAIN_JS),
+            ("", None, PLAIN_JS),
+        ] {
+            let res = get(h.port, &path, accepts).await;
+            assert!(status(&res).contains("200"), "{accepts:?}: {}", status(&res));
+            assert_eq!(header_in(&res, "content-encoding").as_deref(), encoding, "{accepts:?}");
+            assert_eq!(body(&res), served, "{accepts:?}");
+            let vary = header_in(&res, "vary").unwrap_or_default().to_ascii_lowercase();
+            assert!(vary.contains("accept-encoding"), "{accepts:?}: vary {vary:?}");
+            let kind = header_in(&res, "content-type").unwrap_or_default();
+            assert!(kind.starts_with("text/javascript"), "{accepts:?}: {kind}");
+        }
+    }
+
+    /// BREACH reads a secret out of how well a response compresses, so nothing
+    /// that carries agent state or a token may be compressed at all. The first
+    /// request is the control: the same header does buy a compressed copy
+    /// under `/assets/`, so the refusals after it are not a header ignored.
+    #[tokio::test]
+    async fn inv3_nothing_outside_the_bundle_is_ever_served_compressed() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let accepts = "Accept-Encoding: gzip, deflate, br, zstd\r\n";
+        let control = get(h.port, &format!("/assets/{HASHED_JS}"), accepts).await;
+        assert_eq!(header_in(&control, "content-encoding").as_deref(), Some("br"));
+        for path in ["/", "/agent/xyz", "/app.js", "/api/agents", "/api/tree", "/api/env"] {
+            let res = get(h.port, path, accepts).await;
+            assert!(status(&res).contains("200"), "{path}: {}", status(&res));
+            assert_eq!(header_in(&res, "content-encoding"), None, "{path}");
+            assert!(!body(&res).contains(BROTLI_COPY), "{path}");
+        }
+    }
+
+    /// The bundle route reads the disk through `ServeDir` rather than
+    /// `serve_static`, so it is held to the same standard on its own.
+    #[tokio::test]
+    async fn the_bundle_route_cannot_be_walked_out_of_its_web_root_either() {
+        let h = plain(FakePanes::new()).await;
+        lay_out_a_bundle(h.web_root.path());
+        let outside = h.web_root.path().parent().unwrap().join("ac-asset-secret.txt");
+        std::fs::write(&outside, "TOP SECRET").unwrap();
+        let name = outside.file_name().unwrap().to_string_lossy().to_string();
+        for path in [
+            format!("/assets/../../{name}"),
+            format!("/assets/%2e%2e/%2e%2e/{name}"),
+            format!("/assets/..%2f..%2f{name}"),
+            format!("/assets/%2f..%2f..%2f{name}"),
+        ] {
+            let res = get(h.port, &path, "").await;
+            assert!(!body(&res).contains("TOP SECRET"), "escaped with {path}");
+        }
+        let _ = std::fs::remove_file(outside);
+    }
+
+    /// Records each new-agent request that reached the spawn, and starts nothing.
+    #[derive(Default)]
+    struct RecordingSpawn {
+        started: Mutex<Vec<NewAgentRequest>>,
+    }
+
+    #[async_trait]
+    impl SpawnApi for RecordingSpawn {
+        async fn start(&self, req: NewAgentRequest) -> Result<SpawnResult, Failure> {
+            let cwd = req.cwd.clone();
+            self.started.lock().unwrap().push(req);
+            Ok(SpawnResult { tmux_session: "test-session".into(), cwd })
+        }
+        async fn start_terminal(&self, req: NewTerminalRequest) -> Result<SpawnResult, Failure> {
+            Ok(SpawnResult { tmux_session: "test-terminal".into(), cwd: req.cwd })
+        }
+    }
+
+    /// A server under `grants` whose spawns are recorded rather than run.
+    async fn spawning(grants: Grants) -> (Harness, Arc<RecordingSpawn>) {
+        let parts = harness_parts(FakePanes::new());
+        let spawn = Arc::new(RecordingSpawn::default());
+        let mut app = harness_app(&parts, Fixtures::Real, None);
+        {
+            let app = Arc::get_mut(&mut app).expect("sole owner");
+            app.spawn = spawn.clone();
+            app.grants = grants;
+        }
+        let served = app.clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let _ = run(app, listener).await;
+        });
+        let HarnessParts { panes, source, control, web_root } = parts;
+        (Harness { port, panes, source, control, web_root, app: served }, spawn)
+    }
+
+    /// §7: a first task is part of starting an agent, so it takes the spawn
+    /// power. Neither a read-only credential nor one that may drive a running
+    /// agent can start one with a task, and nothing reaches the spawn.
+    #[tokio::test]
+    async fn a_read_only_credential_cannot_start_an_agent_with_a_task() {
+        let payload = r#"{"cwd":"/tmp","task":"fix the login bug"}"#;
+        for grants in ["read", "read,respond,drive"] {
+            let (h, spawn) = spawning(Grants::parse(grants).unwrap()).await;
+            let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(payload)).await;
+            assert!(status(&res).contains("403"), "{grants}: {}", status(&res));
+            assert!(spawn.started.lock().unwrap().is_empty(), "{grants}");
+        }
+    }
+
+    /// A first task at its cap, made of the characters JSON doubles, still fits
+    /// the request and reaches the spawn whole. The ordinary 8 KiB body bound
+    /// refused it as "too large".
+    #[tokio::test]
+    async fn a_first_task_at_its_cap_reaches_the_spawn_whole() {
+        let (h, spawn) = spawning(Grants::ALL).await;
+        let task = format!("say {}", "\"\\\n".repeat((crate::spawn::MAX_TASK - 4) / 3));
+        let payload = serde_json::json!({ "cwd": "/tmp", "task": task }).to_string();
+        assert!(payload.len() > MAX_BODY, "the case the old bound refused");
+        let res = post(h.port, "/api/agents", "Content-Type: application/json\r\n", Some(&payload)).await;
+        assert!(status(&res).contains("200"), "{}: {}", status(&res), body(&res));
+        assert_eq!(spawn.started.lock().unwrap()[0].task.as_deref(), Some(task.as_str()));
+    }
+
+    fn tool_result_request(session: &str, id: &str) -> serde_json::Value {
+        serde_json::json!({"type":"toolResult","sessionId":session,"toolUseId":id})
+    }
+
+    /// INV-4: what a call returned is read for the agent this tab is looking
+    /// at and no other, on request — the `history` read's terms.
+    #[tokio::test]
+    async fn inv4_a_tool_result_read_needs_a_focused_viewer() {
+        let h = start(None, FakePanes::new(), Fixtures::Real).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, tool_result_request(SESSION, RECORDED_CALL)).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "toolResult")).await.is_none());
+
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, tool_result_request(SESSION, RECORDED_CALL)).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert_eq!(reply["sessionId"], serde_json::json!(SESSION));
+        assert_eq!(reply["toolUseId"], serde_json::json!(RECORDED_CALL));
+        assert_eq!(reply["result"]["output"], serde_json::json!("recorded output"));
+    }
+
+    /// A miss is still answered, so the row asking is not left waiting, and a
+    /// read-only credential may ask: transcripts are what `read` covers.
+    #[tokio::test]
+    async fn a_tool_result_miss_is_answered_with_nothing_and_read_may_ask() {
+        let h = granting(Grants::parse("read").unwrap(), FakePanes::new()).await;
+        let mut client = open(h.port).await;
+        send_json(&mut client, serde_json::json!({"type":"focus","sessionId":SESSION})).await;
+        send_json(&mut client, tool_result_request(SESSION, "toolu_never_written")).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert!(reply.get("result").is_none());
+        let too_long = "t".repeat(crate::outcome::MAX_TOOL_USE_ID + 1);
+        send_json(&mut client, tool_result_request(SESSION, &too_long)).await;
+        let reply = next_msg(&mut client, |m| is_type(m, "toolResult")).await.unwrap();
+        assert!(reply.get("result").is_none());
+        assert_eq!(h.panes.writes(), 0);
+    }
+
+    /// The harness agent, now a Claude session whose transcript last moved at
+    /// `moved_at`, told to every listener as the enricher does.
+    fn transcript_moves_to(source: &FakeSource, moved_at: i64) {
+        let agents = {
+            let mut agents = source.agents.lock().unwrap();
+            agents[0].agent_kind = crate::agent_kinds::CLAUDE_KIND.into();
+            agents[0].status = AgentStatus::Idle;
+            agents[0].last_activity_at = Some(moved_at);
+            agents.clone()
+        };
+        for listener in source.listeners.lock().unwrap().iter().flatten() {
+            listener(agents.clone());
+        }
+    }
+
+    /// Every message sent so far has been read: the reply to a ping is behind them.
+    async fn read_so_far(client: &mut Client) {
+        send_json(client, serde_json::json!({ "type": "ping" })).await;
+        assert!(next_msg(client, |m| is_type(m, "pong")).await.is_some());
+    }
+
+    /// F6 over a real socket: the record moves to the agent's own time only
+    /// while the tab that has it open is on screen, and every tab hears it.
+    #[tokio::test]
+    async fn inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen() {
+        const READ_AT: i64 = 1_786_600_000_000;
+        const REPLIED_AT: i64 = READ_AT + 60_000;
+        let h = plain(FakePanes::new()).await;
+        transcript_moves_to(&h.source, READ_AT);
+        let mut client = open(h.port).await;
+        let first = next_msg(&mut client, |m| is_type(m, "seen")).await.expect("a record on connect");
+        assert_eq!(first["seenThrough"][SESSION], READ_AT, "the first frame is backlog");
+
+        send_json(&mut client, serde_json::json!({ "type": "pong", "visible": false })).await;
+        send_json(&mut client, serde_json::json!({ "type": "focus", "sessionId": SESSION })).await;
+        read_so_far(&mut client).await;
+        transcript_moves_to(&h.source, REPLIED_AT);
+        assert_eq!(h.app.viewers.seen.current()[SESSION], READ_AT, "a hidden tab shows nobody anything");
+
+        send_json(&mut client, serde_json::json!({ "type": "pong", "visible": true })).await;
+        let moved = next_msg(&mut client, |m| is_type(m, "seen") && m["seenThrough"][SESSION] == REPLIED_AT).await;
+        assert!(moved.is_some(), "the tab is told, so another device would be too");
+        assert_eq!(h.app.viewers.seen.current()[SESSION], REPLIED_AT);
+    }
 }
+

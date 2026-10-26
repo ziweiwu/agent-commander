@@ -18,7 +18,7 @@
      be rescued by thinning the wash, which tops out at 4.54:1 while making the
      banner harder to notice. Keeping the tint and darkening the text gets
      11.35:1 without touching the design intent. */
-  background: color-mix(in srgb, var(--waiting) 18%, transparent);
+  background: var(--tint-banner);
   color: var(--text);
   text-align: center;
   font-size: var(--text-sm);
@@ -47,7 +47,7 @@
 }
 .title {
   font-size: var(--text-lg);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
   margin: 0;
   letter-spacing: -0.01em;
 }
@@ -66,6 +66,32 @@
 .chipMark {
   margin-right: 3px;
   font-size: var(--text-xs);
+}
+/** Which kinds of session: a select dressed as the chips it sits beside. */
+.kinds {
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  padding: 4px 8px;
+  min-height: 30px;
+  cursor: pointer;
+}
+.kinds:hover {
+  border-color: var(--text);
+}
+@media (max-width: 560px) {
+  .kinds {
+    min-height: 40px;
+  }
+}
+/** Under 16px, iOS zooms the page on focusing a select. */
+@media (pointer: coarse) {
+  .kinds {
+    font-size: 16px;
+  }
 }
 
 
@@ -266,10 +292,13 @@
    * the screen is for — was 149px, 26% of the viewport. In landscape it was
    * 76px of 380, a fifth.
    *
-   * So the app title goes (the sheet's header already names what you are
-   * looking at, and the back button is right there), and the chips are held to
-   * one row instead of stacking. Nothing is removed that says anything about
-   * the agent on screen or about whether you can keep working.
+   * So the app title goes, and the chips are held to one row instead of
+   * stacking. The title is the app's own name; the agent's is in the sheet's
+   * header, and the back button is right there. That held only once the
+   * header wrapped its tabs to a second row (FR-DET-2): with them on the first,
+   * a 320-390px phone gave the name about 0px. `e2e/mobile.spec.ts` keeps at
+   * least 60px of it. Nothing is removed that says anything about the agent on
+   * screen or about whether you can keep working.
    */
   .sheetMode .topbar {
     flex-wrap: nowrap;

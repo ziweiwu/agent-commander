@@ -1,18 +1,35 @@
 import { memo, useMemo, useState } from 'react'
-import type { Agent, AgentTree } from '../../shared/types.ts'
+import type { Agent, AgentTree, Refusals } from '../../shared/types.ts'
 import { CLAUDE_KIND, hasTranscripts, specOf } from '../../shared/agent-kinds.ts'
-import { CONTEXT_WARN_PCT, relative, tildePath, tokens, uptimeParts, usd } from '../lib/format.ts'
+import {
+  CONTEXT_WARN_PCT,
+  clock,
+  dayMark,
+  relative,
+  tildePath,
+  tokens,
+  uptimeParts,
+  usd,
+} from '../lib/format.ts'
 import { plainText } from '../lib/chat.ts'
 import { claimOf, isStallCandidate, type DelegationClaim } from '../lib/delegation.ts'
 import { trailOf } from '../lib/trail.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
-import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
+import { formatDay, formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { useStore } from '../store/store.ts'
 import { DelegationTree } from './DelegationTree.tsx'
-import { ICON_BUTTON, ICON_MARK, Icon } from './ui/Icon.tsx'
+import { ICON_BUTTON, ICON_INLINE, ICON_MARK, Icon } from './ui/Icon.tsx'
 import type { IconName } from './ui/Icon.tsx'
-import { ageFrom, ageIsTimeInState, railOf, reachOf, type RailState } from '../lib/status.ts'
+import {
+  ageFrom,
+  ageIsTimeInState,
+  railOf,
+  reachOf,
+  sinceOf,
+  type RailState,
+  type SinceFace,
+} from '../lib/status.ts'
 import styles from './AgentCard.module.css'
 
 /**
@@ -93,6 +110,12 @@ export interface AgentCardProps {
    */
   tree?: AgentTree
   selected: boolean
+  /**
+   * It did something since it was last opened in this app (F6). Decided by
+   * the list, which also counts these for the group heading; `isNewSinceOpened`
+   * keeps it to idle Claude cards.
+   */
+  newSinceOpened?: boolean
   onSelect: (sessionId: string) => void
 }
 
@@ -130,6 +153,7 @@ export const AgentCard = memo(function AgentCard({
   agent,
   tree,
   selected,
+  newSinceOpened = false,
   onSelect,
 }: AgentCardProps) {
   const t = useTranslate()
@@ -146,6 +170,7 @@ export const AgentCard = memo(function AgentCard({
    */
   const since = ageFrom(agent)
   const rel = since === null ? '' : formatRelative(lang, relative(since))
+  const sincePrompt = sinceOf(agent)
   const tok = tokens(agent.tokens)
   /*
    * The one figure with a real denominator (INV-11): Claude Code's own reading
@@ -191,7 +216,6 @@ export const AgentCard = memo(function AgentCard({
   const worked = formatUptime(lang, uptimeParts(agent.startedAt, agent.lastActivityAt))
   const quietFor = formatUptime(lang, uptimeParts(agent.lastActivityAt))
   const onFace = delegatesOnFace(agent, claim)
-  const canAnswer = agent.status === 'waiting' && Boolean(agent.paneId)
   /*
    * The sessions the server has told us have lost their pane. The card has to
    * know: a pane id says a reference exists, not that anything is behind it,
@@ -201,6 +225,8 @@ export const AgentCard = memo(function AgentCard({
   const exited = useStore((s) => s.exited)
   const rail = railOf(agent, exited)
   const reach = reachOf(agent, exited)
+  /** The Answer verb goes with the hand: never beside a struck ring, a pane that has exited, or a guess. */
+  const canAnswer = rail.state === 'waiting'
   /** Whether the age on this card is time-in-state rather than time-since. */
   const blockedFor = ageIsTimeInState(agent)
   /*
@@ -217,7 +243,12 @@ export const AgentCard = memo(function AgentCard({
     : ''
 
   return (
-    <div className={styles.wrap} data-testid="agent-entry" data-session-id={agent.sessionId}>
+    <div
+      className={styles.wrap}
+      data-testid="agent-entry"
+      data-session-id={agent.sessionId}
+      data-rail={rail.state}
+    >
       <button
         type="button"
         className={styles.card}
@@ -226,12 +257,11 @@ export const AgentCard = memo(function AgentCard({
         data-session-id={agent.sessionId}
         data-agent-kind={agent.agentKind}
         data-transcripts={transcripts}
-        data-attached="true"
         aria-current={selected}
-        /*
+        /**
          * Named deliberately rather than by whatever its text concatenates to.
          *
-         * The context line separates its parts with a `::after` middot, and
+         * The context line separates its parts with a `::before` middot, and
          * generated content is in the accessibility tree — so the card
          * announced as "waiting · dialog open· Bash: rm -rf dist· ~/Projects/
          * lego-deals· terminal reachable", dots and all, with the reach mark's
@@ -283,6 +313,24 @@ export const AgentCard = memo(function AgentCard({
                 {kindLabel}
               </span>
             )}
+            {/**
+              * Reachability, and it is a second channel rather than part of the
+              * state: an agent can be perfectly reachable and unknowable, or
+              * blocked on you and unreachable. The server's own reason rides on
+              * the title where it has one, which is where `attachBlockedReason`
+              * has wanted to live all along — it is not a status and never was.
+              */}
+            <span
+              className={styles.reach}
+              data-testid="agent-reach"
+              data-reach={reach.reach}
+              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
+            >
+              <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
+              <span className="sr-only">
+                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
+              </span>
+            </span>
             {/*
              * The age, and what it is the age *of*. For an agent that reported
              * itself waiting this is how long it has been blocked, not when it
@@ -291,14 +339,23 @@ export const AgentCard = memo(function AgentCard({
              * rather than only in the number, because a screen reader gets no
              * help from position.
              */}
-            {rel && (
-              <span
-                className={styles.age}
-                data-testid="agent-age"
-                data-since={blockedFor ? 'state' : 'activity'}
-                title={blockedFor ? t('ageBlockedTitle') : undefined}
-              >
-                {rel}
+            {sincePrompt ? (
+              <SincePromptAge face={sincePrompt} />
+            ) : (
+              rel && (
+                <span
+                  className={styles.age}
+                  data-testid="agent-age"
+                  data-since={blockedFor ? 'state' : 'activity'}
+                  title={blockedFor ? t('ageBlockedTitle') : undefined}
+                >
+                  {rel}
+                </span>
+              )
+            )}
+            {newSinceOpened && (
+              <span className={styles.newSince} data-testid="agent-new" title={t('cardNewTitle')}>
+                {t('cardNew')}
               </span>
             )}
           </div>
@@ -347,20 +404,21 @@ export const AgentCard = memo(function AgentCard({
               </span>
             )}
 
-            <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
-              {tildePath(agent.cwd)}
-            </span>
-            {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
-
-            {contextHot && contextRounded !== undefined && (
-              <span
-                className={styles.context}
-                data-testid="agent-context"
-                title={t('contextFaceTitle', { pct: contextRounded })}
-              >
-                {t('contextFace', { pct: contextRounded })}
+            <span className={styles.place} data-testid="agent-place">
+              <span className={styles.folder} data-testid="agent-dir" title={agent.cwd}>
+                {tildePath(agent.cwd)}
               </span>
-            )}
+              {agent.gitBranch && <span className={styles.branch}>{agent.gitBranch}</span>}
+              {contextHot && contextRounded !== undefined && (
+                <span
+                  className={styles.context}
+                  data-testid="agent-context"
+                  title={t('contextFaceTitle', { pct: contextRounded })}
+                >
+                  {t('contextFace', { pct: contextRounded })}
+                </span>
+              )}
+            </span>
 
             {onFace && <DelegateLine agent={agent} claim={claim} />}
 
@@ -376,24 +434,6 @@ export const AgentCard = memo(function AgentCard({
               </span>
             )}
 
-            {/*
-              * Reachability, and it is a second channel rather than part of the
-              * state: an agent can be perfectly reachable and unknowable, or
-              * blocked on you and unreachable. The server's own reason rides on
-              * the title where it has one, which is where `attachBlockedReason`
-              * has wanted to live all along — it is not a status and never was.
-              */}
-            <span
-              className={styles.reach}
-              data-testid="agent-reach"
-              data-reach={reach.reach}
-              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
-            >
-              <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
-              <span className="sr-only">
-                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
-              </span>
-            </span>
           </div>
         </div>
       </button>
@@ -407,9 +447,11 @@ export const AgentCard = memo(function AgentCard({
         className={styles.disclosure}
         data-testid="details-toggle"
         aria-expanded={showDetails}
+        aria-label={t('detailsShow')}
+        title={showDetails ? t('detailsHide') : t('detailsShow')}
         onClick={() => setShowDetails((open) => !open)}
       >
-        {showDetails ? t('detailsHide') : t('detailsShow')}
+        <Icon name="chevron-down" size={ICON_INLINE} />
       </button>
       {showDetails && (
         <div className={styles.panel} data-testid="agent-details">
@@ -440,6 +482,7 @@ export const AgentCard = memo(function AgentCard({
                 </dd>
               </div>
             )}
+            {agent.refusals && <RefusalsFact refusals={agent.refusals} />}
             {agent.usage?.costUsd !== undefined && (
               <div className={styles.fact} data-testid="agent-cost">
                 <dt>{t('costLabel')}</dt>
@@ -506,6 +549,61 @@ export const AgentCard = memo(function AgentCard({
   )
 })
 
+/**
+ * A busy card's age, counted from the last prompt a person typed rather than
+ * from the last write, which for a working agent is always about now (F8).
+ *
+ * The same words twice: the whole sentence where the top line has room for it
+ * beside the name, and a short form where it does not. The line's own width
+ * picks one, so the face gains no row, and the title carries the whole of it
+ * either way. A floor keeps its "at least" in both forms — `≥` in the short
+ * one — because a count is never shown as more than it is (INV-11).
+ */
+function SincePromptAge({ face }: { face: SinceFace }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const clock = face.kind === 'clock' ? formatUptime(lang, uptimeParts(face.at)) : ''
+  const vars = { t: clock, n: face.calls }
+  const floor = face.kind === 'floor'
+  const full = t(floor ? 'sincePromptFloor' : 'sincePrompt', vars)
+  const short = t(floor ? 'sincePromptFloorShort' : 'sincePromptShort', vars)
+  const why = t(floor ? 'sincePromptFloorTitle' : 'sincePromptTitle')
+  return (
+    <span
+      className={`${styles.age} ${styles.since}`}
+      data-testid="agent-age"
+      data-since="prompt"
+      data-floor={floor || undefined}
+      title={`${full}\n${why}`}
+    >
+      <span className={styles.sinceFull} data-testid="agent-since">
+        {full}
+      </span>
+      <span className={styles.sinceShort} data-testid="agent-since-short" aria-hidden="true">
+        {short}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * Auto mode's refusals, counted only over what was read and labelled with
+ * where that starts — the same caveat the token count carries (INV-11). A
+ * refusal never pushes (INV-14); it waits here to be asked about.
+ */
+function RefusalsFact({ refusals }: { refusals: Refusals }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const mark = dayMark(refusals.since)
+  const since = mark.kind === 'today' ? clock(refusals.since) : `${formatDay(lang, mark)} ${clock(refusals.since)}`
+  const vars = { n: refusals.count, ago: formatRelative(lang, relative(refusals.lastAt)), since }
+  return (
+    <div className={styles.fact} data-testid="agent-refusals">
+      <dt>{t('refusalsLabel')}</dt>
+      <dd>{t(refusals.count === 1 ? 'refusalsOne' : 'refusalsMany', vars)}</dd>
+    </div>
+  )
+}
 
 /**
  * What this card is willing to say about the agent's delegates.

@@ -72,6 +72,7 @@ ICONS: dict[str, str] = {
     "chevron-down": '<path d="M5 9L12 16L19 9"/>',
     # The overflow menu.
     "ellipsis": '<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+    "ellipsis-vertical": '<circle cx="12" cy="5" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="12" cy="19" r="1"/>',
     # Full screen, as four corner brackets rather than a pair of diagonal
     # arrows: at 11px the diagonals read as "resize" and the brackets read as
     # "take the whole screen".

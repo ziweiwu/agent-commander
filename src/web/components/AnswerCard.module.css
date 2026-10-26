@@ -16,14 +16,14 @@
 .question {
   margin: 0;
   font-size: var(--text-md);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
   color: var(--text);
 }
 
 .label {
   margin: 0;
-  font-size: var(--text-xs);
-  color: var(--dim);
+  font: 600 var(--text-sm) var(--font-ui);
+  color: var(--text);
 }
 
 /*
@@ -35,11 +35,12 @@
   margin: 0;
   max-height: 180px;
   overflow: auto;
-  padding: 8px 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   background: var(--panel);
   color: var(--text);
-  font-size: var(--text-xs);
+  font: var(--text-base)/1.5 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -81,7 +82,7 @@
 }
 
 .optionLabel {
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   color: var(--text);
 }
 
@@ -105,8 +106,8 @@
  */
 .drawnNote {
   margin: 0;
-  font-size: var(--text-xs);
-  color: var(--waiting);
+  font-size: var(--text-sm);
+  color: var(--dim);
 }
 .drawnOption {
   border-style: dashed;
@@ -176,7 +177,7 @@
   padding: 6px 8px;
   max-height: 160px;
   overflow: auto;
-  font: 11px/1.45 var(--font-mono);
+  font: var(--text-xs) / var(--leading-ui) var(--font-mono);
   color: var(--dim);
   background: var(--panel-2);
   border: 1px solid var(--line);
@@ -200,5 +201,5 @@
   border-left: 3px solid var(--danger);
   color: var(--text);
   font-size: var(--text-sm);
-  font-weight: 600;
+  font-weight: var(--weight-strong);
 }

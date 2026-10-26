@@ -7,7 +7,7 @@
  * as separate utterances, and consecutive messages from the same speaker
  * grouped under one header.
  */
-import type { TimelineEvent } from '../../shared/types.ts'
+import type { TimelineEvent, ToolOutcome } from '../../shared/types.ts'
 
 export type Role = 'you' | 'agent' | 'notice'
 
@@ -16,7 +16,14 @@ export interface ToolCall {
   tool: string
   text: string
   subagent: boolean
+  /** The id its result record names; what a `toolResult` request asks for. */
+  toolUseId?: string
+  /** How it ended, once its result record has been read. */
+  outcome?: ToolOutcome
 }
+
+/** How each call ended, by `toolUseId`, as the server has reported them. */
+export type Outcomes = Readonly<Record<string, ToolOutcome>>
 
 export interface ChatMessage {
   id: string
@@ -61,7 +68,7 @@ export interface ChatMessage {
 /** Messages closer together than this from the same speaker share a header. */
 const GROUP_WINDOW_MS = 120_000
 
-export function buildMessages(events: TimelineEvent[]): ChatMessage[] {
+export function buildMessages(events: TimelineEvent[], outcomes: Outcomes = {}): ChatMessage[] {
   const messages: ChatMessage[] = []
 
   const push = (role: Role, at: number, text: string, id: string): ChatMessage => {
@@ -89,6 +96,11 @@ export function buildMessages(events: TimelineEvent[]): ChatMessage[] {
           tool: event.tool ?? 'tool',
           text: event.text,
           subagent: event.kind === 'subagent',
+        }
+        if (event.toolUseId !== undefined) {
+          call.toolUseId = event.toolUseId
+          const outcome = outcomes[event.toolUseId]
+          if (outcome) call.outcome = outcome
         }
         const last = messages.at(-1)
         // Attach to the agent message this work belongs to. A tool call that
@@ -441,7 +453,18 @@ export function plainText(text: string): string {
 export function emptyNotice(conversation: {
   timelineAt: number | null
   timelineStalledAt: number | null
-}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' {
+  /**
+   * What the fleet already knows about a session with nothing said in it:
+   * still starting up, or up and never prompted. Either way there is no
+   * transcript to wait for, so "loading" never ends and "unreachable" blames
+   * the server for a conversation that simply has not begun.
+   */
+  fresh?: 'starting' | 'unprompted' | null
+  /** The first task this tab started the agent with, quoted while it starts (F5). */
+  task?: string | null
+}): 'chatLoading' | 'chatUnreachable' | 'chatEmpty' | 'chatStarting' | 'chatStartingTask' | 'chatFirstPrompt' {
+  if (conversation.fresh === 'starting') return conversation.task ? 'chatStartingTask' : 'chatStarting'
+  if (conversation.fresh === 'unprompted') return 'chatFirstPrompt'
   if (conversation.timelineAt !== null) return 'chatEmpty'
   return conversation.timelineStalledAt !== null ? 'chatUnreachable' : 'chatLoading'
 }
@@ -615,4 +638,34 @@ export function parseLinks(text: string): Span[] {
   }
   if (last < text.length) spans.push({ kind: 'text', text: text.slice(last) })
   return spans.length > 0 ? spans : [{ kind: 'text', text }]
+}
+
+/** The words an outcome is read as, before translation. */
+export type OutcomeWords =
+  | { kind: 'ok'; counts: string }
+  | { kind: 'failed' }
+  | { kind: 'refused'; by?: ToolOutcome['by']; category?: string }
+
+/** U+2212, so a removal count is a minus sign and not a hyphen. */
+const MINUS = '\u2212'
+
+/**
+ * What a call's outcome says, or null where it says nothing worth a column:
+ * an ordinary success that changed no lines this app can count.
+ *
+ * Always words, never a colour alone: `refused` and `failed` are spelled out
+ * and the danger hue only underlines them. The classifier's category is its
+ * own label, read as words by losing the underscores.
+ */
+export function outcomeWords(outcome: ToolOutcome | undefined): OutcomeWords | null {
+  if (!outcome) return null
+  if (outcome.outcome === 'failed') return { kind: 'failed' }
+  if (outcome.outcome === 'refused') {
+    const words: OutcomeWords = { kind: 'refused' }
+    if (outcome.by) words.by = outcome.by
+    if (outcome.category) words.category = outcome.category.replaceAll('_', ' ')
+    return words
+  }
+  if (outcome.added === undefined && outcome.removed === undefined) return null
+  return { kind: 'ok', counts: `+${outcome.added ?? 0} ${MINUS}${outcome.removed ?? 0}` }
 }

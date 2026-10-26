@@ -137,7 +137,7 @@ pub fn description_from(rec: &Value) -> Option<String> {
  * excluded for the same reason — a card must not quote us back to ourselves as
  * though the user had said it.
  */
-fn is_typed_by_a_person(rec: &Value) -> bool {
+pub(crate) fn is_typed_by_a_person(rec: &Value) -> bool {
     if rec.get("isCompactSummary").and_then(Value::as_bool) == Some(true)
         || rec.get("isMeta").and_then(Value::as_bool) == Some(true)
         || rec.get("toolUseResult").is_some()

@@ -7,7 +7,7 @@
 
 use crate::control::SendableKey;
 pub use crate::pane::History;
-use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent};
+use crate::types::{Agent, PendingPrompt, RateLimits, TimelineEvent, ToolOutcome, ToolResultView};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -72,6 +72,11 @@ pub struct AgentPatch {
     pub running: Option<Option<crate::types::RunningProcess>>,
     /// Context-window usage and cost from the bridge's per-session file.
     pub usage: Option<crate::types::SessionUsage>,
+    /// Auto mode's refusals in the window of the transcript that was read.
+    pub refusals: Option<crate::types::Refusals>,
+    /// `Some(None)` clears it: a transcript that was replaced and holds no
+    /// prompt has nothing left to count from (INV-11).
+    pub since_prompt: Option<Option<crate::types::SincePrompt>>,
 }
 
 impl AgentPatch {
@@ -94,6 +99,8 @@ impl AgentPatch {
             && self.cwd.is_none()
             && self.running.is_none()
             && self.usage.is_none()
+            && self.refusals.is_none()
+            && self.since_prompt.is_none()
     }
 
     /// Apply this patch onto an agent in place.
@@ -114,6 +121,8 @@ impl AgentPatch {
         if let Some(v) = &self.git_branch { agent.git_branch = Some(v.clone()) }
         if let Some(v) = &self.running { agent.running = v.clone() }
         if let Some(v) = &self.usage { agent.usage = Some(v.clone()) }
+        if let Some(v) = self.refusals { agent.refusals = Some(v) }
+        if let Some(v) = self.since_prompt { agent.since_prompt = v }
         if let Some(v) = &self.cwd {
             agent.cwd = v.clone();
             // Keep the precomputed basename in step with the path it describes.
@@ -202,11 +211,19 @@ pub struct TailRead {
     /// plumbing rather than a message and so produces no timeline event. Without
     /// this the card that offered the answer would have nothing to retire it.
     pub prompt_changed: bool,
+    /// How the calls whose results this read reached ended.
+    pub outcomes: Vec<ToolOutcome>,
 }
 
 #[async_trait]
 pub trait TailApi: Send + Sync + 'static {
     async fn read(&mut self) -> anyhow::Result<TailRead>;
+    /// What one tool call returned, as recorded, for a reader who opened its
+    /// row. On request only, never polled (INV-4); `None` where this tail
+    /// cannot find it or keeps no record of results at all.
+    async fn tool_result(&mut self, _tool_use_id: &str) -> Option<ToolResultView> {
+        None
+    }
 
     /// The file the reads come from, once one has been found, so a reader
     /// can be woken by a write rather than only by a tick.
@@ -311,6 +328,35 @@ mod tests {
             for field in &fields {
                 assert!(names(body, field), "`{field}` is not named in {place}");
             }
+        }
+    }
+
+    /// The fields `card_fields` lets through to the card, as `field: patch.field`.
+    fn carried_to_the_card(enrich: &str) -> Vec<String> {
+        body_of(enrich, "card_fields")
+            .lines()
+            .filter_map(|line| line.trim().strip_suffix(','))
+            .filter_map(|line| line.split_once(": patch."))
+            .map(|(field, _)| field.trim().to_string())
+            .collect()
+    }
+
+    /// The fourth carrier. `card_fields` decides what the enricher passes on and
+    /// the compiler holds it to the struct; `differs` decides whether that is
+    /// worth a broadcast, and nothing held it to anything. A field it forgets
+    /// still reaches a card, but only when some other field moves in the same
+    /// tick — so the card goes stale between, with every test green.
+    /// `sincePrompt` was the field this was written for: its call count moves
+    /// on ticks where nothing else on the card does.
+    #[test]
+    fn every_field_the_enricher_carries_is_compared_before_it_is_sent() {
+        let enrich = source("enrich.rs");
+        let carried = carried_to_the_card(&enrich);
+        assert!(carried.len() > 10, "card_fields did not parse: {carried:?}");
+        assert!(carried.iter().any(|field| field == "since_prompt"), "{carried:?}");
+        let differs = body_of(&enrich, "differs");
+        for field in &carried {
+            assert!(names(&differs, field), "`{field}` is not compared in enrich.rs::differs");
         }
     }
 }

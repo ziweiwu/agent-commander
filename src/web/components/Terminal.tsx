@@ -15,6 +15,7 @@ import {
 } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
+import { useDraft } from '../hooks/useDraft.ts'
 import { Button } from './ui/Button.tsx'
 import { ShiftTabButton } from './ShiftTabButton.tsx'
 import { allowsSlashCommands } from '../../shared/agent-kinds.ts'
@@ -392,7 +393,7 @@ function usePaneTerm(options: PaneTermOptions) {
   useBlurAfterExit(options, wrapRef)
   useRefitWhenTheRoomChanges(options, termRef)
 
-  return { wrapRef, scaleRef, term: termRef.current, guarded, typed }
+  return { wrapRef, scaleRef, termRef, term: termRef.current, guarded, typed }
 }
 
 export interface TerminalProps {
@@ -406,7 +407,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   const exited = usePaneExited(agent)
   const history = useStore((s) => (s.history?.sessionId === agent.sessionId ? s.history : null))
   const historyPending = useStore((s) => s.historyPending)
-  const [draft, setDraft] = useState('')
+  const boxRef = useRef<HTMLTextAreaElement>(null)
   /*
    * INV-2's "exactly once", which React state cannot hold on its own: `draft`
    * is read from a closure and `setDraft('')` does not land until React
@@ -415,10 +416,9 @@ export function Terminal({ agent, onExit }: TerminalProps) {
    * The ref is the authority and is cleared synchronously, which is the same
    * shape the message composer uses for the same reason.
    */
-  const draftRef = useRef('')
-  /* Held only to put the box back to one line once its text has gone. */
-  const boxRef = useRef<HTMLTextAreaElement>(null)
-  const { wrapRef, scaleRef, term, guarded, typed } = usePaneTerm({
+  const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('paste', agent.sessionId, boxRef)
+  const coarse = useIsCoarse()
+  const { wrapRef, scaleRef, termRef, term, guarded, typed } = usePaneTerm({
     agent,
     onExit,
     fullscreen,
@@ -427,34 +427,24 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   })
 
   /**
-   * Hand the box's contents over, and say whether to run them.
-   *
-   * `draftRef` is cleared *before* the write and is the synchronous truth, for
-   * the reason the message composer's is: two presses in one React batch —
-   * key repeat, a double tap on a phone — would each read the same uncleared
-   * `draft` and each send it. `term-paste.spec.ts` holds that line.
-   */
-  /**
    * Empty the box and hand back what was in it, or nothing.
    *
    * `draftRef` is cleared *before* either verb writes, and is the synchronous
    * truth, for the reason the message composer's is: two presses in one React
    * batch — key repeat, a double tap on a phone — would each read the same
    * uncleared `draft` and each send it. `term-paste.spec.ts` holds that line.
+   * Enter, the Run button and the form's submit all land on `runDraft`, so
+   * they share this one guard rather than each carrying a copy.
    */
   const takeDraft = (): string => {
     const text = draftRef.current
     if (text.length === 0) return ''
-    draftRef.current = ''
-    setDraft('')
-    // The inline height `onChange` wrote outlives the text it was measured
-    // for, so an emptied box would keep the depth of the paste it just sent.
-    if (boxRef.current) boxRef.current.style.height = ''
+    clearDraft()
     return text
   }
 
-  /** Put it at the prompt, where it can be read before it runs. */
-  const submitDraft = (): void => {
+  /** Stage it: put it at the prompt, where it can be read before it runs. */
+  const stageDraft = (): void => {
     const text = takeDraft()
     if (text !== '') typed(text)
   }
@@ -482,6 +472,24 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       ref={wrapRef}
       className={`${styles.wrap} ${term?.overflowing ? styles.pannable : ''}`}
       data-testid="term-wrap"
+      /**
+       * A tap on a touch screen opens the phone's keyboard in the box below.
+       *
+       * Not in xterm's own input. That is a hidden off-screen textarea with
+       * autocorrect off, and a phone keyboard is built around a visible field:
+       * typed characters leave one by one with nothing to read or fix before
+       * they reach a live shell, dictation and an IME's candidates have nowhere
+       * to show, and iOS scrolls the page to bring the hidden field into view.
+       * The box shows the whole line, runs it on Enter, and is where a paste
+       * goes anyway; the keybar beside it covers the keys a phone lacks.
+       *
+       * A phone raises its keyboard only for a `focus()` made inside a user
+       * gesture, so nothing is focused on mount there (`openTerminal`).
+       * `click` rather than `pointerdown`: a click is only synthesised for a
+       * tap, never for the drag that pans a pannable pane. The tap sends
+       * nothing (INV-2), and a pane that has ended takes no focus.
+       */
+      onClick={coarse && !exited ? () => boxRef.current?.focus() : undefined}
     >
       <div ref={scaleRef} className={styles.scale} data-testid="term-scale" />
     </div>
@@ -495,27 +503,27 @@ export function Terminal({ agent, onExit }: TerminalProps) {
        * that announces these as ordinary controls is offering an action that
        * cannot happen.
        */}
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Enter')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Enter')}>
         Enter
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Up')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Up')}>
         ↑
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Down')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Down')}>
         ↓
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('Tab')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('Tab')}>
         Tab
       </Button>
       <Button
-        variant="compact"
+        variant="key"
         disabled={exited}
         onClick={() => guarded('Escape')}
         className={styles.danger}
       >
         Esc
       </Button>
-      <Button variant="compact" disabled={exited} onClick={() => guarded('C-c')}>
+      <Button variant="key" disabled={exited} onClick={() => guarded('C-c')}>
         Ctrl-C
       </Button>
       {/*
@@ -599,10 +607,15 @@ export function Terminal({ agent, onExit }: TerminalProps) {
    *
    * It sends through `typed`, the same door xterm's own paste event uses, so
    * the text is ordered and coalesced with anything else on its way to the
-   * pane (INV-2) — and it stops there. Submitting is the Enter key beside it,
-   * deliberately: a paste puts text at a prompt, and what the reader gets from
-   * this arrangement is the chance to see what actually landed before running
-   * it, which on a phone typing into a live agent is the whole point.
+   * pane (INV-2) — and it stops there.
+   *
+   * Enter runs it, as it does in the chat composer: the owner asked for typing
+   * here to behave like typing at the prompt, and a return key that only
+   * parked the text made every command two presses on a phone. The cost is the
+   * chance to read what landed before it runs, so that stays one button away:
+   * Stage is the detour. Run, Enter and the phone's send key all go through
+   * `runDraft`, which clears the draft before it writes, so a repeating key or
+   * a double tap runs it once.
    */
   const composer = (
     <form
@@ -610,7 +623,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       data-testid="term-compose"
       onSubmit={(e) => {
         e.preventDefault()
-        submitDraft()
+        runDraft()
       }}
     >
       {/*
@@ -622,7 +635,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
        * quietly altered on its way to a live agent is the worst shape this
        * could fail in.
        *
-       * Enter still sends, because a paste carries its newlines through the
+       * Enter still runs, because a paste carries its newlines through the
        * clipboard rather than through keystrokes, so the two do not compete:
        * Shift+Enter is the way to type a newline by hand, which is the same
        * convention the message composer uses.
@@ -635,10 +648,10 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         disabled={exited}
         ref={boxRef}
         onChange={(e) => {
-          draftRef.current = e.target.value
-          setDraft(e.target.value)
           e.target.style.height = 'auto'
-          e.target.style.height = `${Math.min(e.target.scrollHeight, COMPOSE_MAX_HEIGHT)}px`
+          const height = Math.min(e.target.scrollHeight, COMPOSE_MAX_HEIGHT)
+          e.target.style.height = `${height}px`
+          writeDraft(agent.sessionId, e.target.value, height)
         }}
         onKeyDown={(e) => {
           /*
@@ -648,18 +661,13 @@ export function Terminal({ agent, onExit }: TerminalProps) {
            */
           if (e.nativeEvent.isComposing) return
           /*
-           * Cmd/Ctrl+Enter runs it. The modifier is the convention everywhere
-           * a field can both stage and commit, and it keeps plain Enter doing
-           * the safer of the two — which is the one a reader gets by accident.
+           * Enter runs it, with or without Cmd/Ctrl (the old chord keeps
+           * working). Shift or Alt is a newline typed by hand. Staging is the
+           * button, never a key, so the same press never means two things.
            */
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-            e.preventDefault()
-            runDraft()
-            return
-          }
           if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
             e.preventDefault()
-            submitDraft()
+            runDraft()
           }
         }}
         aria-label={t('termComposeLabel')}
@@ -667,8 +675,8 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         /*
          * The four a phone would otherwise apply to a command: a capitalised
          * first letter, a "corrected" flag, a completion, a spelling mark.
-         * `enterkeyhint` names the key the keyboard draws, which sends the
-         * text to the prompt and does not run it.
+         * `enterkeyhint` names the key the keyboard draws, which runs the
+         * text, as Enter does.
          */
         autoCapitalize="off"
         autoCorrect="off"
@@ -676,28 +684,30 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         spellCheck={false}
         enterKeyHint="send"
       />
-      <Button
-        variant="compact"
-        type="submit"
-        data-testid="term-compose-send"
-        disabled={exited || draft.length === 0}
-        title={t('termComposeSendTitle')}
-      >
-        {t('termComposeSend')}
-      </Button>
-      {/*
-        * The second verb, and it is a separate button rather than a mode on
-        * the first. A mode makes the same press mean different things on
-        * different days, which is the wrong shape for the one control in this
-        * app that runs a command in somebody's live shell.
+      {/**
+        * Two verbs, two buttons, not a mode on one. A mode makes the same press
+        * mean different things on different days, which is the wrong shape for
+        * the one control in this app that runs a command in somebody's live
+        * shell. Run is the submit, the one Enter and the phone's send key agree
+        * with; Stage is the deliberate detour, kept for the paste that should
+        * be read before it executes.
         */}
       <Button
         variant="compact"
         type="button"
+        data-testid="term-compose-send"
+        disabled={exited || draft.length === 0}
+        title={t('termComposeSendTitle')}
+        onClick={stageDraft}
+      >
+        {t('termComposeSend')}
+      </Button>
+      <Button
+        variant="compact"
+        type="submit"
         data-testid="term-compose-run"
         disabled={exited || draft.length === 0}
         title={t('termComposeRunTitle')}
-        onClick={runDraft}
       >
         {t('termComposeRun')}
       </Button>

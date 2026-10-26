@@ -21,7 +21,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { AGENT_SCREEN_ACTIONS } from '../src/shared/surfaces.ts'
-import { AGENT, openAgent, openFleet } from './helpers.ts'
+import { AGENT, controlsThatCannotBeHit, openAgent, openFleet } from './helpers.ts'
 
 /** WCAG 2.2 AA, 2.5.8. The audits hold the touch surfaces to 44. */
 const MIN_TARGET = 24
@@ -116,34 +116,17 @@ test.describe('INV-17 every shape is the whole app', () => {
     // the pointer rule in the cascade.
     const floor = test.info().project.use.hasTouch ? 44 : MIN_TARGET
 
-    const bad = await page.$$eval(
-      'button:not([disabled]), a[href], select, [role="tab"]:not([disabled])',
-      (elements, floor) =>
-        elements
-          .filter((el) => el.checkVisibility())
-          .map((el) => {
-            const box = el.getBoundingClientRect()
-            const name =
-              el.getAttribute('aria-label') ??
-              el.getAttribute('title') ??
-              el.textContent?.trim() ??
-              ''
-            // A link inside a sentence is sized by the line it sits in, and
-            // WCAG 2.5.8 exempts it for that reason (the inline exception). It
-            // still has to be named; only the size floor is waived (INV-18).
-            // `data-inline` is the one marker Message.tsx sets for this, and
-            // `scripts/lib/targets.mjs` gives the audit scripts the same one.
-            const inline = el.matches('[data-inline]')
-            return {
-              what: `${el.tagName.toLowerCase()}[${el.getAttribute('data-testid') ?? name.slice(0, 20)}]`,
-              tooSmall: !inline && (box.width < floor || box.height < floor),
-              unnamed: name === '',
-            }
-          })
-          .filter((control) => control.tooSmall || control.unnamed),
-      floor,
-    )
-    expect(bad, `controls too small or unnamed: ${JSON.stringify(bad)}`).toEqual([])
+    const bad = await controlsThatCannotBeHit(page, floor)
+    expect(bad, `controls too small, unnamed or cut off: ${JSON.stringify(bad)}`).toEqual([])
+  })
+
+  test('@phone and on the smallest phone still in use', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 })
+    await openAgent(page, AGENT.idle)
+    await revealEverything(page)
+
+    const bad = await controlsThatCannotBeHit(page, 44)
+    expect(bad, `controls too small, unnamed or cut off: ${JSON.stringify(bad)}`).toEqual([])
   })
 })
 

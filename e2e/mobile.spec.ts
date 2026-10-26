@@ -14,7 +14,7 @@
  * was put on a diet: 149px of 568 on an iPhone SE, 76px of 380 in landscape.
  */
 import { expect, test } from '@playwright/test'
-import { AGENT, card, openAgent, openFleet } from './helpers.ts'
+import { AGENT, card, openAgent, openFleet, stamp } from './helpers.ts'
 
 /** How much of the screen the conversation gets, as a fraction. */
 async function conversationShare(page: import('@playwright/test').Page): Promise<number> {
@@ -91,4 +91,101 @@ test.describe('@phone the sheet', () => {
     const box = page.getByTestId('composer-input')
     await expect(box).toBeInViewport()
   })
+
+  /**
+   * F1. ‹ Agents unmounts the sheet, and the draft used to be component state
+   * inside it, so a reply half-written on the bus was gone by the time the
+   * reader had checked the fleet and come back.
+   */
+  test('keeps a half-typed message through ‹ Agents and back', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    const draft = stamp('half a reply, not sent')
+    await page.getByTestId('composer-input').fill(draft)
+
+    await page.getByTestId('back-button').click()
+    await expect(page.getByTestId('fleet-list')).toBeVisible()
+    await card(page, AGENT.idle).click()
+
+    await expect(page.getByTestId('composer-input')).toHaveValue(draft)
+  })
 })
+
+/** The phone widths the sheet has to hold its header at: an SE, a mini, a 13/14, a Pro Max. */
+const PHONE_WIDTHS = [320, 375, 390, 430]
+/** Enough of the agent's name to tell one agent from the next. */
+const MIN_NAME_PX = 60
+
+/**
+ * FR-DET-2 on a phone. The sheet's header was `flex-wrap: nowrap`, so the back
+ * link, the status, the tabs and the actions came to about 340px in a row with
+ * nothing allowed to drop: at 320px ⤢ sat at x 325-369, past the sheet's own
+ * `overflow: hidden` edge and impossible to press, and from 320 to 390 the
+ * agent's name got about 0px. The tabs now drop to a second row instead.
+ */
+test.describe('@phone the sheet header', () => {
+  for (const [what, sessionId] of [
+    ['an idle agent', AGENT.idle],
+    ['a blocked one, whose status is the longest word', AGENT.waiting],
+  ] as const) {
+    test(`keeps every control inside the sheet and the name readable, for ${what}`, async ({
+      page,
+    }) => {
+      for (const width of PHONE_WIDTHS) {
+        await page.setViewportSize({ width, height: 740 })
+        await page.goto(`/agent/${sessionId}`)
+        await expect(page.getByTestId('agent-detail')).toBeVisible()
+
+        const header = await page.evaluate(() => {
+          const sheet = document.querySelector('[data-testid="agent-detail"]')?.getBoundingClientRect()
+          const head = document.querySelector('[data-testid="detail-head"]')
+          const name = document.querySelector('[data-testid="detail-name"]')?.getBoundingClientRect()
+          if (!sheet || !head || !name) return null
+          const outside = [...head.querySelectorAll('button')]
+            .filter((button) => button.checkVisibility())
+            .filter((button) => {
+              const box = button.getBoundingClientRect()
+              return (
+                box.left < sheet.left - 0.5 ||
+                box.right > sheet.right + 0.5 ||
+                box.top < sheet.top - 0.5 ||
+                box.bottom > sheet.bottom + 0.5
+              )
+            })
+            .map((button) => button.dataset.testid ?? button.textContent ?? '')
+          return { outside, name: name.width }
+        })
+
+        expect(header, `${width}px: the sheet header did not render`).not.toBeNull()
+        expect(header?.outside, `${width}px: header controls past the sheet's edge`).toEqual([])
+        expect(header?.name ?? 0, `${width}px: the agent's name`).toBeGreaterThanOrEqual(MIN_NAME_PX)
+      }
+    })
+  }
+})
+
+/**
+ * INV-17 with F7's expansion open: a recorded diff is as wide as its longest
+ * line, and the fixture edit carries one far wider than a phone. The box
+ * scrolls; the page does not.
+ */
+test.describe('@phone a tool call that says what happened', () => {
+  test('opens an edit in a box that scrolls inside itself', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await expect(page.getByTestId('tool-outcome').filter({ hasText: 'refused · auto mode' })).toBeVisible()
+    const edit = page.getByTitle('Edit: src/components/Header.astro')
+    await expect(edit.getByTestId('tool-outcome')).toHaveText('+12 −3')
+
+    await edit.getByTestId('tool-expand').click()
+    const body = page.getByTestId('tool-result-body')
+    await expect(body).toContainText('<ThemeToggle client:load')
+    await expect(page.getByTestId('tool-result-caption')).toContainText(
+      'the file may have changed since · you changed this before it was applied',
+    )
+    expect(await body.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true)
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - window.innerWidth,
+    )
+    expect(overflow).toBeLessThanOrEqual(1)
+  })
+})
+

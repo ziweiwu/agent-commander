@@ -42,14 +42,29 @@
  */
 .primary {
   border-color: var(--focus);
-  background: color-mix(in srgb, var(--focus) 16%, transparent);
+  background: var(--tint-focus);
 }
 
 .compact {
   padding: 6px 11px;
   min-height: 36px;
   font-size: var(--text-sm);
+}
+
+/**
+ * A key typed into a pane — Enter, the arrows, Tab, Esc, Ctrl-C — and nothing
+ * else. Mono and a heavier bottom edge, so a keycap reads as a key while a
+ * compact button that names an action ("Full screen", "Stage") reads as words.
+ * `.compact` used to force mono on every one of those, which drew half the
+ * app's buttons as code.
+ */
+.key {
+  padding: 6px 11px;
+  min-height: 36px;
+  min-width: 36px;
+  font-size: var(--text-sm);
   font-family: var(--font-mono);
+  border-bottom-width: 2px;
 }
 
 .icon {
@@ -78,7 +93,7 @@
 }
 .chip b {
   color: var(--text);
-  font-weight: 650;
+  font-weight: var(--weight-strong);
 }
 .chip:hover {
   border-color: var(--text);
@@ -94,7 +109,7 @@
 .chip[aria-pressed='true'] {
   border-color: var(--focus);
   color: var(--text);
-  background: color-mix(in srgb, var(--focus) 15%, transparent);
+  background: var(--tint-focus);
 }
 
 /* Sized by width as well as pointer type, so a narrowed desktop window gets the
@@ -109,7 +124,8 @@
     width: 40px;
     min-width: 40px;
   }
-  .compact {
+  .compact,
+  .key {
     min-height: 40px;
     min-width: 40px;
   }
@@ -125,7 +141,8 @@
   .btn {
     min-height: 44px;
   }
-  .compact {
+  .compact,
+  .key {
     min-height: 44px;
     min-width: 44px;
   }

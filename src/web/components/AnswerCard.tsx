@@ -100,7 +100,14 @@ function detailLabel(tool: string): 'answerPlan' | 'answerCommand' | 'answerAbou
   return 'answerAbout'
 }
 
-export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPrompt | null }) {
+export interface AnswerCardProps {
+  agent: Agent
+  prompt: PendingPrompt | null
+  /** A single question was answered and sent: the reader may want the next agent. */
+  onAnswered?: () => void
+}
+
+export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
   const t = useTranslate()
   const showToast = useStore((s) => s.showToast)
   /*
@@ -222,6 +229,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
     }
     setSent(true)
     showToast(t(multi ? 'answerToggled' : 'answerSent', { name: shortName(agent) }))
+    if (!multi) onAnswered?.()
     /*
      * A toggle does not spend the card, so the synchronous guard is released
      * for the next row — but not instantly, or the same-batch check it exists
@@ -243,7 +251,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
   }
 
   return (
-    <div className={styles.card} data-testid="answer-card">
+    <div className={styles.card} data-testid="answer-card" tabIndex={-1}>
       {/*
         * The CLI's own one-word title for this dialog, which every real
         * question carries and which the terminal puts on the dialog's tab. It
@@ -267,9 +275,18 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
       )}
 
       {prompt?.question !== undefined && (
-        <p className={styles.question} data-testid="answer-question">
+        <p className={styles.question} data-testid="answer-question" tabIndex={-1}>
           {prompt.question}
         </p>
+      )}
+
+      {prompt?.detail !== undefined && (
+        <>
+          <p className={styles.label}>{t(detailLabel(prompt.tool))}</p>
+          <pre className={styles.detail} data-testid="answer-detail">
+            {prompt.detail}
+          </pre>
+        </>
       )}
 
       {/*
@@ -286,15 +303,6 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         <p className={styles.warning} role="note" data-testid="answer-sandbox">
           {t('answerSandboxOff')}
         </p>
-      )}
-
-      {prompt?.detail !== undefined && (
-        <>
-          <p className={styles.label}>{t(detailLabel(prompt.tool))}</p>
-          <pre className={styles.detail} data-testid="answer-detail">
-            {prompt.detail}
-          </pre>
-        </>
       )}
 
       {answerable && drawn && (
@@ -418,7 +426,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         {(multi ? MULTI_KEYS : KEYS).map((key) => (
           <Button
             key={key}
-            variant="compact"
+            variant="key"
             data-testid={`answer-key-${key}`}
             disabled={!agent.paneId || !online}
             onClick={() => nudge(key)}
@@ -429,7 +437,7 @@ export function AnswerCard({ agent, prompt }: { agent: Agent; prompt: PendingPro
         {/* INV-6: `Escape` can destroy work in flight, so it asks first — the
             same rule the terminal's own keybar follows. */}
         <Button
-          variant="compact"
+          variant="key"
           data-testid="answer-key-Escape"
           disabled={!agent.paneId || !online}
           onClick={() => {

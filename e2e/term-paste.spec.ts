@@ -42,7 +42,7 @@ test.describe('the terminal takes text without a keyboard', () => {
 
     await expect.poll(() => sent.length).toBe(1)
     expect(sent[0]).toContain('echo from-a-phone')
-    // Text, not a submission: Enter is the key beside it (INV-2).
+    /** Stage is text, not a submission (INV-2). */
     expect(sent[0]).toContain('"submit":false')
     // The server accepted it; a refusal would come back as a toast.
     await expect(page.getByTestId('toast')).toHaveCount(0)
@@ -94,5 +94,125 @@ test.describe('the terminal takes text without a keyboard', () => {
 
     await page.waitForTimeout(1_000)
     expect(sent).toHaveLength(1)
+  })
+})
+
+/** Every `paste` frame, parsed. */
+function watchFrames(page: import('@playwright/test').Page): Array<Record<string, unknown>> {
+  const sent: Array<Record<string, unknown>> = []
+  page.on('websocket', (ws) =>
+    ws.on('framesent', (frame) => {
+      const payload = typeof frame.payload === 'string' ? frame.payload : ''
+      if (payload.includes('"type":"paste"') || payload.includes('"type":"key"'))
+        sent.push(JSON.parse(payload))
+    }),
+  )
+  return sent
+}
+
+test.describe('Enter in the box runs the text', () => {
+  test('Enter puts it at the prompt and runs it, once', async ({ page }) => {
+    const sent = watchFrames(page)
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+
+    const box = page.getByTestId('term-compose-input')
+    await box.fill('echo run-me')
+    /** Three presses in a row: a key repeat, or a double tap on a return key. */
+    await box.press('Enter')
+    await box.press('Enter')
+    await box.press('Enter')
+
+    await expect.poll(() => sent.length).toBe(1)
+    await page.waitForTimeout(500)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ type: 'paste', text: 'echo run-me', submit: true })
+    await expect(box).toHaveValue('')
+    await expect(page.getByTestId('toast')).toHaveCount(0)
+  })
+
+  test('Shift+Enter types a newline and sends nothing', async ({ page }) => {
+    const sent = watchFrames(page)
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+
+    const box = page.getByTestId('term-compose-input')
+    await box.fill('one')
+    await box.press('Shift+Enter')
+    await box.pressSequentially('two')
+
+    await expect(box).toHaveValue('one\ntwo')
+    await page.waitForTimeout(500)
+    expect(sent).toHaveLength(0)
+  })
+
+  test('the Run button runs it once, and Stage stays text-only', async ({ page }) => {
+    const sent = watchFrames(page)
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+
+    const box = page.getByTestId('term-compose-input')
+    await box.fill('make it so')
+    await page.getByTestId('term-compose-run').dblclick()
+    await expect.poll(() => sent.length).toBe(1)
+    expect(sent[0]).toMatchObject({ text: 'make it so', submit: true })
+
+    await box.fill('read me first')
+    await page.getByTestId('term-compose-send').click()
+    await expect.poll(() => sent.length).toBe(2)
+    expect(sent[1]).toMatchObject({ text: 'read me first', submit: false })
+  })
+})
+
+/**
+ * A tap on the pane on a touch screen. @phone: the phone projects have
+ * `hasTouch` and `isMobile` (Chromium and WebKit). The tap opens the keyboard
+ * in the composer box, where the line is seen before Enter runs it. Playwright
+ * delivers a real tap and a real focus but cannot raise iOS's keyboard, so that
+ * last step remains a manual check on a device.
+ */
+test.describe('tapping the pane on a touch screen', () => {
+  const boxFocused = (page: import('@playwright/test').Page) =>
+    page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'term-compose-input')
+
+  test('does not take focus on mount, @phone', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+    await expect(page.locator('.xterm-helper-textarea')).toHaveCount(1)
+    await page.waitForTimeout(500)
+    expect(await boxFocused(page)).toBe(false)
+    expect(
+      await page.evaluate(() => document.activeElement?.classList.contains('xterm-helper-textarea') ?? false),
+    ).toBe(false)
+  })
+
+  test('a tap focuses the composer box and Enter runs the typed line once, @phone', async ({
+    page,
+  }) => {
+    const sent = watchFrames(page)
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    const wrap = page.getByTestId('term-wrap')
+    await expect(wrap).toBeVisible()
+
+    await wrap.tap()
+    await expect.poll(() => boxFocused(page)).toBe(true)
+    /** The tap itself sends nothing (INV-2). */
+    expect(sent).toHaveLength(0)
+
+    await page.keyboard.type('ls')
+    await page.keyboard.press('Enter')
+    /**
+     * Typing stays in the box until Enter: the only frame is the submitted
+     * line, so a frame per key would fail the length check.
+     */
+    await expect.poll(() => sent.length).toBeGreaterThan(0)
+    await page.waitForTimeout(300)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ text: 'ls', submit: true })
   })
 })

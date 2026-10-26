@@ -666,6 +666,19 @@ describe('INV-16 a permission prompt says what would actually run (TODO §13c, �
     expect(screen.getByText(/command it would run/i)).toBeTruthy()
   })
 
+  /**
+   * The fact before the claim. The agent's summary of a command used to be
+   * read first and the command itself second, at the smallest size on the
+   * screen — on the card whose job is approving `rm -rf` from a phone.
+   */
+  it('puts the command before the agent’s description of it', () => {
+    const described: PendingPrompt = { ...PERMISSION, detail: 'rm -rf dist', summary: 'Tidy up' }
+    renderApp(<AnswerCard agent={blocked()} prompt={described} />)
+    const command = screen.getByTestId('answer-detail')
+    const summary = screen.getByTestId('answer-summary')
+    expect(command.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
   it('says nothing about the sandbox when the call stays inside it', () => {
     renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
     expect(screen.queryByTestId('answer-sandbox')).toBeNull()

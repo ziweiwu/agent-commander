@@ -9,6 +9,8 @@ import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
 import { relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
+import { isNewSinceOpened } from '../lib/newSince.ts'
+import { useLayout } from '../hooks/useMediaQuery.ts'
 import { AgentCard } from './AgentCard.tsx'
 import { Button } from './ui/Button.tsx'
 import { ICON_INLINE, Icon } from './ui/Icon.tsx'
@@ -43,8 +45,24 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const setNewAgentOpen = useStore((s) => s.setNewAgentOpen)
   const showToast = useStore((s) => s.showToast)
   const [pruning, setPruning] = useState(false)
+  const phone = useLayout() === 'phone'
 
   const groups = useMemo(() => grouped(agents, fleet), [agents, fleet])
+  const seenThrough = useStore((s) => s.seenThrough)
+  /**
+   * The idle sessions that did something since they were last opened in this
+   * app (F6). None while the fleet is a memory: with the socket down nothing
+   * can be opened or shown, so a mark would be a claim about now (INV-11).
+   */
+  const fresh = useMemo(
+    () =>
+      new Set(
+        conn === 'open'
+          ? agents.filter((agent) => isNewSinceOpened(agent, seenThrough)).map((agent) => agent.sessionId)
+          : [],
+      ),
+    [agents, seenThrough, conn],
+  )
 
   /*
    * The delegation graph, polled only while this list is mounted (INV-4).
@@ -110,37 +128,57 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
       )
   }
 
+  /**
+   * Only when there is something to prune, and only while the fleet is
+   * live. INV-11: with the socket down these cards are memories, and
+   * "idle, never prompted" twenty minutes ago is not a claim about now —
+   * which is exactly the wrong thing to close a session on.
+   */
+  const pruneButton =
+    unused.length > 0 ? (
+      <Button
+        data-testid="prune-button"
+        title={t('pruneTitle')}
+        disabled={pruning || conn !== 'open'}
+        onClick={() => void prune()}
+      >
+        {pruning ? t('pruneWorking') : t('prune', { count: String(unused.length) })}
+      </Button>
+    ) : null
+  /**
+   * On a phone, Prune sits at the foot of the Idle group, under the sessions it
+   * closes. In the toolbar it was a full-width row between the header and Needs
+   * you, pushing the first blocked agent about 52px down for a chore done at a
+   * desk. With no Idle group on screen (a filter, a search) it stays in the
+   * toolbar, so the action never leaves the phone (INV-17).
+   */
+  const pruneAtIdle = phone && groups.some((group) => group.key === 'idle')
+
   return (
     <div className={`${styles.column} ${tiled ? styles.tiled : ''}`}>
-      <SearchBar searchRef={searchRef} />
-
-      <SortControl />
-
-      <div className={styles.actions}>
-        <Button
-          className={styles.newAgent}
-          data-testid="new-agent-button"
-          onClick={() => setNewAgentOpen(true)}
-        >
-          + {t('newAgent')}
-        </Button>
-
-        {/*
-          * Only when there is something to prune, and only while the fleet is
-          * live. INV-11: with the socket down these cards are memories, and
-          * "idle, never prompted" twenty minutes ago is not a claim about now —
-          * which is exactly the wrong thing to close a session on.
-          */}
-        {unused.length > 0 && (
+      {/**
+        * One row at the desk: filter, sort and the actions share it, and the
+        * column's own width wraps them back to three rows in the 288px list
+        * beside an open agent and on a phone. No new width cut: FR-UI-1's two
+        * stay two.
+        */}
+      <div className={styles.toolbar}>
+        <div className={styles.search}>
+          <SearchBar searchRef={searchRef} />
+        </div>
+        <div className={styles.sort}>
+          <SortControl />
+        </div>
+        <div className={styles.actions}>
           <Button
-            data-testid="prune-button"
-            title={t('pruneTitle')}
-            disabled={pruning || conn !== 'open'}
-            onClick={() => void prune()}
+            className={styles.newAgent}
+            data-testid="new-agent-button"
+            onClick={() => setNewAgentOpen(true)}
           >
-            {pruning ? t('pruneWorking') : t('prune', { count: String(unused.length) })}
+            + {t('newAgent')}
           </Button>
-        )}
+          {!pruneAtIdle && pruneButton}
+        </div>
       </div>
 
       {/*
@@ -197,6 +235,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                   {t(GROUP_KEY[group.key] as Key)}
                 </span>
                 <span className={styles.groupCount}>{group.agents.length}</span>
+                <NewInGroup count={group.agents.filter((agent) => fresh.has(agent.sessionId)).length} />
               </h2>
               <div
                 className={`${styles.groupList} ${group.key === 'waiting' ? styles.waitingGroup : ''}`}
@@ -207,15 +246,32 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                     agent={agent}
                     tree={treeOf.get(agent.sessionId)}
                     selected={agent.sessionId === selected}
+                    newSinceOpened={fresh.has(agent.sessionId)}
                     onSelect={onSelect}
                   />
                 ))}
               </div>
+              {group.key === 'idle' && pruneAtIdle && pruneButton && (
+                <div className={styles.groupFoot} data-testid="idle-foot">
+                  {pruneButton}
+                </div>
+              )}
             </section>
           ))
         )}
       </div>
     </div>
+  )
+}
+
+/** "· 2 new" after a group's count, when any of its cards carries the mark (F6). */
+function NewInGroup({ count }: { count: number }) {
+  const t = useTranslate()
+  if (count === 0) return null
+  return (
+    <span className={styles.groupNew} data-testid="group-new">
+      · {t('groupNew', { count })}
+    </span>
   )
 }
 

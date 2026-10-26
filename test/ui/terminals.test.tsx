@@ -16,6 +16,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useLocation } from 'react-router-dom'
 import { TERMINAL_KIND } from '../../src/shared/agent-kinds.ts'
 import { AgentDetail } from '../../src/web/components/AgentDetail.tsx'
 import { NewAgentDialog } from '../../src/web/components/NewAgentDialog.tsx'
@@ -24,8 +25,12 @@ import { agent, renderApp, resetStore } from './helpers.tsx'
 import { setViewport } from './setup.ts'
 
 const transport = vi.hoisted(() => ({
-  startAgent: vi.fn(async () => ({ ok: true, cwd: '/Users/me/Projects/thing' }) as const),
-  startTerminal: vi.fn(async () => ({ ok: true, cwd: '/Users/me/Projects/thing' }) as const),
+  startAgent: vi.fn(
+    async () => ({ ok: true, tmuxSession: 'claude-1-thing', cwd: '/Users/me/Projects/thing' }) as const,
+  ),
+  startTerminal: vi.fn(
+    async () => ({ ok: true, tmuxSession: 'term-1', cwd: '/Users/me/Projects/thing' }) as const,
+  ),
 }))
 
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -45,6 +50,11 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   clearGoal: vi.fn(),
   sendShiftTab: vi.fn(),
 }))
+
+/** The route the app is on, so a test can see where the dialog sent it. */
+function Where() {
+  return <span data-testid="where">{useLocation().pathname}</span>
+}
 
 const terminal = agent({
   sessionId: 'tmux:term-1',
@@ -98,7 +108,12 @@ describe('opening one', () => {
   async function openDialog(): Promise<ReturnType<typeof userEvent.setup>> {
     const user = userEvent.setup()
     useStore.setState({ newAgentOpen: true, env: { tmux: true } as never })
-    renderApp(<NewAgentDialog />)
+    renderApp(
+      <>
+        <NewAgentDialog />
+        <Where />
+      </>,
+    )
     return user
   }
 
@@ -143,18 +158,48 @@ describe('opening one', () => {
    */
   it('admits terminals to the fleet, having just made one', async () => {
     const user = await openDialog()
-    expect(useStore.getState().fleet.terminals).toBe(false)
+    expect(useStore.getState().fleet.kinds).toBe('claude')
     await user.click(screen.getByTestId('new-kind-terminal'))
     await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/thing')
     await user.click(screen.getByTestId('new-agent-submit'))
-    expect(useStore.getState().fleet.terminals).toBe(true)
+    expect(useStore.getState().fleet.kinds).toBe('all')
+  })
+
+  it('admits Claude again when only terminals were showing', async () => {
+    useStore.setState((s) => ({ fleet: { ...s.fleet, kinds: 'terminals' } }))
+    const user = await openDialog()
+    await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/thing')
+    await user.click(screen.getByTestId('new-agent-submit'))
+    expect(useStore.getState().fleet.kinds).toBe('all')
+  })
+
+  /**
+   * Starting something used to close the dialog and leave the reader on
+   * whatever was open before, to find the new card in the list themselves.
+   * It opens on the placeholder the server lists it under, and the route is
+   * told to wait for that id rather than bouncing off it.
+   */
+  it('opens the session it started, on the tab that kind has', async () => {
+    const user = await openDialog()
+    await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/thing')
+    await user.click(screen.getByTestId('new-agent-submit'))
+    expect(screen.getByTestId('where').textContent).toBe('/agent/pending%3Aclaude-1-thing')
+    expect(useStore.getState().expectSession).toBe('pending:claude-1-thing')
+  })
+
+  it('opens a terminal it started on its terminal', async () => {
+    const user = await openDialog()
+    await user.click(screen.getByTestId('new-kind-terminal'))
+    await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/thing')
+    await user.click(screen.getByTestId('new-agent-submit'))
+    expect(screen.getByTestId('where').textContent).toBe('/agent/pending%3Aterm-1/term')
   })
 
   it('leaves the filter alone when an agent was started', async () => {
     const user = await openDialog()
     await user.type(screen.getByTestId('new-agent-dir'), '~/Projects/thing')
     await user.click(screen.getByTestId('new-agent-submit'))
-    expect(useStore.getState().fleet.terminals).toBe(false)
+    expect(useStore.getState().fleet.kinds).toBe('claude')
   })
 
   it('says which of the two the button will do', async () => {
