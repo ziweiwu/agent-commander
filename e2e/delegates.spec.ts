@@ -75,7 +75,18 @@ test.describe('delegates on the card', () => {
       '[data-testid="delegate-state"][data-state="quiet"]',
     )
     await expect(quiet.first()).toBeVisible()
-    await expect(quiet.first()).not.toContainText('done')
+    await expect(quiet.first()).not.toContainText(/ended|done/)
+  })
+
+  test('INV-13 calls a delegate Claude Code recorded as finished "ended"', async ({ page }) => {
+    await openDelegates(page, AGENT.movingFamily)
+
+    const ended = entry(page, AGENT.movingFamily)
+      .locator('[data-testid="delegate-state"][data-state="done"]')
+      .first()
+    await expect(ended).toBeVisible()
+    await expect(ended).toHaveText('ended')
+    await expect(ended).toHaveAttribute('title', /not necessarily succeeded/)
   })
 
   /*

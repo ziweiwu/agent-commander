@@ -31,7 +31,7 @@ export type DelegationClaim =
       active: number
       /** Stopped writing. Not done: nothing recorded an ending. */
       quiet: number
-      /** Claimed only on evidence: a recorded result, or the user stopped it. */
+      /** Claimed only on what Claude Code recorded: it ended, or the user stopped it. */
       done: number
       /** How many of those `active` counts are this app's own guess. */
       guesses: number
@@ -86,10 +86,9 @@ export function claimOf(tree: AgentTree | undefined): DelegationClaim {
  * and nobody has checked. That is the shape a status board hides: the card
  * reads a confident "busy · delegated" for as long as you leave it.
  *
- * It is still only a question. Every delegate here is `quiet`, and quiet is
- * precisely the state that does not distinguish finished from dead (INV-13),
- * so the strongest true sentence is "nothing here has moved — is it still
- * working?". One delegate called active — inferred or not — is enough movement
+ * It is still only a question. No delegate here is moving: a `quiet` one may
+ * be finished or dead (INV-13), and an ended one may have failed, so the
+ * strongest true sentence is "nothing here has moved — is it still working?". One delegate called active — inferred or not — is enough movement
  * to keep the family off this list.
  */
 export function isStallCandidate(agent: Agent, claim: DelegationClaim): boolean {
