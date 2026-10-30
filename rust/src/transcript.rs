@@ -19,6 +19,7 @@ use regex::Regex;
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
+use crate::describe::{prompt_origin, PromptOrigin};
 use crate::sources::{AgentPatch, TailApi, TailRead};
 use crate::types::{
     now_ms, Agent, GoalState, NoticeKind, Outcome, PendingPrompt, PromptOption, Question, Refusals,
@@ -92,18 +93,30 @@ fn unwrap_paste(text: &str) -> String {
     PASTE_ENVELOPE.replace_all(text, "").trim().to_string()
 }
 
-/// Whether a record spelled as blocks is a person talking rather than
-/// machinery.
+/// A notice drawn for something no person typed: which notice, the agent it
+/// came from, and what it says.
+type AgentNotice = (NoticeKind, Option<String>, String);
+
+/// The one line of a task notification written for a reader: its
+/// `<summary>`, leaving the ids, the status and the output path behind.
+static TASK_SUMMARY: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<summary>(.*?)</summary>").unwrap());
+
+/// What another agent said, as Claude Code recorded it on the record's
+/// `origin.body`.
 ///
-/// Claude Code writes its own notes as `user` records — the `[Image: source:
-/// …]` line it files beside a picture is one — and marks every one of them
-/// `isMeta`. Quoting those back into the conversation as though the user had
-/// typed them is the claim INV-11 forbids, and it is a claim only the block
-/// path can make: a bare string carries no picture and no note.
-fn is_the_user_speaking(rec: &Value) -> bool {
-    rec.get("isMeta").and_then(Value::as_bool) != Some(true)
-        && rec.get("isCompactSummary").and_then(Value::as_bool) != Some(true)
-        && rec.get("toolUseResult").is_none()
+/// The content is not that. It is the same words inside a fixed frame of
+/// Claude Code's own — one frame on 191 of the 194 peer records surveyed here,
+/// another on the other three — so it is the content only when the body is
+/// missing.
+fn what_the_agent_said(rec: &Value, said: &str) -> String {
+    let body = rec.get("origin").and_then(|origin| text_field(origin, "body"));
+    body.filter(|body| !body.trim().is_empty()).unwrap_or(said).trim().to_string()
+}
+
+/// A task notification's summary, or nothing when it carries none.
+fn task_summary(said: &str) -> String {
+    TASK_SUMMARY.captures(said).map(|found| found[1].trim().to_string()).unwrap_or_default()
 }
 
 /// `~/.claude/projects`, where Claude Code files transcripts by project.
@@ -1157,8 +1170,20 @@ impl Batch<'_> {
             .and_then(Value::as_array)
             .map(|blocks| self.read_prompt_blocks(rec, blocks))
             .unwrap_or_default();
-        let text = content.and_then(Value::as_str).unwrap_or(&from_blocks);
-        let text = unwrap_paste(text.trim());
+        let said = content.and_then(Value::as_str).unwrap_or(&from_blocks);
+        let notice = match prompt_origin(rec) {
+            PromptOrigin::Speech => return self.push_speech(said, context),
+            PromptOrigin::Machinery => return,
+            PromptOrigin::Handback { name } => (NoticeKind::Handback, name, what_the_agent_said(rec, said)),
+            PromptOrigin::PeerMessage { name } => (NoticeKind::PeerMessage, name, what_the_agent_said(rec, said)),
+            PromptOrigin::TaskNotification => (NoticeKind::TaskEnded, None, task_summary(said)),
+        };
+        self.push_notice(notice, context);
+    }
+
+    /// A person's words, drawn as "you".
+    fn push_speech(&mut self, said: &str, context: EventContext) {
+        let text = unwrap_paste(said.trim());
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -1180,8 +1205,26 @@ impl Batch<'_> {
         });
     }
 
-    /// Closes every call a block answers, and returns the text the blocks say
-    /// when a person said it — empty for plumbing.
+    /// Something no person typed, marked on the conversation where it arrived:
+    /// which notice, the agent it came from, and what it says.
+    fn push_notice(&mut self, (notice, from, text): AgentNotice, context: EventContext) {
+        self.out.events.push(TimelineEvent {
+            id: (self.seq)(),
+            at: context.at,
+            kind: TimelineKind::Notice,
+            text,
+            tool: from,
+            sidechain: context.sidechain,
+            notice: Some(notice),
+            tokens_before: None,
+            tokens_after: None,
+            tool_use_id: None,
+        });
+    }
+
+    /// Closes every call a block answers, and returns the text the blocks
+    /// say. Whose words those are is `prompt_origin`'s question, asked of the
+    /// record rather than of its spelling.
     fn read_prompt_blocks(&mut self, rec: &Value, blocks: &[Value]) -> String {
         let mut said = Vec::new();
         for block in blocks {
@@ -1191,9 +1234,6 @@ impl Batch<'_> {
             said.extend(text_field(block, "text"));
         }
         self.read_outcomes(rec);
-        if !is_the_user_speaking(rec) {
-            return String::new();
-        }
         said.join("\n")
     }
 
@@ -1389,11 +1429,22 @@ pub fn describe(event: &TimelineEvent) -> String {
         TimelineKind::User => trim(&format!("you: {}", event.text)),
         // The card has no room for the token pair and no i18n; the timeline
         // carries the detail.
-        TimelineKind::Notice => match event.notice {
-            Some(NoticeKind::CompactedAuto) => "compacted automatically".to_string(),
-            _ => "compacted".to_string(),
-        },
+        TimelineKind::Notice => trim(&describe_notice(event.notice, event.tool.as_deref())),
         _ => trim(&event.text),
+    }
+}
+
+/// A notice on the card's line, named and never quoted: a hand-back's report
+/// is a delegate's words, and the line is where `you: …` used to put them.
+fn describe_notice(notice: Option<NoticeKind>, from: Option<&str>) -> String {
+    match (notice, from) {
+        (Some(NoticeKind::CompactedAuto), _) => "compacted automatically".to_string(),
+        (Some(NoticeKind::Handback), Some(name)) => format!("{name} reported back"),
+        (Some(NoticeKind::Handback), None) => "a delegate reported back".to_string(),
+        (Some(NoticeKind::PeerMessage), Some(name)) => format!("message from {name}"),
+        (Some(NoticeKind::PeerMessage), None) => "message from another agent".to_string(),
+        (Some(NoticeKind::TaskEnded), _) => "background task ended".to_string(),
+        _ => "compacted".to_string(),
     }
 }
 
@@ -3579,6 +3630,147 @@ mod tests {
         append(&file, format!("{}{}", typed("now the docs", NEXT_AT), calls(1)).as_bytes());
         let after = tail.read_next().await;
         assert_eq!(after.patch.since_prompt, Some(Some(SincePrompt { at: Some(at_ms(NEXT_AT)), calls: 1 })));
+    }
+
+    /// What a delegate said when it handed its work back, as Claude Code
+    /// records it on the hand-back's `origin`.
+    const HANDBACK_BODY: &str = "Renamed the export button in all three locales; the build passes.";
+
+    /// The hand-back's content: the same words inside a frame of Claude Code's
+    /// own, which is not the delegate speaking.
+    fn handback_content() -> String {
+        format!("A delegate has finished.\n\n{HANDBACK_BODY}\n\nDecide what to do next with this result.")
+    }
+
+    /// A delegate's hand-back as Claude Code 2.1.310 writes it when the parent
+    /// is idle: a `user` record, flagged `isMeta`, from a `peer`.
+    fn hand_back(content: Value) -> String {
+        json!({
+            "type": "user", "timestamp": "2026-10-30T12:00:00.000Z", "isSidechain": false,
+            "isMeta": true, "promptSource": "system",
+            "origin": {
+                "kind": "peer", "name": "general-purpose", "from": "task-7", "handback": true,
+                "body": HANDBACK_BODY, "handbackReportText": HANDBACK_BODY, "senderTaskId": "task-7",
+            },
+            "message": { "role": "user", "content": content },
+        })
+        .to_string()
+    }
+
+    /// The events drawn as the person speaking.
+    fn said_by_you(out: &ParseResult) -> Vec<&TimelineEvent> {
+        out.events.iter().filter(|event| event.kind == TimelineKind::User).collect()
+    }
+
+    /// Each notice as the wire spells its kind, with whom it is from and what
+    /// it says.
+    fn notices(out: &ParseResult) -> Vec<(Value, Option<String>, String)> {
+        out.events
+            .iter()
+            .filter(|event| event.kind == TimelineKind::Notice)
+            .map(|event| (json!(event.notice), event.tool.clone(), event.text.clone()))
+            .collect()
+    }
+
+    /// After almost every delegated run the first thing on screen was a "you"
+    /// bubble holding the delegate's report: the string path never asked who
+    /// was speaking, and the card's line read `you: …`.
+    #[test]
+    fn inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking() {
+        let out = parse(&[&hand_back(json!(handback_content()))]);
+        assert!(said_by_you(&out).is_empty(), "drawn as the owner: {:?}", out.events);
+        let report = (json!("handback"), Some("general-purpose".to_string()), HANDBACK_BODY.to_string());
+        assert_eq!(notices(&out), vec![report]);
+        assert_eq!(out.patch.activity.as_deref(), Some("general-purpose reported back"));
+    }
+
+    /// The same hand-back spelled as blocks is the same notice, not a message
+    /// and not nothing.
+    #[test]
+    fn inv11_a_hand_back_spelled_as_blocks_is_the_same_notice() {
+        let blocks = json!([{ "type": "text", "text": handback_content() }]);
+        let out = parse(&[&hand_back(blocks)]);
+        let report = (json!("handback"), Some("general-purpose".to_string()), HANDBACK_BODY.to_string());
+        assert_eq!(notices(&out), vec![report]);
+    }
+
+    /// Another agent's message that hands nothing back names its sender, and
+    /// says "message", not "reported back".
+    #[test]
+    fn inv11_a_peer_message_names_its_sender() {
+        let peer = json!({
+            "type": "user", "timestamp": "2026-10-30T12:00:00.000Z", "isMeta": true,
+            "promptSource": "system",
+            "origin": { "kind": "peer", "name": "reviewer", "from": "pid-41", "body": "Is the parser change ready?" },
+            "message": { "role": "user", "content": "From reviewer: Is the parser change ready?" },
+        })
+        .to_string();
+        let out = parse(&[&peer]);
+        assert!(said_by_you(&out).is_empty(), "drawn as the owner: {:?}", out.events);
+        let message = (json!("peerMessage"), Some("reviewer".to_string()), "Is the parser change ready?".to_string());
+        assert_eq!(notices(&out), vec![message]);
+        assert_eq!(out.patch.activity.as_deref(), Some("message from reviewer"));
+    }
+
+    /// A background task's end was drawn as "you" holding raw markup. It is a
+    /// notice carrying the one line of the markup written for a reader.
+    #[test]
+    fn inv11_a_task_notification_is_a_notice_carrying_its_summary() {
+        let summary = "Background command \"npm test\" completed (exit code 0)";
+        let content = [
+            "<task-notification>".to_string(),
+            "<task-id>b1</task-id>".to_string(),
+            "<status>completed</status>".to_string(),
+            format!("<summary>{summary}</summary>"),
+            "</task-notification>".to_string(),
+        ]
+        .join("\n");
+        let note = json!({
+            "type": "user", "timestamp": "2026-10-30T12:00:00.000Z", "isSidechain": false,
+            "promptSource": "system", "origin": { "kind": "task-notification", "producer": "bash" },
+            "message": { "role": "user", "content": content },
+        })
+        .to_string();
+        let out = parse(&[&note]);
+        assert!(said_by_you(&out).is_empty(), "drawn as the owner: {:?}", out.events);
+        assert_eq!(notices(&out), vec![(json!("taskEnded"), None, summary.to_string())]);
+        assert_eq!(out.patch.activity.as_deref(), Some("background task ended"));
+    }
+
+    /// Records written before `origin` existed say `promptSource: "system"`
+    /// and nothing else; the markup is what names them.
+    #[test]
+    fn inv11_an_unlabelled_task_notification_is_the_same_notice() {
+        let note = json!({
+            "type": "user", "timestamp": "2026-10-30T12:00:00.000Z", "promptSource": "system",
+            "message": { "content": "<task-notification>done</task-notification>" },
+        })
+        .to_string();
+        let out = parse(&[&note]);
+        assert_eq!(notices(&out), vec![(json!("taskEnded"), None, String::new())]);
+    }
+
+    /// Local-command output and Claude Code's notes to itself carry no label
+    /// a person could be mistaken for, so they are drawn as nothing; a person
+    /// typing beside them is still "you".
+    #[test]
+    fn inv11_local_command_output_and_claude_codes_own_notes_are_not_messages() {
+        let stdout = json!({ "type": "user", "timestamp": "2026-10-30T12:00:00.000Z",
+            "message": { "content": "<local-command-stdout>Set model to opus</local-command-stdout>" } });
+        let caveat_text = "<local-command-caveat>Caveat: generated by a local command.</local-command-caveat>";
+        let caveat = json!({ "type": "user", "timestamp": "2026-10-30T12:00:00.000Z", "isMeta": true,
+            "message": { "content": caveat_text } });
+        let summary = json!({ "type": "user", "timestamp": "2026-10-30T12:00:00.000Z",
+            "origin": { "kind": "human" }, "isCompactSummary": true,
+            "message": { "content": "This session is being continued from a previous one." } });
+        let person = json!({ "type": "user", "timestamp": "2026-10-30T12:01:00.000Z",
+            "origin": { "kind": "human" }, "promptSource": "typed",
+            "message": { "content": "rename the export button" } });
+        let lines: Vec<String> = [stdout, caveat, summary, person].iter().map(Value::to_string).collect();
+        let out = parse(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        let texts: Vec<&str> = out.events.iter().map(|event| event.text.as_str()).collect();
+        assert_eq!(texts, vec!["rename the export button"], "{:?}", out.events);
+        assert_eq!(out.events[0].kind, TimelineKind::User);
     }
 }
 

@@ -165,6 +165,15 @@ reads a confident `busy · delegated` for as long as you leave it. The card says
 genuinely does not distinguish finished from dead. One delegate still moving and
 the card says the opposite, in the same place.
 
+**A delegate reporting back is a mark in the conversation, not a message from
+you.** Claude Code files a hand-back as though the person had typed it, so it
+used to arrive as a **You** bubble holding the report. It reads *«general-purpose»
+reported back* now, with the report behind **show report**, and the card's line
+says the same. Another agent's message reads *message from «name»* behind
+**show message**, a background task's end reads *background task ·* and its
+summary, and Claude Code's notes to itself — local-command output among them —
+are not drawn at all.
+
 ### Notifications
 
 Settings carries an **Alerts** toggle: with it on, an agent that *starts*

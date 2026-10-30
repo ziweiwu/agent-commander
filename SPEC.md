@@ -414,6 +414,20 @@ over the list with a back control; on a wide one, a second column.
   the one fact they carry hardest to read. The tags MUST be found by name
   rather than by position: their order is not stable and they are sometimes
   indented. *`transcript::reads_a_typed_slash_command_as_the_command_it_ran`.*
+- **FR-CHAT-17** — Only a person MAY be drawn as **you**. A `user` record from
+  another agent, a task notification, or Claude Code's own note (`isMeta`,
+  local-command output) MUST NOT be, whether its content is a string or blocks:
+  the origin MUST be read from the record's label before its flags, since a
+  peer's message is flagged `isMeta` too. A delegate's hand-back MUST be a
+  notice naming the delegate ("«general-purpose» reported back"), with its
+  report behind a closed **show report** disclosure; another agent's message
+  likewise, behind **show message**; a background task's end MUST be a notice
+  carrying only its summary; a note MUST be drawn as nothing. The card's
+  activity line MUST name the notice rather than quote it. Unlabelled records
+  stay **you**. **(INV-11)**
+  *`transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
+  `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`,
+  `test/ui/message-notices.test.tsx`.*
 - **FR-CHAT-2** — A message the user sends MUST appear immediately as *sending…*
   and settle only when the agent's own transcript confirms it. *`test/ui/delivery.test.tsx`.*
 - **FR-CHAT-3** — A message the agent never echoes back MUST be marked **not
@@ -1269,7 +1283,7 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-CHAT-17, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |

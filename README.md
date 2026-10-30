@@ -53,7 +53,8 @@ a laptop or from a phone.
   irreversible local destruction`, or `failed` — from the fields Claude Code
   records for that, never from the wording of an error. Tap one to see the
   diff or the end of its output as it was recorded; the card's fold counts
-  what auto mode refused.
+  what auto mode refused. A delegate's hand-back reads `«general-purpose»
+  reported back`, its report one tap away, and never as a message from you.
 - **What a busy agent is running**, read from the process table: the tool
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.

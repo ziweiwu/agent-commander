@@ -1,5 +1,5 @@
 import { memo, useId, useState } from 'react'
-import type { Hunk, ToolResultView } from '../../shared/types.ts'
+import type { Hunk, NoticeKind, ToolResultView } from '../../shared/types.ts'
 import {
   outcomeWords,
   parseBlocks,
@@ -11,6 +11,7 @@ import {
   type ToolCall,
 } from '../lib/chat.ts'
 import { clock } from '../lib/format.ts'
+import type { Key } from '../lib/i18n.ts'
 import { textLang } from '../lib/promptLang.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useStore, type ToolResultEntry } from '../store/store.ts'
@@ -38,24 +39,7 @@ function tokens(value: number | undefined): string {
 export const Message = memo(function Message({ message }: { message: ChatMessage }) {
   const t = useTranslate()
 
-  /*
-   * A compaction is not something either party said, so it is not drawn as a
-   * message. It is a mark on the conversation at the point where the agent's
-   * memory was cut, which is the only place it means anything.
-   */
-  if (message.role === 'notice') {
-    return (
-      <div className={styles.notice} data-testid="notice" data-notice={message.notice}>
-        <span className={styles.noticeText}>
-          {t(message.notice === 'compactedAuto' ? 'compactedAuto' : 'compacted', {
-            before: tokens(message.tokensBefore),
-            after: tokens(message.tokensAfter),
-          })}
-        </span>
-        <time className={styles.noticeTime}>{clock(message.at)}</time>
-      </div>
-    )
-  }
+  if (message.role === 'notice') return <Notice message={message} />
 
   const classes = [styles.msg]
   if (message.role === 'you') classes.push(styles.you)
@@ -115,6 +99,77 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
     </div>
   )
 })
+
+/** The disclosure that keeps what another agent said one tap away, by notice. */
+const SHOW_WHAT_WAS_SAID: Partial<Record<NoticeKind, Key>> = {
+  handback: 'noticeShowReport',
+  peerMessage: 'noticeShowMessage',
+}
+
+/** The line a notice reads as, in the reader's language. */
+function noticeLine(message: ChatMessage, translate: Translate): string {
+  const name = message.from
+  switch (message.notice) {
+    case 'handback':
+      return name ? translate('noticeHandback', { name }) : translate('noticeHandbackUnnamed')
+    case 'peerMessage':
+      return name ? translate('noticePeerMessage', { name }) : translate('noticePeerMessageUnnamed')
+    case 'taskEnded':
+      return message.text
+        ? translate('noticeTaskEnded', { summary: message.text })
+        : translate('noticeTaskEndedBare')
+    default:
+      return translate(message.notice === 'compactedAuto' ? 'compactedAuto' : 'compacted', {
+        before: tokens(message.tokensBefore),
+        after: tokens(message.tokensAfter),
+      })
+  }
+}
+
+/**
+ * A mark on the conversation rather than a message, because nobody said it to
+ * the reader.
+ *
+ * A compaction marks the point where the agent's memory was cut, which is the
+ * only place it means anything. A delegate's hand-back, another agent's
+ * message and a background task's end mark where they arrived: Claude Code
+ * files each as a `user` record, and drawing one as "you" put words in the
+ * reader's mouth (INV-11). What another agent said was said to the agent, so
+ * it waits behind a closed native disclosure, drawn only when there is
+ * something to disclose.
+ */
+function Notice({ message }: { message: ChatMessage }) {
+  const t = useTranslate()
+  const [open, setOpen] = useState(false)
+  const line = noticeLine(message, t)
+  const show = message.notice === undefined ? undefined : SHOW_WHAT_WAS_SAID[message.notice]
+
+  return (
+    <div className={styles.noticeBlock} data-testid="notice" data-notice={message.notice}>
+      <div className={styles.notice}>
+        <span className={styles.noticeText} data-testid="notice-text" title={line}>
+          {line}
+        </span>
+        <time className={styles.noticeTime}>{clock(message.at)}</time>
+      </div>
+      {show !== undefined && message.text !== '' && (
+        <details
+          className={styles.noticeSaid}
+          data-testid="notice-disclosure"
+          onToggle={(event) => setOpen(event.currentTarget.open)}
+        >
+          <summary className={styles.noticeToggle}>
+            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={ICON_INLINE} />
+            {t(show)}
+          </summary>
+          <div className={styles.noticeSaidText} data-testid="notice-said" lang={textLang(message.text)}>
+            {message.text}
+          </div>
+        </details>
+      )}
+    </div>
+  )
+}
 
 /**
  * Inline markdown rendered as React elements, never as HTML, so transcript

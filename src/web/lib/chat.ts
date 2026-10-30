@@ -7,7 +7,7 @@
  * as separate utterances, and consecutive messages from the same speaker
  * grouped under one header.
  */
-import type { TimelineEvent, ToolOutcome } from '../../shared/types.ts'
+import type { NoticeKind, TimelineEvent, ToolOutcome } from '../../shared/types.ts'
 
 export type Role = 'you' | 'agent' | 'notice'
 
@@ -58,9 +58,13 @@ export interface ChatMessage {
    *
    * Carried rather than pre-formatted so the reader sees it in their own
    * language — the server has no business writing a sentence into a
-   * conversation.
+   * conversation. A hand-back's or a peer's notice carries what that agent
+   * said in `text`, and the agent in `from`; a task's end carries its summary
+   * in `text`.
    */
-  notice?: 'compacted' | 'compactedAuto'
+  notice?: NoticeKind
+  /** For a hand-back or a peer's message: the agent it came from, by type. */
+  from?: string
   tokensBefore?: number
   tokensAfter?: number
 }
@@ -111,24 +115,30 @@ export function buildMessages(events: TimelineEvent[], outcomes: Outcomes = {}):
         break
       }
 
-      /*
-       * A compaction. Stands on its own rather than folding into a message: it
-       * is not something either party said, it is a change to what the agent
-       * can still remember, and it belongs at the point in the conversation
-       * where the memory was cut.
-       */
-      case 'notice': {
-        const message = push('notice', event.at, '', event.id)
-        message.grouped = false
-        if (event.notice) message.notice = event.notice
-        if (event.tokensBefore !== undefined) message.tokensBefore = event.tokensBefore
-        if (event.tokensAfter !== undefined) message.tokensAfter = event.tokensAfter
+      case 'notice':
+        markNotice(push('notice', event.at, event.text, event.id), event)
         break
-      }
     }
   }
 
   return messages
+}
+
+/**
+ * A notice stands on its own rather than folding into a message, and never
+ * groups under the one before it: it is not something either party said. A
+ * compaction is a change to what the agent can still remember, so it belongs
+ * where the memory was cut. A delegate's hand-back, another agent's message
+ * and a background task's end are things Claude Code filed as `user` records
+ * that no person typed, so they belong where they arrived and are never drawn
+ * as "you" (INV-11).
+ */
+function markNotice(message: ChatMessage, event: TimelineEvent): void {
+  message.grouped = false
+  if (event.notice) message.notice = event.notice
+  if (event.tool !== undefined) message.from = event.tool
+  if (event.tokensBefore !== undefined) message.tokensBefore = event.tokensBefore
+  if (event.tokensAfter !== undefined) message.tokensAfter = event.tokensAfter
 }
 
 /** A locally-echoed message, shown immediately so sending feels instant. */
