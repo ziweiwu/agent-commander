@@ -254,6 +254,20 @@ describe('INV-15 a silent family is asked about, not pronounced on', () => {
     expect(screen.getByTestId('stall-candidate').textContent).toMatch(/still working\?/)
   })
 
+  it('does not claim nothing recorded an ending when every delegate ended', () => {
+    card(
+      { sessionId: 'a', status: 'busy', delegating: true, lastActivityAt: Date.now() - 600_000 },
+      tree([
+        node({ agentId: 'x', state: 'done', finished: true }),
+        node({ agentId: 'y', state: 'done', finished: true }),
+      ]),
+    )
+    open()
+    const title = screen.getByTestId('stall-candidate').getAttribute('title') ?? ''
+    expect(title).not.toMatch(/nothing recorded an ending/i)
+    expect(title).toMatch(/ended one may have failed/)
+  })
+
   it('says the opposite, in the same place, while a delegate is moving', () => {
     card(
       { sessionId: 'a', status: 'busy', delegating: true, lastActivityAt: Date.now() - 600_000 },
