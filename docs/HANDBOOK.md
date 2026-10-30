@@ -242,8 +242,11 @@ Open an agent and you get two tabs:
   answer a permission dialog, hit Esc to interrupt, or arrow through a menu.
 
 A blocked agent shows a banner naming what it's waiting for, and — where the
-question can be read — the question itself with a button per option, right above
-the conversation.
+question can be read — the question itself with a button per option, as the
+conversation's last row. It opens with the question at the top of the
+conversation and the turn that led to it one scroll up; **Jump to latest**
+brings the question back after you read further up. While the card can answer,
+the banner is one line, and the Attach tab beside it is the way to the terminal.
 
 **The options are read, never guessed.** Claude Code writes a tool call to its
 transcript *before* the dialog it raises is answered, so an unanswered
@@ -934,8 +937,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1797 tests: 799 Rust (the server) + 998 vitest (the web app)
-npm run e2e        # 468 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1807 tests: 799 Rust (the server) + 1008 vitest (the web app)
+npm run e2e        # 475 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

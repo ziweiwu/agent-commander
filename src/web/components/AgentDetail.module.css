@@ -372,6 +372,17 @@
 .blocked strong {
   color: var(--waiting);
 }
+.blocked[data-compact='true'] {
+  flex-wrap: nowrap;
+  padding: 4px 10px;
+  margin-bottom: 6px;
+}
+.blockedLine {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cta {
   border-color: var(--waiting);
 }

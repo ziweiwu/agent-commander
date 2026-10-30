@@ -396,18 +396,14 @@ function BlockedBanner({
    * two inches above the buttons that do the job.
    */
   const answerable = useStore((s) => s.prompt) !== null
+  const title = t('blockedTitle', { reason })
+  if (answerable && tab === 'chat' && agent.paneId) return <CompactBlockedBanner title={title} />
 
   return (
     <div className={styles.blocked} data-testid="blocked-banner">
       <div className={styles.blockedText}>
-        <strong>{t('blockedTitle', { reason })}</strong>
-        {t(
-          !agent.paneId
-            ? 'blockedBodyNotAttachable'
-            : answerable && tab === 'chat'
-              ? 'blockedBodyAnswerable'
-              : 'blockedBodyAttachable',
-        )}
+        <strong>{title}</strong>
+        {t(agent.paneId ? 'blockedBodyAttachable' : 'blockedBodyNotAttachable')}
       </div>
       {agent.paneId && (
         <Button
@@ -424,6 +420,20 @@ function BlockedBanner({
           {t(tab === 'attach' ? 'focusTerminal' : 'openTerminal')}
         </Button>
       )}
+    </div>
+  )
+}
+
+/**
+ * FR-ANS-8's banner while the card under it can answer: the title alone, on one
+ * line. The card says the rest, and the route to the terminal is the Attach
+ * tab beside it and the card's own fallback keys (INV-17), so the body and the
+ * Open terminal button were the conversation's room spent twice.
+ */
+function CompactBlockedBanner({ title }: { title: string }) {
+  return (
+    <div className={styles.blocked} data-testid="blocked-banner" data-compact="true" title={title}>
+      <strong className={styles.blockedLine}>{title}</strong>
     </div>
   )
 }

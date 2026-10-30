@@ -12,6 +12,7 @@ import { shortName } from '../lib/naming.ts'
 import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useDraft } from '../hooks/useDraft.ts'
+import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { useStore } from '../store/store.ts'
 import {
   interruptAndSend,
@@ -67,6 +68,41 @@ function headingOf(card: HTMLElement): HTMLElement | null {
     card.querySelector<HTMLElement>('[data-testid="answer-question"]') ??
     card.querySelector<HTMLElement>('[data-testid="answer-card"]')
   )
+}
+
+/**
+ * Where following the conversation stops: its end, or the question's top while
+ * a question is its last row and the reader has not scrolled into it. A card
+ * that grows after it is placed — the pane capture loads late, the banner above
+ * it shrinks — then never pushes the question off the top of the view, and a
+ * reader who scrolled down to the card's keys is left there.
+ */
+function followTarget(scroller: HTMLElement, answerSlot: HTMLElement | null): number {
+  if (!answerSlot?.querySelector('[data-testid="answer-card"]')) return scroller.scrollHeight
+  const top = answerSlot.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop
+  const intoTheCard = scroller.scrollTop > top + 1
+  return intoTheCard ? scroller.scrollHeight : Math.min(scroller.scrollHeight, top)
+}
+
+/** Whether any of an element is inside the part of its scroller on screen. */
+function partlyIn(element: HTMLElement, scroller: HTMLElement): boolean {
+  const view = scroller.getBoundingClientRect()
+  const box = element.getBoundingClientRect()
+  return box.top < view.bottom && box.bottom > view.top
+}
+
+/**
+ * Whether a control is wholly inside the part of its scroller on screen.
+ *
+ * Focusing one that is not scrolls it into view, which on a card taller than
+ * the conversation takes the question off the top; and a control nobody can see
+ * is not one an Enter should press (INV-2).
+ */
+function shownIn(control: HTMLElement, scroller: HTMLElement | null): boolean {
+  if (!scroller) return true
+  const view = scroller.getBoundingClientRect()
+  const box = control.getBoundingClientRect()
+  return box.top >= view.top && box.bottom <= view.bottom
 }
 
 /**
@@ -284,13 +320,28 @@ export function Chat({ agent }: { agent: Agent }) {
     (prompt !== null || (Boolean(agent.paneId) && agent.waitingFor !== 'starting up'))
   const showToast = useStore((s) => s.showToast)
 
-  const scrollRef = useRef<HTMLDivElement>(null)
+  /**
+   * The detail pane's fade, moved with the question: on a landscape phone the
+   * card's second option sits below this scroller's fold now, and nothing else
+   * says so. Drawn only while a question is up, so a conversation being read
+   * back looks as it always has.
+   */
+  const [scrollRef, scrollEdge] = useOverflowEdge<HTMLDivElement>()
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const answerRef = useRef<HTMLDivElement>(null)
   const hopped = useStore((s) => s.hopped === agent.sessionId)
   /** The agent a hop has already put the focus on, so it is done once per arrival. */
   const landedRef = useRef<string | null>(null)
   const handOff = useHandOff(agent.sessionId, prompt?.id)
+  const transcriptLanded = useStore((s) => s.timelineAt !== null)
+  /** Which question, on which agent, read against which transcript: what a placement is done once for. */
+  const questionKey = answering ? `${agent.sessionId}|${prompt?.id ?? ''}|${transcriptLanded}` : null
+  const placedQuestion = useRef<string | null>(null)
+  /**
+   * Whether any of the question is in view. "Jump to latest" floats over the
+   * bottom of the conversation, and over a card it would sit on an option.
+   */
+  const [questionOnScreen, setQuestionOnScreen] = useState(false)
   const [pinned, setPinned] = useState(true)
   const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('chat', agent.sessionId, inputRef)
   const lastQuickRef = useRef<{ text: string; at: number }>({ text: '', at: 0 })
@@ -453,9 +504,9 @@ export function Chat({ agent }: { agent: Agent }) {
    */
   useLayoutEffect(() => {
     if (pinned && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+      scrollRef.current.scrollTop = followTarget(scrollRef.current, answerRef.current)
     }
-  }, [messages.length, busy, pinned])
+  }, [messages.length, busy, pinned, answering, handOff.shown])
 
   /**
    * Open at the divider when what is new is taller than the view, once per
@@ -474,6 +525,27 @@ export function Chat({ agent }: { agent: Agent }) {
     setPinned(false)
   }, [divider, agent.sessionId])
 
+  /**
+   * Open a blocked agent with its question at the top of the conversation.
+   *
+   * The card is the conversation's last row, so the turn that led to the
+   * question is one swipe up and its options are below it, inside the same
+   * scroller. Placed once per question, after the transcript has landed, and
+   * declared after the follow and the divider so it has the last word: the
+   * question is what a blocked agent is opened for. Only this scroller moves,
+   * never the sheet or the page around it, which is why it is not
+   * `scrollIntoView`. It runs on every pointer; only focus is desktop-only.
+   */
+  useLayoutEffect(() => {
+    const box = scrollRef.current
+    const card = answerRef.current
+    if (!questionKey || !box || !card || placedQuestion.current === questionKey) return
+    placedQuestion.current = questionKey
+    box.scrollTop = followTarget(box, card)
+    setPinned(box.scrollHeight - box.scrollTop - box.clientHeight < 1)
+    setQuestionOnScreen(true)
+  }, [questionKey])
+
   /*
    * Stay pinned when the box itself changes height, not only when a message
    * lands. An on-screen keyboard takes half the screen from this scroller,
@@ -484,11 +556,12 @@ export function Chat({ agent }: { agent: Agent }) {
     const el = scrollRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
-      if (pinned) el.scrollTop = el.scrollHeight
+      if (pinned) el.scrollTop = followTarget(el, answerRef.current)
     })
     observer.observe(el)
+    if (answerRef.current) observer.observe(answerRef.current)
     return () => observer.disconnect()
-  }, [pinned])
+  }, [pinned, answering])
 
   /*
    * Opening an agent should let you reply without another click — but not on a
@@ -519,8 +592,9 @@ export function Chat({ agent }: { agent: Agent }) {
       inputRef.current?.focus()
       return
     }
-    const heading = hopped && answerRef.current ? headingOf(answerRef.current) : null
-    if (heading && landedRef.current !== agent.sessionId) {
+    const card = answerRef.current
+    const heading = card && (hopped || !shownIn(option, scrollRef.current)) ? headingOf(card) : null
+    if (hopped && heading && landedRef.current !== agent.sessionId) {
       landedRef.current = agent.sessionId
       heading.focus()
       return
@@ -627,20 +701,16 @@ export function Chat({ agent }: { agent: Agent }) {
 
   return (
     <div className={styles.pane} data-testid="chat">
-      {(answering || handOff.shown) && (
-        <div className={styles.answer} ref={answerRef}>
-          {answering && <AnswerCard agent={agent} prompt={prompt} onAnswered={handOff.arm} />}
-          {handOff.shown && <HandOff from={agent.sessionId} />}
-        </div>
-      )}
       <div className={styles.region}>
         <div
           ref={scrollRef}
           className={styles.scroll}
           data-testid="chat-scroll"
+          data-overflow={answering ? scrollEdge : undefined}
           onScroll={(e) => {
             const el = e.currentTarget
             setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < PIN_SLACK)
+            setQuestionOnScreen(answerRef.current !== null && partlyIn(answerRef.current, el))
           }}
         >
           <div className={styles.list} data-testid="chat-list">
@@ -663,17 +733,23 @@ export function Chat({ agent }: { agent: Agent }) {
                 {agent.status === 'busy' && <WorkingIndicator />}
               </>
             )}
+            {(answering || handOff.shown) && (
+              <div className={styles.answer} ref={answerRef}>
+                {answering && <AnswerCard agent={agent} prompt={prompt} onAnswered={handOff.arm} />}
+                {handOff.shown && <HandOff from={agent.sessionId} />}
+              </div>
+            )}
           </div>
         </div>
 
-        {!pinned && (
+        {!pinned && !(answering && questionOnScreen) && (
           <button
             type="button"
             className={styles.jump}
             data-testid="jump-to-latest"
             onClick={() => {
               setPinned(true)
-              if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+              if (scrollRef.current) scrollRef.current.scrollTop = followTarget(scrollRef.current, answerRef.current)
             }}
           >
             {t('jumpToLatest')}

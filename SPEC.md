@@ -533,7 +533,17 @@ epistemic rather than functional.
   a time, so it would answer the *next* one. **(INV-2, INV-16)**
 - **FR-ANS-8** — A blocked agent MUST show a banner naming what it is waiting
   for wherever it is opened, and MUST offer a route to the terminal for the
-  cases the transcript cannot describe.
+  cases the transcript cannot describe. On the Chat tab, while the answer card
+  can answer (the transcript named the question and the agent has a pane), the
+  banner is one line, and the route to the terminal is the Attach tab and the
+  card's fallback keys. The card is the conversation's last row, inside its
+  scroller, and a blocked agent opens with the question at the top of the
+  conversation and the turn that led to it one scroll up, on every pointer:
+  the conversation keeps at least 30% of a phone's screen and the composer
+  stays on it.
+  *`e2e/blocked-shapes.spec.ts`, `e2e/fades.spec.ts`,
+  `test/ui/AgentDetail.test.tsx`, `test/ui/answer-card.test.tsx`,
+  `scripts/audit-mobile.mjs`, `scripts/audit-workspace.mjs`.*
 
 ### 4.3 Attach
 

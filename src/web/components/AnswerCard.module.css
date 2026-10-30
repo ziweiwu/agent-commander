@@ -1,5 +1,5 @@
-/*
- * Sits above the conversation, where the answer is wanted, rather than in a
+/**
+ * The conversation's last row, under the turn that asked it, rather than a
  * dialog: the question is already modal for the agent, and a modal here would
  * cover the transcript that gives it context.
  */

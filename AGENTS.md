@@ -103,16 +103,17 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1797 tests: 799 Rust (the server) + 998 vitest (the web app)
+npm test              # 1807 tests: 799 Rust (the server) + 1008 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 468 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 475 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
                       # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transcript
-                      # plus composer at desktop/laptop/tablet, measured in a real
+                      # plus composer at desktop/laptop/tablet (and a 30% floor
+                      # for a blocked agent at 1280x720), measured in a real
                       # browser against --mock. Not in `npm run audit`, because it
                       # asserts a product target rather than a correctness property.
                       # PORT/BASE move the server (4400 by default, and it refuses

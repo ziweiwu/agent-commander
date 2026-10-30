@@ -48,6 +48,13 @@ const TOUCH_FLOOR = 44
 const LABEL_CHARS = 16
 const LISTED = 6
 
+/** The share of the viewport the conversation keeps on any agent, blocked or not. */
+const CONVERSATION_FLOOR = 0.3
+/** The fixture blocked on a tool permission: a card with a command, drawn choices and a pane. */
+const BLOCKED_AGENT = 'mock-permission'
+/** Long enough for the conversation to land under the card and the card to be placed. */
+const BLOCKED_SETTLE_MS = 900
+
 /** Every visible touch target under the floor on the screen as it stands. */
 async function reportSmallTargets(page, where) {
   const small = await page.$$eval(
@@ -66,6 +73,27 @@ async function reportSmallTargets(page, where) {
   if (small.length === 0) return
   const named = small.map((found) => `${found.label}(${found.w}x${found.h})`).slice(0, LISTED)
   add('med', 'touch', `${where}: ${small.length} small target(s): ${named.join(', ')}`)
+}
+
+/**
+ * Step 6 again, on the kind of agent step 4 skips: one blocked on a permission.
+ *
+ * Step 4 picks a card that is not waiting, so this floor never saw the answer
+ * card — which sat above the conversation and left it 0px tall on every phone,
+ * on the one screen opened to decide something. Same floor, same scroller.
+ */
+async function reportBlockedConversation(page, where) {
+  await page.goto(`${BASE}agent/${BLOCKED_AGENT}`, { waitUntil: 'networkidle' })
+  await page.waitForSelector('[data-testid="answer-card"]', { timeout: 6000 }).catch(() => add('high', 'chat', `${where}: ${BLOCKED_AGENT} drew no answer card`))
+  await page.waitForTimeout(BLOCKED_SETTLE_MS)
+  const chatH = await page.evaluate(() => {
+    const s = document.querySelector('[data-testid="chat-scroll"]')
+    return s ? { h: Math.round(s.clientHeight), vh: window.innerHeight } : null
+  })
+  if (chatH && chatH.h < chatH.vh * CONVERSATION_FLOOR) {
+    add('med', 'layout', `${where}: a blocked agent's conversation is only ${chatH.h}px of ${chatH.vh}px viewport`)
+  }
+  await page.screenshot({ path: `${OUT}/33-${where}-blocked.png`, fullPage: false })
 }
 
 const browser = await ENGINE.launch()
@@ -142,7 +170,7 @@ for (const { name, device } of PROFILES) {
     const s = document.querySelector('[data-testid="chat-scroll"]')
     return s ? { h: Math.round(s.clientHeight), vh: window.innerHeight } : null
   })
-  if (chatH && chatH.h < chatH.vh * 0.3) {
+  if (chatH && chatH.h < chatH.vh * CONVERSATION_FLOOR) {
     add('med', 'layout', `${name}: conversation pane is only ${chatH.h}px of ${chatH.vh}px viewport`)
   }
 
@@ -236,6 +264,8 @@ for (const { name, device } of PROFILES) {
   }
 
   await reportSmallTargets(page, `${name} agent`)
+
+  await reportBlockedConversation(page, name)
 
   await ctx.close()
 }
