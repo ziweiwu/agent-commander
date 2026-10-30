@@ -1469,13 +1469,17 @@ existing tail (INV-4: no new read). Three rules keep it inside what is known:
   calls in what was read" — a lower bound said as one. A transcript read whole
   with no prompt in it has nothing to count from, and the card keeps the age
   it had. The detail view's own tail starts later in the file, so it leaves
-  the figure to the enricher's rather than overwrite a clock with a floor.
+  the figure to the enricher's rather than overwrite a clock with a floor —
+  and the same for every other count over a window: refusals, `tokens` and
+  delegates.
 
 - `transcript::inv11_since_prompt_*` — machinery does not restart it,
   delegates are excluded, a prompt never read gives nothing, a partial backfill
   gives a floor that the next prompt replaces
 - `sources::tests::every_field_the_enricher_carries_is_compared_before_it_is_sent`
   — a count that moves on a tick where nothing else does must still broadcast
+- `routes::tests::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`
+  — the open conversation's tail passes its activity on and none of its counts
 - `test/ui/card-since-prompt.test.tsx` — busy Claude cards only, both
   languages, the "at least" wording, the fallback, and no row added to the face
 
@@ -1583,6 +1587,12 @@ in this app*, and every part of it is measured rather than guessed:
   tab in the background has been shown to nobody, so it does not move the
   record. The same `visible` the push channel reads (INV-14) decides it, and
   the record lives on the server so the laptop and the phone agree.
+- **Leaving a session — another focus, the tab hidden, or the socket closed —
+  first counts what it showed up to that moment.** The open conversation's
+  own tail moves the agent's `lastActivityAt` without a fleet change, so the
+  reply the reader watched arrive used to be counted only after the tab had
+  left, by which time it was on screen nowhere: the card said *new* and the
+  next visit opened on a divider above a reply already read.
 - **Only an idle Claude card says it.** A busy card is still moving, so *new*
   would be noise; a waiting card already has the hand; an inferred status is
   not a transcript time. And it is the plain text colour, never amber: amber
@@ -1601,6 +1611,11 @@ in this app*, and every part of it is measured rather than guessed:
   it never moves back, and a terminal is never tracked
 - `routes::tests::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`
   — the same over a real socket, and every tab is told
+- `routes::tests::inv11_leaving_for_another_session_counts_the_reply_it_showed`,
+  `routes::tests::inv11_hiding_the_tab_counts_the_reply_it_showed`,
+  `routes::tests::inv11_closing_the_socket_counts_the_reply_it_showed` — a
+  reply the open conversation drew without a fleet change is counted as shown
+  on each of the three ways out
 - `test/ui/new-since.test.tsx` — the mark is on idle Claude cards only, beside
   the age, never amber, absent while stale; the heading counts it; the divider
   sits where the news begins, says *at least* at the top, is absent when
@@ -1878,7 +1893,11 @@ The card's fold counts auto mode's refusals the way it counts `tokens`: over
 the window that was read, labelled with where that window starts — "auto mode
 refused 3 actions · last 4m ago (since 14:02)". A delegate's sidechain is its
 own conversation and is not counted. A refusal never pushes: INV-14 is
-unchanged, and this is a fact waiting to be asked about.
+unchanged, and this is a fact waiting to be asked about. The fold is counted
+by the fleet enricher's tail alone. The open conversation's tail reads a
+shorter window and once wrote its own count over the card's between two
+passes, so an agent left open read "refused 2 actions … (since 14:02)" and
+"refused 1 action … (since 15:40)" by turns.
 
 - `transcript::reads_an_edit_s_hunk_counts`,
   `transcript::reads_a_classifier_refusal_from_permission_decision`,
@@ -1889,6 +1908,8 @@ unchanged, and this is a fact waiting to be asked about.
 - `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`,
   `transcript::an_edit_s_result_is_its_hunks_and_says_when_you_changed_it`,
   `transcript::a_long_output_is_sent_as_its_tail_with_what_was_left_out`
+- `routes::tests::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`
+  — the open conversation's refusals and tokens never reach the card
 - `test/ui/message-tools.test.tsx` — the row's words, the expansion, its
   caption, a miss said to be one, and nothing a result held written to
   browser storage
