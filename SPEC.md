@@ -317,22 +317,30 @@ the default for an unrecognised kind is deny.
   that was on screen had it open, and the Idle heading MUST count those cards
   (`Idle 7 · 2 new`). The record MUST live on the server, so opening an agent
   on the laptop clears the mark on the phone; a hidden tab MUST NOT move it;
-  and the first frame carrying a session's transcript time MUST seed it as
-  backlog, so a fresh server shows no marks. Busy, waiting, inferred and
-  terminal cards, and every card while the fleet is stale, MUST carry no mark,
-  and it MUST be drawn in `--text` or `--dim`, never amber. The wording MUST be
-  "new since opened in this app", never "unread", "done" or "ready": the
-  reader may have followed the agent in tmux, and all this app knows is what
-  it showed. **(INV-11, INV-14)** *`seen::tests`,
+  leaving a session — another focus, the tab hidden, or the socket closed —
+  MUST first count what it showed up to that moment, so a reply the reader
+  watched arrive is never marked; and the first frame carrying a session's
+  transcript time MUST seed it as backlog, so a fresh server shows no marks.
+  Busy, waiting, inferred and terminal cards, and every card while the fleet
+  is stale, MUST carry no mark, and it MUST be drawn in `--text` or `--dim`,
+  never amber. The wording MUST be "new since opened in this app", never
+  "unread", "done" or "ready": the reader may have followed the agent in
+  tmux, and all this app knows is what it showed. **(INV-11, INV-14)** *`seen::tests`,
   `routes::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`,
+  `routes::inv11_leaving_for_another_session_counts_the_reply_it_showed`,
+  `routes::inv11_hiding_the_tab_counts_the_reply_it_showed`,
+  `routes::inv11_closing_the_socket_counts_the_reply_it_showed`,
   `test/ui/new-since.test.tsx`, `e2e/new-since.spec.ts`.*
 - **FR-CARD-11** — The fold MUST count the tool calls auto mode refused, over
   the window of the transcript that was read, with the age of the newest and
   where that window starts: "auto mode refused 3 actions · last 4m ago (since
   14:02)". The same caveat `tokens` carries, for the same reason — a backfill
-  that starts part-way through a session cannot count all of it. A refusal
-  MUST NOT push (INV-14). **(INV-11)**
+  that starts part-way through a session cannot count all of it. The count,
+  like `tokens`, MUST be the fleet enricher's alone, so an agent left open
+  reads one figure rather than its own tail's shorter window by turns. A
+  refusal MUST NOT push (INV-14). **(INV-11)**
   *`test/ui/card-usage.test.tsx`,
+  `routes::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`,
   `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
 
 ### 3.3 Delegates
