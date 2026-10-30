@@ -544,3 +544,29 @@ describe('parseInline: links (INV-18)', () => {
     expect(plainText('see https://example.test/d.')).toBe('see https://example.test/d.')
   })
 })
+
+describe('notices carry what they report (INV-11)', () => {
+  it('keeps what another agent said, and which agent, on the notice', () => {
+    const [message] = buildMessages([
+      ev({ kind: 'notice', notice: 'handback', tool: 'general-purpose', text: 'Renamed the button.' }),
+    ])
+    expect(message).toMatchObject({
+      role: 'notice',
+      notice: 'handback',
+      from: 'general-purpose',
+      text: 'Renamed the button.',
+      grouped: false,
+    })
+  })
+
+  it('never groups two notices under one header, however close together', () => {
+    const messages = buildMessages([
+      ev({ kind: 'notice', notice: 'taskEnded', text: 'npm test completed' }),
+      ev({ kind: 'notice', notice: 'taskEnded', text: 'npm run lint completed' }),
+    ])
+    expect(messages.map((m) => [m.role, m.text, m.grouped])).toEqual([
+      ['notice', 'npm test completed', false],
+      ['notice', 'npm run lint completed', false],
+    ])
+  })
+})

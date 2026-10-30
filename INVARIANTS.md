@@ -1803,6 +1803,40 @@ absence-of-evidence rule the Prune button was removed for.
   written and compared, and dropped in the merge between, so no card carried
   one and nothing failed
 
+**And the conversation never puts machinery's words in the person's mouth.**
+A `user` record from another agent (`peer`), a task notification, or Claude
+Code's own note (`isMeta`, local-command output) is never drawn as the person
+speaking, whether spelled as a string or as blocks; hand-backs and task
+notifications are notices. The card's subject already read the label; the
+conversation read only the flags, and only on the block path, so a bare
+string — which is how Claude Code 2.1.310 writes a delegate's hand-back, a
+background task's end and a local command's output — was a "you" bubble, and
+the card's line read `you: …` over a delegate's report. Measured over six days
+on this machine that was about 190 hand-backs, 128 task notifications and 52
+notes, and a hand-back is the first thing on screen after almost every
+delegated run.
+
+`describe::prompt_origin` sorts every `user` record once, label before flags
+(Claude Code flags a peer's message `isMeta` too), and the conversation and the
+card's line both read it. A hand-back is "«general-purpose» reported back" with
+the report behind **show report**; the report is the `origin.body` the record
+carries, not its content, which wraps the same words in a fixed frame of
+Claude Code's own. A task's end carries its
+`<summary>` and nothing else of the markup. A note is drawn as nothing.
+Everything unlabelled stays "you", as it always was: this app's own sends,
+typed and queued prompts, and records older than `origin`.
+
+- `transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
+  `inv11_a_hand_back_spelled_as_blocks_is_the_same_notice` and
+  `inv11_a_peer_message_names_its_sender` — the notice, the sender, the words
+  from `origin.body`, and the card's line
+- `transcript::inv11_a_task_notification_is_a_notice_carrying_its_summary` and
+  `inv11_an_unlabelled_task_notification_is_the_same_notice`
+- `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`
+  — drawn as nothing, while a person typing beside them is still "you"
+- `test/ui/message-notices.test.tsx` — each notice in both languages, the
+  disclosure closed by default and drawn only when there is something in it
+
 **A tool call says how it ended, from the fields written to say so.** A row
 used to name what the agent *asked* for and nothing more: an edit read as a
 path, and a call auto mode refused looked exactly like one that ran. Each call

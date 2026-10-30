@@ -206,9 +206,10 @@ export type NewAgentResponse = { ok: true, tmuxSession: string, cwd: string, } |
 export type NewTerminalRequest = { cwd: string, name?: string, };
 
 /**
- * Which compaction notice a `Notice` event is reporting.
+ * Which notice a `Notice` event is reporting: a compaction, or something
+ * Claude Code filed as a `user` record that no person typed (INV-11).
  */
-export type NoticeKind = "compacted" | "compactedAuto";
+export type NoticeKind = "compacted" | "compactedAuto" | "handback" | "peerMessage" | "taskEnded";
 
 /**
  * How a tool call ended, as its result record says.
@@ -519,7 +520,8 @@ export type TimelineEvent = { id: string, at: number, kind: TimelineKind,
  */
 text: string, 
 /**
- * Tool name, for kind == Tool.
+ * Tool name, for kind == Tool; for a hand-back or a peer's message, the
+ * agent it came from.
  */
 tool?: string, 
 /**

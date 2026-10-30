@@ -377,6 +377,52 @@
   flex: none;
   font-variant-numeric: tabular-nums;
 }
+.noticeBlock {
+  min-width: 0;
+}
+.noticeSaid {
+  margin: -6px 0 10px;
+  font-size: var(--text-xs);
+}
+.noticeToggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 24px;
+  list-style: none;
+  color: var(--dim);
+  cursor: pointer;
+}
+.noticeToggle::-webkit-details-marker {
+  display: none;
+}
+.noticeToggle:hover {
+  color: var(--text);
+}
+@media (max-width: 560px) {
+  .noticeToggle {
+    min-height: 44px;
+  }
+}
+@media (pointer: coarse) {
+  .noticeToggle {
+    min-height: 44px;
+  }
+}
+.noticeSaidText {
+  margin-top: 4px;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--line);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-prose);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.noticeSaidText:lang(zh) {
+  line-height: 1.75;
+}
 
 /*
  * The hover timestamp, floated rather than given a column.
