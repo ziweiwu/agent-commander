@@ -87,7 +87,7 @@ const EN = {
   delegatesMany: '{n} delegates',
   delegateActive: 'active',
   delegateQuiet: 'quiet',
-  delegateDone: 'done',
+  delegateDone: 'ended',
   delegateGuess: 'inferred',
   delegateCalls: '{n} calls',
   delegateCallsOver: '{n} calls over {t}',
@@ -96,8 +96,9 @@ const EN = {
   delegateGuessTitle:
     'A guess: its transcript grew recently and its parent is busy. Nothing reported this.',
   delegateQuietTitle:
-    'It stopped writing. An agent that finished and one that died both do that, so this is not "done".',
-  delegateDoneTitle: 'Evidence of an ending: a recorded result, or you stopped it.',
+    'It stopped writing. An agent that finished and one that died both do that, so this is not "ended".',
+  delegateDoneTitle:
+    'Claude Code recorded that it ended — finished or failed, not necessarily succeeded.',
   delegateStopped: 'you stopped it',
   delegateOrphan: 'parent not found',
   delegateOrphanTitle:
@@ -607,7 +608,7 @@ const ZH: Record<Key, string> = {
   delegateEffortTitle: '这是从它的记录中量出来的「做了多少」，不是「结果如何」：工具调用次数，以及首末两条记录之间的跨度。',
   delegateGuessTitle: '这是推测：它的记录最近有增长，且其父代理正在运行。没有任何一方如此报告。',
   delegateQuietTitle: '它停止了写入。已完成和已死亡的代理都会如此，所以这不等于「已结束」。',
-  delegateDoneTitle: '有结束的证据：记录中有结果，或由你停止。',
+  delegateDoneTitle: 'Claude Code 记录了它已结束——完成或失败，不一定成功。',
   delegateStopped: '由你停止',
   delegateOrphan: '未找到父节点',
   delegateOrphanTitle:

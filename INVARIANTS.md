@@ -575,7 +575,11 @@ back as `{ changed: false }`, which carries no trees for `setTrees` to be handed
 The read itself still happens on every poll — a `readdir` and a few cached
 sidecars, ~3ms for the whole fleet. It is not worth caching state that Claude
 Code owns and this app only observes; what is worth saving is the transfer and
-the render behind it.
+the render behind it. Since Claude Code began rewriting a sidecar when its
+delegate ends, every sidecar that has not yet recorded an ending also costs one
+`stat` per read, beside the one its transcript already costs, so that the
+ending is seen (INV-13). An ended one is final and costs nothing. The ~3ms was
+measured before that `stat` was added.
 
 This invariant used to enumerate intervals, and they went stale: it was written
 when a frame cost two tmux round trips at p50 141ms, against a 140ms budget it
@@ -1915,16 +1919,28 @@ every subagent transcript.
   agent-<agentId>.jsonl        the delegate's own transcript
   agent-<agentId>.meta.json    {agentType, description, toolUseId,
                                 parentAgentId, spawnDepth}
+                               rewritten when it ends, adding
+                                finished or stoppedByUser
 ```
 
 Measured against 350 of them on this machine: every transcript has a sidecar
 and every sidecar a transcript, `spawnDepth: 1` never carries `parentAgentId`
 and depth 2 and 3 always do. So a whole tree costs one `readdir` plus a few
 hundred bytes each, with no transcript parsing at all — which is what makes it
-cheap enough to poll under INV-4. Sidecars are cached by path for the life of
-the process because they are written once and never touched again; only the
-transcript is re-`stat`ed. The directory is flat, so a grandchild sits beside
-its parent and the tree is rebuilt from `parentAgentId`, never from the path.
+cheap enough to poll under INV-4. The directory is flat, so a grandchild sits
+beside its parent and the tree is rebuilt from `parentAgentId`, never from the
+path.
+
+**A sidecar is written twice, so it is cached by what is on disk, not by path
+alone.** It is written at spawn and, since 2026-10-16, rewritten when the
+delegate leaves `running`. It used to be cached by path for the life of the
+process on the grounds that it was never touched again, which left every
+delegate reading as it did at the first poll — `stoppedByUser` included, since
+that too is written after spawn. Now a sidecar that records an ending is final
+and stays cached; any other is `stat`ed on each read and re-read when its
+mtime or length moves. A sidecar caught half-rewritten keeps its last good
+reading rather than dropping its delegate from the tree for that moment
+(INV-5).
 
 **An unresolvable parent is raised to the top, never dropped.** A sidecar that
 is missing or half-written takes its entire subtree with it if children are only
@@ -1937,16 +1953,21 @@ lying about the shape of the work.
 delegate rather than to an agent, and the ordering is evidence, then a marked
 guess, then an admission:
 
-- `done` is claimed **only on evidence**, and today there is exactly one piece
-  of it: the sidecar says `stoppedByUser`. Something recorded the ending because
-  a person caused it.
+- `done` is claimed **only on evidence**, and there are two pieces of it, both
+  written into the sidecar by Claude Code: `stoppedByUser`, because a person
+  stopped it, and `finished`, because it left `running`. Claude Code began
+  writing `finished` on 2026-10-16; 113 of the 128 sidecars written in the six
+  days before this was amended carry it.
 
-  **This is narrower than it sounds, and the word oversells it.** A delegate
-  that finished its work normally is *not* `done` — it is `quiet`, forever,
-  along with one that died. `done` in practice means "you stopped it". This
-  file previously also claimed the state could be reached from a result for the
-  delegate's `toolUseId` in the parent's transcript; that was never implemented
-  — `toolUseId` is named in the sidecar but read nowhere in `src/` — and saying
+  **`done` means ended, never succeeded.** Claude Code writes `finished` when
+  a delegate leaves `running`, whether it completed its work or failed, so the
+  state is drawn as "ended", its title says "finished or failed, not
+  necessarily succeeded", and no surface may say "succeeded". A sidecar
+  written before Claude Code recorded endings carries neither field, and its
+  delegate stays `quiet` whether it finished or died. This file once also
+  claimed the state could be reached from a result for the delegate's
+  `toolUseId` in the parent's transcript; that was never implemented —
+  `toolUseId` is named in the sidecar but read nowhere in `src/` — and saying
   so was the same overclaiming this invariant exists to prevent, committed by
   the document rather than by the app.
 - `active` is a guess: the transcript grew recently *and* the parent is busy. It
@@ -1954,13 +1975,15 @@ guess, then an admission:
   edge — the same device a fleet card already uses for a status this app worked
   out rather than read. On its own a recent write says nothing, because a
   delegate that finished half a second ago also wrote half a second ago.
-- `quiet` is everything else — which, per the above, is nearly everything. **A
-  quiet node is never drawn as done.** An agent that finished and an agent that
-  died both stop writing; no timestamp separates them.
+- `quiet` is everything else: no recorded ending, and not called active.
+  **A quiet node is never drawn as done.** Without `finished` or
+  `stoppedByUser` on disk, an agent that finished and an agent that died both
+  just stop writing, and no timestamp separates them.
 
-  Because `quiet` carries so much, it must not be the only thing on the row.
-  It answers "is it still going" and is silent about what happened, and a tree
-  of seven delegates all reading `quiet` tells a reader nothing at all. So each
+  Neither state may be the only thing on the row. `quiet` answers "is it
+  still going" and is silent about what happened, `done` says only that it
+  ended, and a tree of seven delegates all reading either tells a reader
+  nothing at all. So each
   node also carries **what it did**, as a measurement rather than a claim: the
   number of tool calls in its transcript and the span between its first and
   last record. That separates a delegate that worked for thirteen minutes
@@ -1998,7 +2021,18 @@ assume.
   own node; the `isFork` and `stoppedByUser` variants; a missing `subagents/`
   directory returning an empty tree rather than throwing; `unknown` rather than
   empty for a CLI with no transcript; and each of the three states, including a
-  delegate that is not called active while its parent is idle
+  delegate that is not called active while its parent is idle; `finished` read
+  as `done` and never as a guess
+  (`inv13_a_finished_sidecar_is_done_and_never_a_guess`); and a `finished` or
+  `stoppedByUser` written after the tree was first read still seen
+  (`inv13_a_sidecar_rewritten_as_finished_reads_as_ended`,
+  `inv13_stopped_by_user_written_after_the_first_read_is_seen`)
+- `subagents::inv4_a_sidecar_is_re_read_only_when_its_mtime_or_size_moves`,
+  `subagents::inv4_an_ended_sidecar_is_never_read_again` and
+  `subagents::inv5_a_sidecar_caught_mid_rewrite_keeps_its_last_reading` — the
+  cache: an unchanged sidecar answered from memory, a moved one re-read, an
+  ended one never read again, and a half-rewritten one standing on its last
+  reading
 **The card that everybody reads is where this has to hold.** The tree used to
 be drawn only in the forest, which was a place you had to go; it is now rolled
 up onto the fleet card, and a rollup is where distinctions go to die. Four
@@ -2028,7 +2062,8 @@ and marking it would imply a better one exists.
   "0m", an unreadable transcript renders no numbers while a real zero still
   does; a quiet delegate is not rendered as done,
   an inferred `active` says so in words, a stopped delegate is named rather
-  than called finished, a raised orphan says it was raised, a grandchild is
+  than called finished, a delegate recorded as finished reads "ended" and
+  never "succeeded", a raised orphan says it was raised, a grandchild is
   drawn, no transcript size reaches the screen, and the disclosure is kept
   outside the card's own button
 - `e2e/delegates.spec.ts` — the same clauses against the real server and mock

@@ -31,7 +31,7 @@ export type DelegationClaim =
       active: number
       /** Stopped writing. Not done: nothing recorded an ending. */
       quiet: number
-      /** Claimed only on evidence: a recorded result, or the user stopped it. */
+      /** Claimed only on what Claude Code recorded: it ended, or the user stopped it. */
       done: number
       /** How many of those `active` counts are this app's own guess. */
       guesses: number

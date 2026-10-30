@@ -1071,6 +1071,12 @@ pub struct SubagentNode {
     /// The user stopped it. Evidence of an ending, so the state is `done`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stopped_by_user: Option<bool>,
+    /// Claude Code recorded that it left `running`, by rewriting its sidecar
+    /// with `finished`. Evidence of an ending, so the state is `done` — which
+    /// means ended, never succeeded: a delegate that failed is recorded the same
+    /// way (INV-13).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finished: Option<bool>,
     /// Its parent id named a delegate that is not on disk, so it was raised to
     /// the top of the tree rather than dropped with everything under it.
     #[serde(skip_serializing_if = "Option::is_none")]

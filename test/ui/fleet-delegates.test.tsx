@@ -77,7 +77,7 @@ describe('INV-13 the card says only what the sidecars support', () => {
       tree([node({ agentId: 'x' }), node({ agentId: 'y', state: 'done' })]),
     )
     expect(delegates()).toContain('1 quiet')
-    expect(delegates()).toContain('1 done')
+    expect(delegates()).toContain('1 ended')
   })
 
   it('marks an inferred active count as a guess, in words', () => {
@@ -115,6 +115,14 @@ describe('INV-13 the expanded tree', () => {
   it('names a stopped delegate rather than calling it finished', () => {
     open([node({ agentId: 'x', state: 'done', stoppedByUser: true })])
     expect(screen.getByTestId('delegate').textContent).toContain('you stopped it')
+  })
+
+  it('calls a delegate Claude Code recorded as finished "ended", never "succeeded"', () => {
+    open([node({ agentId: 'x', state: 'done', finished: true })])
+    const state = screen.getByTestId('delegate-state')
+    expect(state.textContent).toBe('ended')
+    expect(state.getAttribute('title')).toMatch(/not necessarily succeeded/)
+    expect(screen.getByTestId('delegate').textContent).not.toMatch(/succeeded|you stopped it/)
   })
 
   it('shows a raised orphan as raised', () => {
