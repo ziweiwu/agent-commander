@@ -3613,21 +3613,29 @@ fn push_on_transitions(app: &Arc<App>, notifier: Arc<crate::push::Notifier>) {
 
 /// INV-4's first rule, wired: the enricher runs only while a browser is here.
 ///
-/// `watch` and `unwatch` are async and this is called from a synchronous
-/// listener, so each edge becomes its own task. They cannot race each other
-/// into the wrong state: both are idempotent, and the edges arrive in order
-/// from the counter.
+/// `watch` and `unwatch` are async and the listener is synchronous, so an edge
+/// only wakes one task that lives as long as the server, and that task sets
+/// the enricher by the viewer count as it stands, not by the edge. It used to
+/// spawn a task per edge, and nothing kept those in order: `joined` and `left`
+/// change the count before they announce, so two sockets crossing can announce
+/// out of order, and two spawned tasks can run out of order besides. A
+/// `Stopped` applied last left the fleet idle with a tab open. One consumer
+/// reading the count applies the latest state whatever order the edges took.
 fn idle_the_enricher_on_viewers(app: &Arc<App>, enricher: &Arc<crate::enrich::FleetEnricher>) {
-    let enricher = enricher.clone();
-    app.viewers.on_change(Box::new(move |edge| {
-        let enricher = enricher.clone();
-        tokio::spawn(async move {
-            match edge {
-                Watched::Started => enricher.watch().await,
-                Watched::Stopped => enricher.unwatch().await,
-            }
-        });
+    let (wake, mut woken) = mpsc::unbounded_channel::<()>();
+    app.viewers.on_change(Box::new(move |_edge| {
+        let _ = wake.send(());
     }));
+    let (app, enricher) = (app.clone(), enricher.clone());
+    tokio::spawn(async move {
+        while woken.recv().await.is_some() {
+            if app.viewers.count() > 0 {
+                enricher.watch().await;
+            } else {
+                enricher.unwatch().await;
+            }
+        }
+    });
 }
 
 /// Undo the setup, in the reverse of the order it was done in.
