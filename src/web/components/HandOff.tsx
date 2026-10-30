@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useStore } from '../store/store.ts'
-import { longestWaiting } from '../lib/hop.ts'
+import { nextUp } from '../lib/hop.ts'
 import { shortName } from '../lib/naming.ts'
 import { uptimeParts } from '../lib/format.ts'
 import { formatUptime } from '../lib/i18n.ts'
@@ -41,8 +41,8 @@ export function useHandOff(sessionId: string, promptId: string | undefined): Han
 /**
  * "Next: ‹name› · waiting 14m ⌥H", under a question this page has just answered.
  *
- * The agent it names is the one ⌥H would open — the one that has needed you
- * longest — so the key printed on it is the key that does the same thing.
+ * The agent it names is `nextUp`'s, the one ⌥H and the waiting chip open too,
+ * so the key printed on it is the key that does the same thing.
  *
  * **It is a button and nothing more.** It never navigates on its own: an answer
  * is a decision about this agent, and being carried off to another one the
@@ -55,7 +55,7 @@ export function HandOff({ from }: { from: string }) {
   const hop = useHop()
   const agents = useStore((s) => s.agents)
   const exited = useStore((s) => s.exited)
-  const next = longestWaiting(agents, from, exited)
+  const next = nextUp(agents, from, exited)
   if (!next) return null
   const name = shortName(next)
   const age = formatUptime(lang, uptimeParts(next.lastActivityAt))

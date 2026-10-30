@@ -182,15 +182,17 @@ The list's **Needs you** group is the notification while the list is on
 screen. Three shapes take it off: the phone's sheet, a collapsed column, and
 full screen. In those, a chip — **✋ 2 ›** — sits where the filters were (or in
 full screen's header) and counts the *other* agents waiting on you. Tap it and
-the next one opens on its conversation, in the list's own sort order, wrapping
-round. It replaces the page rather than stacking another, so swipe-back still
+the next one opens on its conversation: from an agent that is not waiting, the
+one that has been waiting longest; from a waiting one, the one that started
+waiting after it, wrapping round, so tapping again visits every one of them. It
+replaces the page rather than stacking another, so swipe-back still
 lands on the fleet however many agents you went through. It is absent when
 nobody else is waiting, and it skips an agent whose pane has gone, one still
 starting up, and any status the app only guessed at. While the connection is
 down it goes grey and says *as of* when it last heard.
 
 After you answer a single question from the card, the card offers **Next:
-‹name› · waiting 14m ⌥H** — the agent that has been waiting longest. It never
+‹name› · waiting 14m ⌥H** — the same agent the chip and ⌥H open. It never
 moves you on by itself; press it (or ⌥H) when you are ready. Arriving that way
 — or by the chip, or a chord below — puts the keyboard on the new agent's
 *question*, not its first option, so an Enter you were already pressing answers
@@ -364,7 +366,7 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent down the list, on the tab you are on |
-| `⌥H` | open the agent that has needed you longest; a toast says *Nothing needs you* when none does |
+| `⌥H` | open the agent that has needed you longest, or from one that is waiting, the next in that order; a toast says *Nothing needs you* when none does |
 
 The ⌥ chords are `Alt` on Windows and Linux. They go by the key you press
 rather than the character Option makes of it, wait while a Pinyin or other

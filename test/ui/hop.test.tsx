@@ -57,7 +57,10 @@ const originalFetch = globalThis.fetch
 
 const NOW = Date.now()
 const MINUTE = 60_000
-/** The open one; newest, so the list draws it first in the waiting group. */
+/**
+ * The open one; newest, so the list draws it first in the waiting group and
+ * "next" reaches it last.
+ */
 const W1 = agent({
   sessionId: 'w1',
   name: 'first-blocked',
@@ -65,7 +68,7 @@ const W1 = agent({
   paneId: '%1',
   lastActivityAt: NOW - MINUTE,
 })
-/** Blocked longest: what ⌥H and the hand-off name. */
+/** Blocked longest: what the chip, ⌥H and the hand-off all name from w1, wrapping round. */
 const W2 = agent({
   sessionId: 'w2',
   name: 'second-blocked',
@@ -73,7 +76,7 @@ const W2 = agent({
   paneId: '%2',
   lastActivityAt: NOW - 14 * MINUTE,
 })
-/** Between the two: what the chip names next, following the newest-first sort. */
+/** Between the two: what ⌥J opens from w1, since the list sorts newest first. */
 const W3 = agent({
   sessionId: 'w3',
   name: 'third-blocked',
@@ -200,11 +203,11 @@ describe('F3 the waiting chip is drawn only where the list is not', () => {
     const chip = screen.getByTestId('waiting-chip')
     expect(chip.textContent).toContain('2')
     expect(chip.getAttribute('aria-label')).toBe(
-      '2 other agents need you — open «third-blocked», waiting 5m',
+      '2 other agents need you — open «second-blocked», waiting 14m',
     )
     act(() => useStore.getState().setLang('zh-CN'))
     expect(screen.getByTestId('waiting-chip').getAttribute('aria-label')).toBe(
-      '还有 2 个代理需要你 — 打开「third-blocked」，已等待 5 分钟',
+      '还有 2 个代理需要你 — 打开「second-blocked」，已等待 14 分钟',
     )
   })
 
@@ -233,7 +236,7 @@ describe('F3 the waiting chip is drawn only where the list is not', () => {
     liveFleet()
     shell('/', '/agent/w1')
     await user.click(screen.getByTestId('waiting-chip'))
-    expect(where.path).toBe('/agent/w3')
+    expect(where.path).toBe('/agent/w2')
     act(() => where.back())
     expect(where.path).toBe('/')
   })
@@ -356,5 +359,57 @@ describe('F3 the hand-off after an answer', () => {
     shell('/agent/w1')
     ask(ws, 'w1')
     expect(document.activeElement).toBe(screen.getAllByTestId('answer-option')[0])
+  })
+})
+
+/**
+ * R5: one "next". The chip, the button under a spent answer and ⌥H used to
+ * follow two orders — the list's newest-first sort and the oldest block — so
+ * the two controls on screen after an answer opened opposite ends of the queue,
+ * and ⌥H pressed again bounced between the two oldest for ever.
+ */
+describe('R5 the chip, the hand-off and ⌥H name one "next"', () => {
+  it('after an answer on a phone, the chip and the Next button name the same agent', async () => {
+    const user = userEvent.setup()
+    setViewport(NARROW)
+    const ws = liveFleet()
+    shell('/agent/w1')
+    ask(ws, 'w1')
+    await user.click(screen.getAllByTestId('answer-option')[0]!)
+    expect(screen.getByTestId('waiting-chip').getAttribute('aria-label')).toContain('«second-blocked»')
+    expect(screen.getByTestId('answer-next').textContent).toContain('Next: second-blocked')
+  })
+
+  it('from an agent that is not waiting, the chip and ⌥H both open the one blocked longest', () => {
+    liveFleet()
+    useStore.setState({ sidebar: 'collapsed' })
+    shell('/agent/i1')
+    expect(screen.getByTestId('waiting-chip').getAttribute('aria-label')).toContain('«second-blocked»')
+    chord(document.body, 'KeyH')
+    expect(where.path).toBe('/agent/w2')
+  })
+
+  it('⌥H pressed again and again walks every waiting agent, oldest first, and wraps round', () => {
+    liveFleet()
+    shell('/agent/i1')
+    const visited: string[] = []
+    for (let press = 0; press < 4; press++) {
+      chord(document.body, 'KeyH')
+      visited.push(where.path)
+    }
+    expect(visited).toEqual(['/agent/w2', '/agent/w3', '/agent/w1', '/agent/w2'])
+  })
+
+  it('the chip tapped again and again walks the same ring', async () => {
+    const user = userEvent.setup()
+    liveFleet()
+    useStore.setState({ sidebar: 'collapsed' })
+    shell('/agent/i1')
+    const visited: string[] = []
+    for (let tap = 0; tap < 4; tap++) {
+      await user.click(screen.getByTestId('waiting-chip'))
+      visited.push(where.path)
+    }
+    expect(visited).toEqual(['/agent/w2', '/agent/w3', '/agent/w1', '/agent/w2'])
   })
 })

@@ -1,5 +1,5 @@
 import { useStore } from '../store/store.ts'
-import { nextWaiting, othersWaiting } from '../lib/hop.ts'
+import { nextUp, othersWaiting } from '../lib/hop.ts'
 import { displayName } from '../lib/naming.ts'
 import { relative, uptimeParts } from '../lib/format.ts'
 import { formatRelative, formatUptime } from '../lib/i18n.ts'
@@ -33,9 +33,10 @@ function accessibleName(
  * Absent at zero rather than reading "0": a chip that is always there is one
  * the eye learns to skip, and the day it matters it would be skipped too.
  *
- * Tapping it opens the next one in the list's order on its conversation, by a
- * hop (`useHop`): replacing the history entry, so swipe-back still lands on the
- * fleet, and focusing the question rather than its first option.
+ * Tapping it opens `nextUp` — the agent the Next button and ⌥H open too — on
+ * its conversation, by a hop (`useHop`): replacing the history entry, so
+ * swipe-back still lands on the fleet, and focusing the question rather than
+ * its first option.
  *
  * **Offline it says when, not now (INV-11).** With the socket down the count is
  * a memory; the chip goes muted — the plain chip's own colours, the waiting
@@ -50,12 +51,10 @@ export function WaitingChip() {
   const agents = useStore((s) => s.agents)
   const selected = useStore((s) => s.selected)
   const exited = useStore((s) => s.exited)
-  const sort = useStore((s) => s.fleet.sort)
-  const dir = useStore((s) => s.fleet.dir)
   const live = useStore((s) => s.conn === 'open')
   const fleetAt = useStore((s) => s.fleetAt)
 
-  const next = nextWaiting(agents, selected, { sort, dir }, exited)
+  const next = nextUp(agents, selected, exited)
   if (!next) return null
   const count = othersWaiting(agents, selected, exited).length
   const when = formatRelative(lang, relative(fleetAt ?? undefined))
