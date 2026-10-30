@@ -9,6 +9,7 @@ import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
 import { relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
+import { useOfflineClock } from '../hooks/useOfflineClock.ts'
 import { isNewSinceOpened } from '../lib/newSince.ts'
 import { useLayout } from '../hooks/useMediaQuery.ts'
 import { AgentCard } from './AgentCard.tsx'
@@ -37,7 +38,6 @@ const NAMES_BEFORE_ELLIPSIS = 4
 
 export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListProps) {
   const t = useTranslate()
-  const lang = useLang()
   const agents = useStore((s) => s.agents)
   const conn = useStore((s) => s.conn)
   const fleetAt = useStore((s) => s.fleetAt)
@@ -189,13 +189,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         * needs me", that is the failure that matters: acting on a card that
         * went stale twenty minutes ago.
         */}
-      {conn !== 'open' && agents.length > 0 && (
-        <p className={styles.stale} data-testid="fleet-stale" role="status">
-          {fleetAt
-            ? t('staleFleet', { when: formatRelative(lang, relative(fleetAt)) })
-            : t('staleFleetNoTime')}
-        </p>
-      )}
+      {conn !== 'open' && agents.length > 0 && <StaleCaption fleetAt={fleetAt} />}
 
       <div
         className={styles.list}
@@ -261,6 +255,28 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * "Not connected — showing the last state received 2m ago."
+ *
+ * Its own component so that the redraw `useOfflineClock` causes while the
+ * socket is down repaints this line and not every card under it. It stays a
+ * status although its text now changes — every ten seconds in the first
+ * minute, once a minute after — because the age is what a reader needs to
+ * decide whether to trust the cards, and saying so as it changes is true.
+ */
+function StaleCaption({ fleetAt }: { fleetAt: number | null }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const now = useOfflineClock()
+  return (
+    <p className={styles.stale} data-testid="fleet-stale" role="status">
+      {fleetAt
+        ? t('staleFleet', { when: formatRelative(lang, relative(fleetAt, now)) })
+        : t('staleFleetNoTime')}
+    </p>
   )
 }
 

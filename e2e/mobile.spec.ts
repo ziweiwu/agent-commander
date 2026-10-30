@@ -13,7 +13,7 @@
  * than 30% of the viewport is one you cannot read. Measured before the topbar
  * was put on a diet: 149px of 568 on an iPhone SE, 76px of 380 in landscape.
  */
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page, type WebSocketRoute } from '@playwright/test'
 import { AGENT, card, openAgent, openFleet, stamp } from './helpers.ts'
 
 /** How much of the screen the conversation gets, as a fraction. */
@@ -189,3 +189,75 @@ test.describe('@phone a tool call that says what happened', () => {
   })
 })
 
+
+/** How long a reconnect may take: the transport's backoff doubles to 10s. */
+const RECONNECT_MS = 20_000
+
+/** The topbar's height and the first answer option's top, the two things a thumb is aimed by. */
+async function aim(page: Page): Promise<{ header: number; option: number }> {
+  return page.evaluate(() => {
+    const header = document.querySelector('header')?.getBoundingClientRect().height ?? -1
+    const option = document.querySelector('[data-testid="answer-option"]')?.getBoundingClientRect().top ?? -1
+    return { header: Math.round(header), option: Math.round(option) }
+  })
+}
+
+/**
+ * The tunnel down under an open question, and back. The socket is routed so a
+ * test can drop it without stopping the shared server: while `down`, every
+ * reconnect is refused before it opens and the reachability probe fails, which
+ * is the phone's view of Tailscale being off — "server unreachable".
+ *
+ * In the sheet the topbar is one row. That caption wrapped to five lines in it,
+ * the header went from 53px to 105px, and the answer options dropped 52px —
+ * then jumped back up on reconnect, in the frame they became live again.
+ */
+/**
+ * The widths to hold it at, and whether the whole pill fits at each. At 320 the
+ * chip and the three icon buttons leave the pill 80px before the screen's edge,
+ * which cuts "offline · 2m ago" short — as it cuts the quota chips after it at
+ * every phone width, live or not — so there only its start is held on screen.
+ */
+const OFFLINE_WIDTHS = [
+  { width: 390, wholePill: true },
+  { width: 320, wholePill: false },
+]
+
+test.describe('@phone offline, the topbar holds still', () => {
+  for (const { width, wholePill } of OFFLINE_WIDTHS) {
+    test(`at ${width}px, across a drop and a reconnect`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 664 })
+      let down = false
+      let link: WebSocketRoute | null = null
+      await page.routeWebSocket(/\/ws/, (ws) => {
+        if (down) return ws.close()
+        ws.connectToServer()
+        link = ws
+      })
+      await page.route('**/api/env', (route) => (down ? route.abort() : route.fallback()))
+
+      await page.goto(`/agent/${AGENT.waiting}`)
+      const pill = page.getByTestId('connection-status')
+      const option = page.getByTestId('answer-option').first()
+      await expect(pill).toHaveAttribute('data-state', 'open')
+      await expect(option).toBeEnabled()
+      const live = await aim(page)
+
+      down = true
+      await link!.close()
+      await expect(pill).toHaveAttribute('data-reach', 'unreachable')
+      await expect(option).toBeDisabled()
+      expect(await aim(page), `${width}px offline`).toEqual(live)
+      await expect(pill.locator('[aria-hidden="true"]')).toHaveText(/^offline · /)
+      await expect(pill).toHaveAttribute('title', /Tailscale/)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      const box = (await pill.boundingBox())!
+      expect(box.x + (wholePill ? box.width : 0), `${width}px: the pill's edge`).toBeLessThanOrEqual(width)
+
+      down = false
+      await expect(pill).toHaveAttribute('data-state', 'open', { timeout: RECONNECT_MS })
+      await expect(option).toBeEnabled()
+      expect(await aim(page), `${width}px back`).toEqual(live)
+    })
+  }
+})
