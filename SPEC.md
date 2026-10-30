@@ -1008,7 +1008,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   never at zero. "Need you" is the hand the card draws (`lib/hop.ts`
   `needsYou`): reported `waiting`, a pane that is still there, and not a
   `starting up` placeholder — counted over the whole fleet, never the filtered
-  view. Next follows the list's sort and wraps round. It opens on the Chat tab
+  view. Next is the agent after this one in the order they began waiting,
+  oldest first, wrapping round; from an agent that is not waiting it is the one
+  that has waited longest. The chip, the post-answer Next button and ⌥H always
+  name the same agent (`nextUp`). Amended from "follows the list's sort": the
+  chip followed it while the Next button and ⌥H went oldest first, so after an
+  answer the two controls on screen opened opposite ends of the queue, and ⌥H
+  pressed again bounced between the two oldest. It opens on the Chat tab
   and replaces the history entry, so swipe-back lands on the fleet. With the
   socket down it MUST go muted and say "as of" the last frame **(INV-11)**. Its
   accessible name says the count, the agent it opens and how long that one has
@@ -1147,7 +1153,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
-| `⌥H` | open the agent that has needed you longest, on Chat; "Nothing needs you" when none does |
+| `⌥H` | open the agent that has needed you longest — or, from one that is waiting, the next in that order — on Chat; "Nothing needs you" when none does |
 
   The ⌥ chords work from the message box, with the column collapsed and in full
   screen. They match the physical key (`e.code`), because macOS Option rewrites

@@ -31,8 +31,8 @@ a laptop or from a phone.
   the keys instead of pretending to know the question.
 - **The next one that needs you, without the list.** With an agent open on a
   phone, with the column collapsed or in full screen, **✋ 2 ›** counts the other
-  agents waiting on you and opens the next. After an answer the card offers the
-  one that has waited longest, and ⌥J / ⌥K / ⌥H walk the fleet from the
+  agents waiting on you and opens the next, oldest first. After an answer the
+  card offers the same one, and ⌥J / ⌥K / ⌥H walk the fleet from the
   keyboard — landing on the question, never on an option a stray Enter could
   press.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
