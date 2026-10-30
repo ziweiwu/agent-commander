@@ -29,6 +29,7 @@
 
 use crate::agent_kinds::CLAUDE_KIND;
 use crate::env::{exec_runner, CommandRunner};
+use crate::poll::InFlightGuard;
 use crate::sources::{AgentPatch, AgentSource, Unsubscribe};
 use crate::types::{Agent, AgentStatus};
 use async_trait::async_trait;
@@ -803,15 +804,6 @@ pub(crate) fn announces_a_change(event: &notify::Event) -> bool {
         event.kind,
         EventKind::Access(_) | EventKind::Modify(ModifyKind::Metadata(MetadataKind::AccessTime))
     )
-}
-
-/// Resets an in-flight flag however the work exits, standing in for the TS
-/// `finally`.
-struct InFlightGuard<'a>(&'a AtomicBool);
-impl Drop for InFlightGuard<'_> {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::SeqCst);
-    }
 }
 
 impl Inner {

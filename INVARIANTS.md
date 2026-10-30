@@ -492,7 +492,10 @@ where they can drift without making this file wrong.
   different things.
 - **A poll cannot overlap itself or outrun its own cost.** Every loop re-arms
   after the work completes rather than on a fixed interval, and never schedules
-  the next read sooner than the last one took.
+  the next read sooner than the last one took. A pass cut short by idling
+  releases its in-flight flag, so the next resume runs a pass; whether the
+  enricher runs follows the viewer count as it stands, applied by one task in
+  order.
 - **A pane that is not changing is polled less.** Anything this app writes to a
   pane returns it to full speed at once, so the backoff never sits between a
   keystroke and its echo.
@@ -637,6 +640,12 @@ restarted in between.
 - `enrich::inv4_stops_tailing_while_no_browser_is_connected` — the enricher idles while no browser is connected, runs
   a pass the moment one arrives, and paces itself by the work rather than by a
   wall clock
+- `enrich::inv4_idling_mid_pass_does_not_stop_the_next_pass`,
+  `enrich::inv4_a_pass_cut_short_has_let_go_when_unwatch_returns` — the last
+  tab leaving in the middle of a read no longer leaves the pass flag set: a
+  resumed loop runs its passes and catches up, and `unwatch` returns only once
+  the aborted pass has let go. The order of the viewer edges has no
+  deterministic test, since the race it closes is the scheduler's
 - `routes::inv4_a_focus_on_a_cli_with_no_transcripts_probes_once` — the
   retry above is only for a CLI that keeps transcripts; for one that does not,
   the probe is a directory scan that cannot succeed, and it runs once

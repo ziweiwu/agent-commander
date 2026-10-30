@@ -170,6 +170,17 @@ async fn wait(inner: &PollerInner, delay: Duration) {
     }
 }
 
+/// Resets an in-flight flag however the work exits, standing in for the TS
+/// `finally`. That includes a future dropped mid-pass by an aborted task,
+/// which runs nothing after the `.await` it was parked on, so only a
+/// destructor can release the flag.
+pub(crate) struct InFlightGuard<'a>(pub(crate) &'a AtomicBool);
+impl Drop for InFlightGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /* --------------------------------------------------------------------- tests */
 
 #[cfg(test)]
