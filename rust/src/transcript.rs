@@ -49,6 +49,13 @@ const BACKFILL_SCAN_BYTES: u64 = 64 * 1024 * 1024;
 const STATE_TAIL_BYTES: u64 = 128 * 1024;
 
 /// Record types that carry no timeline meaning.
+///
+/// The three API-request types are here only for a record whose keys come in
+/// another order: `is_api_request` keeps the rest from being parsed at all.
+/// The ones after them are the other types a survey of 40 days of transcripts
+/// found that are neither conversation nor state; none carries a
+/// message, a folder or a branch, so listing them changes nothing drawn and
+/// lets `Disposition::Unlisted` mean a type nobody has looked at.
 const META_TYPES: &[&str] = &[
     "attachment",
     "mode",
@@ -56,7 +63,41 @@ const META_TYPES: &[&str] = &[
     "file-history-snapshot",
     "summary",
     "system",
+    "api-request",
+    "api-request-blob",
+    "api-request-shape",
+    "agent-name",
+    "artifact-autoreact-ledger",
+    "artifact-comment-monitor",
+    "atis-latch",
+    "bridge-session",
+    "cost-state",
+    "custom-title",
+    "fork-context-ref",
+    "frame-link",
+    "launched",
+    "pr-link",
+    "queue-operation",
+    "result",
+    "started",
 ];
+
+/// Record types that are the conversation: what the chat draws, and where the
+/// card reads the model, the tokens, the folder and the branch.
+const CONVERSATION_TYPES: &[&str] = &["user", "assistant"];
+
+/// The bytes every API-request record starts with, because Claude Code writes
+/// `type` first: `api-request`, `api-request-blob` and `api-request-shape`.
+///
+/// They are up to 72% of the bytes of a recent transcript, at up to 710 KB a
+/// line, and nothing in them is drawn: a blob quotes the conversation back to
+/// the API, blocks and all, and the conversation is already read where it was
+/// written.
+const API_REQUEST_PREFIX: &[u8] = br#"{"type":"api-request"#;
+
+/// What Claude Code names as the model on a reply it wrote itself rather than
+/// one the model sent, which says nothing about the model in use.
+const SYNTHETIC_MODEL: &str = "<synthetic>";
 
 /// Records that are not conversation, but do carry session state the fleet view
 /// needs: which permission mode the agent is in, and the title it generated for
@@ -1099,7 +1140,24 @@ impl ParseResult {
 struct RecordSets {
     meta: HashSet<&'static str>,
     state: HashSet<&'static str>,
+    conversation: HashSet<&'static str>,
     subagent_tools: HashSet<&'static str>,
+}
+
+/// What `Batch::read` does with a record, by its type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Disposition {
+    /// Session state the card shows, and nothing else.
+    State,
+    /// No timeline meaning; read only by the checks before the meta cut.
+    Meta,
+    /// The conversation itself.
+    Conversation,
+    /// A type nobody has classified. It is read as conversation, the way
+    /// every type was before there was a list, so that a new kind of message
+    /// is drawn rather than silently dropped; the disposition test fails on
+    /// any type the survey found that lands here.
+    Unlisted,
 }
 
 impl RecordSets {
@@ -1107,9 +1165,35 @@ impl RecordSets {
         RecordSets {
             meta: META_TYPES.iter().copied().collect(),
             state: STATE_TYPES.iter().copied().collect(),
+            conversation: CONVERSATION_TYPES.iter().copied().collect(),
             subagent_tools: SUBAGENT_TOOLS.iter().copied().collect(),
         }
     }
+
+    fn disposition(&self, kind: &str) -> Disposition {
+        if self.state.contains(kind) {
+            Disposition::State
+        } else if self.meta.contains(kind) {
+            Disposition::Meta
+        } else if self.conversation.contains(kind) {
+            Disposition::Conversation
+        } else {
+            Disposition::Unlisted
+        }
+    }
+}
+
+/// Whether a line is one of the API-request records, told from its first
+/// bytes so that it is never parsed: see `API_REQUEST_PREFIX`.
+fn is_api_request(line: &[u8]) -> bool {
+    line.starts_with(API_REQUEST_PREFIX)
+}
+
+/// The one field of a record skipped unparsed that is still wanted, read
+/// without building the rest: see `Batch::date_from_unread`.
+#[derive(serde::Deserialize)]
+struct Stamped {
+    timestamp: Option<String>,
 }
 
 /// What every event from one record shares: when it happened, whether it
@@ -1138,7 +1222,8 @@ impl Batch<'_> {
             self.out.first_at = text_field(rec, "timestamp").and_then(parse_iso8601_ms);
         }
         let kind = rec.get("type").and_then(Value::as_str).unwrap_or("");
-        if sets.state.contains(kind) {
+        let disposition = sets.disposition(kind);
+        if disposition == Disposition::State {
             self.read_session_state(rec);
             return;
         }
@@ -1163,11 +1248,23 @@ impl Batch<'_> {
             self.push_compaction(rec);
             return;
         }
-        if sets.meta.contains(kind) {
+        if disposition == Disposition::Meta {
             return;
         }
         self.read_where_it_ran(rec);
         self.read_conversation(rec, kind, sets);
+    }
+
+    /// A record skipped unparsed still dates the batch when it is the first
+    /// that could: where the window starts is the "since" of auto mode's
+    /// refusals on the card. Only until the batch has a date, and without
+    /// building the record.
+    fn date_from_unread(&mut self, line: &str) {
+        if self.out.first_at.is_some() {
+            return;
+        }
+        let stamped = serde_json::from_str::<Stamped>(line).ok().and_then(|record| record.timestamp);
+        self.out.first_at = stamped.as_deref().and_then(parse_iso8601_ms);
     }
 
     /// A message the turn read mid-turn, or a dequeued repeat of one. True
@@ -1301,7 +1398,8 @@ impl Batch<'_> {
             self.tokens += output;
         }
         // The model can change mid-session via /model, so the latest wins.
-        if let Some(model) = message.and_then(|msg| text_field(msg, "model")) {
+        let model = message.and_then(|msg| text_field(msg, "model"));
+        if let Some(model) = model.filter(|model| *model != SYNTHETIC_MODEL) {
             self.out.patch.model = Some(model.to_string());
         }
         let content = message.and_then(|msg| msg.get("content"));
@@ -1533,6 +1631,10 @@ fn parse_after(lines: &[&str], seq: &mut dyn FnMut() -> String, last_said: Optio
         if line.trim().is_empty() {
             continue;
         }
+        if is_api_request(line.as_bytes()) {
+            batch.date_from_unread(line);
+            continue;
+        }
         // A torn final line is normal when tailing a file being appended to;
         // the tailer re-reads it once it is complete (INV-5).
         let Ok(rec) = serde_json::from_str::<Value>(line) else { continue };
@@ -1557,8 +1659,13 @@ pub(crate) fn records_from_the_end(buf: &[u8]) -> impl Iterator<Item = (usize, &
 
 /// Whether one record is something the chat draws as a message — what a reader
 /// means by "the conversation", as against the tool calls and results around
-/// it. Read by the timeline's own parser, so the two cannot disagree on it.
+/// it. Read by the timeline's own parser, so the two cannot disagree on it;
+/// an API-request record, which that parser skips, is turned away before even
+/// its UTF-8 is checked.
 fn is_message(record: &[u8]) -> bool {
+    if is_api_request(record) {
+        return false;
+    }
     let Ok(line) = std::str::from_utf8(record) else { return false };
     let mut unnumbered = || String::new();
     parse_lines(&[line], &mut unnumbered)
@@ -4111,6 +4218,182 @@ mod tests {
         let dequeued_first = dequeued("yes", "2026-08-14T01:44:50.000Z");
         let out = parse(&[&dequeued_first, &first, &second]);
         assert_eq!(user_times(&out.events).len(), 2, "{:?}", out.events);
+    }
+
+    fn api_request(timestamp: &str) -> String {
+        json!({
+            "type": "api-request", "id": "r1", "sessionId": "s", "timestamp": timestamp,
+            "base": { "system": "synthetic system text" }, "params": { "max_tokens": 1 },
+        })
+        .to_string()
+    }
+
+    fn api_request_blob() -> String {
+        let quoted = json!([
+            { "type": "tool_use", "id": "toolu_blob", "name": "Bash", "input": {} },
+            { "type": "text", "text": "a reply quoted into the request" },
+            { "type": "thinking", "thinking": "quoted thinking" },
+        ]);
+        let message = json!({ "role": "assistant", "content": quoted });
+        json!({ "type": "api-request-blob", "hash": "h1", "sessionId": "s", "message": message }).to_string()
+    }
+
+    fn api_request_shape(timestamp: &str) -> String {
+        json!({ "type": "api-request-shape", "sessionId": "s", "timestamp": timestamp, "shape": {}, "shapeHash": "x" })
+            .to_string()
+    }
+
+    /// Everything a parse hands the card and the chat, as one comparable string.
+    fn drawn(out: &ParseResult) -> String {
+        format!(
+            "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+            out.events, out.patch, out.opened, out.answered, out.outcomes, out.refused_at, out.first_at, out.prompted
+        )
+    }
+
+    /// B5: a blob quotes the conversation back, blocks and all, and none of it
+    /// is drawn a second time.
+    #[test]
+    fn an_api_request_blob_yields_nothing() {
+        let out = parse(&[&api_request_blob()]);
+        assert!(out.events.is_empty(), "{:?}", out.events);
+        assert!(out.opened.is_empty());
+    }
+
+    /// Skipping these records unparsed must not drop anything the card or the
+    /// chat draws: a conversation reads the same with them as without them.
+    #[test]
+    fn the_api_request_records_add_nothing_to_what_a_transcript_draws() {
+        let prompt = json!({
+            "type": "user", "timestamp": "2026-10-30T12:00:00.000Z", "cwd": "/w", "gitBranch": "main",
+            "message": { "role": "user", "content": "list the files" },
+        })
+        .to_string();
+        let blocks = json!([
+            { "type": "text", "text": "listing" },
+            { "type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {} },
+        ]);
+        let usage = json!({ "output_tokens": FIXTURE_TOKENS });
+        let mut call = json!({
+            "type": "assistant", "timestamp": "2026-10-30T12:00:02.000Z", "cwd": "/w", "gitBranch": "main",
+            "message": { "model": "claude-opus-5-5", "usage": usage, "content": blocks },
+        });
+        let call_text = call.to_string();
+        call["message"]["content"] = json!([{ "type": "tool_use", "id": "toolu_2", "name": "Read", "input": {} }]);
+        let open_call = call.to_string();
+        let answer = json!([{ "type": "tool_result", "tool_use_id": "toolu_1", "content": "a" }]);
+        let result = json!({
+            "type": "user", "timestamp": "2026-10-30T12:00:03.000Z",
+            "message": { "role": "user", "content": answer },
+        })
+        .to_string();
+        let request = api_request("2026-10-30T12:00:01.000Z");
+        let (blob, shape) = (api_request_blob(), api_request_shape("2026-10-30T12:00:01.500Z"));
+        let bare = parse(&[&prompt, &call_text, &result, &open_call]);
+        let full = parse(&[
+            &prompt, &request, &blob, &shape, &call_text, &request, &blob, &result, &shape, &open_call,
+        ]);
+        assert!(!bare.events.is_empty() && !bare.opened.is_empty());
+        assert_eq!(drawn(&full), drawn(&bare));
+    }
+
+    /// A batch that opens on one of these records is still dated by it: the
+    /// card's "since" on auto mode's refusals is where the window starts.
+    #[test]
+    fn a_batch_that_opens_on_an_api_request_is_dated_by_it() {
+        let reply = assistant(json!([{ "type": "text", "text": "a" }]));
+        let out = parse(&[&api_request("2026-08-14T00:50:00.000Z"), &reply]);
+        assert_eq!(out.first_at, parse_iso8601_ms("2026-08-14T00:50:00.000Z"));
+    }
+
+    /// The type is the fallback for a record whose keys come in another order,
+    /// where the prefix test cannot see it: still nothing of it is read.
+    #[test]
+    fn an_api_request_record_whose_type_is_not_first_is_still_not_read() {
+        let reordered = json!({
+            "sessionId": "s", "type": "api-request-blob", "cwd": "/elsewhere",
+            "message": { "model": "claude-other", "usage": { "output_tokens": FIXTURE_TOKENS }, "content": "x" },
+        })
+        .to_string();
+        let out = parse(&[&reordered]);
+        assert_eq!((out.patch.model, out.patch.cwd, out.patch.tokens), (None, None, None));
+    }
+
+    /// B6: `<synthetic>` is what Claude Code names a reply it wrote itself
+    /// rather than one the model sent, so it is not the model in use.
+    #[test]
+    fn a_synthetic_record_does_not_change_the_model() {
+        let real = json!({ "type": "assistant", "timestamp": "2026-10-30T12:00:00.000Z",
+            "message": { "model": "claude-opus-5-5", "content": [{ "type": "text", "text": "hi" }] } }).to_string();
+        let synthetic = json!({ "type": "assistant", "timestamp": "2026-10-30T12:00:01.000Z",
+            "isApiErrorMessage": false,
+            "message": { "model": "<synthetic>", "content": [{ "type": "text", "text": "No response requested." }] } })
+            .to_string();
+        let out = parse(&[&real, &synthetic]);
+        assert_eq!(out.patch.model.as_deref(), Some("claude-opus-5-5"));
+        assert_eq!(out.events.len(), 2, "the synthetic reply is still drawn");
+        assert_eq!(parse(&[&synthetic]).patch.model, None);
+    }
+
+    /// Every record type a survey of 40 days of this machine's transcripts
+    /// found (Claude Code 2.1.302 on), with what the parser does with it.
+    /// `system` stands for all seven of its subtypes; a compaction is one,
+    /// and is read before the meta cut.
+    const SURVEYED: &[(&str, &str)] = &[
+        ("assistant", "conversation"),
+        ("user", "conversation"),
+        ("api-request", "skipped"),
+        ("api-request-blob", "skipped"),
+        ("api-request-shape", "skipped"),
+        ("ai-title", "state"),
+        ("last-prompt", "state"),
+        ("permission-mode", "state"),
+        ("agent-name", "meta"),
+        ("artifact-autoreact-ledger", "meta"),
+        ("artifact-comment-monitor", "meta"),
+        ("atis-latch", "meta"),
+        ("attachment", "meta"),
+        ("bridge-session", "meta"),
+        ("cost-state", "meta"),
+        ("custom-title", "meta"),
+        ("file-history-delta", "meta"),
+        ("file-history-snapshot", "meta"),
+        ("fork-context-ref", "meta"),
+        ("frame-link", "meta"),
+        ("launched", "meta"),
+        ("mode", "meta"),
+        ("pr-link", "meta"),
+        ("queue-operation", "meta"),
+        ("result", "meta"),
+        ("started", "meta"),
+        ("system", "meta"),
+    ];
+
+    /// What the parser does with a record of this type, written type-first
+    /// the way Claude Code writes every record.
+    fn disposition_of(kind: &str) -> &'static str {
+        if is_api_request(json!({ "type": kind }).to_string().as_bytes()) {
+            return "skipped";
+        }
+        match RecordSets::new().disposition(kind) {
+            Disposition::State => "state",
+            Disposition::Meta => "meta",
+            Disposition::Conversation => "conversation",
+            Disposition::Unlisted => "unlisted",
+        }
+    }
+
+    /// A type nobody has classified is read as conversation, as every type
+    /// was before there was a list; so one the survey found must not be.
+    #[test]
+    fn every_surveyed_record_type_has_a_disposition() {
+        for (kind, expected) in SURVEYED {
+            assert_eq!(disposition_of(kind), *expected, "{kind}");
+        }
+        assert_eq!(disposition_of("a-type-no-survey-found"), "unlisted");
+        for kind in ["api-request", "api-request-blob", "api-request-shape"] {
+            assert_eq!(RecordSets::new().disposition(kind), Disposition::Meta, "the fallback for {kind}");
+        }
     }
 }
 
