@@ -405,8 +405,9 @@ file, the focused agent's transcript), `AgentSource.onChange` and
 | WebSocket heartbeat | 30s, drop after 2 missed | `routes.rs` |
 | Environment probe | once at startup | `env.rs` |
 | Delegation tree, while the forest view is open | 3s | `useFleetTrees.ts` |
+| "As of" captions redrawn, while the socket is down (no request) | 10s, then 60s after 1m | `useOfflineClock.ts` |
 
-Three of those are conditional rather than constant. The pane capture runs only
+Four of those are conditional rather than constant. The pane capture runs only
 while some tab has that agent focused *and* attached; the delegation tree is
 fetched only while the forest view is mounted, which is why it is plain HTTP
 rather than a fifth socket message — an effect that stops on unmount satisfies
@@ -414,7 +415,9 @@ INV-4's first rule without a subscription lifecycle on the wire; and the
 fleet-wide enrichment runs only while at least one tab is connected at all — `routes.rs` reports the
 viewer count through `ServeOptions.onViewers` and `main.rs` idles
 `FleetEnricher` on it. Both are INV-4's first rule, which is about who is
-watching rather than how often.
+watching rather than how often. The fourth is the browser's own and runs the
+other way round: the "as of" captions are redrawn only while the socket is
+down, because then no frame comes to redraw them, and never while it is up.
 
 The heartbeat is what makes "who is watching" answerable. A closed tab says so;
 a phone that went to sleep on the far side of Tailscale says nothing at all, and

@@ -26,6 +26,8 @@ const EN = {
   connConnecting: 'connecting…',
   connReconnecting: 'reconnecting…',
   connUnreachable: 'server unreachable — is Tailscale up?',
+  connOfflineShort: 'offline · {when}',
+  connOfflineNoTime: 'offline',
   searchPlaceholder: 'Filter agents…',
   searchLabel: 'Filter agents by name, folder, branch or activity',
   /* groups */
@@ -563,6 +565,8 @@ const ZH: Record<Key, string> = {
   connConnecting: '连接中…',
   connReconnecting: '重新连接中…',
   connUnreachable: '无法连接服务器——Tailscale 在线吗？',
+  connOfflineShort: '离线 · {when}',
+  connOfflineNoTime: '离线',
   searchPlaceholder: '筛选代理…',
   searchLabel: '按名称、目录、分支或活动筛选代理',
   groupWaiting: '需要你处理',

@@ -11,10 +11,11 @@
  * The last known state is still the most useful thing on screen, so it is
  * muted and captioned rather than hidden.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, renderHook, screen } from '@testing-library/react'
 import { FleetList } from '../../src/web/components/FleetList.tsx'
 import { useStore } from '../../src/web/store/store.ts'
+import { useOfflineClock } from '../../src/web/hooks/useOfflineClock.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -119,5 +120,81 @@ describe('while the socket is down', () => {
     useStore.setState({ agents: [agent({ sessionId: 'a' })], conn: 'connecting', fleetAt: null })
     shell()
     expect(screen.getByTestId('fleet-stale').textContent).toMatch(/not connected/i)
+  })
+})
+
+/**
+ * The caption computed its age as it rendered, and what makes it render is a
+ * frame — the one thing that stops arriving when the socket drops. So "the last
+ * state received just now" said "just now" for as long as the outage lasted:
+ * 135 s measured on the desk, 130 s on a phone's waiting chip.
+ *
+ * The redraws are counted one `act` per second because React batches every
+ * update inside one `act` into a single render.
+ */
+describe('INV-11 the age keeps counting while the socket stays down', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('ages the caption with no frame to redraw it', () => {
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], conn: 'open', fleetAt: Date.now() })
+    shell()
+    act(() => useStore.setState({ conn: 'closed' }))
+    expect(screen.getByTestId('fleet-stale').textContent).toMatch(/just now/)
+    act(() => vi.advanceTimersByTime(70_000))
+    expect(screen.getByTestId('fleet-stale').textContent).toMatch(/received 1m ago/)
+  })
+
+  it('announces in minute steps, so the ten-second redraw is not read out', () => {
+    const announced = (region: Element): string =>
+      [...region.childNodes]
+        .filter((node) => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true'))
+        .map((node) => node.textContent)
+        .join('')
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], conn: 'open', fleetAt: Date.now() })
+    shell()
+    act(() => useStore.setState({ conn: 'closed' }))
+    act(() => vi.advanceTimersByTime(10_000))
+    const region = screen.getByRole('status')
+    const atTen = { heard: announced(region), seen: region.textContent }
+    for (let s = 10; s < 50; s += 10) act(() => vi.advanceTimersByTime(10_000))
+    expect(announced(screen.getByRole('status'))).toBe(atTen.heard)
+    expect(screen.getByRole('status').textContent).not.toBe(atTen.seen)
+    expect(screen.getByRole('status').textContent).toMatch(/received 50s ago/)
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(announced(screen.getByRole('status'))).toMatch(/received 1m ago/)
+  })
+
+  it('runs no timer while connected, and stops the moment the socket opens', () => {
+    renderHook(() => useOfflineClock())
+    expect(vi.getTimerCount()).toBe(0)
+    act(() => useStore.setState({ conn: 'closed' }))
+    expect(vi.getTimerCount()).toBe(1)
+    act(() => vi.advanceTimersByTime(25_000))
+    expect(vi.getTimerCount()).toBe(1)
+    act(() => useStore.setState({ conn: 'open' }))
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('redraws every ten seconds for the first minute, then once a minute', () => {
+    let renders = 0
+    renderHook(() => {
+      renders += 1
+      return useOfflineClock()
+    })
+    act(() => useStore.setState({ conn: 'closed' }))
+    const atDrop = renders
+    const redrawsOneActPerSecond = (seconds: number): number => {
+      const before = renders
+      for (let s = 0; s < seconds; s += 1) act(() => vi.advanceTimersByTime(1000))
+      return renders - before
+    }
+    expect(redrawsOneActPerSecond(60)).toBe(6)
+    expect(redrawsOneActPerSecond(180)).toBe(3)
+    expect(renders - atDrop).toBe(9)
   })
 })

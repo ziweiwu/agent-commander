@@ -7,8 +7,9 @@ import { closeAgentById } from '../store/transport.ts'
 import type { Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
-import { relative } from '../lib/format.ts'
+import { relative, relativeByMinute, type Relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
+import { useOfflineClock } from '../hooks/useOfflineClock.ts'
 import { isNewSinceOpened } from '../lib/newSince.ts'
 import { useLayout } from '../hooks/useMediaQuery.ts'
 import { AgentCard } from './AgentCard.tsx'
@@ -37,7 +38,6 @@ const NAMES_BEFORE_ELLIPSIS = 4
 
 export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListProps) {
   const t = useTranslate()
-  const lang = useLang()
   const agents = useStore((s) => s.agents)
   const conn = useStore((s) => s.conn)
   const fleetAt = useStore((s) => s.fleetAt)
@@ -189,13 +189,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         * needs me", that is the failure that matters: acting on a card that
         * went stale twenty minutes ago.
         */}
-      {conn !== 'open' && agents.length > 0 && (
-        <p className={styles.stale} data-testid="fleet-stale" role="status">
-          {fleetAt
-            ? t('staleFleet', { when: formatRelative(lang, relative(fleetAt)) })
-            : t('staleFleetNoTime')}
-        </p>
-      )}
+      {conn !== 'open' && agents.length > 0 && <StaleCaption fleetAt={fleetAt} />}
 
       <div
         className={styles.list}
@@ -261,6 +255,33 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * "Not connected — showing the last state received 2m ago."
+ *
+ * Its own component so that the redraw `useOfflineClock` causes while the
+ * socket is down repaints this line and not every card under it.
+ *
+ * Said twice, because it is a status and its age now moves. On screen it counts
+ * seconds, redrawn every ten; a polite live region announces every change, so
+ * that copy is `aria-hidden`, and what a screen reader hears is the same
+ * sentence in whole minutes (`relativeByMinute`) — once on the drop, then once
+ * a minute.
+ */
+function StaleCaption({ fleetAt }: { fleetAt: number | null }) {
+  const t = useTranslate()
+  const lang = useLang()
+  const now = useOfflineClock()
+  const lastFrameAt = fleetAt ?? undefined
+  const caption = (age: Relative | null): string =>
+    fleetAt ? t('staleFleet', { when: formatRelative(lang, age) }) : t('staleFleetNoTime')
+  return (
+    <p className={styles.stale} data-testid="fleet-stale" role="status">
+      <span aria-hidden="true">{caption(relative(lastFrameAt, now))}</span>
+      <span className="sr-only">{caption(relativeByMinute(lastFrameAt, now))}</span>
+    </p>
   )
 }
 

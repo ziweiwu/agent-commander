@@ -1056,7 +1056,15 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   answer the two controls on screen opened opposite ends of the queue, and ⌥H
   pressed again bounced between the two oldest. It opens on the Chat tab
   and replaces the history entry, so swipe-back lands on the fleet. With the
-  socket down it MUST go muted and say "as of" the last frame **(INV-11)**. Its
+  socket down it MUST go muted and say "as of" the last frame in its accessible
+  name; in the sheet the connection pill carries that time on screen ("offline ·
+  2m ago", the whole caption as its title and name), on one line, so the topbar
+  keeps its height and the answer options do not move when the socket drops or
+  returns. Every "as of" caption MUST age while offline, with no frame to redraw
+  it **(INV-11)**. Amended from "say 'as of' the last frame": drawn in the sheet,
+  the chip's "as of" and the full "server unreachable" caption took the topbar
+  from 53px to 105px and dropped the answer options 52px, and the time read
+  "just now" for as long as the outage lasted. Its
   accessible name says the count, the agent it opens and how long that one has
   waited, in both languages. After a single question is answered from the
   card, the card MUST offer "Next: ‹name› · waiting 14m ⌥H" — the agent ⌥H
@@ -1064,7 +1072,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   button or a chord MUST focus the question, never its first option, so an
   Enter already on its way answers nothing **(INV-2)**.
   *`test/fleet-ui.test.ts`, `test/ui/hop.test.tsx`, `test/ui/one-place.test.tsx`,
-  `e2e/hop.spec.ts`.*
+  `test/ui/stale-fleet.test.tsx`, `e2e/hop.spec.ts`, `e2e/mobile.spec.ts`.*
 
 ---
 

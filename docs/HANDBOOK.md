@@ -200,7 +200,12 @@ replaces the page rather than stacking another, so swipe-back still
 lands on the fleet however many agents you went through. It is absent when
 nobody else is waiting, and it skips an agent whose pane has gone, one still
 starting up, and any status the app only guessed at. While the connection is
-down it goes grey and says *as of* when it last heard.
+down it goes grey and says *as of* when it last heard. On a phone that time is
+said once, by the connection pill — **offline · 2m ago** — and the chip keeps
+it in what a screen reader hears, so the topbar stays one row and nothing under
+your thumb moves when the connection drops or comes back. Every *as of* goes on
+counting while the connection stays down; the pill's full reason, "server
+unreachable — is Tailscale up?", is its tooltip.
 
 After you answer a single question from the card, the card offers **Next:
 ‹name› · waiting 14m ⌥H** — the same agent the chip and ⌥H open. It never

@@ -218,7 +218,7 @@ describe('F3 the waiting chip is drawn only where the list is not', () => {
     expect(screen.queryByTestId('waiting-chip')).toBeNull()
   })
 
-  it('goes muted and says "as of" while the socket is down', () => {
+  it('goes muted while the socket is down, and in the sheet says "as of" in its name only', () => {
     setViewport(NARROW)
     const ws = liveFleet()
     shell('/agent/w1')
@@ -226,8 +226,32 @@ describe('F3 the waiting chip is drawn only where the list is not', () => {
     act(() => ws.close())
     const chip = screen.getByTestId('waiting-chip')
     expect(chip.dataset.stale).toBe('true')
-    expect(chip.textContent).toContain('as of')
+    expect(chip.textContent).not.toContain('as of')
     expect(chip.getAttribute('aria-label')).toContain('as of')
+  })
+
+  it('keeps "as of" on screen with the column collapsed, where the topbar has room', () => {
+    const ws = liveFleet()
+    useStore.setState({ sidebar: 'collapsed' })
+    shell('/agent/w1')
+    act(() => ws.close())
+    expect(screen.getByTestId('waiting-chip').textContent).toContain('as of')
+  })
+
+  it('ages its "as of", and the sheet’s pill with it, while no frame comes', () => {
+    vi.useFakeTimers()
+    try {
+      setViewport(NARROW)
+      const ws = liveFleet()
+      shell('/agent/w1')
+      act(() => ws.close())
+      expect(screen.getByTestId('waiting-chip').getAttribute('aria-label')).toContain('as of just now')
+      act(() => vi.advanceTimersByTime(70_000))
+      expect(screen.getByTestId('waiting-chip').getAttribute('aria-label')).toContain('as of 1m ago')
+      expect(screen.getByTestId('connection-status').textContent).toContain('offline · 1m ago')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('opens the next on the Chat tab by replacing the entry, so back lands on the fleet', async () => {
@@ -239,6 +263,49 @@ describe('F3 the waiting chip is drawn only where the list is not', () => {
     expect(where.path).toBe('/agent/w2')
     act(() => where.back())
     expect(where.path).toBe('/')
+  })
+})
+
+/**
+ * In the sheet the topbar is one row (`flex-wrap: nowrap`), and the whole
+ * "server unreachable — is Tailscale up?" wrapped to five lines inside it,
+ * taking the header from 53px to 105px and the answer options down 52px.
+ */
+describe('the connection pill while the socket is down', () => {
+  const visible = (pill: HTMLElement): string =>
+    [...pill.childNodes]
+      .filter((node) => !(node instanceof HTMLElement && node.className === 'sr-only'))
+      .map((node) => node.textContent)
+      .join('')
+
+  it('says "offline" and since when in the sheet, and keeps the whole caption as its title and name', () => {
+    setViewport(NARROW)
+    const ws = liveFleet()
+    shell('/agent/w1')
+    expect(visible(screen.getByTestId('connection-status'))).toBe('live')
+    act(() => ws.close())
+    const pill = screen.getByTestId('connection-status')
+    expect(visible(pill)).toBe('offline · just now')
+    expect(pill.getAttribute('title')).toMatch(/reconnecting|unreachable/)
+    expect(within(pill).getByText(/reconnecting|unreachable/).className).toBe('sr-only')
+  })
+
+  it('says it in Chinese too', () => {
+    setViewport(NARROW)
+    const ws = liveFleet()
+    shell('/agent/w1')
+    act(() => useStore.getState().setLang('zh-CN'))
+    act(() => ws.close())
+    expect(visible(screen.getByTestId('connection-status'))).toBe('离线 · 刚刚')
+  })
+
+  it('keeps the whole caption on screen beside the list, where the row can wrap', () => {
+    const ws = liveFleet()
+    shell('/agent/w1')
+    act(() => ws.close())
+    const pill = screen.getByTestId('connection-status')
+    expect(pill.textContent).toMatch(/reconnecting|unreachable/)
+    expect(pill.getAttribute('title')).toBeNull()
   })
 })
 
