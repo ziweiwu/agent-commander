@@ -19,6 +19,12 @@
 //! hundred bytes each, with no transcript parsing at all — which is what makes
 //! this affordable to poll under INV-4.
 //!
+//! **A sidecar is written twice.** Once at spawn, and again when the delegate
+//! leaves `running`: since 2026-10-16 Claude Code rewrites it with
+//! `finished: true`, and a stop adds `stoppedByUser`. Those two are the only
+//! record of an ending anywhere on disk, so the cache below re-reads a sidecar
+//! until it carries one.
+//!
 //! The directory is flat: a grandchild sits beside its parent. The tree is
 //! rebuilt from `parentAgentId`, never from the path.
 #![allow(dead_code)]
@@ -26,7 +32,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
@@ -54,12 +60,26 @@ struct Sidecar {
     name: Option<String>,
     parent_agent_id: Option<String>,
     spawn_depth: Option<u32>,
-    /// Evidence of an ending, and the only evidence a sidecar ever carries.
+    /// The user stopped it. Evidence of an ending, written after spawn.
     stopped_by_user: bool,
+    /// Claude Code recorded that the delegate left `running`. Evidence of an
+    /// ending and only of an ending: a delegate that failed is recorded the
+    /// same way, so this never means it succeeded.
+    finished: bool,
+    /// How the delegate was asked for, e.g. `background`. Carried, not yet
+    /// acted on.
+    request_shape: Option<String>,
     is_fork: bool,
 }
 
 impl Sidecar {
+    /// Whether Claude Code has recorded how this delegate ended. Nothing it
+    /// writes afterwards changes what this module reads, so an ended sidecar is
+    /// the one the cache keeps without looking at the file again.
+    fn has_ended(&self) -> bool {
+        self.stopped_by_user || self.finished
+    }
+
     /// Read the fields this module relies on out of a parsed sidecar.
     ///
     /// Walked as a `Value` rather than through `#[derive(Deserialize)]` for the
@@ -81,19 +101,55 @@ impl Sidecar {
                 .and_then(Value::as_i64)
                 .and_then(|n| u32::try_from(n).ok()),
             stopped_by_user: flag("stoppedByUser"),
+            finished: flag("finished"),
+            request_shape: text("requestShape"),
             is_fork: flag("isFork"),
         })
     }
 }
 
-/// Sidecars, cached by path forever.
+/// What would have to change on disk for a cached sidecar to be stale: its
+/// mtime and its length, for the reason `effort_cache` keys on both.
+type Stamp = (Option<SystemTime>, u64);
+
+#[derive(Debug, Clone)]
+struct CachedSidecar {
+    sidecar: Sidecar,
+    stamp: Option<Stamp>,
+}
+
+/// Sidecars, cached by path and by what was on disk when each was read.
 ///
-/// They are written once when the delegate is spawned and never touched again —
-/// a type, a brief and a parent do not change — so re-reading one on every poll
-/// would be pure cost. Only the transcript is re-`stat`ed.
-fn sidecar_cache() -> &'static Mutex<HashMap<PathBuf, Sidecar>> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Sidecar>>> = OnceLock::new();
+/// A type, a brief and a parent never change, but the sidecar does: Claude
+/// Code rewrites it when the delegate ends. So one that records an ending is
+/// final and answered from memory without touching the file, and any other is
+/// `stat`ed on each read and re-read only when its `(mtime, len)` has moved.
+/// That is one `stat` per unfinished delegate per tree read, beside the one
+/// its transcript already costs (INV-4).
+fn sidecar_cache() -> &'static Mutex<HashMap<PathBuf, CachedSidecar>> {
+    static CACHE: OnceLock<Mutex<HashMap<PathBuf, CachedSidecar>>> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_sidecar(path: &Path) -> Option<CachedSidecar> {
+    sidecar_cache().lock().ok()?.get(path).cloned()
+}
+
+fn remember_sidecar(path: &Path, sidecar: &Sidecar, stamp: Option<Stamp>) {
+    if let Ok(mut cache) = sidecar_cache().lock() {
+        cache.insert(path.to_path_buf(), CachedSidecar { sidecar: sidecar.clone(), stamp });
+    }
+}
+
+async fn stamp_of(path: &Path) -> Option<Stamp> {
+    let stat = tokio::fs::metadata(path).await.ok()?;
+    Some((stat.modified().ok(), stat.len()))
+}
+
+async fn parse_sidecar(path: &Path) -> Option<Sidecar> {
+    let text = tokio::fs::read_to_string(path).await.ok()?;
+    let parsed = serde_json::from_str::<Value>(&text).ok()?;
+    Sidecar::from_value(&parsed)
 }
 
 /// Testing seam: forget what was cached.
@@ -103,21 +159,32 @@ pub fn forget_sidecars() {
     }
 }
 
-/// One sidecar, from the cache or from disk. A failure is never cached: the
-/// file may simply not have been finished being written yet.
+/// One sidecar, from the cache or from disk.
+///
+/// The `stat` comes before the read. A rewrite that lands between the two is
+/// then cached under the older key and read again next time, where the other
+/// order would cache the older content under the newer key for good.
+///
+/// A failure is never cached: the file may simply not have been finished being
+/// written yet. While a known sidecar is being rewritten its last good reading
+/// stands in, so the delegate does not drop out of the tree for that moment
+/// (INV-5).
 async fn read_sidecar(path: &Path) -> Option<Sidecar> {
-    if let Ok(cache) = sidecar_cache().lock() {
-        if let Some(hit) = cache.get(path) {
-            return Some(hit.clone());
+    let cached = cached_sidecar(path);
+    if let Some(hit) = cached.as_ref().filter(|c| c.sidecar.has_ended()) {
+        return Some(hit.sidecar.clone());
+    }
+    let stamp = stamp_of(path).await;
+    if let Some(hit) = cached.as_ref().filter(|c| stamp.is_some() && c.stamp == stamp) {
+        return Some(hit.sidecar.clone());
+    }
+    match parse_sidecar(path).await {
+        Some(fresh) => {
+            remember_sidecar(path, &fresh, stamp);
+            Some(fresh)
         }
+        None => cached.map(|c| c.sidecar),
     }
-    let text = tokio::fs::read_to_string(path).await.ok()?;
-    let parsed = serde_json::from_str::<Value>(&text).ok()?;
-    let sidecar = Sidecar::from_value(&parsed)?;
-    if let Ok(mut cache) = sidecar_cache().lock() {
-        cache.insert(path.to_path_buf(), sidecar.clone());
-    }
-    Some(sidecar)
 }
 
 /// One delegate as read off disk, still unlinked from any parent.
@@ -132,12 +199,12 @@ struct Entry {
 
 /// What a delegate did, as opposed to what became of it.
 ///
-/// Two measurements, never a summary. `Quiet` is the honest answer about a
-/// delegate's *outcome* and will stay the answer for almost all of them, so it
-/// cannot also be the only thing on the row: seven delegates all reading
-/// `quiet` say nothing. These say the one thing that is both true and useful —
-/// that this one worked for thirteen minutes and made twenty-nine tool calls,
-/// and that one died on its first.
+/// Two measurements, never a summary. Neither state says what happened: `quiet`
+/// is the honest answer for a sidecar with no recorded ending, and `done` means
+/// ended, not succeeded, so seven delegates all reading either say nothing.
+/// These say the one thing that is both true and useful — that this one worked
+/// for thirteen minutes and made twenty-nine tool calls, and that one died on
+/// its first.
 #[derive(Debug, Clone, Copy)]
 struct Effort {
     calls: u32,
@@ -304,15 +371,16 @@ async fn read_entries(dir: &Path) -> Vec<Entry> {
 /// What this app is willing to say a delegate is doing.
 ///
 /// INV-13, and the ordering matters: evidence first, then a marked guess, then
-/// an admission. `Done` is only ever claimed on something recorded — the user
-/// stopped it — because an agent that finished and an agent that died look
-/// identical from a transcript that stopped growing.
+/// an admission. `Done` is only ever claimed on something Claude Code recorded
+/// — the user stopped it, or it left `running` — and it means ended, never
+/// succeeded. Without either record an agent that finished and an agent that
+/// died look identical from a transcript that stopped growing.
 fn state_of(
     entry: &Entry,
     parent_status: AgentStatus,
     now: i64,
 ) -> (SubagentState, Option<bool>) {
-    if entry.meta.stopped_by_user {
+    if entry.meta.has_ended() {
         return (SubagentState::Done, None);
     }
     if parent_status == AgentStatus::Busy && now - entry.last_write_at < ACTIVE_WINDOW_MS {
@@ -344,6 +412,7 @@ fn to_node(entry: &Entry, parent_status: AgentStatus, now: i64) -> SubagentNode 
         state,
         state_inferred,
         stopped_by_user: meta.stopped_by_user.then_some(true),
+        finished: meta.finished.then_some(true),
         reparented: None,
         children: Vec::new(),
     }
@@ -1074,6 +1143,7 @@ mod tests {
             state: SubagentState::Quiet,
             state_inferred: None,
             stopped_by_user: None,
+            finished: None,
             reparented: None,
             children: Vec::new(),
         };
@@ -1101,30 +1171,32 @@ mod tests {
         );
     }
 
-    /// Sidecars are cached by path for the life of the process, because they
-    /// are written once and never touched again. Only the transcript is
-    /// re-`stat`ed, which is what keeps this cheap enough to poll (INV-4).
+    /// A sidecar that has recorded no ending is answered from the cache while
+    /// its `(mtime, len)` holds, and re-read the moment either moves. Proven by
+    /// rewriting it once without disturbing the key and once with a new length
+    /// (INV-4). The mtime is pinned before the first read because a file
+    /// written normally gets a sub-millisecond one that cannot be restored.
     #[tokio::test]
-    async fn inv4_a_sidecar_is_read_once_and_cached_by_path() {
+    async fn inv4_a_sidecar_is_re_read_only_when_its_mtime_or_size_moves() {
         let _guard = isolated();
         let (root, transcript) = project(&[fixture(
             "a1",
             json!({ "agentType": "first", "description": "y", "spawnDepth": 1 }),
         )]);
+        let sidecar = sidecar_of(&root, "a1");
+        set_mtime(&sidecar, PINNED_MTIME_MS);
 
         let before = read_tree_at(&agent(), Some(&transcript), NOW).await;
         assert_eq!(before.children[0].agent_type, "first");
 
-        // Rewritten on disk, and deliberately not re-read.
-        let sidecar = root.path().join("sess-1/subagents/agent-a1.meta.json");
-        std::fs::write(&sidecar, json!({ "agentType": "second" }).to_string()).expect("rewrite");
+        rewrite(&sidecar, &json!({ "agentType": "fifth", "description": "y", "spawnDepth": 1 }));
+        set_mtime(&sidecar, PINNED_MTIME_MS);
         let cached = read_tree_at(&agent(), Some(&transcript), NOW).await;
-        assert_eq!(cached.children[0].agent_type, "first");
+        assert_eq!(cached.children[0].agent_type, "first", "an unchanged key must not re-read");
 
-        // …until the seam the tests use says to forget it.
-        forget_sidecars();
+        rewrite(&sidecar, &json!({ "agentType": "second", "description": "y", "spawnDepth": 1 }));
         let fresh = read_tree_at(&agent(), Some(&transcript), NOW).await;
-        assert_eq!(fresh.children[0].agent_type, "second");
+        assert_eq!(fresh.children[0].agent_type, "second", "a moved key must re-read");
     }
     /* ---------------------------------------------------------------------
      * INV-13: what a delegate *did*, as against what became of it.
@@ -1260,5 +1332,143 @@ mod tests {
         forget_efforts();
         let fresh = read_tree_at(&agent(), Some(&transcript), NOW).await;
         assert_eq!(fresh.children[0].calls, Some(0), "and a dropped cache re-reads");
+    }
+
+    /// A background delegate's sidecar as Claude Code writes it at spawn, before
+    /// anything is recorded about how it ended.
+    fn spawned() -> Value {
+        json!({
+            "agentType": "general-purpose",
+            "description": "sweep the invariants",
+            "spawnDepth": 1,
+            "requestShape": "background",
+            "toolUseId": "toolu_1",
+        })
+    }
+
+    /// The same sidecar after Claude Code has recorded an ending under `key`.
+    fn ended(key: &str) -> Value {
+        let mut meta = spawned();
+        meta[key] = json!(true);
+        meta
+    }
+
+    fn sidecar_of(root: &tempfile::TempDir, id: &str) -> PathBuf {
+        root.path().join("sess-1/subagents").join(format!("agent-{id}.meta.json"))
+    }
+
+    fn transcript_of(root: &tempfile::TempDir, id: &str) -> PathBuf {
+        root.path().join("sess-1/subagents").join(format!("agent-{id}.jsonl"))
+    }
+
+    fn rewrite(path: &Path, meta: &Value) {
+        std::fs::write(path, meta.to_string()).expect("rewrite sidecar");
+    }
+
+    /// Since 2026-10-16 Claude Code rewrites the sidecar with `finished: true`
+    /// when a delegate leaves `running`. That is a record of the ending, so it
+    /// beats a recent write the same way `stoppedByUser` does.
+    #[tokio::test]
+    async fn inv13_a_finished_sidecar_is_done_and_never_a_guess() {
+        let _guard = isolated();
+        let (_root, transcript) = project(&[Fixture {
+            id: "a1",
+            meta: Some(ended("finished").to_string()),
+            wrote_ago: Some(1_000),
+            bytes: 10,
+        }]);
+
+        let tree = read_tree_at(&busy(), Some(&transcript), NOW).await;
+
+        assert_eq!(tree.children[0].state, SubagentState::Done);
+        assert_eq!(tree.children[0].state_inferred, None);
+        assert_eq!(tree.children[0].finished, Some(true));
+        assert_eq!(tree.children[0].stopped_by_user, None);
+    }
+
+    /// The tree is read while the delegate runs, and the sidecar is rewritten
+    /// when it ends. Reading it once at spawn and caching it by path is what
+    /// left every finished delegate `quiet` for good.
+    #[tokio::test]
+    async fn inv13_a_sidecar_rewritten_as_finished_reads_as_ended() {
+        const ENDED_AGO_MS: i64 = 20 * 60_000;
+
+        let _guard = isolated();
+        let (root, transcript) = project(&[Fixture {
+            id: "a1",
+            meta: Some(spawned().to_string()),
+            wrote_ago: Some(1_000),
+            bytes: 10,
+        }]);
+        let first = read_tree_at(&busy(), Some(&transcript), NOW).await;
+        assert_eq!(first.children[0].state, SubagentState::Active);
+
+        rewrite(&sidecar_of(&root, "a1"), &ended("finished"));
+        set_mtime(&transcript_of(&root, "a1"), NOW - ENDED_AGO_MS);
+        let later = read_tree_at(&busy(), Some(&transcript), NOW).await;
+
+        assert_eq!(later.children[0].state, SubagentState::Done);
+        assert_eq!(later.children[0].state_inferred, None);
+        assert_eq!(later.children[0].finished, Some(true));
+    }
+
+    /// The cache alone, with the field this app has always read: `stoppedByUser`
+    /// is written after spawn too, so a tree read before the stop missed it.
+    #[tokio::test]
+    async fn inv13_stopped_by_user_written_after_the_first_read_is_seen() {
+        let _guard = isolated();
+        let (root, transcript) = project(&[Fixture {
+            id: "a1",
+            meta: Some(spawned().to_string()),
+            wrote_ago: Some(1_000),
+            bytes: 10,
+        }]);
+        let first = read_tree_at(&busy(), Some(&transcript), NOW).await;
+        assert_eq!(first.children[0].state, SubagentState::Active);
+
+        rewrite(&sidecar_of(&root, "a1"), &ended("stoppedByUser"));
+        let later = read_tree_at(&busy(), Some(&transcript), NOW).await;
+
+        assert_eq!(later.children[0].state, SubagentState::Done);
+        assert_eq!(later.children[0].stopped_by_user, Some(true));
+    }
+
+    /// An ending is final, so a sidecar that records one is never read again:
+    /// not re-read when it changes, and not even `stat`ed (INV-4).
+    #[tokio::test]
+    async fn inv4_an_ended_sidecar_is_never_read_again() {
+        let _guard = isolated();
+        let (root, transcript) = project(&[fixture(
+            "a1",
+            json!({ "agentType": "first", "spawnDepth": 1, "finished": true }),
+        )]);
+        let before = read_tree_at(&agent(), Some(&transcript), NOW).await;
+        assert_eq!(before.children[0].agent_type, "first");
+
+        rewrite(&sidecar_of(&root, "a1"), &json!({ "agentType": "a different type" }));
+        let after = read_tree_at(&agent(), Some(&transcript), NOW).await;
+
+        assert_eq!(after.children[0].agent_type, "first");
+        assert_eq!(after.children[0].state, SubagentState::Done);
+    }
+
+    /// Re-reading opens a window the old cache never had: a sidecar caught
+    /// half-rewritten. That is a moment, not a malformed file, so the delegate
+    /// keeps its last good reading rather than dropping out of the tree (INV-5).
+    #[tokio::test]
+    async fn inv5_a_sidecar_caught_mid_rewrite_keeps_its_last_reading() {
+        let _guard = isolated();
+        let (root, transcript) = project(&[fixture(
+            "a1",
+            json!({ "agentType": "first", "description": "y", "spawnDepth": 1 }),
+        )]);
+        let before = read_tree_at(&agent(), Some(&transcript), NOW).await;
+        assert_eq!(before.children[0].agent_type, "first");
+
+        std::fs::write(sidecar_of(&root, "a1"), "{\"agentType\": \"fir").expect("half-written");
+        let during = read_tree_at(&agent(), Some(&transcript), NOW).await;
+
+        assert_eq!(ids(&during.children), vec!["a1"]);
+        assert_eq!(during.children[0].agent_type, "first");
     }
 }

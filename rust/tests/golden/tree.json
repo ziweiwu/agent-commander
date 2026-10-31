@@ -86,6 +86,7 @@
               "calls": 12,
               "workedMs": 240000,
               "state": "done",
+              "finished": true,
               "children": [
                 {
                   "agentId": "ab481603df0bb2d1d",
@@ -98,6 +99,7 @@
                   "calls": 12,
                   "workedMs": 240000,
                   "state": "done",
+                  "finished": true,
                   "children": []
                 }
               ]

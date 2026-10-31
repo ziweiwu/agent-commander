@@ -349,19 +349,24 @@ the default for an unrecognised kind is deny.
   writes beside each subagent transcript, never derived from timing or naming.
   **(INV-13)** *`test/delegation-claim.test.ts`, `test/ui/fleet-trees.test.tsx`.*
 - **FR-DEL-2** — Each card MUST summarise what the agent handed out (`4
-  delegates · 1 active · 2 quiet · 1 done`) and MUST be able to open the tree
+  delegates · 1 active · 2 quiet · 1 ended`) and MUST be able to open the tree
   beneath it, nested as deep as the work goes.
 - **FR-DEL-3** — A delegate MUST carry exactly one of three states, and the
   three MUST stay distinct:
-  - **done** — something recorded an ending. In practice: a human stopped it.
+  - **done**, drawn as **ended** — Claude Code recorded an ending in the
+    sidecar: `finished` (it left `running`) or `stoppedByUser` (a human stopped
+    it). It means ended, not succeeded: `finished` is written for a delegate
+    that failed too, so the app MUST NOT say "succeeded". A sidecar rewritten
+    after the tree was first read MUST still be seen. **(INV-13)**
   - **active · inferred** — its transcript grew recently and the parent is
     working. A guess that says it is one.
   - **quiet** — nothing written for a while, nothing recorded an ending. It may
     have finished; it may have died. The app MUST say neither. **(INV-13)**
-- **FR-DEL-4** — Because almost every delegate ends up `quiet`, each row MUST
-  also show a *measurement* of what it did (`29 calls over 12m`) counted from
-  its own transcript. A delegate whose transcript cannot be read MUST show no
-  numbers rather than zeros — a zero is a confident claim that it did nothing.
+- **FR-DEL-4** — Because neither `quiet` nor `done` says what happened, each
+  row MUST also show a *measurement* of what it did (`29 calls over 12m`)
+  counted from its own transcript. A delegate whose transcript cannot be read
+  MUST show no numbers rather than zeros — a zero is a confident claim that it
+  did nothing.
 - **FR-DEL-5** — A delegate whose parent is missing from disk MUST be shown at
   the top level and marked, never dropped along with everything beneath it.
 - **FR-DEL-6** — An agent whose CLI keeps no transcript MUST report that the app
