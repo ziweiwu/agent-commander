@@ -426,7 +426,8 @@ pub struct TimelineEvent {
     pub kind: TimelineKind,
     /// Primary line of text.
     pub text: String,
-    /// Tool name, for kind == Tool.
+    /// Tool name, for kind == Tool; for a hand-back or a peer's message, the
+    /// agent it came from.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
     /// True when this event came from a subagent sidechain.
@@ -711,13 +712,22 @@ impl PendingPrompt {
     }
 }
 
-/// Which compaction notice a `Notice` event is reporting.
+/// Which notice a `Notice` event is reporting: a compaction, or something
+/// Claude Code filed as a `user` record that no person typed (INV-11).
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum NoticeKind {
     Compacted,
     CompactedAuto,
+    /// A delegate handed its work back: `tool` names it, `text` is its report.
+    Handback,
+    /// Another agent's message that hands nothing back: `tool` names the
+    /// sender, `text` is what it said.
+    PeerMessage,
+    /// A background task ended: `text` is the summary Claude Code wrote for
+    /// it, or empty.
+    TaskEnded,
 }
 
 #[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]

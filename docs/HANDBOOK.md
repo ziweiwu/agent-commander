@@ -165,6 +165,15 @@ reads a confident `busy · delegated` for as long as you leave it. The card says
 genuinely does not distinguish finished from dead. One delegate still moving and
 the card says the opposite, in the same place.
 
+**A delegate reporting back is a mark in the conversation, not a message from
+you.** Claude Code files a hand-back as though the person had typed it, so it
+used to arrive as a **You** bubble holding the report. It reads *«general-purpose»
+reported back* now, with the report behind **show report**, and the card's line
+says the same. Another agent's message reads *message from «name»* behind
+**show message**, a background task's end reads *background task ·* and its
+summary, and Claude Code's notes to itself — local-command output among them —
+are not drawn at all.
+
 ### Notifications
 
 Settings carries an **Alerts** toggle: with it on, an agent that *starts*
@@ -182,15 +191,17 @@ The list's **Needs you** group is the notification while the list is on
 screen. Three shapes take it off: the phone's sheet, a collapsed column, and
 full screen. In those, a chip — **✋ 2 ›** — sits where the filters were (or in
 full screen's header) and counts the *other* agents waiting on you. Tap it and
-the next one opens on its conversation, in the list's own sort order, wrapping
-round. It replaces the page rather than stacking another, so swipe-back still
+the next one opens on its conversation: from an agent that is not waiting, the
+one that has been waiting longest; from a waiting one, the one that started
+waiting after it, wrapping round, so tapping again visits every one of them. It
+replaces the page rather than stacking another, so swipe-back still
 lands on the fleet however many agents you went through. It is absent when
 nobody else is waiting, and it skips an agent whose pane has gone, one still
 starting up, and any status the app only guessed at. While the connection is
 down it goes grey and says *as of* when it last heard.
 
 After you answer a single question from the card, the card offers **Next:
-‹name› · waiting 14m ⌥H** — the agent that has been waiting longest. It never
+‹name› · waiting 14m ⌥H** — the same agent the chip and ⌥H open. It never
 moves you on by itself; press it (or ⌥H) when you are ready. Arriving that way
 — or by the chip, or a chord below — puts the keyboard on the new agent's
 *question*, not its first option, so an Enter you were already pressing answers
@@ -367,7 +378,7 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent down the list, on the tab you are on |
-| `⌥H` | open the agent that has needed you longest; a toast says *Nothing needs you* when none does |
+| `⌥H` | open the agent that has needed you longest, or from one that is waiting, the next in that order; a toast says *Nothing needs you* when none does |
 
 The ⌥ chords are `Alt` on Windows and Linux. They go by the key you press
 rather than the character Option makes of it, wait while a Pinyin or other
@@ -937,8 +948,8 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1807 tests: 799 Rust (the server) + 1008 vitest (the web app)
-npm run e2e        # 475 end-to-end tests: desktop/tablet/phone on Chromium,
+npm test           # 1797 tests: 799 Rust (the server) + 998 vitest (the web app)
+npm run e2e        # 468 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
 npm run typecheck

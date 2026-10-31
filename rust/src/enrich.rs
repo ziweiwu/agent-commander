@@ -19,6 +19,7 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 use crate::agent_kinds::has_transcripts;
+use crate::poll::InFlightGuard;
 use crate::procs::{running_of, ProcApi, ProcTable};
 use crate::sources::{AgentPatch, AgentSource, TailApi};
 use crate::types::{Agent, AgentStatus, RunningProcess};
@@ -159,9 +160,17 @@ impl FleetEnricher {
         }));
     }
 
+    /// End the loop, and return only once its task is gone.
+    ///
+    /// An aborted task is dropped when the runtime next reaches it, not when
+    /// `abort` returns, and until then a pass it cut short still holds
+    /// `running`. On a multi-threaded runtime the loop a resume spawns can run
+    /// first, find the flag held, and skip the pass that `watch` promises.
     async fn stop_loop(&self) {
-        if let Some(handle) = self.task.lock().await.take() {
+        let ending = self.task.lock().await.take();
+        if let Some(handle) = ending {
             handle.abort();
+            let _cancelled = handle.await;
         }
     }
 
@@ -202,13 +211,20 @@ impl FleetEnricher {
         self.tails.lock().await.clear();
     }
 
+    /// One pass, unless one is already in flight.
+    ///
+    /// The flag is held by a guard rather than cleared after the work, because
+    /// `unwatch` and `stop` abort the loop wherever it is. A pass dropped in
+    /// the middle of a read used to leave `running` set for good: every later
+    /// pass returned at once, and every card's transcript fields and the
+    /// fleet's `caughtUp` froze until the server restarted (INV-4, F6).
     pub async fn tick(&self) {
         if self.running.swap(true, Ordering::SeqCst) {
             return;
         }
+        let _in_flight = InFlightGuard(&self.running);
         self.run_once().await;
         self.announce_catch_up();
-        self.running.store(false, Ordering::SeqCst);
     }
 
     fn announce_catch_up(&self) {
@@ -1185,5 +1201,65 @@ mod tests {
         assert_eq!(*asked.lock().unwrap(), vec!["c"]);
         assert_eq!(source.find("k").unwrap().activity, None);
         assert_eq!(source.find("c").unwrap().activity.as_deref(), Some("read"));
+    }
+
+    /// A pass long enough that idling is sure to land in the middle of it.
+    const A_PASS_IDLING_CUTS_SHORT: Duration = Duration::from_millis(200);
+    /// How far into that pass the last tab leaves.
+    const INTO_THE_PASS: Duration = Duration::from_millis(50);
+    /// Long enough for a resumed loop to have run several of those passes.
+    const AFTER_RESUMING: Duration = Duration::from_millis(1500);
+
+    fn mid_pass_enricher(reads: &Arc<StdMutex<usize>>) -> Arc<FleetEnricher> {
+        FleetEnricher::with_interval(
+            FakeSource::with(vec![agent("a")]),
+            counting(reads, A_PASS_IDLING_CUTS_SHORT),
+            None,
+            Duration::from_millis(10),
+        )
+    }
+
+    /// INV-4 with F6: the last tab leaving aborts the loop wherever it is,
+    /// and a pass in the middle of a read had set `running` without clearing
+    /// it. Every later pass then returned at once, so every card's transcript
+    /// fields and the fleet's `caughtUp` froze until the server restarted,
+    /// with nothing reporting an error.
+    #[tokio::test]
+    async fn inv4_idling_mid_pass_does_not_stop_the_next_pass() {
+        let reads = Arc::new(StdMutex::new(0usize));
+        let enricher = mid_pass_enricher(&reads);
+        let flag = Arc::new(CaughtUp::default());
+        enricher.report_catch_up_to(flag.clone());
+
+        enricher.start().await;
+        tokio::time::sleep(INTO_THE_PASS).await;
+        enricher.unwatch().await;
+        enricher.watch().await;
+        let at_resume = *reads.lock().unwrap();
+        tokio::time::sleep(AFTER_RESUMING).await;
+
+        assert!(*reads.lock().unwrap() > at_resume, "no pass ran after resuming");
+        assert!(flag.get(), "the fleet never caught up after resuming");
+        enricher.stop().await;
+    }
+
+    /// INV-4: `unwatch` returns only once the pass it cut short has let go,
+    /// so the pass a resume asks for at once cannot find the old one still
+    /// holding the flag and be skipped. Calling `tick` straight after is the
+    /// deterministic stand-in for a resumed loop that a multi-threaded
+    /// runtime schedules before it has dropped the aborted one.
+    #[tokio::test]
+    async fn inv4_a_pass_cut_short_has_let_go_when_unwatch_returns() {
+        let reads = Arc::new(StdMutex::new(0usize));
+        let enricher = mid_pass_enricher(&reads);
+
+        enricher.start().await;
+        tokio::time::sleep(INTO_THE_PASS).await;
+        enricher.unwatch().await;
+        let at_idle = *reads.lock().unwrap();
+        enricher.tick().await;
+
+        assert_eq!(*reads.lock().unwrap(), at_idle + 1, "the next pass found the flag still held");
+        enricher.stop().await;
     }
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { focusAgent } from '../store/transport.ts'
-import { agentPath, listNeighbour, longestWaiting, type AgentTab } from '../lib/hop.ts'
+import { agentPath, listNeighbour, nextUp, type AgentTab } from '../lib/hop.ts'
 import { useTranslate } from './useTranslate.ts'
 
 /** Go to one agent from another, the way the chip, the hand-off and the chords do. */
@@ -67,8 +67,8 @@ export function chordOf(press: KeyboardEvent): Chord | null {
 
 /**
  * ⌥J / ⌥K: the next or previous agent along the list, on the tab already open.
- * ⌥H: the agent that has needed you longest, on its conversation, or a toast
- * saying nothing does.
+ * ⌥H: the next agent that needs you (`nextUp`, the chip's and the Next
+ * button's), on its conversation, or a toast saying nothing does.
  *
  * On the document, so they work from the composer, with the column collapsed
  * and from full screen alike — the list does not have to be on screen for a
@@ -85,7 +85,7 @@ export function useHopKeys(): void {
       if (!chord || state.newAgentOpen) return
       press.preventDefault()
       if (chord === 'waiting') {
-        const target = longestWaiting(state.agents, state.selected, state.exited)
+        const target = nextUp(state.agents, state.selected, state.exited)
         if (target) hop(target.sessionId, 'chat')
         else state.showToast(t('nothingNeedsYou'))
         return

@@ -317,22 +317,30 @@ the default for an unrecognised kind is deny.
   that was on screen had it open, and the Idle heading MUST count those cards
   (`Idle 7 · 2 new`). The record MUST live on the server, so opening an agent
   on the laptop clears the mark on the phone; a hidden tab MUST NOT move it;
-  and the first frame carrying a session's transcript time MUST seed it as
-  backlog, so a fresh server shows no marks. Busy, waiting, inferred and
-  terminal cards, and every card while the fleet is stale, MUST carry no mark,
-  and it MUST be drawn in `--text` or `--dim`, never amber. The wording MUST be
-  "new since opened in this app", never "unread", "done" or "ready": the
-  reader may have followed the agent in tmux, and all this app knows is what
-  it showed. **(INV-11, INV-14)** *`seen::tests`,
+  leaving a session — another focus, the tab hidden, or the socket closed —
+  MUST first count what it showed up to that moment, so a reply the reader
+  watched arrive is never marked; and the first frame carrying a session's
+  transcript time MUST seed it as backlog, so a fresh server shows no marks.
+  Busy, waiting, inferred and terminal cards, and every card while the fleet
+  is stale, MUST carry no mark, and it MUST be drawn in `--text` or `--dim`,
+  never amber. The wording MUST be "new since opened in this app", never
+  "unread", "done" or "ready": the reader may have followed the agent in
+  tmux, and all this app knows is what it showed. **(INV-11, INV-14)** *`seen::tests`,
   `routes::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`,
+  `routes::inv11_leaving_for_another_session_counts_the_reply_it_showed`,
+  `routes::inv11_hiding_the_tab_counts_the_reply_it_showed`,
+  `routes::inv11_closing_the_socket_counts_the_reply_it_showed`,
   `test/ui/new-since.test.tsx`, `e2e/new-since.spec.ts`.*
 - **FR-CARD-11** — The fold MUST count the tool calls auto mode refused, over
   the window of the transcript that was read, with the age of the newest and
   where that window starts: "auto mode refused 3 actions · last 4m ago (since
   14:02)". The same caveat `tokens` carries, for the same reason — a backfill
-  that starts part-way through a session cannot count all of it. A refusal
-  MUST NOT push (INV-14). **(INV-11)**
+  that starts part-way through a session cannot count all of it. The count,
+  like `tokens`, MUST be the fleet enricher's alone, so an agent left open
+  reads one figure rather than its own tail's shorter window by turns. A
+  refusal MUST NOT push (INV-14). **(INV-11)**
   *`test/ui/card-usage.test.tsx`,
+  `routes::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`,
   `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
 
 ### 3.3 Delegates
@@ -414,6 +422,20 @@ over the list with a back control; on a wide one, a second column.
   the one fact they carry hardest to read. The tags MUST be found by name
   rather than by position: their order is not stable and they are sometimes
   indented. *`transcript::reads_a_typed_slash_command_as_the_command_it_ran`.*
+- **FR-CHAT-17** — Only a person MAY be drawn as **you**. A `user` record from
+  another agent, a task notification, or Claude Code's own note (`isMeta`,
+  local-command output) MUST NOT be, whether its content is a string or blocks:
+  the origin MUST be read from the record's label before its flags, since a
+  peer's message is flagged `isMeta` too. A delegate's hand-back MUST be a
+  notice naming the delegate ("«general-purpose» reported back"), with its
+  report behind a closed **show report** disclosure; another agent's message
+  likewise, behind **show message**; a background task's end MUST be a notice
+  carrying only its summary; a note MUST be drawn as nothing. The card's
+  activity line MUST name the notice rather than quote it. Unlabelled records
+  stay **you**. **(INV-11)**
+  *`transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
+  `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`,
+  `test/ui/message-notices.test.tsx`.*
 - **FR-CHAT-2** — A message the user sends MUST appear immediately as *sending…*
   and settle only when the agent's own transcript confirms it. *`test/ui/delivery.test.tsx`.*
 - **FR-CHAT-3** — A message the agent never echoes back MUST be marked **not
@@ -1018,7 +1040,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   never at zero. "Need you" is the hand the card draws (`lib/hop.ts`
   `needsYou`): reported `waiting`, a pane that is still there, and not a
   `starting up` placeholder — counted over the whole fleet, never the filtered
-  view. Next follows the list's sort and wraps round. It opens on the Chat tab
+  view. Next is the agent after this one in the order they began waiting,
+  oldest first, wrapping round; from an agent that is not waiting it is the one
+  that has waited longest. The chip, the post-answer Next button and ⌥H always
+  name the same agent (`nextUp`). Amended from "follows the list's sort": the
+  chip followed it while the Next button and ⌥H went oldest first, so after an
+  answer the two controls on screen opened opposite ends of the queue, and ⌥H
+  pressed again bounced between the two oldest. It opens on the Chat tab
   and replaces the history entry, so swipe-back lands on the fleet. With the
   socket down it MUST go muted and say "as of" the last frame **(INV-11)**. Its
   accessible name says the count, the agent it opens and how long that one has
@@ -1157,7 +1185,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
-| `⌥H` | open the agent that has needed you longest, on Chat; "Nothing needs you" when none does |
+| `⌥H` | open the agent that has needed you longest — or, from one that is waiting, the next in that order — on Chat; "Nothing needs you" when none does |
 
   The ⌥ chords work from the message box, with the column collapsed and in full
   screen. They match the physical key (`e.code`), because macOS Option rewrites
@@ -1273,7 +1301,7 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-CHAT-17, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |

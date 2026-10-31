@@ -138,10 +138,7 @@ pub fn description_from(rec: &Value) -> Option<String> {
  * though the user had said it.
  */
 pub(crate) fn is_typed_by_a_person(rec: &Value) -> bool {
-    if rec.get("isCompactSummary").and_then(Value::as_bool) == Some(true)
-        || rec.get("isMeta").and_then(Value::as_bool) == Some(true)
-        || rec.get("toolUseResult").is_some()
-    {
+    if is_claude_codes_own_note(rec) {
         return false;
     }
     let origin_is_human = rec
@@ -151,6 +148,92 @@ pub(crate) fn is_typed_by_a_person(rec: &Value) -> bool {
         == Some("human");
     let source = rec.get("promptSource").and_then(Value::as_str);
     origin_is_human || matches!(source, Some("typed") | Some("queued"))
+}
+
+/// Who a `user` record speaks for, which decides how the conversation draws
+/// it.
+///
+/// `is_typed_by_a_person` asks the narrower question the card's subject and
+/// its "since your prompt" clock need. This one sorts every record, because
+/// besides a person talking Claude Code files four other things as `user`:
+/// another agent's message (a delegate's hand-back is one), a background task's
+/// end, its own notes to itself, and a local command's output. Drawing any of
+/// those as "you" is the dashboard putting words in the person's mouth
+/// (INV-11), and the conversation did exactly that for every one spelled as a
+/// bare string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PromptOrigin {
+    /// A person, or a record nothing marks as anything else — typed, queued,
+    /// sent through the SDK, or written before `origin` existed. Drawn as
+    /// "you", as it always was.
+    Speech,
+    /// A delegate handing its work back, by the agent type `origin.name`
+    /// carries.
+    Handback { name: Option<String> },
+    /// Another agent's message that hands nothing back.
+    PeerMessage { name: Option<String> },
+    /// Claude Code reporting that a background task ended.
+    TaskNotification,
+    /// Claude Code's own note, a tool result, a compaction summary or a local
+    /// command's output: nothing anybody said, so drawn as nothing.
+    Machinery,
+}
+
+/// The opening tags of what Claude Code records for a local command such as
+/// `/model`: a `user` record carrying no other label, the caveat flagged
+/// `isMeta` and the output not.
+const LOCAL_COMMAND_TAGS: &[&str] = &["<local-command-stdout>", "<local-command-caveat>"];
+
+/// The opening tag of a background task's end, which records written before
+/// `origin` existed carry with `promptSource: "system"` and nothing else.
+const TASK_NOTIFICATION_TAG: &str = "<task-notification";
+
+/// Who this `user` record speaks for. The label is read before the flags,
+/// because Claude Code flags a peer's message `isMeta` too.
+pub(crate) fn prompt_origin(rec: &Value) -> PromptOrigin {
+    let origin = rec.get("origin").unwrap_or(&Value::Null);
+    let kind = origin.get("kind").and_then(Value::as_str);
+    if kind == Some("peer") {
+        return from_another_agent(origin);
+    }
+    if kind == Some("task-notification") || is_an_unlabelled_task_notification(rec) {
+        return PromptOrigin::TaskNotification;
+    }
+    if is_claude_codes_own_note(rec) || is_local_command_output(rec) {
+        return PromptOrigin::Machinery;
+    }
+    PromptOrigin::Speech
+}
+
+/// A `peer` origin: a hand-back when it carries the `handback` mark, any other
+/// message when it does not.
+fn from_another_agent(origin: &Value) -> PromptOrigin {
+    let name = origin.get("name").and_then(Value::as_str).map(str::to_string);
+    let handback = origin.get("handback").is_some_and(|mark| !mark.is_null() && mark != false);
+    if handback { PromptOrigin::Handback { name } } else { PromptOrigin::PeerMessage { name } }
+}
+
+fn is_an_unlabelled_task_notification(rec: &Value) -> bool {
+    rec.get("promptSource").and_then(Value::as_str) == Some("system")
+        && string_content(rec).is_some_and(|text| text.starts_with(TASK_NOTIFICATION_TAG))
+}
+
+fn is_local_command_output(rec: &Value) -> bool {
+    string_content(rec).is_some_and(|text| LOCAL_COMMAND_TAGS.iter().any(|tag| text.starts_with(tag)))
+}
+
+/// What Claude Code marks as its own rather than anybody's words: a note it
+/// files beside a picture or a command (`isMeta`), a compaction summary, and a
+/// tool result.
+fn is_claude_codes_own_note(rec: &Value) -> bool {
+    rec.get("isCompactSummary").and_then(Value::as_bool) == Some(true)
+        || rec.get("isMeta").and_then(Value::as_bool) == Some(true)
+        || rec.get("toolUseResult").is_some()
+}
+
+/// The content of a record spelled as a bare string, leading whitespace off.
+fn string_content(rec: &Value) -> Option<&str> {
+    Some(rec.get("message")?.get("content")?.as_str()?.trim_start())
 }
 
 /// The prompt's text, whether the record spells its content as a bare string or

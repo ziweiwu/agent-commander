@@ -16,14 +16,7 @@ import {
 import { TERMINAL_KIND } from '../src/shared/agent-kinds.ts'
 import { matches, relative, tildePath, tokens, uptimeParts } from '../src/web/lib/format.ts'
 import { formatRelative, formatUptime } from '../src/web/lib/i18n.ts'
-import {
-  agentPath,
-  listNeighbour,
-  longestWaiting,
-  needsYou,
-  nextWaiting,
-  othersWaiting,
-} from '../src/web/lib/hop.ts'
+import { agentPath, listNeighbour, needsYou, nextUp, othersWaiting } from '../src/web/lib/hop.ts'
 import type { Agent } from '../src/shared/types.ts'
 
 const agent = (over: Partial<Agent> & { sessionId: string }): Agent => ({
@@ -373,42 +366,71 @@ describe('sort direction', () => {
 })
 
 /**
- * F3: "✋ 2 ›" and the hops behind it. Over the whole fleet — a filter is about
- * what the list shows, not a decision that a blocked agent stopped mattering —
- * and only to agents the card would draw a hand on.
+ * F3 and R5: "✋ 2 ›", the Next button under a spent answer and ⌥H are one
+ * function. Over the whole fleet — a filter is about what the list shows, not a
+ * decision that a blocked agent stopped mattering — only to agents the card
+ * would draw a hand on, and in the order they began waiting, oldest first.
  */
-describe('nextWaiting', () => {
+describe('nextUp', () => {
   const NOW = 1_000_000
-  const blocked = (id: string, agoMs: number, over: Partial<Agent> = {}): Agent =>
-    agent({ sessionId: id, name: id, status: 'waiting', paneId: `%${id}`, lastActivityAt: NOW - agoMs, ...over })
-  const RECENT = { sort: 'recent', dir: 'desc' } as const
-  const FLEET_OF_FOUR = [
+  const blocked = (id: string, agoMs?: number, over: Partial<Agent> = {}): Agent =>
+    agent({
+      sessionId: id,
+      name: id,
+      status: 'waiting',
+      paneId: `%${id}`,
+      lastActivityAt: agoMs === undefined ? undefined : NOW - agoMs,
+      ...over,
+    })
+  const QUEUE_OF_FOUR = [
     blocked('w1', 10),
     blocked('w2', 20),
     blocked('w3', 30),
+    blocked('w4', 40),
     agent({ sessionId: 'idle', status: 'idle', paneId: '%9', lastActivityAt: NOW }),
   ]
 
-  it('follows the sort and wraps round', () => {
-    expect(nextWaiting(FLEET_OF_FOUR, 'w1', RECENT)?.sessionId).toBe('w2')
-    expect(nextWaiting(FLEET_OF_FOUR, 'w2', RECENT)?.sessionId).toBe('w3')
-    expect(nextWaiting(FLEET_OF_FOUR, 'w3', RECENT)?.sessionId).toBe('w1')
+  it('from an agent that is not waiting, is the one blocked longest, not the top of the list', () => {
+    const listed = grouped([...QUEUE_OF_FOUR], state({ sort: 'recent', dir: 'desc' }))
+    expect(listed[0]?.agents[0]?.sessionId).toBe('w1')
+    expect(nextUp(QUEUE_OF_FOUR, 'idle')?.sessionId).toBe('w4')
+    expect(nextUp(QUEUE_OF_FOUR, null)?.sessionId).toBe('w4')
   })
 
-  it('turns round with the sort direction', () => {
-    const oldest = { sort: 'recent', dir: 'asc' } as const
-    expect(nextWaiting(FLEET_OF_FOUR, 'w3', oldest)?.sessionId).toBe('w2')
-    expect(nextWaiting(FLEET_OF_FOUR, 'w1', oldest)?.sessionId).toBe('w3')
+  it('from a waiting one, is the next to have begun waiting, wrapping round', () => {
+    expect(nextUp(QUEUE_OF_FOUR, 'w4')?.sessionId).toBe('w3')
+    expect(nextUp(QUEUE_OF_FOUR, 'w2')?.sessionId).toBe('w1')
+    expect(nextUp(QUEUE_OF_FOUR, 'w1')?.sessionId).toBe('w4')
   })
 
-  it('from an agent that is not waiting, is the top of the waiting group', () => {
-    expect(nextWaiting(FLEET_OF_FOUR, 'idle', RECENT)?.sessionId).toBe('w1')
-    expect(nextWaiting(FLEET_OF_FOUR, null, RECENT)?.sessionId).toBe('w1')
+  it('walks the whole queue when followed from the oldest, rather than bouncing between two', () => {
+    const visited: string[] = []
+    let open = 'w4'
+    for (let step = 0; step < 5; step++) {
+      open = nextUp(QUEUE_OF_FOUR, open)?.sessionId ?? open
+      visited.push(open)
+    }
+    expect(visited).toEqual(['w3', 'w2', 'w1', 'w4', 'w3'])
+    expect(new Set(visited).size).toBe(4)
+  })
+
+  it('once the answered agent has turned busy, is the oldest of the others', () => {
+    const answered = QUEUE_OF_FOUR.map((a) => (a.sessionId === 'w2' ? { ...a, status: 'busy' as const } : a))
+    expect(nextUp(answered, 'w2')?.sessionId).toBe('w4')
+  })
+
+  it('puts an agent with no recorded block last, and breaks a tie by session id', () => {
+    const fleet = [blocked('unknown'), blocked('tied-b', 10), blocked('tied-a', 10)]
+    expect(nextUp(fleet, null)?.sessionId).toBe('tied-a')
+    expect(nextUp(fleet, 'tied-a')?.sessionId).toBe('tied-b')
+    expect(nextUp(fleet, 'tied-b')?.sessionId).toBe('unknown')
+    expect(nextUp(fleet, 'unknown')?.sessionId).toBe('tied-a')
   })
 
   it('never names the open agent, and is null when nobody else waits', () => {
     const alone = [blocked('w1', 10), agent({ sessionId: 'idle', status: 'idle' })]
-    expect(nextWaiting(alone, 'w1', RECENT)).toBeNull()
+    expect(nextUp(alone, 'w1')).toBeNull()
+    expect(nextUp([agent({ sessionId: 'idle', status: 'idle' })], 'idle')).toBeNull()
     expect(othersWaiting(alone, 'w1')).toEqual([])
   })
 
@@ -423,39 +445,14 @@ describe('nextWaiting', () => {
       blocked('real', 50),
     ]
     expect(othersWaiting(fleet, 'open', ['exited']).map((a) => a.sessionId)).toEqual(['real'])
-    expect(nextWaiting(fleet, 'open', RECENT, ['exited'])?.sessionId).toBe('real')
+    expect(nextUp(fleet, 'open', ['exited'])?.sessionId).toBe('real')
     expect(needsYou(fleet[0]!)).toBe(true)
   })
 
   it('reads the whole fleet, not the filtered view', () => {
     const fleet = [blocked('w1', 10), blocked('w2', 20, { name: 'nothing-like-the-query' })]
     expect(visibleAgents(fleet, state({ query: 'w1' })).map((a) => a.sessionId)).toEqual(['w1'])
-    expect(nextWaiting(fleet, 'w1', RECENT)?.sessionId).toBe('w2')
-  })
-})
-
-describe('longestWaiting', () => {
-  const NOW = 1_000_000
-  const blocked = (id: string, agoMs?: number): Agent =>
-    agent({
-      sessionId: id,
-      status: 'waiting',
-      paneId: '%1',
-      lastActivityAt: agoMs === undefined ? undefined : NOW - agoMs,
-    })
-
-  it('is the agent blocked longest, other than the open one', () => {
-    const fleet = [blocked('short', 10), blocked('long', 500), blocked('mid', 100)]
-    expect(longestWaiting(fleet, null)?.sessionId).toBe('long')
-    expect(longestWaiting(fleet, 'long')?.sessionId).toBe('mid')
-  })
-
-  it('puts an agent with no recorded block last rather than first', () => {
-    expect(longestWaiting([blocked('unknown'), blocked('known', 10)], null)?.sessionId).toBe('known')
-  })
-
-  it('is null when nothing else needs you', () => {
-    expect(longestWaiting([blocked('only', 10)], 'only')).toBeNull()
+    expect(nextUp(fleet, 'w1')?.sessionId).toBe('w2')
   })
 })
 

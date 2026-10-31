@@ -31,8 +31,8 @@ a laptop or from a phone.
   the keys instead of pretending to know the question.
 - **The next one that needs you, without the list.** With an agent open on a
   phone, with the column collapsed or in full screen, **✋ 2 ›** counts the other
-  agents waiting on you and opens the next. After an answer the card offers the
-  one that has waited longest, and ⌥J / ⌥K / ⌥H walk the fleet from the
+  agents waiting on you and opens the next, oldest first. After an answer the
+  card offers the same one, and ⌥J / ⌥K / ⌥H walk the fleet from the
   keyboard — landing on the question, never on an option a stray Enter could
   press.
 - **A faithful terminal capture.** The Attach tab shows the real tmux pane and
@@ -53,7 +53,8 @@ a laptop or from a phone.
   irreversible local destruction`, or `failed` — from the fields Claude Code
   records for that, never from the wording of an error. Tap one to see the
   diff or the end of its output as it was recorded; the card's fold counts
-  what auto mode refused.
+  what auto mode refused. A delegate's hand-back reads `«general-purpose»
+  reported back`, its report one tap away, and never as a message from you.
 - **What a busy agent is running**, read from the process table: the tool
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.

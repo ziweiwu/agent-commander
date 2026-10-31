@@ -103,9 +103,9 @@ success.
 ```sh
 npm run typecheck
 npm run lint
-npm test              # 1807 tests: 799 Rust (the server) + 1008 vitest (the web app)
+npm test              # 1818 tests: 805 Rust (the server) + 1013 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
-npm run e2e           # 475 end-to-end tests, five projects: desktop/tablet/phone on
+npm run e2e           # 468 end-to-end tests, five projects: desktop/tablet/phone on
                       # Chromium, and phone/tablet again on WebKit. Two mock
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
@@ -442,12 +442,28 @@ commit.
   any `differs` does not compare. Seen red by deleting `since_prompt` from
   `differs`.
 
-  **`sincePrompt` is the enricher's alone.** The detail view's tail opens when
-  an agent is opened, so its backfill starts later in the file than the
-  enricher's and can see a floor where the enricher sees a clock. `routes.rs`
-  clears the field from that tail's patch (`leave_the_prompt_count_to_the_enricher`)
-  rather than let the two overwrite each other on every read. `tokens` has the
-  same two-tail shape and was left as it is.
+  **Every window count is the enricher's alone: `sincePrompt`, `refusals`,
+  `tokens` and `subagents`.** The detail view's tail opens when an agent is
+  opened, so its backfill starts later in the file than the enricher's and
+  counts less: a floor where the enricher sees a clock, one refusal where it
+  sees two. `routes.rs` clears all four from that tail's patch
+  (`leave_window_counts_to_the_enricher`) rather than let the two overwrite
+  each other on every read. `tokens` was once left as it is, and the open
+  agent's refusals and tokens then switched between two readings while it sat
+  open: the detail tail's write is silent, the enricher's next pass found the
+  field changed and broadcast its own, and any fleet frame in between carried
+  the other. Held by
+  `routes::tests::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`.
+
+  **The same silent write hides the open agent's newest reply from F6.**
+  `seenThrough` moves only on a fleet change, and the detail tail's patch is
+  not one, so the reply the reader watched arrive was counted only after the
+  tab had left, by which time the session was on screen nowhere and the card
+  said *new*. `mark_shown` now runs before every presence change as well as
+  after: another focus, a `pong` saying the tab is hidden, and the socket
+  closing. The open agent's card in the desk's side column still takes its
+  latest activity from the next fleet frame the enricher or the registry
+  sends, because nothing announces the detail tail's write.
 - **A new wire type has to be named in `wire::render_once()` or `gen:types`
   emits nothing.** ts-rs exports from a *root list*, not from the `#[derive]`:
   `types.rs`'s `render_once` calls `export_all` on each root, and a type nobody

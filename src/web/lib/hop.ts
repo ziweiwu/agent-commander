@@ -4,8 +4,8 @@
  * The list is the one place this app says which agents need you, and two
  * shapes take it off the screen while an agent is open — the phone's sheet and
  * a collapsed column — as does full screen at any width. These functions answer
- * "which one next" from the fleet itself, so the chip, the post-answer hand-off
- * and the keyboard chords agree with each other and with the list.
+ * "which one next" from the fleet itself: the chip, the post-answer hand-off and
+ * ⌥H all name one agent (`nextUp`), and ⌥J/⌥K walk the list (`listNeighbour`).
  *
  * **Over the whole fleet, not the filtered view, for the waiting ones.** A
  * search term or a status filter is about what the list shows; it is not a
@@ -15,7 +15,7 @@
  * purpose: ⌥J/⌥K walk the list, so they walk the list as it is filtered.
  */
 import type { Agent } from '../../shared/types.ts'
-import { grouped, sortAgents, type FleetState, type SortDir, type SortKey } from './filter.ts'
+import { grouped, type FleetState } from './filter.ts'
 import { railOf } from './status.ts'
 import { PENDING_PREFIX } from './succession.ts'
 
@@ -54,54 +54,49 @@ export function othersWaiting(
   return agents.filter((a) => a.sessionId !== openId && needsYou(a, exited))
 }
 
-/** The order the list is sorted in, which "next" follows. */
-export interface Order {
-  sort: SortKey
-  dir: SortDir
-}
-
 /**
- * The next agent that needs you after the open one, in the list's own order,
- * wrapping round; null when no other agent does.
+ * The order "next" walks the agents that need you in: the one blocked longest
+ * first, which is the oldest `lastActivityAt` — for a waiting agent, the moment
+ * it stopped and asked (`ageFrom`). A blocked agent costs more the longer it
+ * waits, and the list's own waiting group is where recency is shown.
  *
- * The list draws its waiting group first and sorts inside it, so from an agent
- * that is not itself waiting, "next" wrapping round is the top of that group.
- * From a waiting one it is the one drawn below it — or the top again, once it
- * is the last.
- */
-export function nextWaiting(
-  agents: readonly Agent[],
-  openId: string | null,
-  order: Order,
-  exited: readonly string[] = [],
-): Agent | null {
-  const others = othersWaiting(agents, openId, exited)
-  if (others.length === 0) return null
-  const open = agents.find((a) => a.sessionId === openId && a.status === 'waiting')
-  const ring = sortAgents(open ? [...others, open] : others, order.sort, order.dir)
-  if (!open) return ring[0] ?? null
-  return ring[(ring.indexOf(open) + 1) % ring.length] ?? null
-}
-
-/**
- * The agent that has needed you longest, other than the open one; null when no
- * other agent needs you.
+ * One with no recorded activity goes last: how long it has been blocked is not
+ * something this app knows, and treating that as "forever" would put a guess at
+ * the front of the queue. A tie is broken by session id, so the ring is the same
+ * on every render and on every device.
  *
- * Longest is the oldest `lastActivityAt`, which for a waiting agent is the
- * moment it stopped and asked (`ageFrom`). One with no recorded activity goes
- * last: how long it has been blocked is not something this app knows, and
- * treating that as "forever" would put a guess at the front of the queue.
+ * This comparator is the whole of the choice. "Next" in the list's sort instead
+ * would replace it with `sortAgents` over the fleet's `{ sort, dir }`.
  */
-export function longestWaiting(
-  agents: readonly Agent[],
-  openId: string | null,
-  exited: readonly string[] = [],
-): Agent | null {
+function blockedLongestFirst(first: Agent, second: Agent): number {
   const since = (blocked: Agent): number => blocked.lastActivityAt ?? Number.POSITIVE_INFINITY
-  const queue = [...othersWaiting(agents, openId, exited)].sort(
-    (first, second) => since(first) - since(second),
-  )
-  return queue[0] ?? null
+  const byAge = since(first) - since(second)
+  if (byAge) return byAge
+  if (first.sessionId === second.sessionId) return 0
+  return first.sessionId < second.sessionId ? -1 : 1
+}
+
+/**
+ * The agent the chip, the Next button under a spent answer and ⌥H all open;
+ * null when nothing else needs you.
+ *
+ * The queue is every agent that needs you, the open one included when it is
+ * itself waiting, in `blockedLongestFirst` order. From an agent in it, next is
+ * the one after it, wrapping round — so following it again and again visits
+ * every agent rather than bouncing between the two oldest. From one that is not
+ * waiting, which is where an answered agent is once it turns busy, next is the
+ * one that has waited longest.
+ */
+export function nextUp(
+  agents: readonly Agent[],
+  openId: string | null,
+  exited: readonly string[] = [],
+): Agent | null {
+  const queue = agents.filter((a) => needsYou(a, exited)).sort(blockedLongestFirst)
+  const at = queue.findIndex((a) => a.sessionId === openId)
+  if (at < 0) return queue[0] ?? null
+  const after = queue[(at + 1) % queue.length]
+  return after && after.sessionId !== openId ? after : null
 }
 
 /**
