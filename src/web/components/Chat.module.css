@@ -463,23 +463,12 @@
   }
 }
 
-/*
- * Above the conversation rather than inside the scroller: a question the agent
- * is stopped on must not scroll out of reach of the person answering it.
- */
 .answer {
-  flex: none;
-  padding: 8px 12px 0;
+  padding-block: 8px 4px;
 }
 /** The hand-off renders nothing when no other agent needs you; its slot then takes no room. */
 .answer:empty {
   display: none;
-}
-
-@media (max-width: 560px) {
-  .answer {
-    padding: 6px 8px 0;
-  }
 }
 
 /*

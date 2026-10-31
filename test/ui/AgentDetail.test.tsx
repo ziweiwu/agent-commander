@@ -115,6 +115,40 @@ describe('AgentDetail', () => {
     expect(screen.getByTestId('unblock-button')).toBeDefined()
   })
 
+  describe('FR-ANS-8 while the answer card under the banner can answer', () => {
+    const blocked = agent({ sessionId: 'a', status: 'waiting', waitingFor: 'dialog open', paneId: '%1' })
+    beforeEach(() => {
+      useStore.setState({
+        prompt: { tool: 'AskUserQuestion', question: 'Which one?', options: [{ label: 'This' }], id: 'p1' },
+      })
+    })
+
+    it('shrinks the banner to its title on Chat, with no Open terminal button', () => {
+      renderApp(<AgentDetail agent={blocked} tab="chat" sheet={false} onTab={noop} onClose={noop} />)
+      const banner = screen.getByTestId('blocked-banner')
+      expect(banner.dataset.compact).toBe('true')
+      expect(banner.textContent).toBe('Waiting on you — dialog open.')
+      expect(banner.getAttribute('title')).toBe('Waiting on you — dialog open.')
+      expect(screen.queryByTestId('unblock-button')).toBeNull()
+      expect(screen.getByTestId<HTMLButtonElement>('tab-attach').disabled).toBe(false)
+    })
+
+    it('keeps the whole banner and its button on the Attach tab', () => {
+      renderApp(<AgentDetail agent={blocked} tab="attach" sheet={false} onTab={noop} onClose={noop} />)
+      expect(screen.getByTestId('blocked-banner').dataset.compact).toBeUndefined()
+      expect(screen.getByTestId('unblock-button')).toBeDefined()
+    })
+
+    it('keeps the whole banner when there is no pane for the card to answer through', () => {
+      renderApp(
+        <AgentDetail agent={{ ...blocked, paneId: undefined }} tab="chat" sheet={false} onTab={noop} onClose={noop} />,
+      )
+      const banner = screen.getByTestId('blocked-banner')
+      expect(banner.dataset.compact).toBeUndefined()
+      expect(banner.textContent).toContain('not attachable')
+    })
+  })
+
   // A stale banner would tell you to go and do something already done.
   it('clears the blocked banner once the agent stops waiting', () => {
     const { rerender } = renderApp(

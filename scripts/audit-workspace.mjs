@@ -83,6 +83,16 @@ const SHAPES = [
    */
   { name: 'half-width', width: 1024, height: 768, enforced: false },
   { name: 'phone', width: 390, height: 844, enforced: false, touch: true },
+  /**
+   * A blocked agent on a laptop, held to a floor rather than to the bar.
+   *
+   * Measured at 0%: the plan's card sat above the conversation and took the
+   * whole scroller, and the composer was pushed below a 720px screen. The card
+   * is now the conversation's last row, so this is the floor that says so —
+   * the mobile audit's 30% for the conversation. Not the 80% bar: FR-ANS-8's
+   * one-line banner is a row of chrome only a blocked agent has.
+   */
+  { name: 'blocked', width: 1280, height: 720, enforced: false, agent: 'mock-plan', floor: 30 },
 ]
 
 const BAR = Number(process.env.BAR ?? 80)
@@ -149,7 +159,7 @@ for (const shape of SHAPES) {
    */
   const hideBanner = '[class*="mockBanner"]{display:none !important}'
   await page.addStyleTag({ content: hideBanner }).catch(() => {})
-  await page.goto(`${BASE}agent/${AGENT}`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}agent/${shape.agent ?? AGENT}`, { waitUntil: 'networkidle' })
   await page.addStyleTag({ content: hideBanner }).catch(() => {})
   await page.waitForSelector('[data-testid="message"]', { timeout: 15000 }).catch(() => {})
   await page.waitForTimeout(TRANSCRIPT_SETTLE_MS)
@@ -167,8 +177,9 @@ let failed = false
 console.log(`\nwork surface, fleet column collapsed — bar ${BAR}%\n`)
 for (const r of rows) {
   const ok = r.pct >= BAR
-  const verdict = !r.enforced ? 'not enforced' : ok ? 'PASSES' : 'FAILS'
-  if (r.enforced && !ok) failed = true
+  const underFloor = r.floor !== undefined && r.pct < r.floor
+  const verdict = underFloor ? `FAILS its ${r.floor}% floor` : !r.enforced ? 'not enforced' : ok ? 'PASSES' : 'FAILS'
+  if ((r.enforced && !ok) || underFloor) failed = true
   // A layout that scrolls sideways has found width nobody asked for, which
   // would flatter every number above it (INV-17).
   if (r.sideways) {

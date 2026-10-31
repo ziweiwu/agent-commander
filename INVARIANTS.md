@@ -2918,7 +2918,12 @@ to be read and typed into, so the share of the viewport given to the transcript'
 scroll viewport plus the composer's field is a number rather than an impression:
 at least **80%** at desktop (1440x900), laptop (1180x800) and tablet
 (834x1112), with the fleet column collapsed. `npm run audit:workspace` drives a
-real browser against `--mock` and fails under the bar.
+real browser against `--mock` and fails under the bar. A blocked agent is held to
+a floor rather than to the bar: at 1280x720 on the plan fixture the work surface
+MUST be at least 30%, where it measured 0% while the answer card sat above the
+conversation and pushed the composer off the screen. `npm run audit:mobile`
+holds a blocked agent's conversation to the same 30% of a phone's viewport as
+any other's.
 
 Measured rather than modelled, because modelling it got the answer wrong by 26
 points: a stylesheet-derived estimate said 74% where the running app was at 48%,

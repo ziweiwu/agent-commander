@@ -112,7 +112,8 @@ npm run e2e           # 468 end-to-end tests, five projects: desktop/tablet/phon
                       # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server
 npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transcript
-                      # plus composer at desktop/laptop/tablet, measured in a real
+                      # plus composer at desktop/laptop/tablet (and a 30% floor
+                      # for a blocked agent at 1280x720), measured in a real
                       # browser against --mock. Not in `npm run audit`, because it
                       # asserts a product target rather than a correctness property.
                       # PORT/BASE move the server (4400 by default, and it refuses

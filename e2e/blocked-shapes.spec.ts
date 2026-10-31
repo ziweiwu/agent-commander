@@ -15,7 +15,7 @@
  * All three fixtures were never prompted, so `openAgent` cannot open them (it
  * waits for a first message). Navigate directly.
  */
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { AGENT } from './helpers.ts'
 
 test.describe('a plan awaiting approval', () => {
@@ -82,5 +82,65 @@ test.describe('a pane that has exited', () => {
     const keybar = page.getByTestId('keybar')
     await expect(keybar.getByRole('button', { name: 'Enter' })).toBeDisabled()
     await expect(keybar.getByRole('button', { name: 'Ctrl-C' })).toBeDisabled()
+  })
+})
+
+const BLOCKED_SHAPES = [AGENT.waiting, AGENT.plan, AGENT.permission]
+const CONVERSATION_FLOOR = 0.3
+
+/** Where the conversation, its question and the composer sit, in viewport pixels. */
+async function blockedLayout(page: Page) {
+  return page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>('[data-testid="chat-scroll"]')!
+    const card = document.querySelector<HTMLElement>('[data-testid="answer-card"]')!
+    const composer = document.querySelector<HTMLElement>('[data-testid="composer-input"]')!
+    const view = scroller.getBoundingClientRect()
+    return {
+      share: scroller.clientHeight / innerHeight,
+      cardInside: scroller.contains(card),
+      cardTopInView: card.getBoundingClientRect().top - view.top,
+      viewHeight: scroller.clientHeight,
+      composerBottom: composer.getBoundingClientRect().bottom,
+      screen: innerHeight,
+    }
+  })
+}
+
+async function expectReadable(page: Page) {
+  await expect(page.getByTestId('answer-card')).toBeVisible()
+  await expect(page.getByTestId('blocked-banner')).toHaveAttribute('data-compact', 'true')
+  await expect(page.getByTestId('unblock-button')).toHaveCount(0)
+  await expect.poll(async () => (await blockedLayout(page)).share).toBeGreaterThanOrEqual(CONVERSATION_FLOOR)
+  const layout = await blockedLayout(page)
+  expect(layout.cardInside, 'the question is a row of the conversation').toBe(true)
+  expect(await questionTopInView(page), 'it opens with the question in view').toBe(true)
+  expect(layout.composerBottom).toBeLessThanOrEqual(layout.screen)
+}
+
+async function questionTopInView(page: Page): Promise<boolean> {
+  const layout = await blockedLayout(page)
+  return layout.cardTopInView >= 0 && layout.cardTopInView < layout.viewHeight
+}
+
+test.describe('a blocked agent keeps its conversation on screen @phone', () => {
+  for (const id of BLOCKED_SHAPES) {
+    test(`FR-ANS-8 ${id}: a one-line banner, the question in the conversation, the composer on screen`, async ({
+      page,
+    }) => {
+      await page.goto(`/agent/${id}`)
+      await expectReadable(page)
+    })
+  }
+})
+
+test.describe('a blocked agent keeps its conversation on screen on a laptop @desktop', () => {
+  test('FR-ANS-8 a plan at 1280x720: the question in the conversation, the composer on screen', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 720 })
+    await page.goto(`/agent/${AGENT.plan}`)
+    await expectReadable(page)
+    await page.getByTestId('chat-scroll').evaluate((el) => el.scrollTo({ top: 0 }))
+    await expect.poll(() => questionTopInView(page)).toBe(false)
+    await page.getByTestId('jump-to-latest').click()
+    await expect.poll(() => questionTopInView(page)).toBe(true)
   })
 })

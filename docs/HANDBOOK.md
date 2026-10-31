@@ -260,8 +260,11 @@ Open an agent and you get two tabs:
   answer a permission dialog, hit Esc to interrupt, or arrow through a menu.
 
 A blocked agent shows a banner naming what it's waiting for, and — where the
-question can be read — the question itself with a button per option, right above
-the conversation.
+question can be read — the question itself with a button per option, as the
+conversation's last row. It opens with the question at the top of the
+conversation and the turn that led to it one scroll up; **Jump to latest**
+brings the question back after you read further up. While the card can answer,
+the banner is one line, and the Attach tab beside it is the way to the terminal.
 
 **The options are read, never guessed.** Claude Code writes a tool call to its
 transcript *before* the dialog it raises is answered, so an unanswered

@@ -13,14 +13,16 @@
  * that can contradict them (INV-16). A mislabelled button here answers a live
  * agent's question wrongly, which is exactly what INV-11 exists to prevent.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Chat } from '../../src/web/components/Chat.tsx'
 import { AnswerCard } from '../../src/web/components/AnswerCard.tsx'
 import { agent, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import type { PendingPrompt } from '../../src/shared/types.ts'
+import { buildMessages } from '../../src/web/lib/chat.ts'
+import { setViewport } from './setup.ts'
 
 // The live capture is xterm behind a lazy import; here it only has to be
 // present or absent. `test/ui/pane-peek.test.tsx` proves what it does.
@@ -724,5 +726,110 @@ describe('INV-16 the card shows what the transcript wrote down', () => {
     expect(previews).toHaveLength(1)
     expect(previews[0]?.tagName).toBe('PRE')
     expect(previews[0]?.textContent).toBe('t0 starts\nt1 caught up')
+  })
+})
+
+describe('FR-ANS-8 the question is the conversation’s last row', () => {
+  const VIEW_TOP_PX = 120
+  const VIEW_PX = 400
+  const CARD_TOP_PX = 900
+  const CONTENT_PX = 1_600
+  const OPTION_PX = 40
+  const OPTION_BELOW_THE_FOLD_PX = 500
+
+  const rect = (top: number, height: number) =>
+    ({ top, bottom: top + height, left: 0, right: 0, width: 0, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect
+
+  const layOut = (optionOffsetPx = 0): void => {
+    Object.assign(HTMLElement.prototype, { scrollHeight: CONTENT_PX, clientHeight: VIEW_PX })
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+      const scroller = document.querySelector('[data-testid="chat-scroll"]')
+      const contentTop = VIEW_TOP_PX - (scroller?.scrollTop ?? 0)
+      if (this === scroller) return rect(VIEW_TOP_PX, VIEW_PX)
+      if (this.firstElementChild?.getAttribute('data-testid') === 'answer-card') {
+        return rect(contentTop + CARD_TOP_PX, CONTENT_PX - CARD_TOP_PX)
+      }
+      if (this.getAttribute('data-testid') === 'answer-option') {
+        return rect(contentTop + CARD_TOP_PX + optionOffsetPx, OPTION_PX)
+      }
+      return rect(0, 0)
+    })
+  }
+
+  const open = () => {
+    useStore.setState({
+      prompt: QUESTION,
+      timelineAt: Date.now(),
+      messages: buildMessages([
+        { id: 'm1', at: Date.now() - 60_000, kind: 'user', text: 'run the migration' },
+        { id: 'm2', at: Date.now() - 50_000, kind: 'assistant', text: 'Two ways to do this; asking which.' },
+      ]),
+    })
+    return renderApp(<Chat agent={blocked()} />)
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    Object.assign(HTMLElement.prototype, { scrollHeight: 0, clientHeight: 0 })
+    setViewport(() => false)
+  })
+
+  it('draws the card inside the conversation, after its last message', () => {
+    open()
+    const card = screen.getByTestId('answer-card')
+    expect(screen.getByTestId('chat-scroll').contains(card)).toBe(true)
+    const last = screen.getAllByTestId('message').at(-1)!
+    expect(last.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('opens with the question at the top of the conversation and the turn before it one scroll up', () => {
+    layOut()
+    open()
+    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(CARD_TOP_PX)
+  })
+
+  it('places it on a phone too, where nothing takes the focus', () => {
+    setViewport((query) => query.includes('pointer: coarse') || query.includes('max-width'))
+    layOut()
+    open()
+    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(CARD_TOP_PX)
+    expect(document.activeElement).toBe(document.body)
+  })
+
+  it('places each question once, so reading back up the turn is not undone by a fleet frame', () => {
+    layOut()
+    const { rerender } = open()
+    const scroller = screen.getByTestId('chat-scroll')
+    scroller.scrollTop = 0
+    rerender(<Chat agent={{ ...blocked(), lastActivityAt: Date.now() }} />)
+    expect(scroller.scrollTop).toBe(0)
+    act(() => useStore.setState({ prompt: { ...QUESTION, id: 'the-next-question' } }))
+    expect(scroller.scrollTop).toBe(CARD_TOP_PX)
+  })
+
+  it('leaves a reader who scrolled down to the card’s keys where they are', () => {
+    layOut()
+    open()
+    const scroller = screen.getByTestId('chat-scroll')
+    scroller.scrollTop = CONTENT_PX - VIEW_PX
+    fireEvent.scroll(scroller)
+    expect(scroller.scrollTop).toBeGreaterThanOrEqual(CONTENT_PX - VIEW_PX)
+  })
+
+  it('lands on the question, not an option below the fold, so Enter answers nothing unseen (INV-2)', () => {
+    layOut(OPTION_BELOW_THE_FOLD_PX)
+    open()
+    expect(document.activeElement).toBe(screen.getByTestId('answer-question'))
+  })
+
+  it('offers "Jump to latest" only once the question is out of view, and it brings the question back', () => {
+    layOut()
+    open()
+    const scroller = screen.getByTestId('chat-scroll')
+    expect(screen.queryByTestId('jump-to-latest')).toBeNull()
+    scroller.scrollTop = 0
+    fireEvent.scroll(scroller)
+    fireEvent.click(screen.getByTestId('jump-to-latest'))
+    expect(scroller.scrollTop).toBe(CARD_TOP_PX)
   })
 })
