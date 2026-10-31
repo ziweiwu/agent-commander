@@ -16,8 +16,10 @@ import { claimantOf, successorOf } from '../lib/succession.ts'
 import { useIsNarrow, useLayout } from '../hooks/useMediaQuery.ts'
 import { useVisualViewport } from '../hooks/useVisualViewport.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
-import { useTranslate } from '../hooks/useTranslate.ts'
-import type { Key } from '../lib/i18n.ts'
+import { useLang, useTranslate, type Translate } from '../hooks/useTranslate.ts'
+import { useOfflineClock } from '../hooks/useOfflineClock.ts'
+import { formatRelative, type Key } from '../lib/i18n.ts'
+import { relative } from '../lib/format.ts'
 import { FleetList } from './FleetList.tsx'
 import { AgentDetail } from './AgentDetail.tsx'
 import { NewAgentDialog } from './NewAgentDialog.tsx'
@@ -49,6 +51,58 @@ function connCaption(conn: Conn, reach: Reach): Key {
   return conn === 'closed' ? 'connReconnecting' : 'connConnecting'
 }
 
+interface ConnPillProps {
+  /** Drawn in the phone's sheet, whose topbar is one row that must not grow. */
+  sheet?: boolean
+}
+
+/**
+ * The connection pill, and in the sheet the one place the topbar says since when.
+ *
+ * The sheet holds its topbar to one row (`flex-wrap: nowrap`), and "server
+ * unreachable — is Tailscale up?" wrapped to five lines inside it: the header
+ * went from 53px to 105px and the answer options dropped 52px, then jumped
+ * back on reconnect in the frame they became live. So there, with the socket
+ * down, it reads "offline · 2m ago" on one line, and the whole caption is its
+ * title and what a screen reader hears. The age is redrawn by
+ * `useOfflineClock`, since the frame that would redraw it is the one not
+ * coming; it is the time the waiting chip keeps in its name (FR-NOTIFY-10).
+ */
+function ConnPill({ sheet }: ConnPillProps) {
+  const t = useTranslate()
+  const lang = useLang()
+  const conn = useStore((s) => s.conn)
+  const reach = useStore((s) => s.reach)
+  const fleetAt = useStore((s) => s.fleetAt)
+  const now = useOfflineClock()
+  const caption = t(connCaption(conn, reach))
+  const when = formatRelative(lang, relative(fleetAt ?? undefined, now))
+  const short = sheet && conn === 'closed' ? offlineShort(t, when) : ''
+  return (
+    <div
+      className={styles.conn}
+      data-testid="connection-status"
+      data-state={conn}
+      data-reach={conn === 'open' ? undefined : reach}
+      title={short ? caption : undefined}
+    >
+      {short ? (
+        <>
+          <span aria-hidden="true">{short}</span>
+          <span className="sr-only">{`${caption} (${short})`}</span>
+        </>
+      ) : (
+        caption
+      )}
+    </div>
+  )
+}
+
+/** "offline · 2m ago", or "offline" from a page that never heard a frame. */
+function offlineShort(translateKey: Translate, when: string): string {
+  return when ? translateKey('connOfflineShort', { when }) : translateKey('connOfflineNoTime')
+}
+
 export function App() {
   const t = useTranslate()
   const navigate = useNavigate()
@@ -65,8 +119,6 @@ export function App() {
   useHopKeys()
 
   const mock = useStore((s) => s.mock)
-  const conn = useStore((s) => s.conn)
-  const reach = useStore((s) => s.reach)
   const toast = useStore((s) => s.toast)
   const selected = useStore((s) => s.selected)
   const fullscreen = useStore((s) => s.fullscreen)
@@ -194,7 +246,7 @@ export function App() {
           agent<span>-commander</span>
         </h1>
         {!narrow && selected !== null && !solo && <SidebarToggle />}
-        {(sheetMode || fleetHidden) && !fullscreen && <WaitingChip />}
+        {(sheetMode || fleetHidden) && !fullscreen && <WaitingChip sheet={sheetMode} />}
         {solo ? <span className={styles.spacer} /> : <Filters />}
         <UsageChips />
         <Button
@@ -209,14 +261,7 @@ export function App() {
         </Button>
         <NotifyButton />
         <SettingsMenu />
-        <div
-          className={styles.conn}
-          data-testid="connection-status"
-          data-state={conn}
-          data-reach={conn === 'open' ? undefined : reach}
-        >
-          {t(connCaption(conn, reach))}
-        </div>
+        <ConnPill sheet={sheetMode} />
       </header>
 
       <NotifyNudge />

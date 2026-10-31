@@ -70,8 +70,10 @@ a laptop or from a phone.
 - **Works on a phone** over Tailscale, and keeps working when the network does
   not: a sleeping phone's socket is noticed and replaced rather than left
   looking live, and the conversation says it is loading rather than claiming the
-  agent has said nothing. The on-screen keyboard takes the keys and nothing
-  else: the message box, the last message and any error stay above it.
+  agent has said nothing. Offline it says how long ago it last heard, and keeps
+  counting, without moving the answer buttons. The on-screen keyboard takes the
+  keys and nothing else: the message box, the last message and any error stay
+  above it.
 - **Eight colour schemes**, light and dark, every one audited for contrast, in
   English and 简体中文.
 

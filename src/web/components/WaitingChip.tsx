@@ -6,6 +6,7 @@ import { formatRelative, formatUptime } from '../lib/i18n.ts'
 import { useLang, useTranslate, type Translate } from '../hooks/useTranslate.ts'
 import type { Agent } from '../../shared/types.ts'
 import { useHop } from '../hooks/useHop.ts'
+import { useOfflineClock } from '../hooks/useOfflineClock.ts'
 import { ICON_MARK, Icon } from './ui/Icon.tsx'
 import styles from './WaitingChip.module.css'
 
@@ -19,6 +20,16 @@ function accessibleName(
     age ? translateKey('waitingChipAge', { age }) : '',
     asOf ? ` (${asOf})` : '',
   ].join('')
+}
+
+export interface WaitingChipProps {
+  /**
+   * Drawn in the phone's sheet, whose topbar is one row that must not grow.
+   * There the connection pill says since when on screen, so the chip keeps its
+   * "as of" in its accessible name only: drawn as well, it took the chip from
+   * 64px to 147px and pushed the row over (FR-NOTIFY-10).
+   */
+  sheet?: boolean
 }
 
 /**
@@ -41,10 +52,11 @@ function accessibleName(
  * **Offline it says when, not now (INV-11).** With the socket down the count is
  * a memory; the chip goes muted — the plain chip's own colours, the waiting
  * wash withdrawn — and says "as of" the last frame, the way the fleet's stale
- * caption does. It still opens the agent, which is a read: what is on the other
- * side carries its own offline state.
+ * caption does, aged by `useOfflineClock` because no frame will age it. It
+ * still opens the agent, which is a read: what is on the other side carries its
+ * own offline state.
  */
-export function WaitingChip() {
+export function WaitingChip({ sheet }: WaitingChipProps) {
   const t = useTranslate()
   const lang = useLang()
   const hop = useHop()
@@ -53,13 +65,14 @@ export function WaitingChip() {
   const exited = useStore((s) => s.exited)
   const live = useStore((s) => s.conn === 'open')
   const fleetAt = useStore((s) => s.fleetAt)
+  const now = useOfflineClock()
 
   const next = nextUp(agents, selected, exited)
   if (!next) return null
   const count = othersWaiting(agents, selected, exited).length
-  const when = formatRelative(lang, relative(fleetAt ?? undefined))
+  const when = formatRelative(lang, relative(fleetAt ?? undefined, now))
   const asOf = live ? '' : t('waitingChipAsOf', { when })
-  const age = formatUptime(lang, uptimeParts(next.lastActivityAt))
+  const age = formatUptime(lang, uptimeParts(next.lastActivityAt, now))
   const name = accessibleName(t, { count, next, age, asOf })
 
   return (
@@ -75,7 +88,7 @@ export function WaitingChip() {
       <Icon name="hand" size={ICON_MARK} />
       <b>{count}</b>
       <span aria-hidden="true">›</span>
-      {asOf && <span className={styles.asOf}>{asOf}</span>}
+      {asOf && !sheet && <span className={styles.asOf}>{asOf}</span>}
     </button>
   )
 }

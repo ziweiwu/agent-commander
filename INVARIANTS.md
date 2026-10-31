@@ -1537,9 +1537,12 @@ number you would sort by to find what is burning quota. It is now labelled as
 what it is.
 
 - `test/ui/stale-fleet.test.tsx` — nothing is said while the socket is open; a
-  caption naming how long ago the state arrived once it is not; the cards are
-  marked without being hidden; the caption is announced rather than only drawn;
-  and an empty fleet, which asserts nothing, gets no caveat
+  caption naming how long ago the state arrived once it is not, which goes on
+  ageing with no frame to redraw it (`useOfflineClock`: every 10s for the
+  first minute, then every minute, and no timer at all while connected); the
+  cards are marked without being hidden; the caption is announced rather than
+  only drawn, in whole minutes, so the ten-second redraw is not read out; and
+  an empty fleet, which asserts nothing, gets no caveat
 
 **A figure with a real denominator may be a percentage; the rest stay
 sizes.** `tokens` is still output only from a capped tail and still says so.

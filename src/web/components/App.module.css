@@ -309,6 +309,14 @@
   .sheetMode .title {
     display: none;
   }
+  /**
+   * One line, so the row cannot grow. Offline the pill says "offline · 2m ago"
+   * here rather than the whole caption, which wrapped to five lines in this
+   * row and moved the answer options 52px under a thumb (`ConnPill`).
+   */
+  .sheetMode .conn {
+    white-space: nowrap;
+  }
 }
 
 @media (max-width: 560px) {
