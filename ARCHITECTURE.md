@@ -412,9 +412,9 @@ while some tab has that agent focused *and* attached; the delegation tree is
 fetched only while the forest view is mounted, which is why it is plain HTTP
 rather than a fifth socket message — an effect that stops on unmount satisfies
 INV-4's first rule without a subscription lifecycle on the wire; and the
-fleet-wide enrichment runs only while at least one tab is connected at all — `routes.rs` reports the
-viewer count through `ServeOptions.onViewers` and `main.rs` idles
-`FleetEnricher` on it. Both are INV-4's first rule, which is about who is
+fleet-wide enrichment runs only while at least one tab is connected at all — `routes.rs` both counts the
+viewers and idles `FleetEnricher` on that count, through one serialized
+consumer (`idle_the_enricher_on_viewers`). Both are INV-4's first rule, which is about who is
 watching rather than how often. The fourth is the browser's own and runs the
 other way round: the "as of" captions are redrawn only while the socket is
 down, because then no frame comes to redraw them, and never while it is up.
@@ -768,7 +768,7 @@ their absence would otherwise read as an oversight.
   `test/poll.test.ts`.
 - **Nothing polls what nobody is watching.** The fleet enricher — one transcript
   tail per agent, every five seconds — ran with no browser connected at all.
-  `routes.rs` reports the viewer count and `main.rs` idles the enricher on it.
+  `routes.rs` counts the viewers and idles the enricher on that count.
 - **An agent that has just started is visible now, not in thirty seconds.** A
   session id the liveness check had not confirmed was skipped until the next
   30s reconcile. `registry.rs` asks the CLI immediately, and `#asked` is what
