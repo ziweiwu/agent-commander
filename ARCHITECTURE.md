@@ -240,9 +240,10 @@ and the card captions it as read from the process table (INV-11).
 `subagents.rs` reads the *other* files in that directory, and they turn the same
 count into a shape. Beside every `agent-<id>.jsonl` sits an `agent-<id>.meta.json`
 naming the delegate's type, its brief and its parent — so the whole tree is read
-rather than derived, with no transcript parsing at all (INV-13). Sidecars are
-cached by path forever: they are written once when a delegate is spawned and
-never touched again.
+rather than derived, with no transcript parsing at all (INV-13). A sidecar is
+written when its delegate is spawned and rewritten when it ends, with
+`finished` or `stoppedByUser`: one that records an ending is cached for good,
+and any other is `stat`ed each read and re-read when its mtime or length moves.
 
 ### Quota — whether anyone can keep working
 
@@ -610,9 +611,7 @@ contract any more than `~/.claude/sessions/<pid>.json` is (INV-5), and the
 forest's delegate lanes are the only thing in the app that depends on it. A change of shape degrades to
 "no tree" for that agent, which is the right direction — but it degrades
 *silently*, and an empty tree looks identical to an agent that has not
-delegated. The sidecars are also cached by path for the life of the process on
-the grounds that they are written once and never rewritten; if that ever stops
-being true, a delegate's type and brief go stale with nothing to say so.
+delegated.
 
 **2. `Registry.enrich()` (`registry.ts:183`) is a blind shallow merge with two
 callers writing different field sets.** The fleet enricher filters through
@@ -800,6 +799,13 @@ their absence would otherwise read as an oversight.
   `.github/workflows/ci.yml`, which also runs the end-to-end suite.
 - **INV-6 is enforced by the server**, not only by the browser. That was fixed
   before this document was written and the entry saying otherwise was stale.
+- **A sidecar rewritten after spawn is seen.** Fragile item 1 used to end on
+  the sidecar cache: keyed by path for the life of the process, on the grounds
+  that a sidecar is never rewritten, and "if that ever stops being true" it
+  goes stale silently. It stopped being true on 2026-10-16, when Claude Code
+  began rewriting the sidecar with `finished` as a delegate ends, and every
+  ended delegate read `quiet` for good. The cache now keeps only an ended
+  sidecar and re-reads any other when its mtime or length moves (INV-13).
 
 ## How it is checked
 

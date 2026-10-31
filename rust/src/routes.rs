@@ -1905,6 +1905,7 @@ async fn handle_socket(socket: WebSocket, app: Arc<App>) {
     off_seen();
     viewer.clear_timers();
     writer.abort();
+    mark_shown(&app);
     app.viewers.presence.gone(viewer.tab);
     app.viewers.left();
 }
@@ -1991,6 +1992,12 @@ fn subscribe_to_seen(viewer: &Arc<Viewer>, app: &Arc<App>) -> Unsubscribe {
 
 /// Fold the fleet, and the sessions open on a tab that is on screen, into the
 /// record of what has been shown (F6).
+///
+/// Called before a tab's presence changes as well as after. The open
+/// conversation's own tail folds its reply into the fleet without telling any
+/// listener, so `track_seen` never hears it; counted after the tab has left,
+/// that reply is no longer on screen anywhere and the card would call it new
+/// although the reader watched it arrive.
 fn mark_shown(app: &App) {
     let on_screen = app.viewers.presence.on_screen_sessions();
     app.viewers.seen.observe(&app.deps.source.list(), &on_screen);
@@ -2051,7 +2058,10 @@ fn answered_before_the_gate(msg: &ClientMessage, viewer: &Viewer, app: &App) -> 
             presence.on_screen(viewer.tab);
             mark_shown(app);
         }
-        ClientMessage::Pong { .. } => presence.off_screen(viewer.tab),
+        ClientMessage::Pong { .. } => {
+            mark_shown(app);
+            presence.off_screen(viewer.tab);
+        }
         ClientMessage::Present => presence.touched(viewer.tab, std::time::Instant::now()),
         ClientMessage::Ping => viewer.send(ServerMessage::Pong),
         _ => return false,
@@ -2362,6 +2372,7 @@ fn on_focus(session_id: Option<String>, viewer: &Arc<Viewer>, app: &Arc<App>) {
         st.focused = session_id.clone();
         st.last_prompt_id = None;
     }
+    mark_shown(app);
     app.viewers.presence.focus(viewer.tab, session_id.clone());
     mark_shown(app);
     let Some(session_id) = session_id else { return };
@@ -2712,7 +2723,7 @@ async fn pump_timeline(
     }
     // INV-5: a transcript that cannot be read must not kill the session view.
     let Ok(mut read) = tail.read().await else { return };
-    leave_the_prompt_count_to_the_enricher(&mut read.patch);
+    leave_window_counts_to_the_enricher(&mut read.patch);
     if !read.patch.is_empty() {
         app.deps.source.enrich(session_id, read.patch);
     }
@@ -2756,15 +2767,24 @@ async fn pump_timeline(
     }
 }
 
-/// The enricher's tail is the one that counts since the last prompt.
+/// The enricher's tail is the one that counts over a window of the transcript.
 ///
 /// This tail opened when the agent did, so its backfill starts later in the
 /// file than the enricher's, which has been reading since the server started.
-/// For a prompt between the two starts one would say "214 calls since 47m"
-/// and the other "at least 150 calls", each overwriting the other on every
-/// read — a card flipping between a clock and no clock while it sits open.
-fn leave_the_prompt_count_to_the_enricher(patch: &mut crate::sources::AgentPatch) {
+/// Every figure counted over what a tail has read therefore differs between
+/// the two. For a prompt between the two starts one would say "214 calls
+/// since 47m" and the other "at least 150 calls"; one would say "refused 2
+/// since 14:02" and the other "refused 1 since 15:40", and the same for
+/// output tokens and delegates. Each read here put its own figure back in
+/// the map without a broadcast, each enricher pass found it changed and put
+/// its figure back with one, and any fleet frame in between carried this
+/// tail's, so the card switched between the two while it sat open. The open
+/// agent's counts move at the enricher's pace, like every other card's.
+fn leave_window_counts_to_the_enricher(patch: &mut crate::sources::AgentPatch) {
     patch.since_prompt = None;
+    patch.refusals = None;
+    patch.tokens = None;
+    patch.subagents = None;
 }
 
 /// The prompt as the pane shows it, where the transcript alone cannot say.
@@ -6939,6 +6959,108 @@ mod tests {
         watch.until_written_or(TICK).await;
         assert!(started.elapsed() >= TICK, "a closed channel ended the wait early");
         assert!(watch.writes.is_none(), "a watch with no more events was kept");
+    }
+
+    /// Where the open conversation stood when the reader opened it.
+    const OPENED_AT: i64 = 1_786_600_000_000;
+    /// The reply the reader then watched arrive.
+    const WATCHED_REPLY_AT: i64 = OPENED_AT + 60_000;
+
+    /// The harness agent open on a tab that is on screen, and a reply arriving
+    /// the way the open conversation's own tail delivers one: drawn on that
+    /// tab, and folded into the fleet without a word to any listener, as
+    /// `LiveSource::enrich` does with the detail tail's patch.
+    async fn watching_a_reply_arrive(h: &Harness) -> Client {
+        transcript_moves_to(&h.source, OPENED_AT);
+        let mut client = open(h.port).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "seen")).await.is_some());
+        send_json(&mut client, serde_json::json!({ "type": "pong", "visible": true })).await;
+        send_json(&mut client, serde_json::json!({ "type": "focus", "sessionId": SESSION })).await;
+        read_so_far(&mut client).await;
+        h.source.agents.lock().unwrap()[0].last_activity_at = Some(WATCHED_REPLY_AT);
+        client
+    }
+
+    /// F6: going back to the list first counts what the conversation showed,
+    /// so the reply the reader watched arrive is not "new" on its card.
+    #[tokio::test]
+    async fn inv11_leaving_for_another_session_counts_the_reply_it_showed() {
+        let h = plain(FakePanes::new()).await;
+        let mut client = watching_a_reply_arrive(&h).await;
+        send_json(&mut client, serde_json::json!({ "type": "focus", "sessionId": null })).await;
+        read_so_far(&mut client).await;
+        assert_eq!(h.app.viewers.seen.current()[SESSION], WATCHED_REPLY_AT);
+    }
+
+    /// F6: hiding the tab first counts what it showed while it was on screen.
+    #[tokio::test]
+    async fn inv11_hiding_the_tab_counts_the_reply_it_showed() {
+        let h = plain(FakePanes::new()).await;
+        let mut client = watching_a_reply_arrive(&h).await;
+        send_json(&mut client, serde_json::json!({ "type": "pong", "visible": false })).await;
+        read_so_far(&mut client).await;
+        assert_eq!(h.app.viewers.seen.current()[SESSION], WATCHED_REPLY_AT);
+    }
+
+    /// How often a test looks again for a socket the server is still closing.
+    const TEARDOWN_POLL: Duration = Duration::from_millis(10);
+
+    /// F6: closing the socket first counts what its tab showed.
+    #[tokio::test]
+    async fn inv11_closing_the_socket_counts_the_reply_it_showed() {
+        let h = plain(FakePanes::new()).await;
+        let client = watching_a_reply_arrive(&h).await;
+        drop(client);
+        let deadline = tokio::time::Instant::now() + REPLY_DEADLINE;
+        while h.app.viewers.count() > 0 && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(TEARDOWN_POLL).await;
+        }
+        assert_eq!(h.app.viewers.count(), 0, "the socket was never torn down");
+        assert_eq!(h.app.viewers.seen.current()[SESSION], WATCHED_REPLY_AT);
+    }
+
+    /// What the open conversation's tail says it is doing, beside the counts
+    /// it made over its own window of the transcript.
+    const WINDOWED_ACTIVITY: &str = "reading routes.rs";
+
+    /// A detail tail whose window counted a refusal, tokens, a delegate and
+    /// calls since the prompt.
+    struct WindowCountingTail;
+
+    #[async_trait]
+    impl TailApi for WindowCountingTail {
+        async fn read(&mut self) -> anyhow::Result<TailRead> {
+            let patch = AgentPatch {
+                activity: Some(WINDOWED_ACTIVITY.into()),
+                refusals: Some(crate::types::Refusals { count: 1, last_at: 2, since: 1 }),
+                tokens: Some(4_096),
+                subagents: Some(1),
+                since_prompt: Some(Some(crate::types::SincePrompt { at: None, calls: 3 })),
+                ..Default::default()
+            };
+            Ok(TailRead { patch, first: true, ..Default::default() })
+        }
+    }
+
+    /// INV-11: a figure counted over a window belongs to the enricher's tail,
+    /// which has read the file since the server started. The detail tail's
+    /// window opens later, and its smaller count overwrote the card's between
+    /// two enricher passes, so the open agent's refusals and tokens flipped.
+    #[tokio::test]
+    async fn inv11_the_open_conversation_leaves_window_counts_to_the_enricher() {
+        let parts = harness_parts(FakePanes::new());
+        let tails = Arc::new(|_agent: &Agent| Some(Box::new(WindowCountingTail) as Box<dyn TailApi>));
+        let port = serve_with_tails(&parts, tails).await;
+        let mut client = open(port).await;
+        send_json(&mut client, serde_json::json!({ "type": "focus", "sessionId": SESSION })).await;
+        assert!(next_msg(&mut client, |m| is_type(m, "timeline")).await.is_some());
+        let patches = parts.source.patches.lock().unwrap();
+        let (_, patch) = patches.iter().find(|(id, _)| id == SESSION).expect("the detail tail enriched the card");
+        assert_eq!(patch.activity.as_deref(), Some(WINDOWED_ACTIVITY), "what is not a count still reaches the card");
+        assert_eq!(patch.refusals, None);
+        assert_eq!(patch.tokens, None);
+        assert_eq!(patch.subagents, None);
+        assert_eq!(patch.since_prompt, None);
     }
 }
 

@@ -128,7 +128,7 @@ to `47m · 214 calls` (or `≥214 calls`), with the whole sentence on hover.
 ### Delegates
 
 Every card carries a line about what the agent handed out — `4 delegates ·
-1 active · 2 quiet · 1 done` — and **Show delegates** opens the tree beneath it,
+1 active · 2 quiet · 1 ended` — and **Show delegates** opens the tree beneath it,
 nested as deep as the work actually goes. Claude Code writes the graph down, one
 small file beside each subagent's transcript naming its type, its brief and its
 parent, so this is read rather than guessed at.
@@ -136,16 +136,18 @@ parent, so this is read rather than guessed at.
 Each delegate carries one of three states. They are three rather than two on
 purpose:
 
-- **done** — something recorded the ending. In practice that means *you stopped
-  it*: a delegate that finished normally leaves no record saying so.
+- **ended** — Claude Code recorded the ending: the delegate left `running`, or
+  *you stopped it*, which the row also says. Ended is not succeeded: a delegate
+  that failed is recorded the same way, so read what it did beside it.
 - **active · inferred** — its transcript grew recently and the parent is working.
   A good guess, and it says that it is one.
 - **quiet** — nothing has been written for a while and nothing recorded an
-  ending. It may have finished; it may have died. Nothing here can tell, so it
-  says neither.
+  ending. It may have died, or finished under a Claude Code from before
+  2026-10-16, which did not record endings. Nothing here can tell, so it says
+  neither.
 
-Because almost everything ends up **quiet**, the state cannot be the only thing
-on the row — a tree of seven identical `quiet` rows says nothing. So each
+Because neither **quiet** nor **ended** says what happened, the state cannot be
+the only thing on the row — a tree of seven identical rows says nothing. So each
 delegate also shows *what it did*: `29 calls over 12m`, counted from its own
 transcript. That is a measurement, not a summary, and it is what separates a
 delegate that worked for twelve minutes from one that died on its first call. A

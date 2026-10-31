@@ -87,7 +87,7 @@ const EN = {
   delegatesMany: '{n} delegates',
   delegateActive: 'active',
   delegateQuiet: 'quiet',
-  delegateDone: 'done',
+  delegateDone: 'ended',
   delegateGuess: 'inferred',
   delegateCalls: '{n} calls',
   delegateCallsOver: '{n} calls over {t}',
@@ -96,8 +96,9 @@ const EN = {
   delegateGuessTitle:
     'A guess: its transcript grew recently and its parent is busy. Nothing reported this.',
   delegateQuietTitle:
-    'It stopped writing. An agent that finished and one that died both do that, so this is not "done".',
-  delegateDoneTitle: 'Evidence of an ending: a recorded result, or you stopped it.',
+    'It stopped writing. An agent that finished and one that died both do that, so this is not "ended".',
+  delegateDoneTitle:
+    'Claude Code recorded that it ended — finished or failed, not necessarily succeeded.',
   delegateStopped: 'you stopped it',
   delegateOrphan: 'parent not found',
   delegateOrphanTitle:
@@ -127,7 +128,7 @@ const EN = {
   delegatesHideRest: 'Hide the {n} not moving',
   stallQuestion: 'Nothing here has moved for {t} — still working?',
   stallQuestionTitle:
-    'This agent is quiet because it delegated, and every delegate is quiet too. Quiet is not "finished" — nothing recorded an ending. Worth a look.',
+    'This agent is quiet because it delegated, and no delegate is moving. A quiet one may still be working, and an ended one may have failed. Worth a look.',
   trailLabel: 'Wrote for {worked}, silent for {silent}',
   statusInferredTitle:
     "Worked out from whether this agent's terminal has produced output lately. It " +
@@ -620,7 +621,7 @@ const ZH: Record<Key, string> = {
   delegateEffortTitle: '这是从它的记录中量出来的「做了多少」，不是「结果如何」：工具调用次数，以及首末两条记录之间的跨度。',
   delegateGuessTitle: '这是推测：它的记录最近有增长，且其父代理正在运行。没有任何一方如此报告。',
   delegateQuietTitle: '它停止了写入。已完成和已死亡的代理都会如此，所以这不等于「已结束」。',
-  delegateDoneTitle: '有结束的证据：记录中有结果，或由你停止。',
+  delegateDoneTitle: 'Claude Code 记录了它已结束——完成或失败，不一定成功。',
   delegateStopped: '由你停止',
   delegateOrphan: '未找到父节点',
   delegateOrphanTitle:
@@ -650,7 +651,7 @@ const ZH: Record<Key, string> = {
   delegatesHideRest: '隐藏 {n} 个未在推进的',
   stallQuestion: '已有 {t} 没有任何动静——还在运行吗？',
   stallQuestionTitle:
-    '此代理因为委派而静默，且每个子代理也都静默。静默不等于「已完成」——没有任何记录表明它结束了。值得看一眼。',
+    '此代理因为委派而静默，且没有任何子代理在推进。静默的可能仍在运行，已结束的也可能失败了。值得看一眼。',
   trailLabel: '写入 {worked}，静默 {silent}',
   statusInferredTitle:
     '根据该助手终端近期是否有输出推断得出。它不像 Claude Code 那样自报状态，因此永远不会显示“等待中”——停在提示符前和已经完成，从外部看是一样的。',

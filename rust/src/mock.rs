@@ -2596,6 +2596,7 @@ fn node(agent_id: &str, description: &str, wrote_ms_ago: i64, now: i64) -> Subag
         state: SubagentState::Quiet,
         state_inferred: None,
         stopped_by_user: None,
+        finished: None,
         reparented: None,
         children: Vec::new(),
     }
@@ -2705,6 +2706,7 @@ fn kissa_listening_list(now: i64) -> SubagentNode {
         parent_agent_id: Some("a69275682c401ef83".into()),
         bytes: 96_000,
         state: SubagentState::Done,
+        finished: Some(true),
         ..node(
             "ab481603df0bb2d1d",
             "Cross-check opening hours against the venues",
@@ -2717,6 +2719,7 @@ fn kissa_listening_list(now: i64) -> SubagentNode {
         parent_agent_id: Some("a9b1181eab51efaf0".into()),
         bytes: 244_000,
         state: SubagentState::Done,
+        finished: Some(true),
         children: vec![opening_hours],
         ..node(
             "a69275682c401ef83",

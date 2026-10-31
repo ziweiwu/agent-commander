@@ -317,22 +317,30 @@ the default for an unrecognised kind is deny.
   that was on screen had it open, and the Idle heading MUST count those cards
   (`Idle 7 · 2 new`). The record MUST live on the server, so opening an agent
   on the laptop clears the mark on the phone; a hidden tab MUST NOT move it;
-  and the first frame carrying a session's transcript time MUST seed it as
-  backlog, so a fresh server shows no marks. Busy, waiting, inferred and
-  terminal cards, and every card while the fleet is stale, MUST carry no mark,
-  and it MUST be drawn in `--text` or `--dim`, never amber. The wording MUST be
-  "new since opened in this app", never "unread", "done" or "ready": the
-  reader may have followed the agent in tmux, and all this app knows is what
-  it showed. **(INV-11, INV-14)** *`seen::tests`,
+  leaving a session — another focus, the tab hidden, or the socket closed —
+  MUST first count what it showed up to that moment, so a reply the reader
+  watched arrive is never marked; and the first frame carrying a session's
+  transcript time MUST seed it as backlog, so a fresh server shows no marks.
+  Busy, waiting, inferred and terminal cards, and every card while the fleet
+  is stale, MUST carry no mark, and it MUST be drawn in `--text` or `--dim`,
+  never amber. The wording MUST be "new since opened in this app", never
+  "unread", "done" or "ready": the reader may have followed the agent in
+  tmux, and all this app knows is what it showed. **(INV-11, INV-14)** *`seen::tests`,
   `routes::inv11_an_open_session_is_shown_only_while_its_tab_is_on_screen`,
+  `routes::inv11_leaving_for_another_session_counts_the_reply_it_showed`,
+  `routes::inv11_hiding_the_tab_counts_the_reply_it_showed`,
+  `routes::inv11_closing_the_socket_counts_the_reply_it_showed`,
   `test/ui/new-since.test.tsx`, `e2e/new-since.spec.ts`.*
 - **FR-CARD-11** — The fold MUST count the tool calls auto mode refused, over
   the window of the transcript that was read, with the age of the newest and
   where that window starts: "auto mode refused 3 actions · last 4m ago (since
   14:02)". The same caveat `tokens` carries, for the same reason — a backfill
-  that starts part-way through a session cannot count all of it. A refusal
-  MUST NOT push (INV-14). **(INV-11)**
+  that starts part-way through a session cannot count all of it. The count,
+  like `tokens`, MUST be the fleet enricher's alone, so an agent left open
+  reads one figure rather than its own tail's shorter window by turns. A
+  refusal MUST NOT push (INV-14). **(INV-11)**
   *`test/ui/card-usage.test.tsx`,
+  `routes::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`,
   `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
 
 ### 3.3 Delegates
@@ -341,19 +349,24 @@ the default for an unrecognised kind is deny.
   writes beside each subagent transcript, never derived from timing or naming.
   **(INV-13)** *`test/delegation-claim.test.ts`, `test/ui/fleet-trees.test.tsx`.*
 - **FR-DEL-2** — Each card MUST summarise what the agent handed out (`4
-  delegates · 1 active · 2 quiet · 1 done`) and MUST be able to open the tree
+  delegates · 1 active · 2 quiet · 1 ended`) and MUST be able to open the tree
   beneath it, nested as deep as the work goes.
 - **FR-DEL-3** — A delegate MUST carry exactly one of three states, and the
   three MUST stay distinct:
-  - **done** — something recorded an ending. In practice: a human stopped it.
+  - **done**, drawn as **ended** — Claude Code recorded an ending in the
+    sidecar: `finished` (it left `running`) or `stoppedByUser` (a human stopped
+    it). It means ended, not succeeded: `finished` is written for a delegate
+    that failed too, so the app MUST NOT say "succeeded". A sidecar rewritten
+    after the tree was first read MUST still be seen. **(INV-13)**
   - **active · inferred** — its transcript grew recently and the parent is
     working. A guess that says it is one.
   - **quiet** — nothing written for a while, nothing recorded an ending. It may
     have finished; it may have died. The app MUST say neither. **(INV-13)**
-- **FR-DEL-4** — Because almost every delegate ends up `quiet`, each row MUST
-  also show a *measurement* of what it did (`29 calls over 12m`) counted from
-  its own transcript. A delegate whose transcript cannot be read MUST show no
-  numbers rather than zeros — a zero is a confident claim that it did nothing.
+- **FR-DEL-4** — Because neither `quiet` nor `done` says what happened, each
+  row MUST also show a *measurement* of what it did (`29 calls over 12m`)
+  counted from its own transcript. A delegate whose transcript cannot be read
+  MUST show no numbers rather than zeros — a zero is a confident claim that it
+  did nothing.
 - **FR-DEL-5** — A delegate whose parent is missing from disk MUST be shown at
   the top level and marked, never dropped along with everything beneath it.
 - **FR-DEL-6** — An agent whose CLI keeps no transcript MUST report that the app
