@@ -7,7 +7,7 @@ import { closeAgentById } from '../store/transport.ts'
 import type { Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
-import { relative } from '../lib/format.ts'
+import { relative, relativeByMinute, type Relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
 import { useOfflineClock } from '../hooks/useOfflineClock.ts'
 import { isNewSinceOpened } from '../lib/newSince.ts'
@@ -262,20 +262,25 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
  * "Not connected — showing the last state received 2m ago."
  *
  * Its own component so that the redraw `useOfflineClock` causes while the
- * socket is down repaints this line and not every card under it. It stays a
- * status although its text now changes — every ten seconds in the first
- * minute, once a minute after — because the age is what a reader needs to
- * decide whether to trust the cards, and saying so as it changes is true.
+ * socket is down repaints this line and not every card under it.
+ *
+ * Said twice, because it is a status and its age now moves. On screen it counts
+ * seconds, redrawn every ten; a polite live region announces every change, so
+ * that copy is `aria-hidden`, and what a screen reader hears is the same
+ * sentence in whole minutes (`relativeByMinute`) — once on the drop, then once
+ * a minute.
  */
 function StaleCaption({ fleetAt }: { fleetAt: number | null }) {
   const t = useTranslate()
   const lang = useLang()
   const now = useOfflineClock()
+  const lastFrameAt = fleetAt ?? undefined
+  const caption = (age: Relative | null): string =>
+    fleetAt ? t('staleFleet', { when: formatRelative(lang, age) }) : t('staleFleetNoTime')
   return (
     <p className={styles.stale} data-testid="fleet-stale" role="status">
-      {fleetAt
-        ? t('staleFleet', { when: formatRelative(lang, relative(fleetAt, now)) })
-        : t('staleFleetNoTime')}
+      <span aria-hidden="true">{caption(relative(lastFrameAt, now))}</span>
+      <span className="sr-only">{caption(relativeByMinute(lastFrameAt, now))}</span>
     </p>
   )
 }

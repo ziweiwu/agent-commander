@@ -23,6 +23,18 @@ export function relative(at: number | undefined, now = Date.now()): Relative | n
   return { unit: 'day', n: Math.round(hours / 24) }
 }
 
+/**
+ * `relative`, with its seconds band read as "now": an age in whole minutes.
+ *
+ * For text a screen reader speaks each time it changes. A caption aged every
+ * ten seconds would otherwise be read out five times in its first minute, saying
+ * nothing a listener acts on that "just now" does not.
+ */
+export function relativeByMinute(since: number | undefined, now = Date.now()): Relative | null {
+  const age = relative(since, now)
+  return age?.unit === 'sec' ? { unit: 'now', n: 0 } : age
+}
+
 export interface Uptime {
   unit: 'day' | 'hour' | 'min'
   a: number

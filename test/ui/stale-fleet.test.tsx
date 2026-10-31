@@ -149,6 +149,26 @@ describe('INV-11 the age keeps counting while the socket stays down', () => {
     expect(screen.getByTestId('fleet-stale').textContent).toMatch(/received 1m ago/)
   })
 
+  it('announces in minute steps, so the ten-second redraw is not read out', () => {
+    const announced = (region: Element): string =>
+      [...region.childNodes]
+        .filter((node) => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true'))
+        .map((node) => node.textContent)
+        .join('')
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], conn: 'open', fleetAt: Date.now() })
+    shell()
+    act(() => useStore.setState({ conn: 'closed' }))
+    act(() => vi.advanceTimersByTime(10_000))
+    const region = screen.getByRole('status')
+    const atTen = { heard: announced(region), seen: region.textContent }
+    for (let s = 10; s < 50; s += 10) act(() => vi.advanceTimersByTime(10_000))
+    expect(announced(screen.getByRole('status'))).toBe(atTen.heard)
+    expect(screen.getByRole('status').textContent).not.toBe(atTen.seen)
+    expect(screen.getByRole('status').textContent).toMatch(/received 50s ago/)
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(announced(screen.getByRole('status'))).toMatch(/received 1m ago/)
+  })
+
   it('runs no timer while connected, and stops the moment the socket opens', () => {
     renderHook(() => useOfflineClock())
     expect(vi.getTimerCount()).toBe(0)
