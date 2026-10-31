@@ -108,8 +108,27 @@ type AgentNotice = (NoticeKind, Option<String>, String);
 /// a person repeating themselves.
 const SAME_MESSAGE_WINDOW_MS: i64 = 120_000;
 
+/// Which record a person's words were drawn from, which decides what a later
+/// record of the same words can be.
+///
+/// Only an attachment the turn read and a prompt dequeued when a turn ended
+/// can be two records of one message. A typed prompt and a later attachment
+/// of the same words, or two attachments, are the person saying it twice, and
+/// hiding either left this app's copy of it reading "not delivered".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaidAs {
+    /// Typed at the prompt, or unlabelled: never a second record of anything.
+    Prompted,
+    /// A `user` record with `promptSource: "queued"`.
+    Dequeued,
+    /// A `queued_command` attachment the turn read at its next step.
+    MidTurn,
+    /// Already paired with its other record, so it pairs with nothing else.
+    Matched,
+}
+
 /// The last thing the person was drawn saying to this agent: the words with
-/// whitespace folded, when, and whether the turn read it mid-turn.
+/// whitespace folded, when, and from which record.
 ///
 /// Held by the tail across reads, because the two records of one message can
 /// land in different reads.
@@ -117,13 +136,26 @@ const SAME_MESSAGE_WINDOW_MS: i64 = 120_000;
 struct LastSaid {
     words: String,
     at: i64,
-    mid_turn: bool,
+    said_as: SaidAs,
 }
 
 impl LastSaid {
-    fn is_the_same(&self, words: &str, said_at: i64) -> bool {
-        self.words == folded(words) && (said_at - self.at).abs() <= SAME_MESSAGE_WINDOW_MS
+    /// Whether these words, recorded this way, are this message's other
+    /// record: a dequeued prompt and an attachment, either way round, of the
+    /// same words close together.
+    fn is_the_other_record(&self, words: &str, context: EventContext) -> bool {
+        let pairs = matches!(
+            (self.said_as, context.said_as),
+            (SaidAs::Dequeued, SaidAs::MidTurn) | (SaidAs::MidTurn, SaidAs::Dequeued)
+        );
+        pairs && self.words == folded(words) && (context.at - self.at).abs() <= SAME_MESSAGE_WINDOW_MS
     }
+}
+
+/// How a `user` record carries a person's words: dequeued, or prompted.
+fn said_as(rec: &Value) -> SaidAs {
+    let dequeued = rec.get("promptSource").and_then(Value::as_str) == Some("queued");
+    if dequeued { SaidAs::Dequeued } else { SaidAs::Prompted }
 }
 
 /// Text with every run of whitespace folded to one space, for comparing two
@@ -1082,12 +1114,12 @@ impl RecordSets {
 
 /// What every event from one record shares: when it happened, whether it
 /// belongs to a sidechain — a subagent's own conversation — rather than to the
-/// one the user is reading, and whether the turn read it mid-turn.
+/// one the user is reading, and which kind of record carried the words.
 #[derive(Clone, Copy)]
 struct EventContext {
     at: i64,
     sidechain: Option<bool>,
-    mid_turn: Option<bool>,
+    said_as: SaidAs,
 }
 
 /// What one batch of lines accumulates: the result being built, the running
@@ -1156,7 +1188,7 @@ impl Batch<'_> {
     /// anything. A delegate's conversation is its own, and moves neither.
     fn push_mid_turn(&mut self, rec: &Value, prompt: &Value) {
         let said = words_of(prompt);
-        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), mid_turn: Some(true) };
+        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), said_as: SaidAs::MidTurn };
         if !self.push_speech(&said, context) || context.sidechain.is_some() {
             return;
         }
@@ -1169,15 +1201,26 @@ impl Batch<'_> {
     /// A prompt dequeued when a turn ended that repeats, close behind, the
     /// message the turn already read: the same message, drawn, timed and
     /// described where it was first read, so this record adds nothing.
-    fn repeats_a_mid_turn_message(&self, rec: &Value) -> bool {
-        let dequeued = rec.get("type").and_then(Value::as_str) == Some("user")
-            && rec.get("promptSource").and_then(Value::as_str) == Some("queued");
-        let Some(last) = self.out.last_said.as_ref().filter(|last| dequeued && last.mid_turn) else {
+    fn repeats_a_mid_turn_message(&mut self, rec: &Value) -> bool {
+        let is_user = rec.get("type").and_then(Value::as_str) == Some("user");
+        if !is_user || said_as(rec) != SaidAs::Dequeued {
             return false;
-        };
+        }
         let content = rec.get("message").and_then(|message| message.get("content"));
         let said = content.map(words_of).unwrap_or_default();
-        spoken(&said).is_some_and(|words| last.is_the_same(&words, record_time(rec)))
+        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), said_as: SaidAs::Dequeued };
+        spoken(&said).is_some_and(|words| self.pairs_with_the_last(&words, context))
+    }
+
+    /// Whether these words are the other record of the message last drawn,
+    /// which is then spent: one record pairs with one other, never two.
+    fn pairs_with_the_last(&mut self, words: &str, context: EventContext) -> bool {
+        let Some(last) = self.out.last_said.as_mut() else { return false };
+        if !last.is_the_other_record(words, context) {
+            return false;
+        }
+        last.said_as = SaidAs::Matched;
+        true
     }
 
     /// Records that are not conversation but do carry session state. They are
@@ -1262,7 +1305,7 @@ impl Batch<'_> {
             self.out.patch.model = Some(model.to_string());
         }
         let content = message.and_then(|msg| msg.get("content"));
-        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), mid_turn: None };
+        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), said_as: said_as(rec) };
         if kind == "user" {
             self.push_user_prompt(rec, content, context);
         } else if kind == "assistant" {
@@ -1295,19 +1338,17 @@ impl Batch<'_> {
     }
 
     /// A person's words, drawn as "you". False when there were none to draw,
-    /// or when the turn read words it had just been drawn saying.
+    /// or when they are the other record of the message last drawn.
     ///
     /// A typed slash command is still the person speaking; it is only spelled
     /// in markup on disk, and `spoken` reads it as the command it ran.
     fn push_speech(&mut self, said: &str, context: EventContext) -> bool {
         let Some(text) = spoken(said) else { return false };
-        let last = self.out.last_said.as_ref();
-        if context.mid_turn.is_some() && last.is_some_and(|last| last.is_the_same(&text, context.at)) {
+        if self.pairs_with_the_last(&text, context) {
             return false;
         }
         if context.sidechain.is_none() {
-            let mid_turn = context.mid_turn.is_some();
-            self.out.last_said = Some(LastSaid { words: folded(&text), at: context.at, mid_turn });
+            self.out.last_said = Some(LastSaid { words: folded(&text), at: context.at, said_as: context.said_as });
         }
         self.out.events.push(TimelineEvent {
             id: (self.seq)(),
@@ -1320,7 +1361,7 @@ impl Batch<'_> {
             tokens_before: None,
             tokens_after: None,
             tool_use_id: None,
-            mid_turn: context.mid_turn,
+            mid_turn: (context.said_as == SaidAs::MidTurn).then_some(true),
         });
         true
     }
@@ -4041,6 +4082,35 @@ mod tests {
         let subject = crate::describe::describe(TYPED_MID_TURN);
         assert!(subject.is_some());
         assert_eq!(read.patch.description, subject);
+    }
+
+    /// The same short reply typed at the prompt and then again into the
+    /// working agent is said twice, and both are drawn. Only a dequeued prompt
+    /// can be the same message as an attachment; hiding the second "yes" left
+    /// this app's copy of it reading "not delivered".
+    #[test]
+    fn inv11_the_same_words_typed_and_then_read_mid_turn_are_two_messages() {
+        let mut reply = read_mid_turn(json!("yes"));
+        reply["timestamp"] = json!("2026-08-14T01:45:30.000Z");
+        let typed_first = typed("yes", READ_MID_TURN_AT);
+        let out = parse(&[typed_first.trim_end(), &reply.to_string()]);
+        assert_eq!(user_times(&out.events).len(), 2, "{:?}", out.events);
+    }
+
+    /// Two mid-turn messages of the same words are each their own attachment,
+    /// so each is drawn; and a dequeued prompt already matched to one
+    /// attachment matches no other.
+    #[test]
+    fn inv11_two_messages_read_mid_turn_with_the_same_words_are_both_drawn() {
+        let first = read_mid_turn(json!("yes")).to_string();
+        let mut second = read_mid_turn(json!("yes"));
+        second["timestamp"] = json!("2026-08-14T01:45:30.000Z");
+        let second = second.to_string();
+        assert_eq!(user_times(&parse(&[&first, &second]).events).len(), 2);
+
+        let dequeued_first = dequeued("yes", "2026-08-14T01:44:50.000Z");
+        let out = parse(&[&dequeued_first, &first, &second]);
+        assert_eq!(user_times(&out.events).len(), 2, "{:?}", out.events);
     }
 }
 

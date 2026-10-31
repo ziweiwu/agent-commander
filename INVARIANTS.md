@@ -1886,7 +1886,10 @@ the card's subject as a typed prompt does. It confirms the echo exactly as any
 `user` event does: `reconcile` is unchanged, and nothing is ever resent. One
 message recorded both ways within 120 s — an attachment and a dequeued
 `queued` prompt, in either order and across reads — is drawn once, at the
-first. Another agent's message and a background task's end are absorbed the
+first, and each record pairs with one other at most. Nothing else is folded:
+the same words typed at the prompt and then read mid-turn, or read mid-turn
+twice, are said twice and drawn twice, or the second copy this app sent would
+read "not delivered". Another agent's message and a background task's end are absorbed the
 same way and stay drawn as nothing here, never as **you**.
 
 - `transcript::inv11_a_message_read_mid_turn_is_a_message_the_reader_can_see`
@@ -1895,6 +1898,8 @@ same way and stay drawn as nothing here, never as **you**.
   and the paste envelope read as typed
 - `transcript::inv11_a_message_recorded_twice_is_drawn_once` and
   `inv11_a_message_recorded_twice_across_two_reads_is_drawn_once`
+- `transcript::inv11_the_same_words_typed_and_then_read_mid_turn_are_two_messages`
+  and `inv11_two_messages_read_mid_turn_with_the_same_words_are_both_drawn`
 - `transcript::inv11_since_prompt_restarts_at_a_message_read_mid_turn` — the
   clock and the subject
 - `transcript::inv11_a_mid_turn_attachment_from_an_agent_or_a_task_is_not_you`

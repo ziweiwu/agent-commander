@@ -456,7 +456,9 @@ over the list with a back control; on a wide one, a second column.
   Claude Code files such a message as a `queued_command` attachment of `human`
   origin rather than as a `user` record, and the card's subject and "since your
   prompt" clock MUST move with it as with a typed prompt. The same words
-  recorded again as a dequeued prompt within 120 s MUST be drawn once. Another
+  recorded again as a dequeued prompt within 120 s MUST be drawn once; the same
+  words typed and then read mid-turn, or read mid-turn twice, MUST be drawn
+  twice. Another
   agent's or a task's attachment MUST NOT be drawn as **you**. **(INV-11)**
   *`transcript::inv11_a_message_read_mid_turn_is_a_message_the_reader_can_see`,
   `transcript::inv11_a_message_recorded_twice_is_drawn_once`,
