@@ -1080,9 +1080,13 @@ primitive the message box uses, and the paste path has never had a busy guard �
 sending "use opus instead" as a chat message to a working agent is a designed
 feature, and is exactly what the composer's Queue mode is. Forbidding the
 select while permitting the message was one door open and one shut onto the
-same prompt. What it costs is immediacy: the CLI reads input that arrives
-mid-turn when the turn ends, so the caller is told the change was `queued` and
-the interface says so rather than implying it has landed.
+same prompt. What it costs is immediacy: the CLI runs a slash command that
+arrives mid-turn when the turn ends, so the caller is told the change was
+`queued` and the interface says so rather than implying it has landed. A plain
+message is different: the CLI reads input that arrives mid-turn at its next
+step and records it then, as an attachment rather than a prompt; the
+conversation shows it as read mid-turn (INV-11). None of the 294 such
+attachments recorded on this machine in 30 days was a slash command.
 
 **Shift+Tab is the other exception, because it does not type.** It sends
 `BTab`, a control key Claude Code handles as a toggle wherever it is, exactly
@@ -1845,6 +1849,41 @@ typed and queued prompts, and records older than `origin`.
   — drawn as nothing, while a person typing beside them is still "you"
 - `test/ui/message-notices.test.tsx` — each notice in both languages, the
   disclosure closed by default and drawn only when there is something in it
+
+**And a message the agent read is a message the reader can see, however Claude
+Code filed it.** A message typed into a working agent — at the terminal, or in
+this app's Queue mode — is read at the turn's next step, and Claude Code 2.1.284
+and later records it then as an `attachment` of type `queued_command`, never as
+a `user` record: all 130 of `human` origin over six days on this machine, two
+of which also had a matching prompt. The chat dropped every one with the other
+attachments, so the agent answered something the reader never saw, and this
+app's own echo of it read "queued" and then "not delivered" — the mark that
+invites a second copy to a live agent (INV-2).
+
+`describe::read_mid_turn` admits `human` origin in `prompt` mode only; the
+attachment's `prompt` is drawn as **you** at the record's time with `midTurn`
+set, captioned *read mid-turn*, and it restarts "since your prompt" and moves
+the card's subject as a typed prompt does. It confirms the echo exactly as any
+`user` event does: `reconcile` is unchanged, and nothing is ever resent. One
+message recorded both ways within 120 s — an attachment and a dequeued
+`queued` prompt, in either order and across reads — is drawn once, at the
+first. Another agent's message and a background task's end are absorbed the
+same way and stay drawn as nothing here, never as **you**.
+
+- `transcript::inv11_a_message_read_mid_turn_is_a_message_the_reader_can_see`
+  and `inv11_a_message_read_mid_turn_reads_as_typed_however_it_is_spelled` —
+  the words, the time, the mark and the card's line; blocks beside a picture
+  and the paste envelope read as typed
+- `transcript::inv11_a_message_recorded_twice_is_drawn_once` and
+  `inv11_a_message_recorded_twice_across_two_reads_is_drawn_once`
+- `transcript::inv11_since_prompt_restarts_at_a_message_read_mid_turn` — the
+  clock and the subject
+- `transcript::inv11_a_mid_turn_attachment_from_an_agent_or_a_task_is_not_you`
+- `mock::tests::inv11_a_message_sent_to_a_working_fixture_is_read_mid_turn` —
+  `--mock` reads a send to a working fixture the same way
+- `test/ui/delivery.test.tsx` (confirmed by the agent reading it mid-turn),
+  `test/ui/message-mid-turn.test.tsx` (the caption in both languages) and
+  `e2e/chat.spec.ts` (queued, then read mid-turn, once)
 
 **A tool call says how it ended, from the fields written to say so.** A row
 used to name what the agent *asked* for and nothing more: an edit read as a

@@ -386,9 +386,12 @@ export interface AppState {
  * at which a user decides the app is broken.
  *
  * It is measured only across time the agent was **not** working. Claude Code
- * writes a prompt into its transcript when it processes it, so a message queued
- * behind a turn cannot be confirmed until that turn ends — and turns run for
- * minutes. Counting this down through one marked every correctly-queued message
+ * writes a message into its transcript when it reads it, not when it arrives.
+ * A message the turn reads mid-turn is recorded as an attachment at that
+ * moment, which the server sends as a `user` event marked `midTurn`; one the
+ * turn leaves until it ends is dequeued then, as a `user` record. Either
+ * confirms the echo through `reconcile`, but the second can be minutes away.
+ * Counting this down through a turn marked every correctly-queued message
  * "not delivered", which is the default path for the composer's Queue mode.
  */
 const CONFIRM_TIMEOUT_MS = 12_000

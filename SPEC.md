@@ -435,8 +435,19 @@ over the list with a back control; on a wide one, a second column.
   *`test/ui/delivery.test.tsx`.*
 - **FR-CHAT-4** — A message sent to a **working** agent MUST read *queued* and
   MUST NOT start its undelivered countdown until the agent stops. Claude Code
-  writes a prompt down when it *processes* it, so a message waiting behind a long
-  turn is waiting, not late. *`test/ui/delivery.test.tsx`.*
+  writes a message down when it *reads* it, so a message waiting behind a long
+  turn is waiting, not late. The agent reading it mid-turn MUST confirm it as
+  any echo is confirmed (FR-CHAT-18). *`test/ui/delivery.test.tsx`.*
+- **FR-CHAT-18** — A message the agent read **mid-turn** MUST be drawn as
+  **you**, at the moment it was read, captioned *read mid-turn* / *回合中读取*.
+  Claude Code files such a message as a `queued_command` attachment of `human`
+  origin rather than as a `user` record, and the card's subject and "since your
+  prompt" clock MUST move with it as with a typed prompt. The same words
+  recorded again as a dequeued prompt within 120 s MUST be drawn once. Another
+  agent's or a task's attachment MUST NOT be drawn as **you**. **(INV-11)**
+  *`transcript::inv11_a_message_read_mid_turn_is_a_message_the_reader_can_see`,
+  `transcript::inv11_a_message_recorded_twice_is_drawn_once`,
+  `test/ui/message-mid-turn.test.tsx`, `e2e/chat.spec.ts`.*
 - **FR-CHAT-5** — Duplicate suppression MUST hold across a burst: two sends in
   one frame, a double tap, and a reconnect MUST NOT produce two messages.
   **(INV-2)** *`test/ui/burst-send.test.tsx`.*

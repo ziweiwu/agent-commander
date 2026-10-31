@@ -231,6 +231,27 @@ fn is_claude_codes_own_note(rec: &Value) -> bool {
         || rec.get("toolUseResult").is_some()
 }
 
+/// What a person typed while the agent worked, when the turn read it at its
+/// next step: the `prompt` of a `queued_command` attachment.
+///
+/// Claude Code 2.1.284 and later files such a message as an attachment and
+/// writes no `user` record for it — 130 of the 130 typed into a working agent
+/// on this machine over six days, against 2 that also had one. So this is the
+/// person speaking exactly as a typed prompt is, under another record type.
+/// Only `human` origin in `prompt` mode qualifies: another agent's message and
+/// a background task's end are absorbed the same way, and neither is the
+/// person (INV-11).
+pub(crate) fn read_mid_turn(rec: &Value) -> Option<&Value> {
+    if rec.get("type").and_then(Value::as_str) != Some("attachment") {
+        return None;
+    }
+    let attachment = rec.get("attachment")?;
+    let says = |key: &str, value: &str| attachment.get(key).and_then(Value::as_str) == Some(value);
+    let origin = attachment.get("origin").and_then(|origin| origin.get("kind")).and_then(Value::as_str);
+    let typed_by_a_person = says("type", "queued_command") && says("commandMode", "prompt") && origin == Some("human");
+    typed_by_a_person.then(|| attachment.get("prompt")).flatten()
+}
+
 /// The content of a record spelled as a bare string, leading whitespace off.
 fn string_content(rec: &Value) -> Option<&str> {
     Some(rec.get("message")?.get("content")?.as_str()?.trim_start())

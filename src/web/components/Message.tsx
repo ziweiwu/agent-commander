@@ -71,6 +71,11 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
   ) : message.pending ? (
     <span className={styles.state}>{t('sending')}</span>
   ) : null
+  const readMidTurn = message.midTurn ? (
+    <span className={styles.state} data-testid="message-mid-turn" title={t('readMidTurnHint')}>
+      {t('readMidTurn')}
+    </span>
+  ) : null
 
   return (
     <div className={classes.join(' ')} data-testid="message" data-role={message.role}>
@@ -79,6 +84,7 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
         // revealed on hover, so a long run never loses its time anchor.
         <>
           <time className={styles.gutter}>{clock(message.at)}</time>
+          {readMidTurn}
           {state}
         </>
       ) : (
@@ -90,6 +96,7 @@ export const Message = memo(function Message({ message }: { message: ChatMessage
             {t(message.role === 'you' ? 'you' : 'agent')}
           </span>
           <time className={styles.time}>{clock(message.at)}</time>
+          {readMidTurn}
           {state}
         </div>
       )}

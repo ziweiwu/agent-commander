@@ -570,3 +570,14 @@ describe('notices carry what they report (INV-11)', () => {
     ])
   })
 })
+
+describe('a message the agent read mid-turn (INV-11)', () => {
+  it('is yours, and carries that the agent read it mid-turn', () => {
+    const [read, typed] = buildMessages([
+      ev({ kind: 'user', text: 'use the second layout', midTurn: true }),
+      ev({ kind: 'user', text: 'and ship it', at: 1_000_000 + 600_000 }),
+    ])
+    expect(read).toMatchObject({ role: 'you', text: 'use the second layout', midTurn: true })
+    expect(typed?.midTurn).toBeUndefined()
+  })
+})

@@ -494,9 +494,10 @@ The client's real architecture is its duplicate suppression, all of it INV-2:
   same-batch check catches.
 - the pending-message timer — an unconfirmed message is marked *not delivered*
   after 12s rather than resent. The 12s is counted only across time the agent
-  was **not** working: a message queued behind a live turn cannot be confirmed
-  until that turn ends, so counting through one marked every correctly queued
-  message as undelivered. It reads *queued* until the agent stops.
+  was **not** working: a message queued behind a live turn is confirmed only
+  when the turn reads it — at its next step, as an attachment the server draws
+  as read mid-turn, or when the turn ends — so counting through one marked every
+  correctly queued message as undelivered. It reads *queued* until then.
 - `sendingRef` in `ShiftTabButton.tsx` and in `useContextActions.ts` — the same
   lesson again, and for clear it is the one with the highest stakes: a second
   press would discard the fresh session the first one had just created. The hook

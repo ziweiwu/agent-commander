@@ -59,7 +59,9 @@ a laptop or from a phone.
   process under it and how long it has been going. It is the only account of
   the work an agent that keeps no transcript can give.
 - **Steer a running session**: message it, switch model or permission mode,
-  set a goal, compact or clear its context, or close it.
+  set a goal, compact or clear its context, or close it. A message sent while
+  it works reads *queued*, and once the agent reads it at its next step it is
+  yours in the conversation, captioned *read mid-turn*.
 - **Notifications** when an agent starts waiting on you, off by default.
 - **New since you last opened it here.** An idle agent that has done
   something since it was last on screen in this app says **new** beside its

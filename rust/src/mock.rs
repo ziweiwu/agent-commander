@@ -819,10 +819,16 @@ fn auditing_the_theme() -> Vec<TimelineFixture> {
 }
 
 /// One message the browser sent, echoed back as a transcript event.
+///
+/// `mid_turn` when the fixture was working as it arrived: Claude Code reads a
+/// message typed into a working agent at its next step and files it as an
+/// attachment, which the server draws as read mid-turn. An echo that skipped
+/// that would let `--mock` pass a client that cannot show it.
 #[derive(Debug, Clone)]
 struct Echo {
     at: i64,
     text: String,
+    mid_turn: bool,
 }
 
 /// Messages sent from the browser, echoed back as transcript events.
@@ -1374,6 +1380,15 @@ impl MockPanes {
             .map(|agent| agent.session_id)
             .or_else(|| session_by_pane(pane_id))
     }
+
+    /// Whether the fixture in this pane is working now. Detached, as the unit
+    /// tests that only read panes build it, nothing is.
+    fn is_working(&self, pane_id: &str) -> bool {
+        self.source
+            .as_ref()
+            .and_then(|source| source.agent_in_pane(pane_id))
+            .is_some_and(|agent| agent.status == AgentStatus::Busy)
+    }
 }
 
 /// How many tool calls the fixture pane's history holds. Three lines each,
@@ -1538,6 +1553,7 @@ impl PaneApi for MockPanes {
             return Ok(());
         }
         let at = now_ms();
+        let mid_turn = self.is_working(pane_id);
         ECHOES
             .lock()
             .unwrap()
@@ -1546,6 +1562,7 @@ impl PaneApi for MockPanes {
             .push(Echo {
                 at,
                 text: text.to_string(),
+                mid_turn,
             });
         if let Some(source) = &self.source {
             source.wrote(&session_id, at);
@@ -1671,6 +1688,7 @@ impl MockTail {
                 tokens_before: None,
                 tokens_after: None,
                 tool_use_id: None,
+                mid_turn: entry.mid_turn.then_some(true),
             })
             .collect();
         self.echo_cursor = log.len();
@@ -1825,6 +1843,7 @@ impl MockTail {
                 tokens_before: None,
                 tokens_after: None,
                 tool_use_id: tool.map(|_| fixture_tool_use_id(index)),
+                mid_turn: None,
             })
             .collect();
         let outcomes = mock_timeline()
@@ -2423,6 +2442,28 @@ mod tests {
         assert_eq!(after, sent_at, "the record's own time, as the transcript would say");
         assert_eq!(heard.lock().unwrap().last(), Some(&Some(after)));
         ECHOES.lock().unwrap().remove(session);
+    }
+
+    /// A message sent to a working fixture is read mid-turn, as Claude Code
+    /// reads one typed into a working agent, so `--mock` draws what the real
+    /// path draws; one sent to an idle fixture is an ordinary prompt.
+    #[tokio::test]
+    async fn inv11_a_message_sent_to_a_working_fixture_is_read_mid_turn() {
+        let (working, idle) = ("mock-busy-2", "mock-idle-db");
+        let (pane_of_busy_2, pane_of_idle_db) = ("%75", "%78");
+        let panes = MockPanes::over(Arc::new(MockSource::new(false)));
+        let mut read_mid_turn = Vec::new();
+        for (session, pane) in [(working, pane_of_busy_2), (idle, pane_of_idle_db)] {
+            ECHOES.lock().unwrap().remove(session);
+            panes.paste(pane, "use the second layout", Submit::Yes).await.unwrap();
+            let mut tail = MockTail::new(session.into());
+            tail.read().await.unwrap();
+            let echoed = tail.read().await.unwrap().events;
+            assert_eq!(echoed.len(), 1);
+            read_mid_turn.push(serde_json::json!(echoed[0]).get("midTurn").cloned());
+            ECHOES.lock().unwrap().remove(session);
+        }
+        assert_eq!(read_mid_turn, [Some(serde_json::json!(true)), None]);
     }
 
     #[test]

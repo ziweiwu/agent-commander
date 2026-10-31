@@ -223,9 +223,12 @@ Open an agent and you get two tabs:
   marked *not delivered* rather than spinning forever, and is never resent
   for you. A message sent to an agent that is **working** reads *queued* instead,
   and does not start its countdown until the agent stops: Claude Code writes a
-  prompt down when it *processes* it, so a message waiting behind a long turn is
+  message down when it *reads* it, so a message waiting behind a long turn is
   waiting, not late — counting it down through one used to mark every correctly
-  queued message as undelivered. A typing indicator shows while it is working. `Enter` sends,
+  queued message as undelivered. Usually the agent reads it at its next step,
+  and it becomes yours in the conversation at that moment, captioned *read
+  mid-turn* (Claude Code files it as an attachment rather than as a prompt,
+  and the chat used to show nothing at all). A typing indicator shows while it is working. `Enter` sends,
   `Shift+Enter` adds a newline, and `Shift+Tab` cycles the permission mode —
   the same chord the CLI uses, and it works mid-task. **Compact** and **Clear**
   sit beside them, because the panel's own control row is above the tabs and is
@@ -611,9 +614,10 @@ Model is allowed for a different reason: it types, but through the very same
 paste the message box already uses on working agents. Sending *"use opus
 instead"* as a message is a designed feature — it is what Queue mode is — so
 refusing the select while permitting the message was one door open and one shut
-onto the same prompt. The CLI reads input that arrives mid-turn when the turn
-ends, so a switch made during a task says it is **queued** rather than pretending
-to have landed.
+onto the same prompt. The CLI runs a slash command that arrives mid-turn when
+the turn ends, so a switch made during a task says it is **queued** rather than
+pretending to have landed. (A plain message is read sooner, at the agent's next
+step, and the conversation shows it as *read mid-turn*.)
 
 Neither is visible the instant you make it. Both are read back out of the
 transcript, which a busy session writes only when its turn ends, so the control

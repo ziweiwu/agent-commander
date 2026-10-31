@@ -154,6 +154,31 @@ describe('a message queued behind a live turn', () => {
     expect(useStore.getState().pending).toEqual([])
   })
 
+  /**
+   * Claude Code reads a message typed into a working agent at its next step
+   * and files it as an attachment, which the server sends as a `user` event
+   * marked `midTurn`. Its tail reads a second later, so the turn can end
+   * before the event lands; the echo is confirmed by it all the same, is
+   * never called undelivered, and nothing is sent again (INV-2).
+   */
+  it('is confirmed by the agent reading it mid-turn, though the turn ended first', () => {
+    working('busy')
+    useStore.getState().addPending(CONFIRMED_TEXT)
+    working('idle')
+    useStore.getState().syncDelivery()
+    vi.advanceTimersByTime(5_000)
+    useStore.setState({
+      events: [{ id: 'e1', at: Date.now(), kind: 'user', text: CONFIRMED_TEXT, midTurn: true }],
+    })
+    useStore.getState().rebuildChat()
+    vi.advanceTimersByTime(60_000)
+    const { messages, pending } = useStore.getState()
+    expect(pending).toEqual([])
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ role: 'you', text: CONFIRMED_TEXT, midTurn: true })
+    expect(messages[0]?.failed).toBeUndefined()
+  })
+
   // An agent that goes back to work has not answered anything; suspending is
   // not the same as forgiving, so the deadline resumes rather than restarting
   // the message's life.

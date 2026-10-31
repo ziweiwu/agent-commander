@@ -97,6 +97,69 @@ fn unwrap_paste(text: &str) -> String {
 /// came from, and what it says.
 type AgentNotice = (NoticeKind, Option<String>, String);
 
+/// How close behind each other two records of the same words must be to be
+/// one message rather than the person saying it twice.
+///
+/// Claude Code files a message typed into a working agent once, as an
+/// attachment, when the turn reads it. Should it ever also dequeue the same
+/// message as a prompt, the two are one message and are drawn once. On this
+/// machine the only identical pairs found were one-word replies hours apart,
+/// so the window is wide enough for a turn's next step and far narrower than
+/// a person repeating themselves.
+const SAME_MESSAGE_WINDOW_MS: i64 = 120_000;
+
+/// The last thing the person was drawn saying to this agent: the words with
+/// whitespace folded, when, and whether the turn read it mid-turn.
+///
+/// Held by the tail across reads, because the two records of one message can
+/// land in different reads.
+#[derive(Debug, Clone)]
+struct LastSaid {
+    words: String,
+    at: i64,
+    mid_turn: bool,
+}
+
+impl LastSaid {
+    fn is_the_same(&self, words: &str, said_at: i64) -> bool {
+        self.words == folded(words) && (said_at - self.at).abs() <= SAME_MESSAGE_WINDOW_MS
+    }
+}
+
+/// Text with every run of whitespace folded to one space, for comparing two
+/// records of what may be one message.
+fn folded(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A person's words as the conversation draws them: the paste envelope off,
+/// trimmed, and a slash command as the command it ran. `None` when nothing is
+/// left.
+fn spoken(said: &str) -> Option<String> {
+    let text = unwrap_paste(said.trim());
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(slash_command(text).unwrap_or_else(|| text.to_string()))
+}
+
+/// The text of a prompt spelled as a bare string or as blocks, the blocks'
+/// text joined line by line.
+fn words_of(prompt: &Value) -> String {
+    if let Some(text) = prompt.as_str() {
+        return text.to_string();
+    }
+    let blocks = prompt.as_array().map(Vec::as_slice).unwrap_or_default();
+    blocks.iter().filter_map(|block| text_field(block, "text")).collect::<Vec<_>>().join("\n")
+}
+
+/// Whether a record belongs to a delegate's own conversation rather than to
+/// the one the person is reading.
+fn sidechain_of(rec: &Value) -> Option<bool> {
+    (rec.get("isSidechain").and_then(Value::as_bool) == Some(true)).then_some(true)
+}
+
 /// The one line of a task notification written for a reader: its
 /// `<summary>`, leaving the ids, the status and the output path behind.
 static TASK_SUMMARY: LazyLock<Regex> =
@@ -964,6 +1027,9 @@ pub struct ParseResult {
     /// The last prompt a person typed in this batch, and this agent's own
     /// calls after it.
     pub prompted: PromptTally,
+    /// What the person was last drawn saying, in this batch or a read before
+    /// it, so that one message recorded twice is drawn once.
+    last_said: Option<LastSaid>,
 }
 
 /// One batch's share of "since your last prompt".
@@ -990,6 +1056,7 @@ impl ParseResult {
             refused_at: Vec::new(),
             first_at: None,
             prompted: PromptTally::default(),
+            last_said: None,
         }
     }
 }
@@ -1013,13 +1080,14 @@ impl RecordSets {
     }
 }
 
-/// The two things every event from one record shares: when it happened, and
-/// whether it belongs to a sidechain — a subagent's own conversation — rather
-/// than to the one the user is reading.
+/// What every event from one record shares: when it happened, whether it
+/// belongs to a sidechain — a subagent's own conversation — rather than to the
+/// one the user is reading, and whether the turn read it mid-turn.
 #[derive(Clone, Copy)]
 struct EventContext {
     at: i64,
     sidechain: Option<bool>,
+    mid_turn: Option<bool>,
 }
 
 /// What one batch of lines accumulates: the result being built, the running
@@ -1048,6 +1116,9 @@ impl Batch<'_> {
         if let Some(goal) = goal_from_record(rec) {
             self.out.patch.goal = Some(Some(goal));
         }
+        if self.read_mid_turn(rec) {
+            return;
+        }
         // Last write wins, like the title, but only prompts that named
         // something ever write: see `describe.rs`.
         if let Some(description) = crate::describe::description_from(rec) {
@@ -1065,6 +1136,48 @@ impl Batch<'_> {
         }
         self.read_where_it_ran(rec);
         self.read_conversation(rec, kind, sets);
+    }
+
+    /// A message the turn read mid-turn, or a dequeued repeat of one. True
+    /// when the record was either, so nothing else reads it.
+    fn read_mid_turn(&mut self, rec: &Value) -> bool {
+        if let Some(prompt) = crate::describe::read_mid_turn(rec) {
+            self.push_mid_turn(rec, prompt);
+            return true;
+        }
+        self.repeats_a_mid_turn_message(rec)
+    }
+
+    /// The person speaking, at the moment the turn read it, and the card's
+    /// clock and subject moved there as a typed prompt moves them.
+    ///
+    /// `description_from` cannot be asked, because this is not a `user`
+    /// record; `describe` is the same test of whether the words name
+    /// anything. A delegate's conversation is its own, and moves neither.
+    fn push_mid_turn(&mut self, rec: &Value, prompt: &Value) {
+        let said = words_of(prompt);
+        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), mid_turn: Some(true) };
+        if !self.push_speech(&said, context) || context.sidechain.is_some() {
+            return;
+        }
+        self.out.prompted = PromptTally { at: Some(context.at), calls: 0 };
+        if let Some(description) = crate::describe::describe(&said) {
+            self.out.patch.description = Some(description);
+        }
+    }
+
+    /// A prompt dequeued when a turn ended that repeats, close behind, the
+    /// message the turn already read: the same message, drawn, timed and
+    /// described where it was first read, so this record adds nothing.
+    fn repeats_a_mid_turn_message(&self, rec: &Value) -> bool {
+        let dequeued = rec.get("type").and_then(Value::as_str) == Some("user")
+            && rec.get("promptSource").and_then(Value::as_str) == Some("queued");
+        let Some(last) = self.out.last_said.as_ref().filter(|last| dequeued && last.mid_turn) else {
+            return false;
+        };
+        let content = rec.get("message").and_then(|message| message.get("content"));
+        let said = content.map(words_of).unwrap_or_default();
+        spoken(&said).is_some_and(|words| last.is_the_same(&words, record_time(rec)))
     }
 
     /// Records that are not conversation but do carry session state. They are
@@ -1114,6 +1227,7 @@ impl Batch<'_> {
             tokens_before: compact.and_then(|meta| number_field(meta, "preTokens")),
             tokens_after: compact.and_then(|meta| number_field(meta, "postTokens")),
             tool_use_id: None,
+            mid_turn: None,
         });
     }
 
@@ -1148,11 +1262,7 @@ impl Batch<'_> {
             self.out.patch.model = Some(model.to_string());
         }
         let content = message.and_then(|msg| msg.get("content"));
-        let context = EventContext {
-            at: record_time(rec),
-            sidechain: (rec.get("isSidechain").and_then(Value::as_bool) == Some(true))
-                .then_some(true),
-        };
+        let context = EventContext { at: record_time(rec), sidechain: sidechain_of(rec), mid_turn: None };
         if kind == "user" {
             self.push_user_prompt(rec, content, context);
         } else if kind == "assistant" {
@@ -1172,7 +1282,10 @@ impl Batch<'_> {
             .unwrap_or_default();
         let said = content.and_then(Value::as_str).unwrap_or(&from_blocks);
         let notice = match prompt_origin(rec) {
-            PromptOrigin::Speech => return self.push_speech(said, context),
+            PromptOrigin::Speech => {
+                self.push_speech(said, context);
+                return;
+            }
             PromptOrigin::Machinery => return,
             PromptOrigin::Handback { name } => (NoticeKind::Handback, name, what_the_agent_said(rec, said)),
             PromptOrigin::PeerMessage { name } => (NoticeKind::PeerMessage, name, what_the_agent_said(rec, said)),
@@ -1181,16 +1294,21 @@ impl Batch<'_> {
         self.push_notice(notice, context);
     }
 
-    /// A person's words, drawn as "you".
-    fn push_speech(&mut self, said: &str, context: EventContext) {
-        let text = unwrap_paste(said.trim());
-        let text = text.trim();
-        if text.is_empty() {
-            return;
+    /// A person's words, drawn as "you". False when there were none to draw,
+    /// or when the turn read words it had just been drawn saying.
+    ///
+    /// A typed slash command is still the person speaking; it is only spelled
+    /// in markup on disk, and `spoken` reads it as the command it ran.
+    fn push_speech(&mut self, said: &str, context: EventContext) -> bool {
+        let Some(text) = spoken(said) else { return false };
+        let last = self.out.last_said.as_ref();
+        if context.mid_turn.is_some() && last.is_some_and(|last| last.is_the_same(&text, context.at)) {
+            return false;
         }
-        // A typed slash command is still the user speaking; it is only spelled
-        // in markup on disk.
-        let text = slash_command(text).unwrap_or_else(|| text.to_string());
+        if context.sidechain.is_none() {
+            let mid_turn = context.mid_turn.is_some();
+            self.out.last_said = Some(LastSaid { words: folded(&text), at: context.at, mid_turn });
+        }
         self.out.events.push(TimelineEvent {
             id: (self.seq)(),
             at: context.at,
@@ -1202,7 +1320,9 @@ impl Batch<'_> {
             tokens_before: None,
             tokens_after: None,
             tool_use_id: None,
+            mid_turn: context.mid_turn,
         });
+        true
     }
 
     /// Something no person typed, marked on the conversation where it arrived:
@@ -1219,6 +1339,7 @@ impl Batch<'_> {
             tokens_before: None,
             tokens_after: None,
             tool_use_id: None,
+            mid_turn: None,
         });
     }
 
@@ -1286,6 +1407,7 @@ impl Batch<'_> {
             tokens_before: None,
             tokens_after: None,
             tool_use_id: None,
+            mid_turn: None,
         });
     }
 
@@ -1319,6 +1441,7 @@ impl Batch<'_> {
             tokens_before: None,
             tokens_after: None,
             tool_use_id: text_field(block, "id").map(str::to_string),
+            mid_turn: None,
         });
     }
 
@@ -1356,8 +1479,15 @@ fn is_compaction(rec: &Value, kind: &str) -> bool {
 
 /// Convert raw JSONL lines into timeline events plus a fleet-card patch.
 pub fn parse_lines(lines: &[&str], seq: &mut dyn FnMut() -> String) -> ParseResult {
+    parse_after(lines, seq, None)
+}
+
+/// `parse_lines` for a read that follows others, knowing what the person was
+/// last drawn saying in them.
+fn parse_after(lines: &[&str], seq: &mut dyn FnMut() -> String, last_said: Option<LastSaid>) -> ParseResult {
     let sets = RecordSets::new();
-    let mut batch = Batch { out: ParseResult::empty(), tokens: 0, subagents: 0, seq };
+    let out = ParseResult { last_said, ..ParseResult::empty() };
+    let mut batch = Batch { out, tokens: 0, subagents: 0, seq };
     for line in lines {
         if line.trim().is_empty() {
             continue;
@@ -1529,6 +1659,9 @@ pub struct TranscriptTail {
     /// it has not seen is one that was never written rather than one the
     /// backfill did not reach back to.
     read_from_the_top: bool,
+    /// What the person was last drawn saying, carried from one read to the
+    /// next so that one message recorded twice is drawn once (INV-11).
+    last_said: Option<LastSaid>,
 }
 
 impl TranscriptTail {
@@ -1551,6 +1684,7 @@ impl TranscriptTail {
             prompt_at: None,
             calls_since_prompt: 0,
             read_from_the_top: false,
+            last_said: None,
         }
     }
 
@@ -1721,8 +1855,9 @@ impl TranscriptTail {
         }
 
         let mut result = {
+            let last_said = self.last_said.take();
             let mut seq = || self.next_id();
-            parse_lines(&lines, &mut seq)
+            parse_after(&lines, &mut seq, last_said)
         };
         self.apply_batch(&mut result).await;
         let (prompt, prompt_changed) = self.report_prompt();
@@ -1794,6 +1929,7 @@ impl TranscriptTail {
             self.window_since = None;
             self.prompt_at = None;
             self.calls_since_prompt = 0;
+            self.last_said = None;
             first = true;
         }
         first
@@ -1871,6 +2007,7 @@ impl TranscriptTail {
         self.track_calls(result);
         self.track_refusals(result);
         self.track_prompt(result.prompted);
+        self.last_said = result.last_said.take();
         result.patch.since_prompt = Some(self.since_prompt());
         self.total_tokens += result.patch.tokens.unwrap_or(0);
         self.total_subagents += result.patch.subagents.unwrap_or(0);
@@ -2539,6 +2676,7 @@ mod tests {
             tokens_before: None,
             tokens_after: None,
             tool_use_id: None,
+            mid_turn: None,
         }
     }
 
@@ -3771,6 +3909,138 @@ mod tests {
         let texts: Vec<&str> = out.events.iter().map(|event| event.text.as_str()).collect();
         assert_eq!(texts, vec!["rename the export button"], "{:?}", out.events);
         assert_eq!(out.events[0].kind, TimelineKind::User);
+    }
+
+    /// When the turn read the person's message in the fixtures below: after
+    /// the calls `call_record` stamps, before the next prompt.
+    const READ_MID_TURN_AT: &str = "2026-08-14T01:45:00.000Z";
+
+    /// What the person typed into the working agent.
+    const TYPED_MID_TURN: &str = "also rename the export button on the settings page";
+
+    /// A message typed while the agent worked, as Claude Code 2.1.284–2.1.311
+    /// files it when the turn reads it at its next step: an attachment, and no
+    /// `user` record at all.
+    fn read_mid_turn(prompt: Value) -> Value {
+        json!({
+            "type": "attachment", "timestamp": READ_MID_TURN_AT, "isSidechain": false,
+            "attachment": {
+                "type": "queued_command", "commandMode": "prompt", "origin": { "kind": "human" },
+                "prompt": prompt, "humanTurn": true, "delivery_id": "d-1", "source_uuid": "u-1",
+                "timestamp": READ_MID_TURN_AT,
+            },
+        })
+    }
+
+    /// The same words dequeued when a turn ended: a `user` record marked
+    /// `queued`.
+    fn dequeued(text: &str, dequeued_at: &str) -> String {
+        json!({ "type": "user", "timestamp": dequeued_at, "promptSource": "queued", "origin": { "kind": "human" },
+                "message": { "role": "user", "content": text } })
+        .to_string()
+    }
+
+    fn user_times(events: &[TimelineEvent]) -> Vec<i64> {
+        events.iter().filter(|event| event.kind == TimelineKind::User).map(|event| event.at).collect()
+    }
+
+    /// Every message typed into a working agent over six days on this machine
+    /// was filed this way, and the chat drew none of them: the agent answered
+    /// something the reader never saw, and this app called its own copy "not
+    /// delivered".
+    #[test]
+    fn inv11_a_message_read_mid_turn_is_a_message_the_reader_can_see() {
+        let out = parse(&[&read_mid_turn(json!(TYPED_MID_TURN)).to_string()]);
+        let said = said_by_you(&out);
+        assert_eq!(said.len(), 1, "events: {:?}", out.events);
+        assert_eq!((said[0].text.as_str(), said[0].at), (TYPED_MID_TURN, at_ms(READ_MID_TURN_AT)));
+        assert_eq!(json!(said[0])["midTurn"], json!(true));
+        assert_eq!(out.patch.activity, Some(format!("you: {TYPED_MID_TURN}")));
+    }
+
+    /// Beside a picture it is blocks, and from this app it arrives in the paste
+    /// envelope; either way it reads as the words that were typed, and a
+    /// message of nothing but whitespace draws nothing.
+    #[test]
+    fn inv11_a_message_read_mid_turn_reads_as_typed_however_it_is_spelled() {
+        let picture = json!([{ "type": "image", "source": { "type": "base64", "data": "" } },
+                             { "type": "text", "text": "crop it like this" }]);
+        let pasted = json!("<pasted_content id=\"p1\">\nuse the second layout\n</pasted_content id=\"p1\">");
+        let lines: Vec<String> =
+            [picture, pasted, json!("  \n ")].into_iter().map(|prompt| read_mid_turn(prompt).to_string()).collect();
+        let out = parse(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        let texts: Vec<&str> = said_by_you(&out).iter().map(|event| event.text.as_str()).collect();
+        assert_eq!(texts, vec!["crop it like this", "use the second layout"]);
+    }
+
+    /// Another agent's message and a background task's end are absorbed the
+    /// same way. Neither is the person speaking, so neither is "you", and
+    /// neither restarts the person's clock.
+    #[test]
+    fn inv11_a_mid_turn_attachment_from_an_agent_or_a_task_is_not_you() {
+        let mut peer = read_mid_turn(json!("Is the parser change ready?"));
+        peer["attachment"]["origin"] = json!({ "kind": "peer", "name": "reviewer" });
+        let mut task = read_mid_turn(json!("<task-notification>done</task-notification>"));
+        task["attachment"]["origin"] = json!({ "kind": "task-notification" });
+        task["attachment"]["commandMode"] = json!("task-notification");
+        let lines = [peer.to_string(), task.to_string()];
+        let out = parse(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        assert!(out.events.is_empty(), "{:?}", out.events);
+        assert_eq!(out.prompted.at, None);
+    }
+
+    /// One message recorded both ways — read mid-turn, then dequeued as a
+    /// prompt, or the other way round — is drawn once, at the first. Only a
+    /// dequeued repeat close behind is folded: the same words typed again, or
+    /// dequeued ten minutes later, are a message of their own.
+    #[test]
+    fn inv11_a_message_recorded_twice_is_drawn_once() {
+        let attachment = read_mid_turn(json!(TYPED_MID_TURN)).to_string();
+        let soon = dequeued(TYPED_MID_TURN, "2026-08-14T01:45:40.000Z");
+        let out = parse(&[&attachment, &soon]);
+        assert_eq!(user_times(&out.events), vec![at_ms(READ_MID_TURN_AT)]);
+        assert_eq!(out.prompted.at, Some(at_ms(READ_MID_TURN_AT)));
+
+        let earlier = dequeued(TYPED_MID_TURN, "2026-08-14T01:44:30.000Z");
+        assert_eq!(user_times(&parse(&[&earlier, &attachment]).events).len(), 1);
+
+        let later = dequeued(TYPED_MID_TURN, "2026-08-14T01:55:00.000Z");
+        assert_eq!(user_times(&parse(&[&attachment, &later]).events).len(), 2);
+        let retyped = typed(TYPED_MID_TURN, "2026-08-14T01:45:20.000Z");
+        assert_eq!(user_times(&parse(&[&attachment, retyped.trim_end()]).events).len(), 2);
+    }
+
+    /// The tail reads a file in pieces, so the second record can arrive in a
+    /// later read than the first; it is still one message.
+    #[tokio::test]
+    async fn inv11_a_message_recorded_twice_across_two_reads_is_drawn_once() {
+        let (root, file) = projects();
+        fs::write(&file, format!("{}\n", read_mid_turn(json!(TYPED_MID_TURN)))).unwrap();
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let first = tail.read_next().await;
+        append(&file, format!("{}\n", dequeued(TYPED_MID_TURN, "2026-08-14T01:45:40.000Z")).as_bytes());
+        let second = tail.read_next().await;
+        let events: Vec<TimelineEvent> = first.events.into_iter().chain(second.events).collect();
+        assert_eq!(user_times(&events), vec![at_ms(READ_MID_TURN_AT)]);
+    }
+
+    /// The card's clock and subject move with a message read mid-turn, as they
+    /// do for one typed at the prompt: it is the person asking.
+    #[tokio::test]
+    async fn inv11_since_prompt_restarts_at_a_message_read_mid_turn() {
+        const AFTER: usize = 2;
+        let mut text = typed("fix the locale layout", PROMPTED_AT);
+        text.push_str(&calls(3));
+        text.push_str(&format!("{}\n", read_mid_turn(json!(TYPED_MID_TURN))));
+        text.push_str(&calls(AFTER));
+        let (root, file) = projects();
+        fs::write(&file, &text).unwrap();
+        let read = TranscriptTail::new(SESSION, root.path()).read_next().await;
+        let since = SincePrompt { at: Some(at_ms(READ_MID_TURN_AT)), calls: AFTER as u32 };
+        assert_eq!(read.patch.since_prompt, Some(Some(since)));
+        let subject = crate::describe::describe(TYPED_MID_TURN);
+        assert!(subject.is_some());
+        assert_eq!(read.patch.description, subject);
     }
 }
 
