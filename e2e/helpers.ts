@@ -44,6 +44,12 @@ export const AGENT = {
   quietFamily: 'mock-quiet-family',
   /** Delegated, with a delegate still moving — the same shape, opposite answer. */
   movingFamily: 'mock-busy-2',
+  /**
+   * Working, and the one to send to while it works: the mock reads a message
+   * sent to a working fixture mid-turn, as Claude Code does. Its own fixture
+   * so the sends move no card another spec reads.
+   */
+  working: 'mock-long-name',
   /** A plain shell this app opened: out of the fleet until the chip admits it. */
   terminal: 'tmux:term-1787832900',
 } as const

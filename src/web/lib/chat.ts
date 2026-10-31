@@ -38,15 +38,22 @@ export interface ChatMessage {
   /**
    * Sent to an agent that was working, and waiting its turn at the prompt.
    *
-   * Claude Code writes a prompt into its transcript when it *processes* it, not
-   * when it arrives, so a message queued behind a long turn is unconfirmable
-   * for as long as that turn lasts — which is minutes, not seconds. Counting it
-   * down like an ordinary send marked correctly-delivered messages as failed;
-   * this is the state that says "waiting", and the countdown does not start
-   * until the agent stops working.
+   * Claude Code writes a message into its transcript when it *reads* it, not
+   * when it arrives: at the turn's next step, as an attachment the server
+   * draws as read mid-turn, or when the turn ends, as a prompt. Until then it
+   * is unconfirmable, which can be minutes. Counting it down like an ordinary
+   * send marked correctly-delivered messages as failed; this is the state
+   * that says "waiting", and the countdown does not start until the agent
+   * stops working.
    */
   queued?: boolean
   failed?: boolean
+  /**
+   * For `role === 'you'`: the agent read this while it was working, at its
+   * next step, and Claude Code filed it as an attachment rather than as a
+   * prompt. Still the person speaking (INV-11).
+   */
+  midTurn?: true
   /**
    * How many copies of this exact text were already in the conversation when
    * it was sent. See `reconcile` — this is what tells a fresh "Continue" apart
@@ -85,9 +92,11 @@ export function buildMessages(events: TimelineEvent[], outcomes: Outcomes = {}):
 
   for (const event of events) {
     switch (event.kind) {
-      case 'user':
-        push('you', event.at, event.text, event.id)
+      case 'user': {
+        const said = push('you', event.at, event.text, event.id)
+        if (event.midTurn) said.midTurn = true
         break
+      }
 
       case 'assistant':
         push('agent', event.at, event.text, event.id)

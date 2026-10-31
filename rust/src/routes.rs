@@ -3971,6 +3971,7 @@ mod tests {
                     tokens_before: None,
                     tokens_after: None,
                     tool_use_id: None,
+                    mid_turn: None,
                 }],
                 patch: AgentPatch::default(),
                 first: self.n == 1,
@@ -4367,6 +4368,7 @@ mod tests {
                     tokens_before: None,
                     tokens_after: None,
                     tool_use_id: None,
+                    mid_turn: None,
                 })
                 .collect();
             self.read_lines = lines.len();

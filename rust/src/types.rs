@@ -446,6 +446,13 @@ pub struct TimelineEvent {
     /// a `ToolOutcome` and a `toolResult` request are keyed on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_use_id: Option<String>,
+    /// For `kind == User`: the person typed it while the agent worked, and
+    /// the turn read it at its next step. Claude Code files such a message as
+    /// an attachment rather than a prompt; it is still the person speaking
+    /// (INV-11), and still what confirms this app's own copy of it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(test, ts(type = "true", optional))]
+    pub mid_turn: Option<bool>,
 }
 
 /// How a tool call ended, as its result record says.

@@ -548,7 +548,14 @@ tokensBefore?: number, tokensAfter?: number,
  * For a tool call: the `tool_use` id its result will name, which is what
  * a `ToolOutcome` and a `toolResult` request are keyed on.
  */
-toolUseId?: string, };
+toolUseId?: string, 
+/**
+ * For `kind == User`: the person typed it while the agent worked, and
+ * the turn read it at its next step. Claude Code files such a message as
+ * an attachment rather than a prompt; it is still the person speaking
+ * (INV-11), and still what confirms this app's own copy of it.
+ */
+midTurn?: true, };
 
 export type TimelineKind = "user" | "assistant" | "tool" | "subagent" | "notice";
 

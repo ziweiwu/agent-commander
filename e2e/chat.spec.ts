@@ -29,6 +29,26 @@ test.describe('sending a message', () => {
     await expect(said(page, text)).toHaveCount(1, { timeout: 15_000 })
     await expect(page.getByTestId('message-failed')).toHaveCount(0)
     await expect(page.getByTestId('composer-input')).toHaveValue('')
+    await expect(said(page, text).getByTestId('message-mid-turn')).toHaveCount(0)
+  })
+
+  /**
+   * Queue mode's round trip. Claude Code reads a message typed into a working
+   * agent at its next step and files it as an attachment rather than a
+   * prompt; the mock reads a send to a working fixture the same way. The echo
+   * reads "queued", then becomes the agent's own copy, captioned, once.
+   */
+  test('sent to a working agent, it is shown once as read mid-turn', async ({ page }) => {
+    await openAgent(page, AGENT.working)
+    const text = stamp('read while working')
+
+    await page.getByTestId('composer-input').fill(text)
+    await page.getByTestId('composer-send').click()
+
+    await expect(said(page, text).getByTestId('message-mid-turn')).toHaveCount(1, { timeout: 15_000 })
+    await expect(said(page, text)).toHaveCount(1)
+    await expect(said(page, text).getByTestId('message-queued')).toHaveCount(0)
+    await expect(said(page, text).getByTestId('message-failed')).toHaveCount(0)
   })
 
   test('a burst of Enters sends one message, not three', async ({ page }) => {

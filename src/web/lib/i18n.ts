@@ -207,7 +207,12 @@ const EN = {
   queued: 'queued',
   queuedHint:
     'Waiting its turn at the prompt. The agent writes a message down when it ' +
-    'gets to it, so this stays queued until the current task finishes.',
+    'reads it — at its next step, or when the current task finishes — so this ' +
+    'stays queued until then.',
+  readMidTurn: 'read mid-turn',
+  readMidTurnHint:
+    'You sent this while the agent was working, and it read it at its next step ' +
+    'rather than as a new turn.',
   notDelivered: 'not delivered',
   notDeliveredHint: "The agent has not echoed this back. It was not resent — check the Attach tab before sending it again.",
   working: 'working…',
@@ -713,7 +718,9 @@ const ZH: Record<Key, string> = {
   agent: '代理',
   sending: '发送中…',
   queued: '排队中',
-  queuedHint: '正在等待代理处理。代理只有轮到这条消息时才会记录它，因此在当前任务结束前会一直排队。',
+  queuedHint: '正在等待代理处理。代理读到这条消息时才会记录它——在它的下一步，或当前任务结束时——在此之前会一直排队。',
+  readMidTurn: '回合中读取',
+  readMidTurnHint: '你在代理工作时发送了这条消息，代理在下一步读取了它，而不是作为新的一轮。',
   notDelivered: '未送达',
   notDeliveredHint: '代理没有回显这条消息。系统不会自动重发——请先在「终端」标签页确认，再决定是否重新发送。',
   working: '处理中…',
