@@ -2351,7 +2351,12 @@ screen-reader live region stay on the device, so they use the card's name
 preference and preferences never reach the server (FR-UI-12).
 
 The four rules above bind it word for word, but for the last. The first fleet
-the server sees is backlog; a standing block never re-fires;
+the server sees is backlog, and **the baseline is the fleet as it stood when
+the server began watching, not the first change after it**: the start-up
+refresh reads the fleet before the push listener exists, so a tracker that
+took its first change as backlog swallowed a block that was itself that first
+change, and after a restart the night's first question never reached the
+phone. A standing block never re-fires;
 unblocked-then-blocked is news; and **a tab somebody is at is the
 notification** — while one is, the transition is consumed and nothing is
 pushed, the way Claude Code's own Remote Control holds its pushes while you are
@@ -2395,7 +2400,12 @@ per-device and unchanged: it still stands down while its own tab is visible.
   for nothing
 - `routes::tests::inv14_*` — over a real socket: a tab that only says it is
   visible no longer holds a push back, one that also reports input does, and a
-  hidden one never does
+  hidden one never does; a block that is the first change after start is
+  pushed (`inv14_a_block_that_is_the_first_change_after_start_is_pushed`),
+  while an agent already blocked at start stays backlog; and a spawn's
+  `starting up` placeholder, which may be Claude's trust prompt, pushes once
+  with nobody there and its registered successor pushes nothing more
+  (`inv14_a_placeholder_starting_up_with_nobody_there_pushes_once`)
 - `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
   connect, on every beat, and the moment that changes; it reports a pointer, a
   key or a touch at most once per `PRESENCE_REPORT_MS`, never on a timer or for

@@ -3623,7 +3623,13 @@ fn fleet_for(
 /// fires only for a transition it watched while nobody was at a tab — on
 /// screen and used within `PRESENCE_WINDOW` (`presence.rs`). The listener
 /// stays for the life of the server, so its handle is let go.
+///
+/// The fleet as it stands now is recorded first, as the baseline. `start()`
+/// has already read it by the time this runs, so no change will ever carry
+/// it, and a tracker left to take its first change as backlog swallowed a
+/// block that was itself that first change.
 fn push_on_transitions(app: &Arc<App>, notifier: Arc<crate::push::Notifier>) {
+    notifier.watched_on_screen(&app.deps.source.list());
     let viewers = app.clone();
     let _keep = app.deps.source.on_change(Box::new(move |agents| {
         if viewers.viewers.presence.anyone_there(std::time::Instant::now()) {
@@ -6587,6 +6593,76 @@ mod tests {
         let used = serde_json::json!({ "type": "present" });
         let hidden = serde_json::json!({ "type": "pong", "visible": false });
         assert_eq!(pushes_while_a_tab_says(&[used, hidden]).await, 1);
+    }
+
+    /// Replace the harness fleet with `agents` and tell every listener.
+    fn fleet_becomes(source: &FakeSource, agents: Vec<Agent>) {
+        *source.agents.lock().unwrap() = agents.clone();
+        for listener in source.listeners.lock().unwrap().iter().flatten() {
+            listener(agents.clone());
+        }
+    }
+
+    /// A push tracker on `h` with nobody at any tab, keeping what it sends.
+    fn pushes_with_nobody_there(h: &Harness) -> Arc<Delivered> {
+        let delivered = Arc::new(Delivered(Mutex::new(Vec::new())));
+        let notifier = crate::push::Notifier::new(delivered.clone(), None, crate::push::PushLang::English);
+        push_on_transitions(&h.app, notifier);
+        delivered
+    }
+
+    /// INV-14's baseline is the fleet at start. The tracker used to take the
+    /// first change it heard as backlog, so after a restart an agent that went
+    /// from busy straight to blocked, with nothing else moving first, never
+    /// reached the phone.
+    #[tokio::test]
+    async fn inv14_a_block_that_is_the_first_change_after_start_is_pushed() {
+        let h = plain(FakePanes::new()).await;
+        let delivered = pushes_with_nobody_there(&h);
+        fleet_moves_to(&h.source, AgentStatus::Waiting);
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(delivered.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn inv14_an_agent_blocked_at_start_is_backlog_through_the_first_change() {
+        let h = blocked(FakePanes::new()).await;
+        let delivered = pushes_with_nobody_there(&h);
+        fleet_moves_to(&h.source, AgentStatus::Waiting);
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        assert_eq!(delivered.0.lock().unwrap().len(), 0);
+    }
+
+    /// A spawn's `starting up` placeholder is `Waiting` on purpose: a Claude
+    /// in a new folder sits on its trust prompt before it registers, and the
+    /// placeholder is the only card that can answer it. So with nobody at a
+    /// tab it pushes once, and the real agent taking its tmux session over
+    /// pushes nothing more.
+    #[tokio::test]
+    async fn inv14_a_placeholder_starting_up_with_nobody_there_pushes_once() {
+        let h = plain(FakePanes::new()).await;
+        let delivered = pushes_with_nobody_there(&h);
+        let fleet_at_start = h.source.list();
+        let placeholder = Agent {
+            session_id: format!("{}spawned", crate::pending::PENDING_PREFIX),
+            status: AgentStatus::Waiting,
+            waiting_for: Some("starting up".into()),
+            tmux_session: Some("spawned".into()),
+            ..fleet_at_start[0].clone()
+        };
+        fleet_becomes(&h.source, [fleet_at_start.clone(), vec![placeholder]].concat());
+        let registered = Agent {
+            session_id: "registered".into(),
+            status: AgentStatus::Idle,
+            tmux_session: Some("spawned".into()),
+            ..fleet_at_start[0].clone()
+        };
+        fleet_becomes(&h.source, [fleet_at_start, vec![registered]].concat());
+        tokio::time::sleep(ANSWER_SETTLE).await;
+        let sent = delivered.0.lock().unwrap().clone();
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert!(sent[0].tag.starts_with(crate::pending::PENDING_PREFIX), "{}", sent[0].tag);
+        assert!(sent[0].body.contains("starting up"), "{}", sent[0].body);
     }
 
     /// A script Vite named after its content, with a `-` and a `_` in the hash
