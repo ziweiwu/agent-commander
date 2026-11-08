@@ -10,6 +10,7 @@ import { cleanup } from '@testing-library/react'
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   // jsdom does not always expose storage; preferences are not what these test.
   globalThis.localStorage?.clear()
   document.documentElement.removeAttribute('data-theme')

@@ -2,9 +2,21 @@ import type { ReactElement } from 'react'
 import { MemoryRouter } from 'react-router-dom'
 import { render, screen, type RenderOptions } from '@testing-library/react'
 import type userEvent from '@testing-library/user-event'
+import { vi } from 'vitest'
+import { ARRIVAL_GUARD_MS } from '../../src/web/hooks/useArrival.ts'
 import { useStore } from '../../src/web/store/store.ts'
 
 export { agent } from '../helpers/agent.ts'
+
+/**
+ * Step the clock past the window in which a control that just appeared ignores
+ * presses (INV-2, `useArrival`), so a test that opens a question or the menu
+ * and presses at once is pressing as a reader would. It pins `Date` there;
+ * `setup.ts` lets it go after each test.
+ */
+export function pastArrival(): void {
+  vi.setSystemTime(Date.now() + ARRIVAL_GUARD_MS)
+}
 
 /** Put the store back to a known state; component tests share the singleton. */
 export function resetStore(): void {

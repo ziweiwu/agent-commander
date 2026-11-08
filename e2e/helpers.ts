@@ -1,4 +1,5 @@
 import { expect, type Page } from '@playwright/test'
+import { ARRIVAL_GUARD_MS } from '../src/web/hooks/useArrival.ts'
 
 /**
  * Fixture ids from `src/server/mock.ts`, named by what they are *for* here.
@@ -71,6 +72,16 @@ export async function openFleet(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.getByTestId('connection-status')).toHaveAttribute('data-state', 'open')
   await expect(page.getByTestId('agent-card').first()).toBeVisible()
+}
+
+/**
+ * Wait out the window in which a question, a set's next question or the
+ * composer's menu ignores presses (INV-2). Called once the test has seen the
+ * thing appear, so the wait is measured from after it arrived and is long
+ * enough by construction.
+ */
+export async function pastArrival(page: Page): Promise<void> {
+  await page.waitForTimeout(ARRIVAL_GUARD_MS)
 }
 
 /**

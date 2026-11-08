@@ -15,7 +15,7 @@
  * few seconds so the next project finds the question asked again.
  */
 import { expect, test } from '@playwright/test'
-import { AGENT } from './helpers'
+import { AGENT, pastArrival } from './helpers'
 
 test.describe.configure({ mode: 'serial' })
 
@@ -29,6 +29,7 @@ test('walks a set to the end from the conversation', async ({ page }) => {
   await expect(card.getByTestId('answer-question')).toContainText('Which colour')
   const options = card.getByTestId('answer-option')
   await expect(options).toHaveCount(3)
+  await pastArrival(page)
   await options.first().click()
 
   // The picker advanced, so the next question arrives under a new id and the
@@ -38,6 +39,7 @@ test('walks a set to the end from the conversation', async ({ page }) => {
   await expect(card.getByTestId('answer-multi')).toBeVisible()
   await expect(options).toHaveCount(3)
   await expect(options.first()).toBeEnabled()
+  await pastArrival(page)
 
   // Two ticks, then → to the review page, whose rows are read off the pane.
   await options.nth(0).click()
@@ -49,6 +51,7 @@ test('walks a set to the end from the conversation', async ({ page }) => {
   })
   await expect(options).toHaveCount(2)
   await expect(options.first()).toContainText('Submit answers')
+  await pastArrival(page)
 
   // Submitting closes the call, and with it the labelled answer.
   await options.first().click()

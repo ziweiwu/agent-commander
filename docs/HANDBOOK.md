@@ -307,6 +307,13 @@ One press closes the card, because a second digit would not repeat the answer �
 `AskUserQuestion` asks its questions one at a time, so it would answer the next
 one.
 
+Nor does the press that opened it. Opening a blocked agent by its card still
+puts the keyboard on option 1, but holding Enter there, or tapping the card's
+**Answer** twice, answers nothing: a key's auto-repeat never presses an option or a key,
+and for 600ms after a question (or a set's next question) appears its buttons
+ignore presses without saying so. The replies in the **⋯** menu behave the
+same way after it opens.
+
 ### On a phone
 
 The layout is built for actually using this from Tailscale on a phone, not just
@@ -971,7 +978,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1878 tests: 833 Rust (the server) + 1045 vitest (the web app)
+npm test           # 1912 tests: 840 Rust (the server) + 1072 vitest (the web app)
 npm run e2e        # 489 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone

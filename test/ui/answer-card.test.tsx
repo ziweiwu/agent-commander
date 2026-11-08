@@ -18,7 +18,7 @@ import { act, fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Chat } from '../../src/web/components/Chat.tsx'
 import { AnswerCard } from '../../src/web/components/AnswerCard.tsx'
-import { agent, renderApp, resetStore } from './helpers.tsx'
+import { agent, pastArrival, renderApp, resetStore } from './helpers.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import type { PendingPrompt } from '../../src/shared/types.ts'
 import { buildMessages } from '../../src/web/lib/chat.ts'
@@ -160,6 +160,7 @@ describe('INV-16 the card names only what the transcript named', () => {
   it('answers with the option index, bound to the prompt it was shown for', async () => {
     const user = userEvent.setup()
     renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[1] as HTMLElement)
     expect(answerPrompt).toHaveBeenCalledWith('a', 'prompt-fingerprint', 1)
     expect(sendKey).not.toHaveBeenCalled()
@@ -174,6 +175,7 @@ describe('INV-16 the card names only what the transcript named', () => {
   it('sends one answer from a double click, because the second would answer the next question', async () => {
     const user = userEvent.setup()
     renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+    pastArrival()
     const first = screen.getAllByTestId('answer-option')[0] as HTMLElement
     await user.click(first)
     await user.click(first)
@@ -212,6 +214,7 @@ describe('INV-16 the card names only what the transcript named', () => {
   it('answers a drawn choice with its index, bound to the prompt, like a stated one', async () => {
     const user = userEvent.setup()
     renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[2] as HTMLElement)
     expect(answerPrompt).toHaveBeenCalledWith('a', 'permission-fingerprint', 2)
   })
@@ -313,6 +316,7 @@ describe('INV-16 the card names only what the transcript named', () => {
       answerPrompt.mockImplementationOnce(real.answerPrompt)
 
       renderApp(<AnswerCard agent={blocked()} prompt={QUESTION} />)
+      pastArrival()
       const first = screen.getAllByTestId('answer-option')[0] as HTMLButtonElement
       expect(first.disabled).toBe(false)
       await user.click(first)
@@ -377,6 +381,7 @@ describe('INV-16 the card names only what the transcript named', () => {
   it('stays open across several ticks, and blocks a double-tap on one row', async () => {
     const user = userEvent.setup()
     renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
+    pastArrival()
     const rows = screen.getAllByTestId('answer-option')
     await user.click(rows[0]!)
     await user.click(rows[1]!)
@@ -533,6 +538,7 @@ describe('a refused answer releases the card (INV-11)', () => {
     const user = userEvent.setup()
     answerPrompt.mockReturnValue(true)
     renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    pastArrival()
     const first = () => screen.getAllByTestId('answer-option')[0] as HTMLButtonElement
     await user.click(first())
     expect(first().disabled).toBe(true)
@@ -618,6 +624,7 @@ describe('INV-16 a set is walked to the end from the card (TODO §13a)', () => {
   it('latches on the first answer and opens again when the next question arrives', async () => {
     const user = userEvent.setup()
     const { rerender } = renderApp(<AnswerCard agent={blocked()} prompt={SET} />)
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[0] as HTMLElement)
     expect(answerPrompt).toHaveBeenCalledWith('a', 'set-q1', 0)
     expect((screen.getAllByTestId('answer-option')[1] as HTMLButtonElement).disabled).toBe(true)
@@ -831,5 +838,121 @@ describe('FR-ANS-8 the question is the conversation’s last row', () => {
     fireEvent.scroll(scroller)
     fireEvent.click(screen.getByTestId('jump-to-latest'))
     expect(scroller.scrollTop).toBe(CARD_TOP_PX)
+  })
+})
+
+/**
+ * INV-2: the gesture that opened a question never answers it.
+ *
+ * Opening a blocked agent puts focus (desk) or the finger (phone) on option
+ * one, which on a permission dialog is "Yes". The rest of that same gesture —
+ * the auto-repeat of a held Enter, the second tap of a double tap — then
+ * landed on it and answered a question nobody had read. A browser clicks a
+ * button on an Enter keydown that nothing cancelled, which `enterKeydown`
+ * stands in for: jsdom does not.
+ */
+describe('INV-2 the gesture that opened a question never answers it', () => {
+  const T0 = 1_000_000
+  const enterKeydown = (target: Element, init: KeyboardEventInit): void => {
+    if (fireEvent.keyDown(target, { key: 'Enter', ...init })) fireEvent.click(target)
+  }
+  const pressEnter = (target: Element): void => enterKeydown(target, { repeat: false })
+  const repeatEnter = (target: Element): void => enterKeydown(target, { repeat: true })
+  const clockAt = (sinceStartMs: number): void => {
+    vi.setSystemTime(T0 + sinceStartMs)
+  }
+  const openBlocked = (prompt: PendingPrompt) => {
+    useStore.setState({ prompt })
+    renderApp(<Chat agent={blocked()} />)
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], now: T0 })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('INV-2 ignores the repeat of the Enter that opened the agent', () => {
+    openBlocked(PERMISSION)
+    const landed = document.activeElement as HTMLElement
+    expect(landed).toBe(screen.getAllByTestId('answer-option')[0])
+    repeatEnter(landed)
+    expect(answerPrompt).not.toHaveBeenCalled()
+  })
+
+  it('INV-2 ignores a held Enter however long it is held, and answers a fresh press', () => {
+    openBlocked(PERMISSION)
+    const landed = document.activeElement as HTMLElement
+    clockAt(5_000)
+    repeatEnter(landed)
+    expect(answerPrompt).not.toHaveBeenCalled()
+    pressEnter(landed)
+    expect(answerPrompt).toHaveBeenCalledExactlyOnceWith('a', 'permission-fingerprint', 0)
+  })
+
+  it('INV-2 ignores a tap within 600ms of the question appearing, and answers one after', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    const yes = screen.getAllByTestId('answer-option')[0]!
+    clockAt(100)
+    fireEvent.click(yes)
+    expect(answerPrompt).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('toast')).toBeNull()
+    clockAt(700)
+    fireEvent.click(yes)
+    expect(answerPrompt).toHaveBeenCalledExactlyOnceWith('a', 'permission-fingerprint', 0)
+  })
+
+  it('INV-2 gives a set’s next question its own window, so a second tap cannot answer it', () => {
+    const first: PendingPrompt = { ...QUESTION, id: 'set-q1', questionIndex: 0, moreQuestions: 1 }
+    const second: PendingPrompt = {
+      ...QUESTION,
+      id: 'set-q2',
+      question: 'Which table should be swapped?',
+      questionIndex: 1,
+      moreQuestions: 0,
+    }
+    const { rerender } = renderApp(<AnswerCard agent={blocked()} prompt={first} />)
+    clockAt(700)
+    fireEvent.click(screen.getAllByTestId('answer-option')[0]!)
+    expect(answerPrompt).toHaveBeenCalledTimes(1)
+    clockAt(800)
+    rerender(<AnswerCard agent={blocked()} prompt={second} />)
+    clockAt(900)
+    fireEvent.click(screen.getAllByTestId('answer-option')[0]!)
+    expect(answerPrompt).toHaveBeenCalledTimes(1)
+    clockAt(1_500)
+    fireEvent.click(screen.getAllByTestId('answer-option')[0]!)
+    expect(answerPrompt).toHaveBeenCalledTimes(2)
+    expect(answerPrompt).toHaveBeenLastCalledWith('a', 'set-q2', 0)
+  })
+
+  it('INV-2 holds a multi-select toggle to the same window', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, multiSelect: true }} />)
+    clockAt(100)
+    fireEvent.click(screen.getAllByTestId('answer-option')[1]!)
+    expect(answerPrompt).not.toHaveBeenCalled()
+    clockAt(700)
+    fireEvent.click(screen.getAllByTestId('answer-option')[1]!)
+    expect(answerPrompt).toHaveBeenCalledTimes(1)
+  })
+
+  it('INV-2 holds the picker keys to the same window, since Enter commits the highlight', () => {
+    useStore.setState({ prompt: null })
+    renderApp(<AnswerCard agent={blocked()} prompt={null} />)
+    clockAt(100)
+    fireEvent.click(screen.getByTestId('answer-key-Enter'))
+    expect(sendKey).not.toHaveBeenCalled()
+    clockAt(700)
+    fireEvent.click(screen.getByTestId('answer-key-Enter'))
+    expect(sendKey).toHaveBeenCalledExactlyOnceWith('Enter')
+  })
+
+  it('INV-2 ignores a held Enter on a picker key once the window has passed', () => {
+    useStore.setState({ prompt: null })
+    renderApp(<AnswerCard agent={blocked()} prompt={null} />)
+    clockAt(700)
+    repeatEnter(screen.getByTestId('answer-key-Enter'))
+    expect(sendKey).not.toHaveBeenCalled()
   })
 })

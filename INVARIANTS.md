@@ -133,6 +133,19 @@ where the question is not written down), and Enter there sends nothing; the
 "Next" button never navigates on its own; and a hop replaces the history entry
 rather than adding one, so it is never something a back gesture replays.
 
+Nor does the gesture that opened it. Card-open focus stays on option 1, and the
+composer's menu still focuses its first reply, so the rest of the gesture that
+put them there arrives on them: the auto-repeat of a held Enter, the second tap
+of a double tap 100-900ms behind the first. On 3cc6501 each of those answered
+`Yes` to `rm -rf dist && npm run build`, or pasted "continue" with Enter. So a
+repeated keydown (`event.repeat`) never activates an answer option, a picker key or a
+quick reply, and any press within `ARRIVAL_GUARD_MS` (600ms, `useArrival`) of a
+question, a set's next question or the menu appearing sends nothing. The
+window restarts with each new prompt id, and the press it swallows shows
+nothing, because it is not an error. Checked by the `INV-2 the gesture …`
+tests in `answer-card.test.tsx` and `QuickPrompts.test.tsx`, and by
+`e2e/gesture-send.spec.ts` on the wire.
+
 The chat's optimistic echo is display-only. A pending message is drawn
 immediately so sending feels instant, but it is sent exactly once; `reconcile()`
 only ever *removes* the local copy once the transcript confirms it, and never
