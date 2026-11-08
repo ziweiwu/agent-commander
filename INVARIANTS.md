@@ -2363,6 +2363,15 @@ pushed, the way Claude Code's own Remote Control holds its pushes while you are
 at the terminal. An inferred status never fires, checked here a second time. A
 push that fails is logged and not retried: the next transition sends its own.
 
+**One known limit of that baseline.** A session file whose `procStart` names
+another process is held out of the first fleet until the CLI lists it
+(`hold_unless_listed`, `registry.rs`), so it is not in the baseline. A later
+read admits it if the first `claude agents --json` fails or lists it, and if
+its last status was `waiting` that admission pushes once for a block that was
+backlog. It takes such a file at start, and costs at most one push per file.
+It is accepted rather than closed, because telling those ids apart needs
+registry state the push tracker does not see.
+
 **Amended again: on screen is not the same as somebody there.** The rule used
 to be "a visible tab is the notification", with visibility the only signal: the
 client says on every heartbeat and every `visibilitychange` whether it is on
@@ -2404,7 +2413,7 @@ per-device and unchanged: it still stands down while its own tab is visible.
   pushed (`inv14_a_block_that_is_the_first_change_after_start_is_pushed`),
   while an agent already blocked at start stays backlog; and a spawn's
   `starting up` placeholder, which may be Claude's trust prompt, pushes once
-  with nobody there and its registered successor pushes nothing more
+  with nobody there and a successor that is not blocked pushes nothing more
   (`inv14_a_placeholder_starting_up_with_nobody_there_pushes_once`)
 - `test/ui/heartbeat.test.tsx` — the tab says whether it is on screen, on
   connect, on every beat, and the moment that changes; it reports a pointer, a

@@ -6636,8 +6636,8 @@ mod tests {
     /// A spawn's `starting up` placeholder is `Waiting` on purpose: a Claude
     /// in a new folder sits on its trust prompt before it registers, and the
     /// placeholder is the only card that can answer it. So with nobody at a
-    /// tab it pushes once, and the real agent taking its tmux session over
-    /// pushes nothing more.
+    /// tab it pushes once, and a successor that is not blocked pushes nothing
+    /// more.
     #[tokio::test]
     async fn inv14_a_placeholder_starting_up_with_nobody_there_pushes_once() {
         let h = plain(FakePanes::new()).await;
