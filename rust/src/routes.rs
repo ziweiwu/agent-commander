@@ -4154,13 +4154,15 @@ mod tests {
     /// Records what reached it, so a test can prove the body was read correctly.
     struct RecordingControl {
         calls: Mutex<Vec<String>>,
+        /// What `close` reports; a clean exit unless a test says otherwise.
+        closes_as: Mutex<CloseResult>,
     }
 
     #[async_trait]
     impl ControlApi for RecordingControl {
         async fn close(&self, session_id: &str, _agent: Option<Agent>) -> Result<CloseResult, Failure> {
             self.calls.lock().unwrap().push(format!("close:{session_id}"));
-            Ok(CloseResult { closed: true, forced: false })
+            Ok(self.closes_as.lock().unwrap().clone())
         }
         async fn shift_tab(&self, _session_id: &str, _agent: Option<Agent>) -> Result<(), Failure> {
             // No value in and none out: the key press is the whole action.
@@ -4529,7 +4531,10 @@ mod tests {
         HarnessParts {
             panes,
             source: FakeSource::new(),
-            control: Arc::new(RecordingControl { calls: Mutex::new(vec![]) }),
+            control: Arc::new(RecordingControl {
+                calls: Mutex::new(vec![]),
+                closes_as: Mutex::new(CloseResult { closed: true, forced: false }),
+            }),
             web_root,
         }
     }
@@ -5235,6 +5240,25 @@ mod tests {
     async fn the_websocket_accepts_a_handshake_with_no_origin_at_all() {
         let h = plain(FakePanes::new()).await;
         assert!(try_ws(h.port, "").await.contains("101"));
+    }
+
+    /// INV-8: an agent left running in its shell is not "exited", or the
+    /// browser would leave its panel and say it closed while it runs on.
+    #[tokio::test]
+    async fn inv8_a_close_that_left_the_agent_running_answers_running() {
+        let h = plain(FakePanes::new()).await;
+        *h.control.closes_as.lock().unwrap() = CloseResult { closed: false, forced: false };
+        let res = post(h.port, &format!("/api/agents/{SESSION}/close"), "", None).await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+        assert!(body(&res).contains("\"detail\":\"running\""), "{}", body(&res));
+    }
+
+    #[tokio::test]
+    async fn a_forced_close_answers_forced() {
+        let h = plain(FakePanes::new()).await;
+        *h.control.closes_as.lock().unwrap() = CloseResult { closed: true, forced: true };
+        let res = post(h.port, &format!("/api/agents/{SESSION}/close"), "", None).await;
+        assert!(body(&res).contains("\"detail\":\"forced\""), "{}", body(&res));
     }
 
     #[tokio::test]

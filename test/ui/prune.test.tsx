@@ -117,6 +117,7 @@ describe('prune', () => {
 
     expect(closeAgentById).toHaveBeenCalledTimes(2)
     expect(useStore.getState().toast).toContain('1')
+    expect(useStore.getState().toast).not.toContain('still running')
   })
 
   it('INV-8 FR-PRUNE-4 does not count a session left running in its shell as closed', async () => {
@@ -130,6 +131,23 @@ describe('prune', () => {
     await user.click(screen.getByTestId('prune-button'))
 
     expect(useStore.getState().toast).toMatch(/Closed 1 of 2.*still running/)
+    expect(useStore.getState().toast).not.toContain('refused')
+  })
+
+  it('INV-8 FR-PRUNE-4 counts a refusal and a session left running apart', async () => {
+    const user = userEvent.setup()
+    closeAgentById
+      .mockResolvedValueOnce({ ok: false, error: 'pane has exited' })
+      .mockResolvedValueOnce({ ok: true, detail: 'running' })
+      .mockResolvedValueOnce({ ok: true, detail: 'exited' })
+    useStore.setState({ agents: [unused('a'), unused('b'), unused('c')] })
+    renderApp(list())
+
+    await user.click(screen.getByTestId('prune-button'))
+
+    const toast = useStore.getState().toast ?? ''
+    expect(toast).toContain('Closed 1 of 3. 1 refused: pane has exited')
+    expect(toast).toMatch(/still running in a shell: 1\b/)
   })
 })
 
