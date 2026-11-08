@@ -18,7 +18,7 @@ import { App } from '../../src/web/components/App.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, resetStore } from './helpers.tsx'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 
 const navigate = vi.hoisted(() => vi.fn())
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -135,6 +135,21 @@ describe('Escape levels', () => {
 
     await user.keyboard('{Escape}')
     expect(useStore.getState().newAgentOpen).toBe(false)
+  })
+
+  /**
+   * Esc while an input method is composing cancels the composition. It must
+   * not also close the browser, or close the dialog behind it.
+   */
+  it('leaves an IME composition’s Escape to the IME while browsing', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], newAgentOpen: true })
+    shell('/')
+    await user.click(screen.getByTestId('new-agent-browse'))
+
+    fireEvent.keyDown(screen.getByTestId('new-agent-dir'), { key: 'Escape', isComposing: true })
+    expect(screen.queryByTestId('folder-browser')).not.toBeNull()
+    expect(useStore.getState().newAgentOpen).toBe(true)
   })
 })
 

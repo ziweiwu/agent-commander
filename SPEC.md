@@ -866,8 +866,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **FR-BROWSE-3** — A browsed path MUST read `~` and `~/…` as the home
   directory, as a spawn does, before it is resolved, and MUST refuse any other
   relative path, `~user` included, rather than resolve it against the server's
-  working directory. With the browser open, `Esc` MUST close the browser and
-  return focus to Browse, not close the dialog (FR-UI-14). **(INV-9)**
+  working directory. The browser's header MUST show `~` only for the home
+  directory and any other root by its absolute path, so what it shows can be
+  typed back. With the browser open, `Esc` MUST close the browser and return
+  focus to Browse, not close the dialog (FR-UI-14), and an `Esc` that cancels
+  an IME composition MUST do neither. **(INV-9)**
   *`browse::inv9_tilde_*`, `test/ui/folder-browser.test.tsx`,
   `test/ui/escape-levels.test.tsx`.*
 

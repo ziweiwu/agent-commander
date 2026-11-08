@@ -172,14 +172,18 @@ function agentOptions(choice: AgentChoice): Omit<NewAgentRequest, 'cwd'> {
  * listing can leave focus on `<body>`, outside the dialog.
  *
  * `leave` is null while the browser is shut, and nothing is listened for.
+ *
+ * An Escape that cancels an input method's composition is left to the IME:
+ * kept from the shell, which would close the dialog, and not acted on here.
  */
 function useEscapeLeavesBrowser(rootRef: RefObject<HTMLElement | null>, leave: (() => void) | null): void {
   useEffect(() => {
     if (!leave) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
-      event.preventDefault()
       event.stopPropagation()
+      if (event.isComposing) return
+      event.preventDefault()
       leave()
       rootRef.current?.querySelector<HTMLElement>(`[data-testid="${BROWSE_TESTID}"]`)?.focus()
     }

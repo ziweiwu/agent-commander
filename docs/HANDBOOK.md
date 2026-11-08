@@ -685,7 +685,8 @@ tmux session. It appears in the list within a
 couple of seconds, because the new process registers itself the same way every
 other session does. Directories from running agents are offered as shortcuts.
 The field and the browser both read `~/…` as your home directory; any other
-relative path is refused. With the browser open, `Esc` closes the browser and
+relative path is refused. The browser's header writes a folder the way you
+would type it: `~/…` under home, the full path anywhere else. With the browser open, `Esc` closes the browser and
 leaves the dialog open; a second `Esc` closes the dialog.
 The server validates the directory before spawning, and checks the model and
 permission mode against fixed allow-lists so an unrecognised value is refused

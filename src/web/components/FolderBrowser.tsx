@@ -3,6 +3,7 @@ import type { DirListing } from '../../shared/types.ts'
 import { browseDirs } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
+import { tildePath } from '../lib/format.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './FolderBrowser.module.css'
 import { ICON_INLINE, Icon } from './ui/Icon.tsx'
@@ -64,7 +65,7 @@ export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
           <Icon name="arrow-up" size={ICON_INLINE} /> {t('browseUp')}
         </Button>
         <span className={styles.path} title={listing?.path}>
-          {listing ? shorten(listing.path, listing.root) : '…'}
+          {listing ? tildePath(listing.path) : '…'}
         </span>
         <label className={styles.hidden}>
           <input
@@ -109,10 +110,4 @@ export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
       )}
     </div>
   )
-}
-
-/** Show the path relative to the browsable root, which is usually home. */
-function shorten(path: string, root: string): string {
-  if (path === root) return '~'
-  return path.startsWith(`${root}/`) ? `~/${path.slice(root.length + 1)}` : path
 }

@@ -41,4 +41,21 @@ describe('INV-9 folder browser refusals', () => {
       await screen.findByText('Could not read that folder: that directory is outside the browsable root'),
     ).toBeTruthy()
   })
+
+  /**
+   * A typed `~` is the home directory (FR-BROWSE-3), so the header may only
+   * say `~` for home. Under a `--browse-root` that is not home it used to read
+   * `~/proj` for /srv/code/proj, a path that, typed back, means $HOME/proj.
+   */
+  it('labels a non-home root by its absolute path, so the header can be typed back', async () => {
+    browseDirs.mockResolvedValue({ path: '/srv/code/proj', parent: '/srv/code', root: '/srv/code', entries: [] })
+    renderApp(<FolderBrowser start="/srv/code/proj" onChoose={() => {}} />)
+    expect((await screen.findByTitle('/srv/code/proj')).textContent).toBe('/srv/code/proj')
+  })
+
+  it('still labels home as ~', async () => {
+    browseDirs.mockResolvedValue({ path: '/Users/me/Projects', parent: '/Users/me', root: '/Users/me', entries: [] })
+    renderApp(<FolderBrowser start="~/Projects" onChoose={() => {}} />)
+    expect((await screen.findByTitle('/Users/me/Projects')).textContent).toBe('~/Projects')
+  })
 })
