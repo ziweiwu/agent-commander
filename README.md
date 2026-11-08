@@ -156,7 +156,8 @@ goes out; nothing is answered from the lock screen.
    agent is blocked. **Attach** shows the terminal. Whatever you half-type stays
    with that agent while you look at another one or go full screen. The
    header's **✕** closes the panel; **Close agent**, which ends the session,
-   sits alone behind the **⋮** beside it.
+   sits alone behind the **⋮** beside it. The tap or Enter that opened a
+   blocked agent never answers it, even when doubled or held.
 3. Tables and links in a reply are rendered as such — a link is tappable
    wherever it appears, including in a tool call's argument.
 4. The **⋯** beside Send holds everything that is not typing: common replies,

@@ -13,6 +13,7 @@ import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useDraft } from '../hooks/useDraft.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
+import { refuseRepeat, useArrival } from '../hooks/useArrival.ts'
 import { useStore } from '../store/store.ts'
 import {
   interruptAndSend,
@@ -232,6 +233,8 @@ export function Chat({ agent }: { agent: Agent }) {
    * and pinned above the button that opened it.
    */
   const [menuAt, setMenuAt] = useState<{ left: number; bottom: number } | null>(null)
+  /** INV-2: the press that opened the menu, or its key's repeat, sends no reply from it. */
+  const menuArriving = useArrival(menuOpen ? STRIP_ID : null)
   const toggleMenu = (): void => {
     if (menuOpen) {
       setMenuOpen(false)
@@ -814,7 +817,9 @@ export function Chat({ agent }: { agent: Agent }) {
                     title={t('quickPromptSend', { text })}
                     aria-label={t('quickPromptSend', { text })}
                     disabled={!online}
+                    onKeyDown={refuseRepeat}
                     onClick={() => {
+                      if (menuArriving()) return
                       setMenuOpen(false)
                       sendQuick(text)
                     }}

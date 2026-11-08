@@ -3,6 +3,7 @@ import type { Agent, PendingPrompt } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { answerPrompt, sendConfirmedKey, sendKey } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { refuseRepeat, useArrival } from '../hooks/useArrival.ts'
 import { Button } from './ui/Button.tsx'
 import { LazyPanePeek } from './LazyTerminal.tsx'
 import { shortName } from '../lib/naming.ts'
@@ -141,6 +142,16 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
     // have read, which content-keying only approximated.
   }, [prompt?.id, prompt?.question, prompt?.tool, prompt?.detail])
 
+  /**
+   * INV-2: the gesture that put this question under the reader does not
+   * answer it. Keyed on what the reset above is keyed on, plus the agent, so
+   * a set's next question and an unread dialog on another agent each start
+   * their own window.
+   */
+  const arriving = useArrival(
+    [agent.sessionId, prompt?.id, prompt?.question, prompt?.tool, prompt?.detail].join('\n'),
+  )
+
   /*
    * A refusal releases the latch. The server declines to type when the pane is
    * not drawing that choice, the agent is not waiting, or the question has
@@ -214,6 +225,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
     // is that a latch left set is the failure being designed against, and a
     // guard on the wrong side of one is how that happens.
     if (prompt === null) return
+    if (arriving()) return
     if (multi && repeatOf(lastPressRef.current, choice)) return
     sendingRef.current = true
     /*
@@ -246,7 +258,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
   /* A picker key moves or confirms; it does not commit an answer by itself, so
      it does not spend the one-press guard the labelled options do. */
   const nudge = (key: string): void => {
-    if (!agent.paneId || !online) return
+    if (!agent.paneId || !online || arriving()) return
     sendKey(key)
   }
 
@@ -346,6 +358,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
                * surfaces cannot disagree about which option is which.
                */
               onClick={() => press(index)}
+              onKeyDown={refuseRepeat}
             >
               <span aria-hidden="true" className={styles.digit}>
                 {index + 1}

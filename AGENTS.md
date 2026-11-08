@@ -551,6 +551,15 @@ commit.
   click made it fail every run; with the fix 12 of 12 full runs passed. Any
   test that closes a socket on real timers leaks the same timer to the next
   test in its file; fake timers, as `return.test.tsx` uses, discard it.
+- **A press right after a question or the menu appears is swallowed, on
+  purpose.** INV-2's arrival window (`useArrival`, 600ms) ignores any press on
+  an answer option, a picker key or a quick reply that soon after it was drawn,
+  and a held key's repeat never activates one. A test that renders a card, or
+  opens the menu, and clicks at once sees nothing sent and no error. Step past
+  it: `pastArrival()` from `test/ui/helpers.tsx` moves `Date` on in vitest, and
+  `pastArrival(page)` from `e2e/helpers.ts` waits it out in Playwright, after
+  the test has seen the thing appear. Each new prompt id restarts the window,
+  so a set's next question needs its own.
 - **WebKit times out under a loaded machine, and it is not always the same
   spec.** Measured on 2026-09-06 at load average 8.7: a full run failed
   `responsive.spec.ts` "every control on screen can be hit and announced" on

@@ -15,7 +15,7 @@ import { App, FleetRoute } from '../../src/web/components/App.tsx'
 import { connect } from '../../src/web/store/transport.ts'
 import { useStore } from '../../src/web/store/store.ts'
 import type { Agent, PendingPrompt } from '../../src/shared/types.ts'
-import { agent, resetStore } from './helpers.tsx'
+import { agent, pastArrival, resetStore } from './helpers.tsx'
 import { setViewport } from './setup.ts'
 
 vi.mock('../../src/web/components/LazyTerminal.tsx', () => ({
@@ -375,6 +375,7 @@ describe('F3 the hand-off after an answer', () => {
     shell('/agent/w1')
     ask(ws, 'w1')
     expect(screen.queryByTestId('answer-next')).toBeNull()
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[0]!)
     expect(ws.answers()).toBe(1)
     const next = screen.getByTestId('answer-next')
@@ -388,6 +389,7 @@ describe('F3 the hand-off after an answer', () => {
     const ws = liveFleet()
     shell('/agent/w1')
     ask(ws, 'w1')
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[0]!)
     act(() => ws.deliver({ type: 'fleet', agents: [{ ...W1, status: 'busy' }, W2, W3, IDLE], mock: false }))
     expect(screen.queryByTestId('answer-card')).toBeNull()
@@ -399,6 +401,7 @@ describe('F3 the hand-off after an answer', () => {
     const ws = liveFleet()
     shell('/', '/agent/w1')
     ask(ws, 'w1')
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[0]!)
     await user.click(screen.getByTestId('answer-next'))
     expect(where.path).toBe('/agent/w2')
@@ -442,6 +445,7 @@ describe('R5 the chip, the hand-off and ⌥H name one "next"', () => {
     const ws = liveFleet()
     shell('/agent/w1')
     ask(ws, 'w1')
+    pastArrival()
     await user.click(screen.getAllByTestId('answer-option')[0]!)
     expect(screen.getByTestId('waiting-chip').getAttribute('aria-label')).toContain('«second-blocked»')
     expect(screen.getByTestId('answer-next').textContent).toContain('Next: second-blocked')

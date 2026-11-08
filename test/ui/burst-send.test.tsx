@@ -12,7 +12,7 @@ import { act } from 'react'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Chat } from '../../src/web/components/Chat.tsx'
-import { agent, renderApp, resetStore } from './helpers.tsx'
+import { agent, pastArrival, renderApp, resetStore } from './helpers.tsx'
 
 const sendMessage = vi.hoisted(() => vi.fn())
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -92,6 +92,7 @@ describe('burst send', () => {
   /** A reply is behind the menu now, so picking one is open-then-pick. */
   const pick = async (user: ReturnType<typeof userEvent.setup>, index: number): Promise<void> => {
     await user.click(screen.getByTestId('strip-toggle'))
+    pastArrival()
     await user.click(screen.getAllByTestId('quick-prompt')[index] as HTMLElement)
   }
 

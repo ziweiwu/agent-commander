@@ -10,13 +10,13 @@
  * agent. In particular a reply must not quietly pick up whatever is half-typed
  * in the box.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Chat } from '../../src/web/components/Chat.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { buildMessages } from '../../src/web/lib/chat.ts'
-import { agent, renderApp, resetStore } from './helpers.tsx'
+import { agent, pastArrival, renderApp, resetStore } from './helpers.tsx'
 
 const sendMessage = vi.hoisted(() => vi.fn())
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -39,9 +39,10 @@ beforeEach(() => {
 /** The leading ➤ is decorative — it signals "this sends", it is not the text. */
 const label = (item: HTMLElement): string => (item.textContent ?? '').replace('➤', '').trim()
 
-/** Open the replies menu, the one press that precedes every reply. */
+/** Open the replies menu, the one press that precedes every reply, and wait out its arrival window. */
 async function openReplies(user: ReturnType<typeof userEvent.setup>): Promise<void> {
   await user.click(screen.getByTestId('strip-toggle'))
+  pastArrival()
 }
 
 describe('quick replies', () => {
@@ -207,5 +208,70 @@ describe('quick replies', () => {
     renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
     await openReplies(user)
     expect(label(screen.getAllByTestId('quick-prompt')[0] as HTMLElement)).toBe('continue')
+  })
+})
+
+/**
+ * INV-2: the gesture that opened the menu never sends from it. Holding Enter
+ * on "More" opens the panel and moves focus to its first reply, "continue";
+ * the key's auto-repeat then landed there and sent it with Enter. A browser
+ * clicks a button on an Enter keydown nothing cancelled, which `enterKeydown`
+ * stands in for: jsdom does not.
+ */
+describe('INV-2 the gesture that opened the menu never sends from it', () => {
+  const T0 = 1_000_000
+  const enterKeydown = (target: Element, init: KeyboardEventInit): void => {
+    if (fireEvent.keyDown(target, { key: 'Enter', ...init })) fireEvent.click(target)
+  }
+  const pressEnter = (target: Element): void => enterKeydown(target, { repeat: false })
+  const repeatEnter = (target: Element): void => enterKeydown(target, { repeat: true })
+  const clockAt = (sinceStartMs: number): void => {
+    vi.setSystemTime(T0 + sinceStartMs)
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'], now: T0 })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('INV-2 ignores the repeat of the Enter that opened the menu', () => {
+    renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
+    fireEvent.click(screen.getByTestId('strip-toggle'))
+    const first = document.activeElement as HTMLElement
+    expect(first).toBe(screen.getAllByTestId('quick-prompt')[0])
+    repeatEnter(first)
+    clockAt(5_000)
+    repeatEnter(first)
+    expect(sendMessage).not.toHaveBeenCalled()
+    pressEnter(first)
+    expect(sendMessage).toHaveBeenCalledExactlyOnceWith('continue')
+  })
+
+  it('INV-2 ignores a press within 600ms of the menu opening, and sends one after', () => {
+    renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
+    fireEvent.click(screen.getByTestId('strip-toggle'))
+    clockAt(100)
+    fireEvent.click(screen.getAllByTestId('quick-prompt')[0]!)
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(screen.getAllByTestId('quick-prompt')).toHaveLength(5)
+    clockAt(700)
+    fireEvent.click(screen.getAllByTestId('quick-prompt')[0]!)
+    expect(sendMessage).toHaveBeenCalledExactlyOnceWith('continue')
+  })
+
+  it('INV-2 restarts the window each time the menu opens', () => {
+    renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
+    const toggle = screen.getByTestId('strip-toggle')
+    fireEvent.click(toggle)
+    clockAt(5_000)
+    fireEvent.click(toggle)
+    expect(screen.queryAllByTestId('quick-prompt')).toEqual([])
+    clockAt(5_100)
+    fireEvent.click(toggle)
+    clockAt(5_200)
+    fireEvent.click(screen.getAllByTestId('quick-prompt')[0]!)
+    expect(sendMessage).not.toHaveBeenCalled()
   })
 })

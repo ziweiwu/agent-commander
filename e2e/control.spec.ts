@@ -10,7 +10,7 @@
  * the failure they would get for real.
  */
 import { expect, test, type Page } from '@playwright/test'
-import { AGENT, openAgent, openComposerMenu, openFleet, stamp } from './helpers.ts'
+import { AGENT, openAgent, openComposerMenu, openFleet, pastArrival, stamp } from './helpers.ts'
 
 test.describe('starting an agent', () => {
   test('INV-7 refuses a directory that is not there, and says so', async ({ page }) => {
@@ -363,6 +363,7 @@ test.describe('acting on a running agent', () => {
     await expect(options).toHaveCount(2)
     await expect(options.first()).toContainText(/Backfill the index/)
 
+    await pastArrival(page)
     await options.first().click()
     await expect(page.getByTestId('toast')).toBeVisible({ timeout: 15_000 })
     // INV-2: the card closes itself on the first press, because a second digit

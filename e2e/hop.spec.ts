@@ -6,7 +6,7 @@
  * others to count and somewhere real to go.
  */
 import { expect, test } from '@playwright/test'
-import { AGENT, card, openFleet } from './helpers.ts'
+import { AGENT, card, openFleet, pastArrival } from './helpers.ts'
 
 /** The other blocked fixtures, any of which "next" may name from the one opened. */
 const OTHER_BLOCKED = new RegExp(`/agent/(${[AGENT.plan, AGENT.permission, AGENT.set].join('|')})$`)
@@ -60,6 +60,7 @@ test('answering a blocked agent offers the next blocked one, and waits to be pre
   await expect(answer).toBeVisible({ timeout: 15_000 })
   await expect(page.getByTestId('answer-next')).toHaveCount(0)
 
+  await pastArrival(page)
   await answer.getByTestId('answer-option').first().click()
   const next = page.getByTestId('answer-next')
   await expect(next).toBeVisible({ timeout: 15_000 })

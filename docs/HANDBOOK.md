@@ -306,6 +306,13 @@ One press closes the card, because a second digit would not repeat the answer â€
 `AskUserQuestion` asks its questions one at a time, so it would answer the next
 one.
 
+Nor does the press that opened it. Opening a blocked agent by its card still
+puts the keyboard on option 1, but holding Enter there, or tapping the card's
+**Answer** twice, answers nothing: a key's auto-repeat never presses an option,
+and for 600ms after a question (or a set's next question) appears its buttons
+ignore presses without saying so. The replies in the **â‹¯** menu behave the
+same way after it opens.
+
 ### On a phone
 
 The layout is built for actually using this from Tailscale on a phone, not just
