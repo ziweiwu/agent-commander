@@ -39,7 +39,9 @@ pub fn read(path: &std::path::Path) -> Option<String> {
 /// Write `token` readable only by this user.
 ///
 /// The mode is set as the file is created rather than afterwards, so there is
-/// no instant at which the secret exists at the default umask.
+/// no instant at which the secret exists at the default umask. A file already
+/// there keeps its own mode through `open`, so it is narrowed again before the
+/// secret goes in: a token file left at 0644 must not stay readable.
 pub fn write(path: &std::path::Path, token: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -53,6 +55,12 @@ pub fn write(path: &std::path::Path, token: &str) -> Result<(), String> {
         open.mode(0o600);
     }
     let mut file = open.open(path).map_err(|e| format!("cannot write {}: {e}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("cannot restrict {}: {e}", path.display()))?;
+    }
     writeln!(file, "{token}").map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
@@ -138,5 +146,21 @@ mod tests {
         let made = read_or_create(&path).expect("create");
         assert!(!made.ends_with('\n'));
         assert_eq!(std::fs::read_to_string(&path).expect("read").trim(), made);
+    }
+
+    /// INV-3: the mode on `OpenOptions` applies only when the file is created,
+    /// so a token file someone left at 0644 stayed world-readable through every
+    /// write, `--rotate-token` included.
+    #[cfg(unix)]
+    #[test]
+    fn inv3_a_wider_file_already_there_is_narrowed_when_written() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_dir, path) = scratch();
+        std::fs::create_dir_all(path.parent().unwrap()).expect("mkdir");
+        std::fs::write(&path, "old\n").expect("seed");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).expect("widen");
+        rotate(&path).expect("rotate");
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode();
+        assert_eq!(mode & 0o077, 0, "group and other must have nothing: {mode:o}");
     }
 }
