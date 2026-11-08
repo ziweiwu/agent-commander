@@ -28,6 +28,7 @@
 
 #![allow(dead_code)]
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -777,6 +778,12 @@ const MILLIS_PER_SECOND: f64 = 1000.0;
 /// a `paste` reach it exactly once each.
 const ONE_MESSAGE: f64 = 1.0;
 
+/// What the time from `last` to `now` has paid back. A clock that stepped
+/// backwards pays nothing rather than a negative amount.
+fn refill_between(last: i64, now: i64) -> f64 {
+    (now - last).max(0) as f64 / MILLIS_PER_SECOND * WRITE_PER_SECOND
+}
+
 /// A token bucket, refilled continuously rather than on a timer.
 ///
 /// Interior mutability, because `routes` holds one per connection behind a
@@ -804,8 +811,7 @@ impl WriteBudget {
     pub fn take_at(&self, now: i64) -> bool {
         let mut state = self.state.lock().expect("write budget poisoned");
         let (ref mut tokens, ref mut last) = *state;
-        let elapsed = (now - *last).max(0) as f64 / MILLIS_PER_SECOND;
-        *tokens = (*tokens + elapsed * WRITE_PER_SECOND).min(WRITE_BURST);
+        *tokens = (*tokens + refill_between(*last, now)).min(WRITE_BURST);
         *last = now;
         if *tokens < ONE_MESSAGE {
             return false;
@@ -819,6 +825,13 @@ impl WriteBudget {
         self.take_at(now_ms())
     }
 
+    /// True once this bucket holds all it can, which makes it the same as a
+    /// new one.
+    fn is_full_at(&self, now: i64) -> bool {
+        let (tokens, last) = *self.state.lock().expect("write budget poisoned");
+        tokens + refill_between(last, now) >= WRITE_BURST
+    }
+
     /// True the first time a refusal should be reported, false while it
     /// persists. Answering a flood with a flood is not an improvement.
     pub fn should_warn(&self) -> bool {
@@ -828,6 +841,43 @@ impl WriteBudget {
 
 /// The message a refused burst is reported with.
 pub const TOO_MUCH_INPUT: &str = "too much input at once — slowing down";
+
+/// INV-12 for the HTTP routes that act on an agent: one [`WriteBudget`] per
+/// agent, shared by every caller naming it.
+///
+/// A request has no connection to keep a budget on, so the socket's
+/// per-connection bucket cannot be reused as it stands. Per agent rather than
+/// per peer: a script looping on one agent spends that agent's allowance and
+/// nobody else's, so the owner's phone on another agent is never refused
+/// because of it.
+///
+/// A bucket that has refilled is the same as a new one, so it is forgotten.
+/// The map holds only agents written to in the last few seconds.
+#[derive(Debug, Default)]
+pub struct AgentBudgets {
+    by_session: Mutex<HashMap<String, WriteBudget>>,
+}
+
+impl AgentBudgets {
+    /// True when this agent may be written to at `now`.
+    pub fn take_at(&self, session_id: &str, now: i64) -> bool {
+        let mut budgets = self.by_session.lock().expect("agent budgets poisoned");
+        budgets.retain(|_, budget| !budget.is_full_at(now));
+        budgets
+            .entry(session_id.to_string())
+            .or_insert_with(|| WriteBudget::new(now))
+            .take_at(now)
+    }
+
+    pub fn take(&self, session_id: &str) -> bool {
+        self.take_at(session_id, now_ms())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn held(&self) -> usize {
+        self.by_session.lock().expect("agent budgets poisoned").len()
+    }
+}
 
 /* ------------------------------------------------------------------ tests */
 
@@ -1704,6 +1754,25 @@ mod tests {
         for (i, _) in sentence.chars().enumerate() {
             assert!(budget.take_at(i as i64 * KEYSTROKE_GAP_MS), "refused character {i}");
         }
+    }
+
+    #[test]
+    fn inv12_each_agent_has_its_own_http_budget() {
+        let budgets = AgentBudgets::default();
+        while budgets.take_at("looping", 0) {}
+        assert!(budgets.take_at("phone", 0), "another agent's allowance was spent");
+        assert!(!budgets.take_at("looping", 0), "serving another agent refilled this one");
+    }
+
+    #[test]
+    fn inv12_a_full_bucket_is_forgotten() {
+        let refilled_ms = (WRITE_BURST / WRITE_PER_SECOND * MILLIS_PER_SECOND) as i64;
+        let budgets = AgentBudgets::default();
+        while budgets.take_at("spent", 0) {}
+        assert!(budgets.take_at("next", refilled_ms - 1));
+        assert_eq!(budgets.held(), 2, "a bucket still refilling must be kept");
+        assert!(budgets.take_at("last", refilled_ms * 2));
+        assert_eq!(budgets.held(), 1, "buckets that have refilled must be dropped");
     }
 
     #[test]

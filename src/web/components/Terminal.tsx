@@ -339,20 +339,23 @@ function useRefitWhenTheRoomChanges(
  * The same action the key bar's button runs, so a hardware Shift+Tab and a tap
  * do the same thing — and the same INV-2 guard, because key repeat on a held
  * chord is precisely the burst the ref exists for. A CLI that does not speak
- * Claude Code's slash commands gets nothing (INV-7).
+ * Claude Code's slash commands gets nothing (INV-7). A press the server
+ * refused says so, as the button does, because the pane will not change.
  */
 function useModeChord(agent: Agent): () => void {
   const sending = useRef(false)
+  const showToast = useStore((s) => s.showToast)
+  const t = useTranslate()
+  const press = async (): Promise<void> => {
+    const result = await sendShiftTab()
+    if (!result.ok) showToast(t('controlFailed', { error: result.error }))
+  }
   return (): void => {
     if (sending.current || !agent.paneId || !allowsSlashCommands(agent.agentKind)) return
     sending.current = true
-    void (async () => {
-      try {
-        await sendShiftTab()
-      } finally {
-        sending.current = false
-      }
-    })()
+    void press().finally(() => {
+      sending.current = false
+    })
   }
 }
 
