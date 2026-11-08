@@ -138,8 +138,8 @@ composer's menu still focuses its first reply, so the rest of the gesture that
 put them there arrives on them: the auto-repeat of a held Enter, the second tap
 of a double tap 100-900ms behind the first. On 3cc6501 each of those answered
 `Yes` to `rm -rf dist && npm run build`, or pasted "continue" with Enter. So a
-repeated keydown (`event.repeat`) never activates an answer option or a quick
-reply, and any press within `ARRIVAL_GUARD_MS` (600ms, `useArrival`) of a
+repeated keydown (`event.repeat`) never activates an answer option, a picker key or a
+quick reply, and any press within `ARRIVAL_GUARD_MS` (600ms, `useArrival`) of a
 question, a set's next question or the menu appearing sends nothing. The
 window restarts with each new prompt id, and the press it swallows shows
 nothing, because it is not an error. Checked by the `INV-2 the gesture …`

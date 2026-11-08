@@ -308,7 +308,7 @@ one.
 
 Nor does the press that opened it. Opening a blocked agent by its card still
 puts the keyboard on option 1, but holding Enter there, or tapping the card's
-**Answer** twice, answers nothing: a key's auto-repeat never presses an option,
+**Answer** twice, answers nothing: a key's auto-repeat never presses an option or a key,
 and for 600ms after a question (or a set's next question) appears its buttons
 ignore presses without saying so. The replies in the **⋯** menu behave the
 same way after it opens.

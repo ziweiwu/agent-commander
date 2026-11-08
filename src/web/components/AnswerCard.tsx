@@ -443,6 +443,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
             data-testid={`answer-key-${key}`}
             disabled={!agent.paneId || !online}
             onClick={() => nudge(key)}
+            onKeyDown={refuseRepeat}
           >
             {key === 'Up' ? '↑' : key === 'Down' ? '↓' : key === 'Right' ? '→' : key}
           </Button>

@@ -571,7 +571,8 @@ epistemic rather than functional.
 - **FR-ANS-7** — One press MUST close the card, guarded synchronously. A second
   digit is not a duplicate answer — `AskUserQuestion` asks its questions one at
   a time, so it would answer the *next* one. Nor MAY the gesture that opened
-  the card answer it: a key repeat never presses an option, and a press within
+  the card answer it: a key repeat never presses an option or a picker
+  key, and a press within
   600ms of the question (or a set's next question) appearing sends nothing.
   The same holds for the composer menu's quick replies. **(INV-2, INV-16)**
 - **FR-ANS-8** — A blocked agent MUST show a banner naming what it is waiting

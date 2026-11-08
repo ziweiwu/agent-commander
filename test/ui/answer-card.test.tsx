@@ -947,4 +947,12 @@ describe('INV-2 the gesture that opened a question never answers it', () => {
     fireEvent.click(screen.getByTestId('answer-key-Enter'))
     expect(sendKey).toHaveBeenCalledExactlyOnceWith('Enter')
   })
+
+  it('INV-2 ignores a held Enter on a picker key once the window has passed', () => {
+    useStore.setState({ prompt: null })
+    renderApp(<AnswerCard agent={blocked()} prompt={null} />)
+    clockAt(700)
+    repeatEnter(screen.getByTestId('answer-key-Enter'))
+    expect(sendKey).not.toHaveBeenCalled()
+  })
 })
