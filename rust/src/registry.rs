@@ -220,7 +220,7 @@ pub fn parse_tmux_ref(reference: Option<&str>) -> (Option<String>, Option<String
 /// Unlike Node's `process.kill`, a non-positive pid is refused outright rather
 /// than passed through: `kill(0, …)` addresses the whole process group, and a
 /// session file claiming pid 0 is malformed input, not a live agent.
-fn is_alive(pid: i64) -> bool {
+pub(crate) fn is_alive(pid: i64) -> bool {
     if pid <= 0 || pid > i64::from(i32::MAX) {
         return false;
     }

@@ -733,8 +733,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   new id in the right order.
 - **FR-CTL-9** — **Close** MUST send `/exit` first and force only a session that
   ignores it, and then only its pane: the tmux session around it may hold other
-  agents and shells. For a kind with no slash commands, Close MUST close the tmux
-  session instead. **(INV-7, INV-8)**
+  agents and shells. It MUST NOT kill a pane whose own process is not the agent:
+  an agent started from a shell has exited once its own process has, and one that
+  ignores `/exit` there MUST be left running and reported as still running. For a
+  kind with no slash commands, Close MUST close the tmux session instead.
+  **(INV-7, INV-8)**
 - **FR-CTL-10** — **Goal** MUST be confirmed against the `goal_status` record
   `/goal` leaves in the transcript, so a paste that went into a dialog instead of
   the prompt is reported rather than shown as a goal that is quietly not set.
@@ -897,7 +900,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   sessions first. *`test/ui/prune.test.tsx`.*
 - **FR-PRUNE-4** — Sessions MUST be closed one at a time through the same
   `/exit`-then-force path as Close, one refusal MUST NOT stop the rest, and the
-  result MUST report what actually closed rather than what was attempted.
+  result MUST report what actually closed rather than what was attempted: a
+  session left running in its shell is not closed.
   **(INV-11)**
 - **FR-PRUNE-5** — The control MUST be unavailable while the fleet view is not
   live: a card from a dropped connection is a memory, not a reading. **(INV-11)**

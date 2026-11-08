@@ -5,7 +5,7 @@ import { grouped, unusedAgents, type StatusFilter } from '../lib/filter.ts'
 import { displayName } from '../lib/naming.ts'
 import { closeAgentById } from '../store/transport.ts'
 import type { Key } from '../lib/i18n.ts'
-import { useLang, useTranslate } from '../hooks/useTranslate.ts'
+import { useLang, useTranslate, type Translate } from '../hooks/useTranslate.ts'
 import { formatRelative } from '../lib/i18n.ts'
 import { relative, relativeByMinute, type Relative } from '../lib/format.ts'
 import { useFleetTrees } from '../hooks/useFleetTrees.ts'
@@ -35,6 +35,35 @@ export interface FleetListProps {
 
 /** How many session names the prune confirmation lists before summarising. */
 const NAMES_BEFORE_ELLIPSIS = 4
+
+/** What a prune did to each session it was asked to close. */
+interface PruneTally {
+  total: number
+  done: number
+  /** Ignored `/exit` in a pane hosting a shell, so left running (INV-8). */
+  running: number
+  /** The first refusal's text. */
+  error: string
+}
+
+/**
+ * The toast after a prune: what closed, what refused, and what was left
+ * running, each counted apart. A session left running in its shell did not
+ * refuse anything, so it is never reported as a refusal (FR-PRUNE-4).
+ */
+function pruneReport(translate: Translate, tally: PruneTally): string {
+  const { total, done, running, error } = tally
+  const refused = total - done - running
+  const count = String(total)
+  if (running === 0 && refused === 0) return translate('pruneDone', { count })
+  if (running === 0 && done === 0) return translate('pruneNone', { error })
+  const closed =
+    refused === 0
+      ? translate('pruneClosedOf', { done: String(done), count })
+      : translate('pruneSome', { done: String(done), count, failed: String(refused), error })
+  if (running === 0) return closed
+  return `${closed} ${translate('pruneStillRunning', { running: String(running) })}`
+}
 
 export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListProps) {
   const t = useTranslate()
@@ -111,21 +140,15 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
     if (!window.confirm(t('pruneConfirm', { count, names: label, sessionWord }))) return
 
     setPruning(true)
-    let done = 0
-    let error = ''
+    const tally: PruneTally = { total: unused.length, done: 0, running: 0, error: '' }
     for (const agent of unused) {
       const result = await closeAgentById(agent.sessionId)
-      if (result.ok) done += 1
-      else error ||= result.error ?? ''
+      if (!result.ok) tally.error ||= result.error ?? ''
+      else if (result.detail === 'running') tally.running += 1
+      else tally.done += 1
     }
     setPruning(false)
-
-    if (done === unused.length) showToast(t('pruneDone', { count }))
-    else if (done === 0) showToast(t('pruneNone', { error }))
-    else
-      showToast(
-        t('pruneSome', { done: String(done), count, failed: String(unused.length - done), error }),
-      )
+    showToast(pruneReport(t, tally))
   }
 
   /**

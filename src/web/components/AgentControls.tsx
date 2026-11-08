@@ -54,6 +54,10 @@ export function AgentControls({ agent }: { agent: Agent }) {
       showToast(t('controlFailed', { error: result.error }))
       return
     }
+    if (result.detail === 'running') {
+      showToast(t('closedLeftRunning', { name }))
+      return
+    }
     showToast(t(result.detail === 'forced' ? 'closedForced' : 'closedGracefully', { name }))
     /*
      * Leave by hand. The route used to close the panel on its own when the id
