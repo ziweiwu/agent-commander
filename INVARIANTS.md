@@ -2028,7 +2028,8 @@ passes, so an agent left open read "refused 2 actions … (since 14:02)" and
 ## INV-12 — Input to a live agent is bounded
 
 No client can queue unbounded work into a running agent. Writes are charged
-against a per-connection budget, and a WebSocket frame that could not be a
+against a per-connection budget on the socket and a per-agent one for the HTTP
+control and picture routes, and a WebSocket frame that could not be a
 legitimate message is refused before it is parsed.
 
 **Why this is not covered by INV-2:** that invariant governs whether input is
@@ -2056,10 +2057,36 @@ disagree about the same paste: one is about memory, the other about intent.
 `focus` and `attach` are not charged. They cost this server work but never reach
 an agent, and a tab switching views quickly is not what this guards.
 
+**The HTTP routes that act on an agent are charged too** (R10). Measured before
+they were: 300 `POST /api/agents/{id}/mode` were 300 × 200, each a Shift+Tab
+queued behind the last, while the same flood down the socket was throttled. A
+request has no connection to keep a budget on, so `control::AgentBudgets` keeps
+one `WriteBudget` per agent, with the socket's burst and refill, and every
+control (`close`, `clear`, `compact`, `mode`, `model`, `goal`) and every picture
+upload spends one unit of it. A refusal is `429` with the same `{ ok: false,
+error }` every control and picture answers with, so the client's existing
+"That did not take effect" and "That picture was not sent" toasts say why. Per
+agent rather than per peer: a loop on one agent spends only that agent's
+allowance, and the owner's phone on another is never refused because of it. A
+person does not come near 120 presses on one agent; a picture costs one unit
+because it is one press, not one per byte. An id the fleet does not hold is
+not charged, since it reaches no agent, and a bucket that has refilled is
+dropped, so the map holds only agents written to in the last few seconds. The
+socket keeps its own per-connection budget: an answer, a key or a paste is not
+charged here.
+
 - `control::inv12_a_flood_does_not_all_reach_the_agent` — a 5,000-message flood no longer arrives in full
   and is reported once rather than 5,000 times; a briskly typed sentence is
   never refused; the budget refills after a burst; and an oversized frame is
   refused before it is parsed
+- `control::inv12_each_agent_has_its_own_http_budget` and
+  `inv12_a_full_bucket_is_forgotten` — one agent's budget is not another's,
+  and the map holds only agents written to in the last few seconds
+- `routes::inv12_a_flood_of_control_posts_does_not_all_reach_the_agent` — 300
+  `POST …/mode` meet a `429` carrying `TOO_MUCH_INPUT` and do not all reach
+  the agent; `inv12_one_agent_s_flood_leaves_another_agent_s_controls_alone`;
+  `inv12_a_picture_is_charged_to_the_same_agent_s_budget`;
+  `inv12_the_owner_s_own_use_is_never_refused`
 
 **A first task is bounded too, and tighter than a paste** (F5). It reaches the
 agent on the `tmux new-session` command line rather than through a buffer, and

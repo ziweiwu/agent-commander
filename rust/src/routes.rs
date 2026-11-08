@@ -310,6 +310,8 @@ pub struct App {
     pub viewers: Viewers,
     /// Where a picture a tab uploads is stored until its session ends.
     pub pictures: Arc<crate::pictures::PictureStore>,
+    /// INV-12 for the control and picture routes, charged per agent.
+    pub agent_budgets: crate::control::AgentBudgets,
     /// How often a quiet socket is pinged. `HEARTBEAT_MS` outside tests.
     ///
     /// A field rather than the constant read directly, because the property
@@ -1556,11 +1558,15 @@ fn value_of(body: &serde_json::Value) -> String {
 /// Plain HTTP beside the socket rather than a fifth client message: a
 /// megabyte through the fleet socket would sit in front of every other tab's
 /// frames until it finished, and the socket's own cap (`MAX_FRAME_BYTES`) was
-/// sized for keystrokes. It also keeps `WriteBudget` meaning what INV-12 says
-/// it means — how much a tab may still ask of a *live agent* — instead of
-/// spending that allowance on a file nobody has been shown yet.
+/// sized for keystrokes. An upload is charged one unit of the agent's HTTP
+/// budget, whatever its size: a person never reaches it, and a loop cannot
+/// fill the disk. It is charged before the body is read, so a refused upload
+/// is not buffered first (INV-12).
 async fn handle_picture(app: &App, body: Body, session_id: &str) -> Response {
     use crate::pictures::Refused;
+    if out_of_budget(app, session_id) {
+        return json_of(StatusCode::TOO_MANY_REQUESTS, &PictureResponse::err(TOO_MUCH_INPUT));
+    }
     if app.deps.source.get(session_id).is_none() {
         return refused_picture(StatusCode::NOT_FOUND, &Refused::UnknownSession);
     }
@@ -1582,6 +1588,14 @@ fn refused_picture(status: StatusCode, why: &crate::pictures::Refused) -> Respon
     json_of(status, &PictureResponse::err(why.message()))
 }
 
+/// INV-12: spend one unit of this agent's HTTP budget, true when it has none.
+///
+/// An id the fleet does not hold is not charged: it reaches no agent, and
+/// charging it would let invented ids fill the map.
+fn out_of_budget(app: &App, session_id: &str) -> bool {
+    app.deps.source.get(session_id).is_some() && !app.agent_budgets.take(session_id)
+}
+
 /// What one control action answers with, or the status its failure earns.
 type Controlled = Result<ControlResponse, (StatusCode, Failure)>;
 
@@ -1594,6 +1608,9 @@ async fn handle_control(app: &App, body: Body, session_id: &str, action: &str) -
 }
 
 async fn run_control(app: &App, body: Body, session_id: &str, action: &str) -> Controlled {
+    if out_of_budget(app, session_id) {
+        return Err((StatusCode::TOO_MANY_REQUESTS, Failure::caller(TOO_MUCH_INPUT)));
+    }
     let agent = app.deps.source.get(session_id);
     match action {
         "close" => close_session(app, session_id, agent).await,
@@ -3456,6 +3473,7 @@ async fn build_app(
         tree: Some(tree_reader(opts)),
         viewers: Viewers::default(),
         pictures: Arc::new(crate::pictures::PictureStore::new()),
+        agent_budgets: Default::default(),
         heartbeat: Duration::from_millis(HEARTBEAT_MS),
         timeline_every: Duration::from_millis(TIMELINE_MS),
     })
@@ -4502,6 +4520,7 @@ mod tests {
             pictures: Arc::new(crate::pictures::PictureStore::in_dir(
                 parts.web_root.path().join("pictures"),
             )),
+            agent_budgets: Default::default(),
             heartbeat: Duration::from_millis(HEARTBEAT_MS),
             timeline_every: Duration::from_millis(TIMELINE_MS),
         })
@@ -7177,6 +7196,90 @@ mod tests {
             );
             let res = raw(h.port, &request).await;
             assert!(status(&res).contains(expected), "{cookie}: {}", status(&res));
+        }
+    }
+
+    /// The judge's measurement: 300 `POST …/mode` were 300 × 200, each a
+    /// Shift+Tab queued behind the last.
+    const CONTROL_FLOOD: usize = 300;
+
+    fn mode_path(session_id: &str) -> String {
+        format!("/api/agents/{session_id}/mode")
+    }
+
+    /// Press the mode control until the server refuses one; how many it took.
+    async fn press_mode_until_refused(port: u16, session_id: &str) -> usize {
+        for accepted in 0..CONTROL_FLOOD {
+            let res = post(port, &mode_path(session_id), "", None).await;
+            if status(&res).contains("429") {
+                return accepted;
+            }
+        }
+        CONTROL_FLOOD
+    }
+
+    /// A refusal has the shape every control already answers with, so the
+    /// client's "That did not take effect: …" toast can say why.
+    #[tokio::test]
+    async fn inv12_a_flood_of_control_posts_does_not_all_reach_the_agent() {
+        let h = plain(FakePanes::new()).await;
+        let mut refused = Vec::new();
+        for _ in 0..CONTROL_FLOOD {
+            let res = post(h.port, &mode_path(SESSION), "", None).await;
+            if status(&res).contains("429") {
+                refused.push(body(&res));
+            }
+        }
+        let reached = h.control.calls.lock().unwrap().len();
+        assert!(!refused.is_empty(), "all {CONTROL_FLOOD} presses were accepted");
+        assert!(reached > 0 && reached < CONTROL_FLOOD, "reached = {reached}");
+        let answer: serde_json::Value = serde_json::from_str(&refused[0]).unwrap();
+        assert_eq!(answer["ok"], serde_json::json!(false));
+        assert_eq!(answer["error"], serde_json::json!(TOO_MUCH_INPUT));
+    }
+
+    /// Per agent and not per peer: a loop on one agent spends that agent's
+    /// allowance, and the owner's controls on any other are untouched.
+    #[tokio::test]
+    async fn inv12_one_agent_s_flood_leaves_another_agent_s_controls_alone() {
+        let h = plain(FakePanes::new()).await;
+        add_agent(&h.source, "other", CLAUDE_KIND);
+        assert!(press_mode_until_refused(h.port, SESSION).await < CONTROL_FLOOD);
+        let res = post(h.port, &mode_path("other"), "", None).await;
+        assert!(status(&res).contains("200"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn inv12_a_picture_is_charged_to_the_same_agent_s_budget() {
+        let h = blocked(FakePanes::new()).await;
+        assert!(press_mode_until_refused(h.port, BLOCKED).await < CONTROL_FLOOD);
+        let res = post_bytes(h.port, &picture_path(BLOCKED), &a_png()).await;
+        assert!(status(&res).contains("429"), "{}", status(&res));
+        let answer: serde_json::Value = serde_json::from_str(&body(&res)).unwrap();
+        assert_eq!(answer["error"], serde_json::json!(TOO_MUCH_INPUT));
+    }
+
+    /// The owner's busiest real minute on one agent, back to back with no
+    /// refill at all: a few mode presses to reach the one wanted, a model and
+    /// a goal, and a handful of pasted photos.
+    #[tokio::test]
+    async fn inv12_the_owner_s_own_use_is_never_refused() {
+        const MODE_PRESSES: usize = 8;
+        const PHOTOS: usize = 6;
+        let h = blocked(FakePanes::new()).await;
+        let json = "Content-Type: application/json\r\n";
+        for press in 0..MODE_PRESSES {
+            let res = post(h.port, &mode_path(BLOCKED), "", None).await;
+            assert!(status(&res).contains("200"), "press {press}: {}", status(&res));
+        }
+        for (action, payload) in [("model", r#"{"value":"opus"}"#), ("goal", r#"{"value":"ship"}"#)] {
+            let path = format!("/api/agents/{BLOCKED}/{action}");
+            let res = post(h.port, &path, json, Some(payload)).await;
+            assert!(status(&res).contains("200"), "{action}: {}", status(&res));
+        }
+        for photo in 0..PHOTOS {
+            let res = post_bytes(h.port, &picture_path(BLOCKED), &a_png()).await;
+            assert!(status(&res).contains("200"), "photo {photo}: {}", status(&res));
         }
     }
 }

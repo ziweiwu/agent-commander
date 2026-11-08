@@ -992,8 +992,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   ran `load(A) → load(B) → paste(into A)`, and A's agent received B's text.
   **(INV-2)** *`pane::tests` write-path group, plus a stateful property test.*
 - **NFR-SEC-15** — No client may queue unbounded work into a running agent.
-  Writes MUST be charged against a per-connection budget, and a frame that could
-  not be a legitimate message MUST be refused before it is parsed. **(INV-12)**
+  Writes MUST be charged against a per-connection budget on the socket and a
+  per-agent one for the HTTP control and picture routes, which MUST answer a
+  refusal with `429` and `{ ok: false, error }`, and a frame that could not be a
+  legitimate message MUST be refused before it is parsed. **(INV-12)**
 - **NFR-SEC-16** — An uploaded picture MUST be named by the server, never by
   the caller: the session id MUST pass the same directory-name rule `usage.rs`
   applies (INV-9) and the file name MUST be the digest of the bytes. The format
