@@ -1205,10 +1205,25 @@ Shift+Tab uses — agent exists, pane reachable — and `assertControllable`
 remains the guard for everything that types.
 
 - **Close** asks first, in the UI, naming the agent. It sends `/exit`, which is
-  Claude Code's own shutdown path, and only kills the agent's pane if it is
-  still alive after a grace period — the pane and never the tmux session around
-  it, because a split window holds other agents and shells that were not asked
-  to close (`control::inv8_close_forces_only_the_pane_of_an_agent_that_ignores_exit`).
+  Claude Code's own shutdown path, and only kills the agent's pane if the
+  agent's process is still alive after a grace period and is that pane's own
+  process — the pane and never the tmux session around it, because a split
+  window holds other agents and shells that were not asked to close
+  (`control::inv8_close_forces_only_the_pane_of_an_agent_that_ignores_exit`).
+  **A pane hosting a shell is never killed.** `claude` typed into a shell
+  leaves the shell as the pane's process, and `/exit` hands the pane back to
+  it, so the close is done once the agent's pid is gone, whatever the pane is
+  doing (`control::inv8_close_counts_the_agents_own_exit_in_a_shell_that_outlives_it`).
+  Killing that pane used to take the shell and its background jobs with it,
+  and report the clean exit as forced. An agent there that ignores `/exit` is
+  left running and the interface says it is still running
+  (`control::inv8_close_leaves_a_shell_hosted_agent_that_ignores_exit_running`):
+  the app never signals the agent's pid, which is a power this invariant and
+  INV-7 do not grant. A pane whose own process tmux cannot name is treated the
+  same way. A placeholder, a session this app started and the CLI has not
+  registered yet, has no pid to ask about, so its pane alone decides; its pane
+  runs `claude` as its own command, so it is forced as before
+  (`control::close_judges_a_placeholder_by_its_pane_alone`).
   A forced kill that finds the pane already gone is reported as the exit it
   was, not as a failure to close: `/exit` landed between the last look and
   the kill

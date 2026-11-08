@@ -115,7 +115,8 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
     let error = ''
     for (const agent of unused) {
       const result = await closeAgentById(agent.sessionId)
-      if (result.ok) done += 1
+      if (result.ok && result.detail !== 'running') done += 1
+      else if (result.ok) error ||= t('pruneLeftRunning', { name: displayName(agent) })
       else error ||= result.error ?? ''
     }
     setPruning(false)

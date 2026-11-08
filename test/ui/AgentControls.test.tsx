@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AgentControls } from '../../src/web/components/AgentControls.tsx'
+import { useStore } from '../../src/web/store/store.ts'
 import { agent, answer, renderApp, resetStore } from './helpers.tsx'
 
 const closeAgent = vi.hoisted(() =>
@@ -83,6 +84,16 @@ describe('close', () => {
     renderApp(<AgentControls agent={idle()} />)
     await user.click(screen.getByTestId('close-agent'))
     await answer(user, 'accept')
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('INV-8 says an agent left running in its shell is still running, and stays on it', async () => {
+    const user = userEvent.setup()
+    closeAgent.mockResolvedValueOnce({ ok: true, detail: 'running' })
+    renderApp(<AgentControls agent={idle()} />)
+    await user.click(screen.getByTestId('close-agent'))
+    await answer(user, 'accept')
+    expect(useStore.getState().toast).toContain('still running')
     expect(navigate).not.toHaveBeenCalled()
   })
 

@@ -463,10 +463,13 @@ const EN = {
   goalActiveTitle: 'Working towards: {condition}',
   goalChecked: 'checked, not met yet',
   goalAchieved: 'achieved',
-  closeConfirm: 'Close {name}? It will be asked to exit, and forced if it does not.',
+  closeConfirm:
+    'Close {name}? It will be asked to exit, and forced if it does not, unless it was started from a shell.',
   closing: 'Closing…',
   closedGracefully: '{name} exited.',
   closedForced: '{name} did not respond to /exit and was stopped.',
+  closedLeftRunning:
+    '{name} did not exit, and its pane is running a shell, so it was left open. It is still running.',
   /* clear + compact — Claude Code's own /clear and /compact */
   clearContext: 'Clear',
   clearKeep: 'Keep the conversation',
@@ -518,6 +521,7 @@ const EN = {
   pruneDone: 'Closed {count} unused session(s).',
   pruneSome: 'Closed {done} of {count}. {failed} refused: {error}',
   pruneNone: 'Nothing was closed: {error}',
+  pruneLeftRunning: '{name} did not exit and is still running in its shell',
   /* new agent */
   newAgent: 'New agent',
   newAgentTitle: 'Start a new agent',
@@ -930,10 +934,11 @@ const ZH: Record<Key, string> = {
   goalActiveTitle: '正在追求：{condition}',
   goalChecked: '已检查，尚未达成',
   goalAchieved: '已达成',
-  closeConfirm: '要关闭 {name} 吗？会先请它退出，若无响应则强制结束。',
+  closeConfirm: '要关闭 {name} 吗？会先请它退出，若无响应则强制结束（从 shell 启动的除外）。',
   closing: '正在关闭…',
   closedGracefully: '{name} 已退出。',
   closedForced: '{name} 未响应 /exit，已被强制结束。',
+  closedLeftRunning: '{name} 没有退出；它的窗格里还在运行 shell，因此没有关闭，它仍在运行。',
   clearContext: '清空',
   clearKeep: '保留这段对话',
   clearing: '正在清空…',
@@ -974,6 +979,7 @@ const ZH: Record<Key, string> = {
   pruneDone: '已关闭 {count} 个闲置会话。',
   pruneSome: '已关闭 {count} 个中的 {done} 个，{failed} 个未能关闭：{error}',
   pruneNone: '没有关闭任何会话：{error}',
+  pruneLeftRunning: '{name} 没有退出，仍在它的 shell 里运行',
   newAgent: '新建代理',
   newAgentTitle: '启动一个新代理',
   newAgentDir: '目录',

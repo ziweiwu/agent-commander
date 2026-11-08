@@ -170,6 +170,13 @@ pub trait ControlDeps: Send + Sync {
     /// that one is verified — see [`clear_context`].
     async fn read_session_id(&self, pid: i64) -> Option<String>;
     async fn pane_alive(&self, pane_id: &str) -> bool;
+    /// Whether the agent's own process is still running. A pane can outlive
+    /// it: `claude` typed into a shell hands the pane back to that shell on
+    /// `/exit`, so a live pane is not a live agent.
+    async fn agent_alive(&self, pid: i64) -> bool;
+    /// The pid of the pane's own process, the one tmux started it with. `None`
+    /// when tmux could not say.
+    async fn pane_pid(&self, pane_id: &str) -> Option<i64>;
     async fn kill_session(&self, tmux_session: &str) -> anyhow::Result<()>;
     async fn kill_pane(&self, pane_id: &str) -> anyhow::Result<()>;
     async fn wait(&self, millis: u64);
@@ -180,6 +187,8 @@ pub type GoalReader = Arc<dyn Fn() -> BoxFut<'static, Option<GoalState>> + Send 
 pub type SessionKiller = Arc<dyn Fn(String) -> BoxFut<'static, anyhow::Result<()>> + Send + Sync>;
 /// The same shape as [`SessionKiller`], handed a pane id instead.
 pub type PaneKiller = SessionKiller;
+/// Reads the pid of a pane's own process, handed the pane id.
+pub type PanePidReader = Arc<dyn Fn(String) -> BoxFut<'static, Option<i64>> + Send + Sync>;
 
 /// The production wiring: writes go through the pane API, reads through
 /// closures the composition root supplies.
@@ -188,6 +197,7 @@ pub struct LiveDeps {
     pub read_goal: GoalReader,
     pub kill: SessionKiller,
     pub kill_pane: PaneKiller,
+    pub pane_pid: PanePidReader,
 }
 
 #[async_trait]
@@ -230,6 +240,13 @@ impl ControlDeps for LiveDeps {
             // No answer at all: the pane is gone outright.
             Err(_) => false,
         }
+    }
+    /// `kill(pid, 0)`, the registry's own liveness test.
+    async fn agent_alive(&self, pid: i64) -> bool {
+        crate::registry::is_alive(pid)
+    }
+    async fn pane_pid(&self, pane_id: &str) -> Option<i64> {
+        (self.pane_pid)(pane_id.to_string()).await.filter(|pid| *pid > 0)
     }
     async fn kill_session(&self, tmux_session: &str) -> anyhow::Result<()> {
         (self.kill)(tmux_session.to_string()).await
@@ -547,11 +564,16 @@ pub async fn clear_goal(agent: Option<&Agent>, deps: &dyn ControlDeps) -> Act<()
 const GRACE_MS: u64 = 6000;
 const POLL_MS: u64 = 500;
 
+/// How a close ended. `closed: false` is an agent that ignored `/exit` in a
+/// pane it does not own, left running rather than killed with its shell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CloseResult {
     pub closed: bool,
     pub forced: bool,
 }
+
+const EXITED: CloseResult = CloseResult { closed: true, forced: false };
+const LEFT_RUNNING: CloseResult = CloseResult { closed: false, forced: false };
 
 /// Close a session.
 ///
@@ -559,6 +581,13 @@ pub struct CloseResult {
 /// writing its transcript. Only a session that ignores it is killed outright,
 /// and only its pane: a split window holds other agents and shells in the
 /// same tmux session, and they were not asked to close.
+///
+/// And only a pane that is the agent's alone. `claude` typed into a shell
+/// leaves that shell as the pane's own process, so `/exit` hands the pane back
+/// to it rather than ending it: the close is done when the agent's process is,
+/// and an agent there that ignores `/exit` is left running and reported as
+/// such. Killing the pane would take the shell and its jobs with it, and
+/// signalling the agent's pid is a power INV-7 and INV-8 do not grant.
 ///
 /// An agent that does not speak that command skips straight to closing its
 /// tmux session. Typing `/exit` at it would not shut anything down — it would
@@ -591,19 +620,47 @@ pub async fn close_agent(agent: Option<&Agent>, deps: &dyn ControlDeps) -> Act<C
     let mut waited = 0u64;
     while waited < GRACE_MS {
         deps.wait(POLL_MS).await;
-        if !deps.pane_alive(pane).await {
-            return Ok(CloseResult { closed: true, forced: false });
+        if has_exited(agent, pane, deps).await {
+            return Ok(EXITED);
         }
         waited += POLL_MS;
     }
 
+    if !owns_its_pane(agent, pane, deps).await {
+        return Ok(if has_exited(agent, pane, deps).await { EXITED } else { LEFT_RUNNING });
+    }
     match deps.kill_pane(pane).await {
         Ok(()) => Ok(CloseResult { closed: true, forced: true }),
         // `/exit` can land between the last look and the kill, which then
         // finds no pane: the agent did what it was asked.
-        Err(_) if !deps.pane_alive(pane).await => Ok(CloseResult { closed: true, forced: false }),
+        Err(_) if !deps.pane_alive(pane).await => Ok(EXITED),
         Err(err) => Err(ControlFailure::Failed(err)),
     }
+}
+
+/// Gone once its pane is, or once its own process is.
+///
+/// The process is asked first because it is a syscall and the pane is a tmux
+/// round trip. A placeholder has no pid yet (`pid: 0`), so its pane is the
+/// only witness: `kill(0, 0)` would ask about this app's own process group,
+/// so `is_alive` refuses a zero pid, and that refusal would read as an exit.
+async fn has_exited(agent: &Agent, pane: &str, deps: &dyn ControlDeps) -> bool {
+    if agent.pid > 0 && !deps.agent_alive(agent.pid).await {
+        return true;
+    }
+    !deps.pane_alive(pane).await
+}
+
+/// The pane's own process is the agent, so killing the pane ends the agent
+/// and nothing else.
+///
+/// A placeholder counts without being asked: `pending` holds only sessions
+/// this app started, with `claude` as the pane's own command.
+async fn owns_its_pane(agent: &Agent, pane: &str, deps: &dyn ControlDeps) -> bool {
+    if crate::pending::is_placeholder(agent) {
+        return true;
+    }
+    agent.pid > 0 && deps.pane_pid(pane).await == Some(agent.pid)
 }
 
 /* --------------------------------------------- INV-6: destructive keys */
@@ -802,6 +859,10 @@ mod tests {
     const GOAL_SET_AT: i64 = 1000;
     const GOAL_EVALUATED_AT: i64 = 2000;
 
+    /// The pane's own process when the agent was typed into a shell: anything
+    /// but the agent's pid.
+    const SHELL_PID: i64 = 500;
+
     fn agent() -> Agent {
         Agent {
             session_id: "a".into(),
@@ -870,6 +931,12 @@ mod tests {
         /// The pane exits on its own just as the forced kill is sent, so the
         /// kill finds nothing to kill.
         gone_before_kill: StdMutex<bool>,
+        /// Whether the agent's own process is still running, apart from its
+        /// pane: a shell the agent was started from outlives it.
+        agent_alive: StdMutex<bool>,
+        /// The pid tmux reports as the pane's own process. The agent's pid when
+        /// Claude is the pane's command, a shell's when it was typed there.
+        pane_pid: StdMutex<Option<i64>>,
     }
 
     impl Fake {
@@ -878,8 +945,17 @@ mod tests {
                 session_before: StdMutex::new(Some("session-before".into())),
                 session_after: StdMutex::new(Some("session-before".into())),
                 alive: StdMutex::new(false),
+                agent_alive: StdMutex::new(true),
+                pane_pid: StdMutex::new(Some(agent().pid)),
                 ..Default::default()
             })
+        }
+        /// A pane whose own process is a shell, with the agent typed into it.
+        fn shell_hosted() -> Arc<Self> {
+            let f = Fake::new();
+            *f.alive.lock().unwrap() = true;
+            *f.pane_pid.lock().unwrap() = Some(SHELL_PID);
+            f
         }
         fn goals(before: Option<GoalState>, after: Option<GoalState>) -> Arc<Self> {
             let f = Fake::new();
@@ -938,6 +1014,12 @@ mod tests {
         }
         async fn pane_alive(&self, _pane_id: &str) -> bool {
             *self.alive.lock().unwrap()
+        }
+        async fn agent_alive(&self, _pid: i64) -> bool {
+            *self.agent_alive.lock().unwrap()
+        }
+        async fn pane_pid(&self, _pane_id: &str) -> Option<i64> {
+            *self.pane_pid.lock().unwrap()
         }
         async fn kill_session(&self, session: &str) -> anyhow::Result<()> {
             self.killed.lock().unwrap().push(session.into());
@@ -1434,6 +1516,7 @@ mod tests {
             read_goal: Arc::new(|| Box::pin(async { None })),
             kill: Arc::new(|_| Box::pin(async { Ok(()) })),
             kill_pane: Arc::new(|_| Box::pin(async { Ok(()) })),
+            pane_pid: Arc::new(|_| Box::pin(async { None })),
         };
 
         // Alive: tmux answers and the process is still running.
@@ -1471,6 +1554,12 @@ mod tests {
         }
         async fn pane_alive(&self, _pane_id: &str) -> bool {
             false
+        }
+        async fn agent_alive(&self, _pid: i64) -> bool {
+            false
+        }
+        async fn pane_pid(&self, _pane_id: &str) -> Option<i64> {
+            None
         }
         async fn kill_session(&self, _session: &str) -> anyhow::Result<()> {
             Ok(())
@@ -1651,5 +1740,59 @@ mod tests {
     #[test]
     fn inv12_the_two_size_limits_cannot_disagree_about_the_same_paste() {
         assert!(MAX_FRAME_BYTES > MAX_PASTE, "the frame cap must sit well above the paste cap");
+    }
+
+    /// `claude` typed into a shell and then `/exit`ed hands the pane back to
+    /// that shell. The pane is alive, the agent is not, and the close is done:
+    /// killing the pane now would take the shell and its jobs with it.
+    #[tokio::test]
+    async fn inv8_close_counts_the_agents_own_exit_in_a_shell_that_outlives_it() {
+        let f = Fake::shell_hosted();
+        *f.agent_alive.lock().unwrap() = false;
+        let r = close_agent(Some(&agent()), &f).await.unwrap();
+        assert_eq!(r, CloseResult { closed: true, forced: false });
+        assert!(f.killed_panes.lock().unwrap().is_empty(), "killed the shell the agent exited to");
+        assert!(f.killed.lock().unwrap().is_empty());
+    }
+
+    /// An agent in a shell that ignores `/exit` is left running and reported
+    /// as such. Its pane is the shell's, and INV-7 and INV-8 grant no power to
+    /// signal the agent's pid instead.
+    #[tokio::test]
+    async fn inv8_close_leaves_a_shell_hosted_agent_that_ignores_exit_running() {
+        let f = Fake::shell_hosted();
+        let r = close_agent(Some(&agent()), &f).await.unwrap();
+        assert_eq!(r, CloseResult { closed: false, forced: false });
+        assert!(f.killed_panes.lock().unwrap().is_empty(), "killed a pane hosting a shell");
+        assert!(f.killed.lock().unwrap().is_empty());
+    }
+
+    /// A pane whose own process tmux could not name is not known to be the
+    /// agent's, so it is not killed.
+    #[tokio::test]
+    async fn inv8_close_never_kills_a_pane_whose_own_process_it_could_not_read() {
+        let f = Fake::shell_hosted();
+        *f.pane_pid.lock().unwrap() = None;
+        let r = close_agent(Some(&agent()), &f).await.unwrap();
+        assert_eq!(r, CloseResult { closed: false, forced: false });
+        assert!(f.killed_panes.lock().unwrap().is_empty());
+    }
+
+    /// A session this app started and the CLI has not registered yet has no
+    /// pid to ask about, so its pane alone says whether it exited. Its pane
+    /// runs `claude` as its own command, never a shell, so a placeholder that
+    /// ignores `/exit` is still forced the way any app-started session is.
+    #[tokio::test]
+    async fn close_judges_a_placeholder_by_its_pane_alone() {
+        let f = Fake::shell_hosted();
+        *f.agent_alive.lock().unwrap() = false;
+        let starting = Agent {
+            session_id: format!("{}claude-1", crate::pending::PENDING_PREFIX),
+            pid: 0,
+            ..agent()
+        };
+        let r = close_agent(Some(&starting), &f).await.unwrap();
+        assert_eq!(r, CloseResult { closed: true, forced: true });
+        assert_eq!(f.killed_panes.lock().unwrap().as_slice(), ["%1"]);
     }
 }

@@ -99,7 +99,7 @@ pub const DEAD_PANE: &str = "pane has exited";
 /// *applied*: a guard that is never called is worse than no guard, because the
 /// tests still pass. Every inbound `key` goes through `check_key`, every
 /// `paste` through `MAX_PASTE` and the budget, and both through `afford`.
-use crate::control::{check_key, SendableKey, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUCH_INPUT};
+use crate::control::{check_key, CloseResult, SendableKey, MAX_FRAME_BYTES, MAX_PASTE, TOO_MUCH_INPUT};
 
 /// The most a JSON request body may be.
 const MAX_BODY: usize = 8 * 1024;
@@ -200,8 +200,8 @@ pub struct GoalOutcome {
 /// agent under it.
 #[async_trait]
 pub trait ControlApi: Send + Sync + 'static {
-    /// Returns true when the session had to be forced.
-    async fn close(&self, session_id: &str, agent: Option<Agent>) -> Result<bool, Failure>;
+    /// Whether the session closed, and whether it had to be forced.
+    async fn close(&self, session_id: &str, agent: Option<Agent>) -> Result<CloseResult, Failure>;
     /// Send one Shift+Tab. Takes no value and reports none: the key either
     /// reached the pane or the call failed, and nothing else is knowable
     /// until the session's turn ends.
@@ -1611,9 +1611,15 @@ async fn run_control(app: &App, body: Body, session_id: &str, action: &str) -> C
     }
 }
 
+/// `running` is an agent that ignored `/exit` in a pane hosting a shell: it
+/// was left open, and the browser says so rather than "exited".
 async fn close_session(app: &App, session_id: &str, agent: Option<Agent>) -> Controlled {
-    let forced = app.control.close(session_id, agent).await.map_err(fail)?;
-    let outcome = if forced { "forced" } else { "exited" };
+    let result = app.control.close(session_id, agent).await.map_err(fail)?;
+    let outcome = match result {
+        CloseResult { closed: false, .. } => "running",
+        CloseResult { forced: true, .. } => "forced",
+        CloseResult { .. } => "exited",
+    };
     Ok(ControlResponse::ok(Some(outcome.to_string())))
 }
 
@@ -3083,7 +3089,15 @@ mod live {
                     async move { crate::pane::kill_pane(&pane_id).await.map_err(anyhow::Error::from) },
                 )
             }),
+            pane_pid: Arc::new(|pane_id: String| Box::pin(async move { pane_pid(&pane_id).await })),
         })
+    }
+
+    /// Read once, at the end of a close's grace, so one more sweep of tmux
+    /// is the whole cost.
+    async fn pane_pid(pane_id: &str) -> Option<i64> {
+        let facts = crate::pane::fleet_facts().await.ok()?;
+        facts.into_iter().find(|f| f.pane_id == pane_id).map(|f| f.pid)
     }
 
     fn failed(failure: ControlFailure) -> Failure {
@@ -3092,12 +3106,9 @@ mod live {
 
     #[async_trait]
     impl ControlApi for Control {
-        async fn close(&self, session_id: &str, agent: Option<Agent>) -> Result<bool, Failure> {
+        async fn close(&self, session_id: &str, agent: Option<Agent>) -> Result<CloseResult, Failure> {
             let deps = self.deps_for(session_id);
-            crate::control::close_agent(agent.as_ref(), &*deps)
-                .await
-                .map(|r| r.forced)
-                .map_err(failed)
+            crate::control::close_agent(agent.as_ref(), &*deps).await.map_err(failed)
         }
 
         async fn shift_tab(&self, session_id: &str, agent: Option<Agent>) -> Result<(), Failure> {
@@ -3320,6 +3331,14 @@ mod mock_control {
         /// session is ever killed.
         async fn pane_alive(&self, _pane_id: &str) -> bool {
             false
+        }
+
+        async fn agent_alive(&self, _pid: i64) -> bool {
+            false
+        }
+
+        async fn pane_pid(&self, _pane_id: &str) -> Option<i64> {
+            None
         }
 
         async fn kill_session(&self, _tmux_session: &str) -> anyhow::Result<()> {
@@ -4139,9 +4158,9 @@ mod tests {
 
     #[async_trait]
     impl ControlApi for RecordingControl {
-        async fn close(&self, session_id: &str, _agent: Option<Agent>) -> Result<bool, Failure> {
+        async fn close(&self, session_id: &str, _agent: Option<Agent>) -> Result<CloseResult, Failure> {
             self.calls.lock().unwrap().push(format!("close:{session_id}"));
-            Ok(false)
+            Ok(CloseResult { closed: true, forced: false })
         }
         async fn shift_tab(&self, _session_id: &str, _agent: Option<Agent>) -> Result<(), Failure> {
             // No value in and none out: the key press is the whole action.

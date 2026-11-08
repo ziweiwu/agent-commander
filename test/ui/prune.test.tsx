@@ -18,6 +18,7 @@ import { setViewport } from './setup.ts'
 interface ControlResult {
   ok: boolean
   error?: string
+  detail?: string
 }
 
 const closeAgentById = vi.fn<(id: string) => Promise<ControlResult>>(async () => ({ ok: true }))
@@ -116,6 +117,19 @@ describe('prune', () => {
 
     expect(closeAgentById).toHaveBeenCalledTimes(2)
     expect(useStore.getState().toast).toContain('1')
+  })
+
+  it('INV-8 FR-PRUNE-4 does not count a session left running in its shell as closed', async () => {
+    const user = userEvent.setup()
+    closeAgentById
+      .mockResolvedValueOnce({ ok: true, detail: 'running' })
+      .mockResolvedValueOnce({ ok: true, detail: 'exited' })
+    useStore.setState({ agents: [unused('a'), unused('b')] })
+    renderApp(list())
+
+    await user.click(screen.getByTestId('prune-button'))
+
+    expect(useStore.getState().toast).toMatch(/Closed 1 of 2.*still running/)
   })
 })
 

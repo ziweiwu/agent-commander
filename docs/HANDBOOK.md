@@ -593,7 +593,11 @@ goes with the old one. Typing `/clear` into the message box, or into the
 terminal, does the same thing and is followed the same way: the panel stays
 open on the agent, now under its new session.
 
-**Close** sends `/exit` first and only forces a session that ignores it.
+**Close** sends `/exit` first and only forces a session that ignores it. A
+Claude Code you started by typing `claude` in a shell is different: its pane
+belongs to the shell, so Close never kills it. A clean `/exit` there leaves you
+at the shell prompt, and one that is ignored leaves the agent running, with a
+toast saying it is still running.
 
 ### From the chat itself
 
@@ -750,7 +754,8 @@ absence of evidence, not permission to close a session.
 Nothing is closed without a confirmation that names the sessions first, they are
 closed one at a time through the same `/exit`-then-kill path as **Close agent**,
 and one refusing to exit does not stop the rest — the toast afterwards reports
-what actually closed rather than what was attempted. The button is unavailable
+what actually closed rather than what was attempted, and a session left running
+in its shell does not count as closed. The button is unavailable
 while the fleet view is not live, because a card from a dropped connection is a
 memory rather than a reading (INV-11).
 
