@@ -184,6 +184,12 @@ pub(crate) enum PromptOrigin {
 /// `isMeta` and the output not.
 const LOCAL_COMMAND_TAGS: &[&str] = &["<local-command-stdout>", "<local-command-caveat>"];
 
+/// Claude Code's two notes after Esc: blocks of text with no marker field at
+/// all, so only their whole words tell them apart. A person typing exactly
+/// that bracketed text is misread, which is accepted; one who goes on past it
+/// is not.
+const INTERRUPT_NOTES: &[&str] = &["[Request interrupted by user]", "[Request interrupted by user for tool use]"];
+
 /// The opening tag of a background task's end, which records written before
 /// `origin` existed carry with `promptSource: "system"` and nothing else.
 const TASK_NOTIFICATION_TAG: &str = "<task-notification";
@@ -222,13 +228,18 @@ fn is_local_command_output(rec: &Value) -> bool {
     string_content(rec).is_some_and(|text| LOCAL_COMMAND_TAGS.iter().any(|tag| text.starts_with(tag)))
 }
 
-/// What Claude Code marks as its own rather than anybody's words: a note it
-/// files beside a picture or a command (`isMeta`), a compaction summary, and a
-/// tool result.
+/// What Claude Code files as its own rather than anybody's words: a note it
+/// files beside a picture or a command (`isMeta`), a compaction summary, a
+/// tool result, and its note that the person interrupted the turn.
 fn is_claude_codes_own_note(rec: &Value) -> bool {
     rec.get("isCompactSummary").and_then(Value::as_bool) == Some(true)
         || rec.get("isMeta").and_then(Value::as_bool) == Some(true)
         || rec.get("toolUseResult").is_some()
+        || is_the_interrupt_note(rec)
+}
+
+fn is_the_interrupt_note(rec: &Value) -> bool {
+    prompt_text(rec).is_some_and(|text| INTERRUPT_NOTES.contains(&text.trim()))
 }
 
 /// What a person typed while the agent worked, when the turn read it at its
@@ -481,10 +492,20 @@ mod tests {
                     "message": { "content": "the command printed nothing at all" } }),
             json!({ "type": "assistant", "origin": { "kind": "human" },
                     "message": { "content": "I will rewrite the registry loop now" } }),
+            json!({ "type": "user", "origin": { "kind": "human" },
+                    "message": { "content": "[Request interrupted by user for tool use]" } }),
+            json!({ "type": "user", "promptSource": "typed",
+                    "message": { "content": "[Request interrupted by user]" } }),
         ];
         for rec in machinery {
             assert_eq!(description_from(&rec), None, "{rec}");
         }
+    }
+
+    #[test]
+    fn inv11_a_prompt_that_goes_on_past_the_interrupt_note_is_the_person() {
+        let asked = "[Request interrupted by user] why did you stop the migration";
+        assert_eq!(description_from(&human(asked)).as_deref(), Some(asked));
     }
 
     #[test]

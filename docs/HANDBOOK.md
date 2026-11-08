@@ -173,8 +173,9 @@ used to arrive as a **You** bubble holding the report. It reads *«general-purpo
 reported back* now, with the report behind **show report**, and the card's line
 says the same. Another agent's message reads *message from «name»* behind
 **show message**, a background task's end reads *background task ·* and its
-summary, and Claude Code's notes to itself — local-command output among them —
-are not drawn at all.
+summary, and Claude Code's notes to itself — local-command output among them,
+and the *[Request interrupted by user]* it writes after you press Esc — are not
+drawn at all.
 
 ### Notifications
 
@@ -961,7 +962,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1876 tests: 831 Rust (the server) + 1045 vitest (the web app)
+npm test           # 1878 tests: 833 Rust (the server) + 1045 vitest (the web app)
 npm run e2e        # 489 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone

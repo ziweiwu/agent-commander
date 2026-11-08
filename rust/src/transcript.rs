@@ -3842,6 +3842,8 @@ mod tests {
             json!({ "type": "user", "timestamp": "2026-08-14T02:02:00.000Z", "origin": { "kind": "human" },
                     "isCompactSummary": true, "message": { "content": "This session is being continued…" } }),
             json!({ "type": "system", "subtype": "compact_boundary", "timestamp": "2026-08-14T02:03:00.000Z" }),
+            json!({ "type": "user", "timestamp": "2026-08-14T02:04:00.000Z", "origin": { "kind": "human" },
+                    "message": { "content": [{ "type": "text", "text": "[Request interrupted by user]" }] } }),
         ];
         let mut text = typed("fix the locale layout", PROMPTED_AT);
         text.push_str(&calls(BEFORE));
@@ -4394,6 +4396,35 @@ mod tests {
         for kind in ["api-request", "api-request-blob", "api-request-shape"] {
             assert_eq!(RecordSets::new().disposition(kind), Disposition::Meta, "the fallback for {kind}");
         }
+    }
+
+    /// INV-11: Claude Code's note after Esc is its own words, not the owner's,
+    /// whether alone or beside a picture.
+    #[test]
+    fn inv11_claude_codes_interrupt_note_is_not_the_owner_speaking() {
+        let note = |blocks: Value| json!({ "type": "user", "timestamp": "2026-11-07T10:00:00Z",
+            "message": { "role": "user", "content": blocks } }).to_string();
+        let plain = note(json!([{ "type": "text", "text": "[Request interrupted by user]" }]));
+        let for_tool_use = note(json!([{ "type": "text", "text": "  [Request interrupted by user for tool use]" }]));
+        let beside_a_picture = note(json!([
+            { "type": "text", "text": "[Request interrupted by user]" },
+            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo=" } },
+        ]));
+        for line in [&plain, &for_tool_use, &beside_a_picture] {
+            let out = parse(&[line]);
+            let drawn_as_you = out.events.iter().any(|event| event.kind == TimelineKind::User);
+            assert!(!drawn_as_you, "{line}: {:?}", out.events);
+            let activity = out.patch.activity.as_deref().unwrap_or("");
+            assert!(!activity.starts_with("you:"), "{line}: {activity}");
+        }
+        let quoting = "why did you stop at [Request interrupted by user]";
+        let person = note(json!([{ "type": "text", "text": quoting }]));
+        let out = parse(&[&plain, &person]);
+        let said: Vec<&str> = out.events.iter()
+            .filter(|event| event.kind == TimelineKind::User)
+            .map(|event| event.text.as_str())
+            .collect();
+        assert_eq!(said, vec![quoting]);
     }
 }
 
