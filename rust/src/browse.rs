@@ -18,7 +18,6 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::options::resolve_path;
 use crate::types::{DirEntryDto, DirListing};
 
 /// Why a listing did not happen.
@@ -130,6 +129,10 @@ impl WithinRoot {
     }
 }
 
+/// The refusal for a request that is neither absolute nor `~`-rooted. The
+/// client matches this text to show it in the reader's language.
+pub const NOT_ABSOLUTE: &str = "use an absolute path or one starting with ~/";
+
 /// Resolve a requested path and refuse anything outside the root.
 ///
 /// Resolution happens before the check, so `~/link-to-slash` is judged by
@@ -137,14 +140,27 @@ impl WithinRoot {
 /// round — check the string, then follow it — is the bug this ordering exists
 /// to prevent.
 ///
+/// `~` is the home directory a spawn expands it to, so a folder the picker
+/// filled in as `~/…` can be browsed again.
+///
 /// This is the one place a [`WithinRoot`] is made.
 pub async fn resolve_inside_root(requested: Option<&str>, root: &Path) -> Res<WithinRoot> {
+    resolve_inside_root_from(requested, root, &crate::spawn::home_dir()).await
+}
+
+/// [`resolve_inside_root`] with the home directory `~` stands for passed in,
+/// so a test can put it inside a temporary root.
+async fn resolve_inside_root_from(
+    requested: Option<&str>,
+    root: &Path,
+    home: &Path,
+) -> Res<WithinRoot> {
     let real_root = tokio::fs::canonicalize(root)
         .await
         .map_err(|_| BrowseError::root(format!("no such directory: {}", root.display())))?;
 
     let target = match requested.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(s) => resolve_path(s),
+        Some(s) => expand_requested(s, home)?,
         None => real_root.clone(),
     };
 
@@ -156,6 +172,16 @@ pub async fn resolve_inside_root(requested: Option<&str>, root: &Path) -> Res<Wi
         return Err(BrowseError::new("that directory is outside the browsable root"));
     }
     Ok(WithinRoot { path: real, root: real_root })
+}
+
+/// The same reading of a typed folder that a spawn gives it: `~` and `~/…`
+/// against home, an absolute path as written, `..` collapsed lexically.
+///
+/// Anything else is refused rather than joined onto the server's working
+/// directory, which nobody browsing chose. That includes `~user`, which names
+/// another account's home and is never looked up.
+fn expand_requested(requested: &str, home: &Path) -> Res<PathBuf> {
+    crate::spawn::normalize_dir(requested, home).map_err(|_| BrowseError::new(NOT_ABSOLUTE))
 }
 
 /// The root the picker is confined to when none was configured.
@@ -426,9 +452,8 @@ mod tests {
         assert!(err.to_string().contains("no such directory"), "{err}");
     }
 
-    /// A relative request resolves against the server's own working directory,
-    /// which is almost never inside the browse root — so it is refused rather
-    /// than quietly listing wherever the process happens to have been started.
+    /// A relative request is refused outright, never resolved against the
+    /// root or quietly against wherever the process happened to be started.
     #[tokio::test]
     async fn a_relative_request_does_not_resolve_against_the_root() {
         let r = root();
@@ -582,5 +607,60 @@ mod tests {
         assert_eq!(up.root(), path_of("/home/me"));
         assert_eq!(up.parent().unwrap().path(), path_of("/home/me"));
         assert!(up.parent().unwrap().parent().is_none());
+    }
+
+    /// The picker fills the field with `~/…`, and Browse hands that straight
+    /// back. It used to be joined onto the server's working directory.
+    #[tokio::test]
+    async fn inv9_tilde_resolves_against_home() {
+        let r = root();
+        let got = resolve_inside_root_from(Some("~/Projects"), &r.path, &r.path).await.unwrap();
+        assert_eq!(got.path(), r.path.join("Projects"));
+        let bare = resolve_inside_root_from(Some("~"), &r.path, &r.path).await.unwrap();
+        assert_eq!(bare.path(), r.path);
+    }
+
+    /// Expansion happens before resolution, so `~` buys no way out: the
+    /// containment check still judges where the path lands.
+    #[tokio::test]
+    async fn inv9_tilde_cannot_escape_the_root() {
+        let r = root();
+        for attack in ["~/..", "~/../..", "~/Projects/../../..", "~/escape-hatch", "~/neighbour/secrets"] {
+            let err = resolve_inside_root_from(Some(attack), &r.path, &r.path).await.unwrap_err();
+            assert!(err.is_client_error(), "{attack}: {err}");
+            assert!(err.to_string().contains("outside"), "{attack}: {err}");
+        }
+    }
+
+    /// `~user` names somebody else's home. It is refused, never expanded and
+    /// never looked up.
+    #[tokio::test]
+    async fn inv9_tilde_user_is_refused_not_expanded() {
+        let r = root();
+        for attack in ["~root", "~root/..", "~otheruser/Projects", "~~/x"] {
+            let err = resolve_inside_root_from(Some(attack), &r.path, &r.path).await.unwrap_err();
+            assert_eq!(err.to_string(), NOT_ABSOLUTE, "{attack}");
+        }
+    }
+
+    /// A relative path is refused by name rather than joined onto the server's
+    /// working directory, which the person browsing never chose.
+    #[tokio::test]
+    async fn inv9_a_relative_request_is_refused_by_name() {
+        let r = root();
+        for relative in ["Projects", "./Projects", "../x", "Projects/~"] {
+            let err = resolve_inside_root_from(Some(relative), &r.path, &r.path).await.unwrap_err();
+            assert!(err.is_client_error(), "{relative}: {err}");
+            assert_eq!(err.to_string(), NOT_ABSOLUTE, "{relative}");
+        }
+    }
+
+    /// The public entry point reads `~` from the real home, the same source a
+    /// spawn uses, and not from the browse root.
+    #[tokio::test]
+    async fn inv9_the_public_resolver_takes_tilde_from_the_spawn_home() {
+        let home = fs::canonicalize(crate::spawn::home_dir()).unwrap();
+        let got = resolve_inside_root(Some("~"), &home).await.unwrap();
+        assert_eq!(got.path(), home);
     }
 }

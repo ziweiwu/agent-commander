@@ -7,6 +7,13 @@ import { Button } from './ui/Button.tsx'
 import styles from './FolderBrowser.module.css'
 import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 
+/**
+ * The server's refusal of a path that is neither absolute nor `~/…`
+ * (`browse::NOT_ABSOLUTE`), matched so it can be shown in the reader's
+ * language rather than in the server's English.
+ */
+export const SERVER_NOT_ABSOLUTE = 'use an absolute path or one starting with ~/'
+
 export interface FolderBrowserProps {
   /** Where to open. Falls back to the server's root. */
   start?: string
@@ -32,7 +39,8 @@ export function FolderBrowser({ start, onChoose }: FolderBrowserProps) {
         setError('')
         setListing(await browseDirs(path, withHidden))
       } catch (err) {
-        setError(t('browseFailed', { error: err instanceof Error ? err.message : String(err) }))
+        const reason = err instanceof Error ? err.message : String(err)
+        setError(reason === SERVER_NOT_ABSOLUTE ? t('browseNeedsAbsolute') : t('browseFailed', { error: reason }))
       }
     },
     [hidden, t],

@@ -18,7 +18,7 @@ import { App } from '../../src/web/components/App.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, resetStore } from './helpers.tsx'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 
 const navigate = vi.hoisted(() => vi.fn())
 vi.mock('../../src/web/store/transport.ts', () => ({
@@ -31,6 +31,7 @@ vi.mock('../../src/web/store/transport.ts', () => ({
   setAttached: vi.fn(),
   clearAgentContext: vi.fn(),
   compactAgentContext: vi.fn(),
+  browseDirs: vi.fn(async () => ({ path: '/home/me', parent: null, root: '/home/me', entries: [] })),
 }))
 
 beforeEach(() => {
@@ -116,6 +117,24 @@ describe('Escape levels', () => {
     await user.keyboard('{Escape}')
     expect(useStore.getState().newAgentOpen).toBe(false)
     expect(useStore.getState().fullscreen).toBe(true)
+  })
+
+  it('backs out of the folder browser before closing the new-agent dialog', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], newAgentOpen: true })
+    shell('/')
+
+    await user.click(screen.getByTestId('new-agent-browse'))
+    expect(screen.getByTestId('folder-browser')).toBeTruthy()
+
+    await user.keyboard('{Escape}')
+    expect(useStore.getState().newAgentOpen).toBe(true)
+    expect(screen.getByTestId('new-agent-dialog')).toBeTruthy()
+    expect(screen.queryByTestId('folder-browser')).toBeNull()
+    expect(document.activeElement).toBe(screen.getByTestId('new-agent-browse'))
+
+    await user.keyboard('{Escape}')
+    expect(useStore.getState().newAgentOpen).toBe(false)
   })
 })
 

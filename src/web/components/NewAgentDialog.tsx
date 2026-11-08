@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { type RefObject, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
@@ -19,6 +19,7 @@ const RECENT_KEY = 'agent-commander.recentDirs'
 const DEFAULT_DIR_KEY = 'agent-commander.defaultDir'
 const RECENT_MAX = 6
 const TASK_ROWS = 3
+const BROWSE_TESTID = 'new-agent-browse'
 
 /**
  * Modes settable at spawn time and the models on offer, both from the lists the
@@ -162,6 +163,31 @@ function agentOptions(choice: AgentChoice): Omit<NewAgentRequest, 'cwd'> {
   }
 }
 
+/**
+ * Escape backs out of the folder browser, one level, rather than closing the
+ * whole dialog, and puts focus back on Browse.
+ *
+ * On `document` in the capture phase, so it runs ahead of the shell's own
+ * Escape handler (bubble phase, same node) wherever focus is: a click in the
+ * listing can leave focus on `<body>`, outside the dialog.
+ *
+ * `leave` is null while the browser is shut, and nothing is listened for.
+ */
+function useEscapeLeavesBrowser(rootRef: RefObject<HTMLElement | null>, leave: (() => void) | null): void {
+  useEffect(() => {
+    if (!leave) return
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      leave()
+      rootRef.current?.querySelector<HTMLElement>(`[data-testid="${BROWSE_TESTID}"]`)?.focus()
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [rootRef, leave])
+}
+
 export function NewAgentDialog() {
   const t = useTranslate()
   const open = useStore((s) => s.newAgentOpen)
@@ -215,6 +241,7 @@ export function NewAgentDialog() {
   // Declared before the focus effect below so it captures the trigger button
   // as the element to restore focus to, not the input we are about to focus.
   useModalChrome(rootRef, open)
+  useEscapeLeavesBrowser(rootRef, browsing ? () => setBrowsing(false) : null)
 
   // Directories already in use are the likeliest places to want another agent.
   const suggestions = [...new Set([...readList(RECENT_KEY), ...agents.map((a) => a.cwd)])].slice(0, 8)
@@ -348,7 +375,7 @@ export function NewAgentDialog() {
                 />
                 <Button
                   variant="compact"
-                  data-testid="new-agent-browse"
+                  data-testid={BROWSE_TESTID}
                   aria-expanded={browsing}
                   onClick={() => setBrowsing((v) => !v)}
                 >
