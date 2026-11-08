@@ -957,6 +957,15 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **NFR-SEC-13** — User text MUST NEVER reach tmux's argument lexer. A paste MUST
   be staged through a mode-0600 file so there is no quoting rule to get wrong.
   **(INV-1, INV-2)**
+- **NFR-SEC-17** — Pasted text MUST NOT carry a control character other than
+  tab, `\n` or `\r`; such text MUST be refused before any tmux command runs,
+  never stripped. Bracketed paste does not sanitise: `ESC[201~` inside the text
+  ends the paste and the rest arrives as keypresses. The browser MUST run the
+  same check before echoing, queuing or clearing a draft, and say the refusal
+  in the reader's language. `\r` stays allowed because xterm's paste in the
+  Attach view sends line breaks as CR. **(INV-2)** *`pane::tests`
+  `inv2_a_paste_carrying_escape_is_refused_before_tmux`,
+  `test/ui/paste-escape.test.tsx`.*
 - **NFR-SEC-14** — A write MUST pick its path before a byte is sent and MUST NOT
   change its mind: one shared tmux buffer name once meant two overlapping pastes
   ran `load(A) → load(B) → paste(into A)`, and A's agent received B's text.
@@ -1318,7 +1327,7 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14, NFR-SEC-17 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-16, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |

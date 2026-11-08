@@ -3,6 +3,7 @@ import type { RefObject } from 'react'
 import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
 import { PaneTerm } from '../lib/term.ts'
+import { refusedAsKeypresses } from '../store/pasteGuard.ts'
 import { useStore } from '../store/store.ts'
 import {
   requestHistory,
@@ -438,7 +439,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
    */
   const takeDraft = (): string => {
     const text = draftRef.current
-    if (text.length === 0) return ''
+    if (text.length === 0 || refusedAsKeypresses(text)) return ''
     clearDraft()
     return text
   }

@@ -1528,6 +1528,7 @@ impl PaneApi for MockPanes {
          * failure seen in mock mode is the failure you would get for real. The
          * mock's *success* was the part that was wrong.
          */
+        crate::pane::check_paste(text)?;
         if pane_id == DEAD_PANE {
             anyhow::bail!("pane {pane_id} has exited");
         }
@@ -1919,6 +1920,14 @@ pub fn mock_deps(fleet: Fleet) -> (Deps, Arc<MockSource>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// INV-2: `--mock` refuses a paste that would leave its brackets, as the
+    /// real pane layer does, so the browser's refusal can be watched there.
+    #[tokio::test]
+    async fn inv2_a_paste_carrying_escape_is_refused_like_a_real_pane() {
+        let err = MockPanes::default().paste("%72", "a\u{1b}[201~\rb", Submit::Yes).await.unwrap_err();
+        assert!(err.to_string().contains("U+001B"), "{err}");
+    }
 
     /// A name longer than this stops fitting a fleet card, which is the whole
     /// reason the over-long fixture exists.
@@ -2549,7 +2558,6 @@ mod tests {
         s.enrich("ghost", AgentPatch::default());
         assert_eq!(s.list().len(), fixtures().len());
     }
-
 }
 
 /* -------------------------------------------------------------------------

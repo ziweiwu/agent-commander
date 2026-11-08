@@ -25,6 +25,7 @@ import { translate } from '../lib/i18n.ts'
 import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
 import { followVisit, visitOf } from '../lib/newSince.ts'
+import { refusedAsKeypresses } from './pasteGuard.ts'
 import { useStore, type ToolResultEntry } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -324,7 +325,7 @@ function acknowledge(ackSeq: number): void {
 
 export function sendMessage(text: string): void {
   const { selected, addPending } = useStore.getState()
-  if (!selected || text.trim().length === 0) return
+  if (!selected || text.trim().length === 0 || refusedAsKeypresses(text)) return
   flushText()
   addPending(text)
   send({ type: 'paste', sessionId: selected, text, submit: true })
@@ -345,10 +346,13 @@ export function sendMessage(text: string): void {
  * every message: a dialog in front of every send is one people learn to dismiss
  * without reading, which leaves the guard weaker than a single deliberate
  * choice that relabels the button it arms.
+ *
+ * Text that cannot be sent is refused before the Escape, so a refused message
+ * never interrupts the agent it was not delivered to.
  */
 export function interruptAndSend(text: string): void {
   const { selected } = useStore.getState()
-  if (!selected || text.trim().length === 0) return
+  if (!selected || text.trim().length === 0 || refusedAsKeypresses(text)) return
   sendConfirmedKey('Escape')
   sendMessage(text)
 }
@@ -392,7 +396,7 @@ export function sendConfirmedKey(key: string): void {
 
 export function sendText(text: string): void {
   const { selected } = useStore.getState()
-  if (!selected) return
+  if (!selected || refusedAsKeypresses(text)) return
   // Characters buffered while another agent was open were typed for that
   // agent, and must not be delivered to this one.
   if (outbox && outbox.sessionId !== selected) flushText()
@@ -423,7 +427,7 @@ export function runText(text: string): void {
   // whitespace paste and a newline in a live shell, which is a command nobody
   // typed. The button's `disabled` masks it today; this is the one control
   // here that executes, so it carries the guard itself.
-  if (!selected || text.trim().length === 0) return
+  if (!selected || text.trim().length === 0 || refusedAsKeypresses(text)) return
   flushText()
   send({ type: 'paste', sessionId: selected, text, submit: true })
 }

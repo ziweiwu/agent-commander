@@ -326,6 +326,36 @@ fn key_cmd(pane_id: &str, key_name: &str) -> String {
     format!("send-keys -t {pane_id} {key_name}")
 }
 
+/// The half of [`check_paste`]'s refusal that says what is allowed instead.
+const ONLY_TEXT: &str = "only tabs and line breaks are allowed";
+/// Why the character is refused, in the words the browser's own refusal uses.
+const READ_AS_A_KEY: &str = "that the terminal would treat as a keypress";
+
+/// Refuse text that would not arrive as text (INV-2).
+///
+/// Bracketed paste is a wrapper, not a sanitiser: `-p` puts `ESC[200~` and
+/// `ESC[201~` around the text and passes whatever is inside straight through.
+/// So a terminator inside the text ends the paste early, and everything after
+/// it reaches the agent as keypresses — a `\r` that submits, a lone `ESC`
+/// that interrupts (the key INV-6 puts behind a confirmation), an `ESC[Z`
+/// that cycles the permission mode. Copying from a hostile page is enough to
+/// carry one.
+///
+/// Tab and both line breaks pass. `\r` has to: xterm's own paste turns line
+/// breaks into CR, and the Attach view sends xterm's data through here.
+/// Every other control character, DEL and the C1 range included, is refused
+/// rather than stripped, so nothing is silently altered — the same rule as
+/// `spawn::check_task`, plus the tab and carriage return a paste carries.
+pub fn check_paste(text: &str) -> Result<(), PaneError> {
+    let Some(c) = text.chars().find(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r')) else {
+        return Ok(());
+    };
+    let code = u32::from(c);
+    Err(PaneError::msg(format!(
+        "the text contains a control character (U+{code:04X}) {READ_AS_A_KEY}; {ONLY_TEXT}"
+    )))
+}
+
 /// Whether a paste ends by pressing Enter for the user.
 ///
 /// The control-mode form of a paste: load the staged file, paste it, maybe submit.
@@ -1092,9 +1122,10 @@ impl Panes {
     /// shell-special characters arrive intact rather than being re-interpreted
     /// as keypresses. `submit` presses Enter afterwards, in the same command
     /// sequence — except for the one text where that Enter never arrives; see
-    /// below.
+    /// below. Text [`check_paste`] refuses runs no tmux command at all.
     pub async fn paste(&self, pane_id: &str, text: &str, submit: Submit) -> Result<(), PaneError> {
         assert_pane(pane_id)?;
+        check_paste(text)?;
         if text.is_empty() && submit == Submit::No {
             return Ok(());
         }
@@ -2447,6 +2478,38 @@ mod tests {
         assert!(!is_missing_target(&PaneError::eagain("spawn tmux EAGAIN")));
         for unknown in ["timed out", ""] {
             assert!(!is_missing_target(&PaneError::msg(unknown)), "{unknown}");
+        }
+    }
+
+    /// `-p` wraps the text in `ESC[200~` … `ESC[201~` and does not sanitise
+    /// it, so a terminator inside the text ended the paste early and the rest
+    /// arrived as keystrokes: here a bare Enter that submits `a` on its own.
+    #[tokio::test]
+    async fn inv2_a_paste_carrying_escape_is_refused_before_tmux() {
+        let (control, once, panes) = rig();
+        let err = panes.paste("%9", "a\u{1b}[201~\rb", Submit::Yes).await.unwrap_err();
+        assert!(err.message.contains("U+001B"), "{err}");
+        assert!(once.calls().is_empty(), "{:?}", once.calls());
+        assert!(control.calls().is_empty(), "{:?}", control.calls());
+    }
+
+    /// Tab and both line breaks stay text: xterm's own paste turns line breaks
+    /// into CR, and the Attach view sends xterm's data through `paste`.
+    #[tokio::test]
+    async fn inv2_tabs_and_line_breaks_still_paste() {
+        let (_c, once, panes) = rig();
+        panes.paste("%9", "line1\nline2\r\tindented", Submit::Yes).await.unwrap();
+        assert_eq!(once.calls().len(), 1);
+    }
+
+    #[test]
+    fn inv2_every_other_control_character_is_refused() {
+        for c in ['\0', '\u{7}', '\u{8}', '\u{1b}', '\u{7f}', '\u{9b}'] {
+            let err = check_paste(&format!("x{c}y")).unwrap_err();
+            assert!(err.message.contains(&format!("U+{:04X}", u32::from(c))), "{c:?}: {err}");
+        }
+        for fine in ["", "plain", "多语言 emoji 🚀", "a\tb\nc\rd"] {
+            assert!(check_paste(fine).is_ok(), "{fine:?}");
         }
     }
 }

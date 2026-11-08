@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { MODEL_ALIASES, type Agent } from '../../shared/types.ts'
+import { refusedAsKeypresses } from '../store/pasteGuard.ts'
 import { useStore } from '../store/store.ts'
 import { setAgentGoal, setAgentModel } from '../store/transport.ts'
 import { useHeldChoice } from '../hooks/useHeldChoice.ts'
@@ -120,7 +121,7 @@ export function ChatControls({ agent }: { agent: Agent }) {
     // it was the server's refusal arriving as a toast (INV-8).
     if (disabled) return
     const condition = draft.trim()
-    if (condition.length === 0) return
+    if (condition.length === 0 || refusedAsKeypresses(condition)) return
     void run('goal', async () => {
       const result = await setAgentGoal(condition)
       if (result.ok) {
