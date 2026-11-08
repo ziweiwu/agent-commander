@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useStore } from '../store/store.ts'
+import { selectLive, useStore } from '../store/store.ts'
 import { grouped, unusedAgents, type StatusFilter } from '../lib/filter.ts'
 import { displayName } from '../lib/naming.ts'
 import { closeAgentById } from '../store/transport.ts'
@@ -39,7 +39,7 @@ const NAMES_BEFORE_ELLIPSIS = 4
 export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListProps) {
   const t = useTranslate()
   const agents = useStore((s) => s.agents)
-  const conn = useStore((s) => s.conn)
+  const live = useStore(selectLive)
   const fleetAt = useStore((s) => s.fleetAt)
   const fleet = useStore((s) => s.fleet)
   const setNewAgentOpen = useStore((s) => s.setNewAgentOpen)
@@ -57,11 +57,11 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const fresh = useMemo(
     () =>
       new Set(
-        conn === 'open'
+        live
           ? agents.filter((agent) => isNewSinceOpened(agent, seenThrough)).map((agent) => agent.sessionId)
           : [],
       ),
-    [agents, seenThrough, conn],
+    [agents, seenThrough, live],
   )
 
   /*
@@ -132,14 +132,17 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
    * Only when there is something to prune, and only while the fleet is
    * live. INV-11: with the socket down these cards are memories, and
    * "idle, never prompted" twenty minutes ago is not a claim about now —
-   * which is exactly the wrong thing to close a session on.
+   * which is exactly the wrong thing to close a session on. The same before
+   * the first live frame (FR-PRUNE-5, FR-FLEET-11): the remembered fleet keeps
+   * no prompts, so every remembered idle card with no recorded activity reads
+   * as never prompted.
    */
   const pruneButton =
     unused.length > 0 ? (
       <Button
         data-testid="prune-button"
         title={t('pruneTitle')}
-        disabled={pruning || conn !== 'open'}
+        disabled={pruning || !live}
         onClick={() => void prune()}
       >
         {pruning ? t('pruneWorking') : t('prune', { count: String(unused.length) })}
@@ -189,12 +192,12 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         * needs me", that is the failure that matters: acting on a card that
         * went stale twenty minutes ago.
         */}
-      {conn !== 'open' && agents.length > 0 && <StaleCaption fleetAt={fleetAt} />}
+      {!live && agents.length > 0 && <StaleCaption fleetAt={fleetAt} />}
 
       <div
         className={styles.list}
         data-testid="fleet-list"
-        data-stale={conn === 'open' ? undefined : 'true'}
+        data-stale={live ? undefined : 'true'}
       >
         {/*
           * INV-11, applied to the first frame. `agents` starts as `[]` before
@@ -269,14 +272,20 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
  * that copy is `aria-hidden`, and what a screen reader hears is the same
  * sentence in whole minutes (`relativeByMinute`) — once on the drop, then once
  * a minute.
+ *
+ * With the socket open and no fleet frame yet it says that instead: "not
+ * connected" would be false, and "waiting for a live update" is what is true.
  */
 function StaleCaption({ fleetAt }: { fleetAt: number | null }) {
   const t = useTranslate()
   const lang = useLang()
   const now = useOfflineClock()
+  const awaiting = useStore((s) => s.conn === 'open')
   const lastFrameAt = fleetAt ?? undefined
-  const caption = (age: Relative | null): string =>
-    fleetAt ? t('staleFleet', { when: formatRelative(lang, age) }) : t('staleFleetNoTime')
+  const caption = (age: Relative | null): string => {
+    if (!fleetAt) return t(awaiting ? 'staleFleetAwaitingNoTime' : 'staleFleetNoTime')
+    return t(awaiting ? 'staleFleetAwaiting' : 'staleFleet', { when: formatRelative(lang, age) })
+  }
   return (
     <p className={styles.stale} data-testid="fleet-stale" role="status">
       <span aria-hidden="true">{caption(relative(lastFrameAt, now))}</span>

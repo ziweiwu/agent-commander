@@ -201,7 +201,16 @@ the default for an unrecognised kind is deny.
   confirmed-empty copy. "No sessions found" is a reading the server has to have
   given; over Tailscale on a phone the gap before it does is seconds long.
   `--mock-empty` serves the confirmed-empty screen so it can be looked at.
-  **(INV-11)** *`test/ui/stale-fleet.test.tsx`, `e2e/loading.spec.ts`.*
+  A remembered fleet MUST stay captioned as a memory until the first live fleet
+  frame, whatever the socket's state, with the connection pill off "live". A
+  remembered card MUST assert nothing the snapshot did not keep: "last seen …"
+  in place of its activity line, never "No prompts yet", and no claim that its
+  terminal is reachable. Send, Answer and Prune MUST stay disabled until that
+  frame confirms the pane. The status chips MUST name no count before the first
+  frame. A reconnect after a live session is not a first frame, and keeps the
+  ordinary dropped-connection caption.
+  **(INV-11)** *`test/ui/stale-fleet.test.tsx`, `test/ui/first-live-frame.test.tsx`,
+  `e2e/loading.spec.ts`, `e2e/first-live-frame.spec.ts`.*
 - **FR-FLEET-12** — Two Claude Code sessions in split panes of one tmux session
   MUST both be listed, and two session files naming the same pane MUST be one
   agent: a `claude -p` run from inside a session names its parent's pane, and a
@@ -900,7 +909,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   result MUST report what actually closed rather than what was attempted.
   **(INV-11)**
 - **FR-PRUNE-5** — The control MUST be unavailable while the fleet view is not
-  live: a card from a dropped connection is a memory, not a reading. **(INV-11)**
+  live: a card from a dropped connection, or one painted from the browser's
+  memory before the first live frame, is a memory, not a reading. **(INV-11)**
 - **FR-PRUNE-6** — On a phone the control MUST sit at the foot of the Idle
   group, under the sessions it closes, rather than in a full-width row above
   Needs you; with no Idle group on screen it MUST stay in the toolbar, so a

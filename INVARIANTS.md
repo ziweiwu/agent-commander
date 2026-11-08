@@ -1615,6 +1615,14 @@ draws for a socket that dropped, with the time it was true. An empty fleet is
 forgotten rather than kept: the confirmed-empty screen is a claim the server
 made once, not one the browser may repeat from memory.
 
+It stays a memory until the first live fleet frame, and the socket opening is
+not that frame. A remembered card has no activity because the snapshot never
+keeps one, so it says when it was last seen rather than "No prompts yet"; it
+keeps a pane id, which says a pane existed, so it does not claim the terminal
+is reachable, and Send, Answer and Prune wait for the frame that confirms it.
+`fleetLive` is set by a received frame and nothing else. It survives a drop:
+after a live session a reconnect is the socket's business, as it always was.
+
 - `usage::tests`, `enrich::the_bridges_context_and_cost_reach_the_card_it_wrote_them_for`
   — a reading needs a time and a figure; the file is `stat`-ed and reread only
   when it moved; junk and a vanished file keep the last good value until the
@@ -1626,6 +1634,9 @@ made once, not one the browser may repeat from memory.
   is not a zero
 - `test/ui/fleet-snapshot.test.tsx` — what is remembered, what is not, and
   that an empty fleet is forgotten
+- `test/ui/first-live-frame.test.tsx`, `e2e/first-live-frame.spec.ts` — a
+  cold start with the socket open and silent reads as a memory and acts on
+  nothing, the first frame ends that, and a later drop behaves as before
 
 **Amended: "new" says what this app showed, never what the reader read.** An
 idle card may carry the word *new* (F6) when its agent has done something since

@@ -18,6 +18,7 @@ import { displayName, isRenamed } from '../lib/naming.ts'
 import { formatDay, formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { useStore } from '../store/store.ts'
+import { useOfflineClock } from '../hooks/useOfflineClock.ts'
 import { DelegationTree } from './DelegationTree.tsx'
 import { ICON_BUTTON, ICON_INLINE, ICON_MARK, Icon } from './ui/Icon.tsx'
 import type { IconName } from './ui/Icon.tsx'
@@ -27,6 +28,7 @@ import {
   railOf,
   reachOf,
   sinceOf,
+  type Reachability,
   type RailState,
   type SinceFace,
 } from '../lib/status.ts'
@@ -97,6 +99,62 @@ export function useStatusText(): (agent: Agent) => string {
     }
     return t(STATUS_KEY[agent.status] ?? 'statusUnknown')
   }
+}
+
+/**
+ * Reachability, on the top row of the card. A remembered pane id says only that
+ * a pane existed when this browser last looked, so before the first live frame
+ * the mark claims neither way (FR-FLEET-11).
+ */
+function ReachMark({ reach }: { reach: Reachability }) {
+  const t = useTranslate()
+  const remembered = useStore((s) => !s.fleetLive)
+  const gone = !remembered && reach.reach === 'gone'
+  let words = t('reachable')
+  if (remembered) words = t('reachUnconfirmed')
+  else if (gone) words = reach.reason ?? t('notAttachable')
+  return (
+    <span
+      className={styles.reach}
+      data-testid="agent-reach"
+      data-reach={remembered ? 'unconfirmed' : reach.reach}
+      title={remembered || gone ? words : undefined}
+    >
+      <Icon name={gone ? 'screen-off' : 'screen'} size={ICON_MARK} />
+      <span className="sr-only">{words}</span>
+    </span>
+  )
+}
+
+/**
+ * A remembered card's line, in place of its activity (FR-FLEET-11).
+ *
+ * Keyed on `fleetLive` alone, not on the socket: a card that has had a live
+ * frame still holds what the server last said when the connection drops, and
+ * the stale caption already says how old that is.
+ *
+ * The snapshot keeps nothing an agent said (INV-3), so a card painted from it
+ * has no activity for a reason that has nothing to do with the agent, and
+ * "No prompts yet" there was a claim over a session mid-turn. This says what
+ * the browser does know: when it last saw the fleet, redrawn by
+ * `useOfflineClock` because the frame that would redraw it has not come.
+ */
+function RememberedLine() {
+  const t = useTranslate()
+  const lang = useLang()
+  const fleetAt = useStore((s) => s.fleetAt)
+  const now = useOfflineClock()
+  const when = formatRelative(lang, relative(fleetAt ?? undefined, now))
+  return (
+    <span
+      className={`${styles.activity} ${styles.activityMuted}`}
+      data-testid="agent-activity"
+      data-remembered="true"
+      title={t('lastSeenTitle')}
+    >
+      {when ? t('lastSeen', { when }) : t('lastSeenNoTime')}
+    </span>
+  )
 }
 
 export interface AgentCardProps {
@@ -223,10 +281,11 @@ export const AgentCard = memo(function AgentCard({
    * over-claim INV-11 exists to prevent.
    */
   const exited = useStore((s) => s.exited)
+  const remembered = useStore((s) => !s.fleetLive)
   const rail = railOf(agent, exited)
   const reach = reachOf(agent, exited)
-  /** The Answer verb goes with the hand: never beside a struck ring, a pane that has exited, or a guess. */
-  const canAnswer = rail.state === 'waiting'
+  /** The Answer verb goes with the hand: never beside a struck ring, a pane that has exited, a guess, or a memory. */
+  const canAnswer = !remembered && rail.state === 'waiting'
   /** Whether the age on this card is time-in-state rather than time-since. */
   const blockedFor = ageIsTimeInState(agent)
   /*
@@ -320,17 +379,7 @@ export const AgentCard = memo(function AgentCard({
               * the title where it has one, which is where `attachBlockedReason`
               * has wanted to live all along — it is not a status and never was.
               */}
-            <span
-              className={styles.reach}
-              data-testid="agent-reach"
-              data-reach={reach.reach}
-              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
-            >
-              <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
-              <span className="sr-only">
-                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
-              </span>
-            </span>
+            <ReachMark reach={reach} />
             {/*
              * The age, and what it is the age *of*. For an agent that reported
              * itself waiting this is how long it has been blocked, not when it
@@ -381,7 +430,9 @@ export const AgentCard = memo(function AgentCard({
               {statusText(agent)}
             </span>
 
-            {agent.activity ? (
+            {remembered ? (
+              <RememberedLine />
+            ) : agent.activity ? (
               <span className={styles.activity} data-testid="agent-activity" title={agent.activity}>
                 {plainText(agent.activity)}
               </span>

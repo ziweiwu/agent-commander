@@ -2,7 +2,7 @@ import { useEffect, useRef, type CSSProperties, type RefObject } from 'react'
 import type { Agent } from '../../shared/types.ts'
 import { Outlet, useParams, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
-import { useStore, type Conn, type Reach } from '../store/store.ts'
+import { selectLive, useStore, type Conn, type Reach } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
 import {
   KIND_SCOPES,
@@ -71,7 +71,7 @@ interface ConnPillProps {
 function ConnPill({ sheet }: ConnPillProps) {
   const t = useTranslate()
   const lang = useLang()
-  const conn = useStore((s) => s.conn)
+  const conn = usePillState()
   const reach = useStore((s) => s.reach)
   const fleetAt = useStore((s) => s.fleetAt)
   const now = useOfflineClock()
@@ -96,6 +96,19 @@ function ConnPill({ sheet }: ConnPillProps) {
       )}
     </div>
   )
+}
+
+/**
+ * The connection as the pill draws it: `open` only once the fleet is live.
+ *
+ * A socket that has opened but carried no fleet frame yet is still connecting
+ * as far as anything on screen is concerned (FR-FLEET-11). "live" there sat
+ * over a remembered fleet whose stale caption had just been taken away.
+ */
+function usePillState(): Conn {
+  const conn = useStore((s) => s.conn)
+  const live = useStore(selectLive)
+  return conn === 'open' && !live ? 'connecting' : conn
 }
 
 /** "offline · 2m ago", or "offline" from a page that never heard a frame. */
@@ -312,9 +325,19 @@ function SidebarToggle() {
   )
 }
 
+/**
+ * What a status chip shows in place of its count before the first fleet frame.
+ *
+ * FR-FLEET-11: "0 agents" above "Connecting…" is a count nobody has given. The
+ * chip keeps its place, so the first frame fills it in rather than pushing the
+ * row about on a phone, where the chips are a row of their own.
+ */
+const NO_COUNT_YET = '–'
+
 function Filters() {
   const t = useTranslate()
   const agents = useStore((s) => s.agents)
+  const counted = useStore((s) => s.fleetAt !== null)
   const filter = useStore((s) => s.fleet.filter)
   const setFilter = useStore((s) => s.setFilter)
   const fleet = useStore((s) => s.fleet)
@@ -325,7 +348,7 @@ function Filters() {
   const counts = countByGroup(inFleet)
   const terminals = agents.filter(isTerminal).length
 
-  const chip = (key: StatusFilter, label: string, count: number) => (
+  const chip = (key: StatusFilter, label: string, count: number | null) => (
     <Chip
       key={key}
       data-testid="filter-chip"
@@ -345,7 +368,7 @@ function Filters() {
           <Icon name="check" size={ICON_MARK} />
         </span>
       )}
-      <b>{count}</b> {label}
+      <b>{count ?? NO_COUNT_YET}</b> {label}
     </Chip>
   )
 
@@ -362,7 +385,7 @@ function Filters() {
 
   return (
     <div className={styles.filters}>
-      {chip('all', t('filterAll'), inFleet.length)}
+      {chip('all', t('filterAll'), counted ? inFleet.length : null)}
       {counts.waiting > 0 && chip('waiting', t('filterWaiting'), counts.waiting)}
       {counts.busy > 0 && chip('busy', t('filterBusy'), counts.busy)}
       {counts.idle > 0 && chip('idle', t('filterIdle'), counts.idle)}

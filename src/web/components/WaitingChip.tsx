@@ -1,4 +1,4 @@
-import { useStore } from '../store/store.ts'
+import { selectLive, useStore } from '../store/store.ts'
 import { nextUp, othersWaiting } from '../lib/hop.ts'
 import { displayName } from '../lib/naming.ts'
 import { relative, uptimeParts } from '../lib/format.ts'
@@ -63,7 +63,7 @@ export function WaitingChip({ sheet }: WaitingChipProps) {
   const agents = useStore((s) => s.agents)
   const selected = useStore((s) => s.selected)
   const exited = useStore((s) => s.exited)
-  const live = useStore((s) => s.conn === 'open')
+  const live = useStore(selectLive)
   const fleetAt = useStore((s) => s.fleetAt)
   const now = useOfflineClock()
 

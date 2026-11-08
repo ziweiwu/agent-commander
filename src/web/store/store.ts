@@ -172,6 +172,17 @@ export interface AppState {
    */
   fleetAt: number | null
   /**
+   * Whether a fleet frame has arrived from the server on this page (FR-FLEET-11).
+   *
+   * False at boot and set only by a received frame, never by the snapshot a
+   * cold start paints, so `fleetAt` alone cannot answer it: hydrate sets that
+   * too. The socket opening is not the server speaking either, and over a
+   * phone's tunnel the gap between the two is seconds. It stays true across a
+   * drop, so a reconnect after a live session behaves as it always did; the
+   * socket's own state covers that case.
+   */
+  fleetLive: boolean
+  /**
    * How far each session has been shown in this app, as the server last said
    * (F6). Null until it has said, which is no marks rather than every mark:
    * the remembered fleet painted on a cold start carries none.
@@ -451,6 +462,7 @@ export const useStore = create<AppState>()((set, get) => ({
   trees: [],
   treesEtag: null,
   fleetAt: null,
+  fleetLive: false,
   seenThrough: null,
   visit: null,
   caughtUp: false,
@@ -678,18 +690,27 @@ export const useStore = create<AppState>()((set, get) => ({
   t: (key, vars) => translate(get().lang, key, vars),
 }))
 
-/** Apply persisted preferences before the first paint. */
+/**
+ * Whether what the fleet shows is a live reading: the socket is open and the
+ * server has sent a fleet frame on this page (FR-FLEET-11). Everything that
+ * acts on a card's pane, and every caption that says the list is current,
+ * reads this rather than `conn`.
+ */
+export const selectLive = (state: AppState): boolean => state.conn === 'open' && state.fleetLive
+
+/**
+ * Apply persisted preferences before the first paint.
+ *
+ * The last fleet this browser saw is painted at once and captioned as a
+ * memory until the first live fleet frame, whatever the socket's state:
+ * `fleetLive` is false, so the stale caption FleetList draws for a socket that
+ * dropped covers this frame too. A phone whose page was evicted otherwise
+ * spends the tunnel's reconnect on a spinner over a fleet it knew ten minutes
+ * ago. Names, states and folders only — see `saveFleetSnapshot` (INV-3) — and
+ * never an empty one, which would present "no sessions" as a reading (INV-11).
+ */
 export function initPreferences(): void {
   const { theme, scheme, lang } = useStore.getState()
-  /*
-   * The last fleet this browser saw, painted at once and captioned as a
-   * memory: `conn` is still `connecting`, so the stale caption FleetList
-   * already draws for a socket that dropped covers this frame too. A phone
-   * whose page was evicted otherwise spends the tunnel's reconnect on a
-   * spinner over a fleet it knew ten minutes ago. Names, states and folders
-   * only — see `saveFleetSnapshot` (INV-3) — and never an empty one, which
-   * would present "no sessions" as a reading (INV-11).
-   */
   const snapshot = loadFleetSnapshot()
   if (snapshot) useStore.setState({ agents: snapshot.agents, fleetAt: snapshot.at })
   // Scheme first: `applyTheme` reads `--bg` back off the document to colour the
