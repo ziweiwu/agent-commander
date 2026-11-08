@@ -21,7 +21,7 @@
  */
 import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Terminal } from '../../src/web/components/Terminal.tsx'
 import { useStore } from '../../src/web/store/store.ts'
@@ -348,5 +348,44 @@ describe('a paste line carrying a control character', () => {
     expect(runText).not.toHaveBeenCalled()
     expect(input().value).toBe(hostile)
     expect(useStore.getState().toast).toContain('U+001B')
+  })
+})
+
+describe('FR-FLEET-11 Run waits for the first live frame, as Send does', () => {
+  it('runs nothing and keeps the draft before the frame', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ conn: 'open', fleetLive: false })
+    open()
+
+    await user.type(input(), 'npm run build')
+    expect(run().disabled).toBe(true)
+    await user.keyboard('{Enter}')
+
+    expect(runText).not.toHaveBeenCalled()
+    expect(input().value).toBe('npm run build')
+  })
+
+  it('runs once the frame has confirmed the pane', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ conn: 'open', fleetLive: false })
+    open()
+
+    await user.type(input(), 'npm run build')
+    act(() => useStore.setState({ fleetLive: true }))
+    await user.click(run())
+
+    await waitFor(() => expect(runText).toHaveBeenCalledWith('npm run build'))
+    expect(runText).toHaveBeenCalledTimes(1)
+  })
+
+  it('still lets a line be staged at the prompt, which submits nothing', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ conn: 'open', fleetLive: false })
+    open()
+
+    await user.type(input(), 'npm run build')
+    await user.click(send())
+
+    await waitFor(() => expect(sendText).toHaveBeenCalledWith('npm run build'))
   })
 })

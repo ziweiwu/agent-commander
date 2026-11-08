@@ -213,9 +213,11 @@ over Tailscale has something to look at while the connection forms. Until the
 first live update arrives, that list is a memory and says so: the caption stays
 up even once the connection has opened, the pill reads *connecting…* rather than
 *live*, each card reads **Last seen 5m ago — waiting for a live update** in place
-of what it is doing, and the terminal mark claims nothing. Send, the answer
-buttons and Prune stay off until that update confirms the pane is still there. A
-first visit, with nothing remembered, shows no counts in the status chips until
+of what it is doing, and the terminal mark claims nothing. Send, Attach's
+Run, the answer buttons and Prune stay off until that update confirms the pane
+is still there. A
+first visit, with nothing remembered, shows no counts in the status chips or the
+kind menu until
 the server has given some.
 
 After you answer a single question from the card, the card offers **Next:

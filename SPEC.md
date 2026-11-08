@@ -205,10 +205,10 @@ the default for an unrecognised kind is deny.
   frame, whatever the socket's state, with the connection pill off "live". A
   remembered card MUST assert nothing the snapshot did not keep: "last seen …"
   in place of its activity line, never "No prompts yet", and no claim that its
-  terminal is reachable. Send, Answer and Prune MUST stay disabled until that
-  frame confirms the pane. The status chips MUST name no count before the first
-  frame. A reconnect after a live session is not a first frame, and keeps the
-  ordinary dropped-connection caption.
+  terminal is reachable. Send, Attach's Run (which submits as Send does), Answer
+  and Prune MUST stay disabled until that frame confirms the pane. The status
+  chips and the kind select MUST name no count before the first frame. A
+  reconnect after a live session is not a first frame, and keeps the ordinary dropped-connection caption.
   **(INV-11)** *`test/ui/stale-fleet.test.tsx`, `test/ui/first-live-frame.test.tsx`,
   `e2e/loading.spec.ts`, `e2e/first-live-frame.spec.ts`.*
 - **FR-FLEET-12** — Two Claude Code sessions in split panes of one tmux session

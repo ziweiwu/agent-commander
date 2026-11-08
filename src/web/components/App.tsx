@@ -411,7 +411,7 @@ function Filters() {
         >
           {KIND_SCOPES.map((key) => (
             <option key={key} value={key}>
-              {`${kindCount[key]} ${t(kindLabel[key])}`}
+              {`${counted ? kindCount[key] : NO_COUNT_YET} ${t(kindLabel[key])}`}
             </option>
           ))}
         </select>

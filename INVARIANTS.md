@@ -1619,7 +1619,8 @@ It stays a memory until the first live fleet frame, and the socket opening is
 not that frame. A remembered card has no activity because the snapshot never
 keeps one, so it says when it was last seen rather than "No prompts yet"; it
 keeps a pane id, which says a pane existed, so it does not claim the terminal
-is reachable, and Send, Answer and Prune wait for the frame that confirms it.
+is reachable, and Send, Attach's Run, Answer and Prune wait for the frame that
+confirms it.
 `fleetLive` is set by a received frame and nothing else. It survives a drop:
 after a live session a reconnect is the socket's business, as it always was.
 

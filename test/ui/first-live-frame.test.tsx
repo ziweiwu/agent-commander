@@ -292,6 +292,35 @@ describe('FR-FLEET-11 a first visit names no count before the first frame', () =
   })
 })
 
+describe('FR-FLEET-11 a first visit with the terminals scope saved', () => {
+  const optionsOfKindSelect = (): string[] =>
+    [...screen.getByTestId('kind-select').querySelectorAll('option')].map(
+      (option) => option.textContent ?? '',
+    )
+  const withSavedScope = (): void => {
+    const { fleet } = useStore.getState()
+    useStore.setState({ fleet: { ...fleet, kinds: 'terminals' } })
+  }
+
+  it('names no count in the kind select before the first frame', () => {
+    withSavedScope()
+    connect()
+    act(() => FakeSocket.last!.fire('open'))
+    shell('/')
+    for (const text of optionsOfKindSelect()) expect(text).not.toMatch(/\d/)
+  })
+
+  it('counts every kind once the server has said', () => {
+    withSavedScope()
+    connect()
+    const ws = FakeSocket.last!
+    act(() => ws.fire('open'))
+    shell('/')
+    act(() => ws.deliver({ type: 'fleet', agents: FLEET, mock: false }))
+    expect(optionsOfKindSelect().every((text) => /^\d+ /.test(text))).toBe(true)
+  })
+})
+
 describe('FR-FLEET-11 in Chinese', () => {
   it('says when a remembered card was last seen', () => {
     useStore.getState().setLang('zh-CN')
