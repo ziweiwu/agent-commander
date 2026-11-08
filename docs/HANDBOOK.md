@@ -381,9 +381,9 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | Key | Does |
 |---|---|
 | `/` | focus the filter box |
-| `↑` `↓` (or `k` `j`) | move through the agent list |
+| `↑` `↓` (or `k` `j`) | move through the agent list (`↓` leaves the filter box; there `k` `j` are letters) |
 | `Enter` | open the focused agent |
-| `Esc` | close the agent (or clear the filter box) |
+| `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
@@ -494,6 +494,8 @@ Nothing hides: the active chip carries a glyph as well as a fill, so arriving
 at an already-filtered dashboard reads as a filter rather than an empty fleet.
 The search box deliberately does not persist — a one-off lookup coming back on
 a reload with no visible cause is just confusing.
+It finds a folder the way the card draws it, so `~/Pro` works as well as
+`/Users/you/Pro`.
 
 Sessions Claude Code names for itself look like `ziweiwu-35`, which
 distinguishes nothing when several are running. Where a session was

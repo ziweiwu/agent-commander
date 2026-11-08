@@ -1,6 +1,6 @@
-import { useEffect, useRef, type CSSProperties } from 'react'
+import { useEffect, useRef, type CSSProperties, type RefObject } from 'react'
 import type { Agent } from '../../shared/types.ts'
-import { Outlet, useParams, useLocation, useNavigate } from 'react-router-dom'
+import { Outlet, useParams, useLocation, useNavigate, useOutletContext } from 'react-router-dom'
 import { hasTranscripts } from '../../shared/agent-kinds.ts'
 import { useStore, type Conn, type Reach } from '../store/store.ts'
 import { focusAgent, setAttached } from '../store/transport.ts'
@@ -216,10 +216,10 @@ export function App() {
 
       if (e.altKey || (typing && target !== searchRef.current)) return
 
-      if (e.key === 'ArrowDown' || e.key === 'j') {
+      if (e.key === 'ArrowDown' || (e.key === 'j' && !typing)) {
         e.preventDefault()
         moveCardFocus(1)
-      } else if (e.key === 'ArrowUp' || e.key === 'k') {
+      } else if (e.key === 'ArrowUp' || (e.key === 'k' && !typing)) {
         e.preventDefault()
         moveCardFocus(-1)
       }
@@ -266,7 +266,7 @@ export function App() {
 
       <NotifyNudge />
 
-      <Outlet context={{ searchRef, narrow }} />
+      <Outlet context={{ searchRef, narrow } satisfies ShellContext} />
 
       <NewAgentDialog />
       {toast && (
@@ -435,6 +435,13 @@ const EXPECT_MS = 8000
  */
 const FOLLOW_MS = 4000
 
+/**
+ * What `App` hands the route beneath it. The filter box must be wired to
+ * `App`'s ref, the one its key handler reads: a ref of the route's own left that
+ * handler holding null, so `/` and Esc never reached the box.
+ */
+type ShellContext = { searchRef: RefObject<HTMLInputElement | null>; narrow: boolean }
+
 export function FleetRoute() {
   const navigate = useNavigate()
   const narrow = useIsNarrow()
@@ -447,7 +454,7 @@ export function FleetRoute() {
   const tab = useStore((s) => s.tab)
   const sidebar = useStore((s) => s.sidebar)
   const sidebarWidth = useStore((s) => s.sidebarWidth)
-  const searchRef = useRef<HTMLInputElement>(null)
+  const { searchRef } = useOutletContext<ShellContext>()
 
   const wantTab = location.pathname.endsWith('/term') ? 'attach' : 'chat'
   const agent = agents.find((a) => a.sessionId === sessionId)
