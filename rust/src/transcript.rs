@@ -4410,15 +4410,19 @@ mod tests {
         ]));
         for line in [&plain, &for_tool_use, &beside_a_picture] {
             let out = parse(&[line]);
-            assert!(out.events.iter().all(|event| event.kind != TimelineKind::User), "{line}: {:?}", out.events);
-            assert!(!out.patch.activity.as_deref().unwrap_or("").starts_with("you:"), "{line}: {:?}", out.patch.activity);
+            let drawn_as_you = out.events.iter().any(|event| event.kind == TimelineKind::User);
+            assert!(!drawn_as_you, "{line}: {:?}", out.events);
+            let activity = out.patch.activity.as_deref().unwrap_or("");
+            assert!(!activity.starts_with("you:"), "{line}: {activity}");
         }
-        let person = json!({ "type": "user", "timestamp": "2026-11-07T10:01:00Z",
-            "message": { "role": "user", "content": [{ "type": "text", "text": "why did you stop at [Request interrupted by user]" }] } })
-            .to_string();
+        let quoting = "why did you stop at [Request interrupted by user]";
+        let person = note(json!([{ "type": "text", "text": quoting }]));
         let out = parse(&[&plain, &person]);
-        let said: Vec<&str> = out.events.iter().filter(|event| event.kind == TimelineKind::User).map(|event| event.text.as_str()).collect();
-        assert_eq!(said, vec!["why did you stop at [Request interrupted by user]"]);
+        let said: Vec<&str> = out.events.iter()
+            .filter(|event| event.kind == TimelineKind::User)
+            .map(|event| event.text.as_str())
+            .collect();
+        assert_eq!(said, vec![quoting]);
     }
 }
 

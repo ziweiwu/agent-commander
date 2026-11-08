@@ -1841,7 +1841,8 @@ absence-of-evidence rule the Prune button was removed for.
 **And the conversation never puts machinery's words in the person's mouth.**
 A `user` record from another agent (`peer`), a task notification, or Claude
 Code's own note (`isMeta`, local-command output, and Claude Code's own
-`[Request interrupted by user…]` note) is never drawn as the person speaking, whether spelled as a string or as blocks; hand-backs and task
+`[Request interrupted by user…]` note) is never drawn as the person speaking,
+whether spelled as a string or as blocks; hand-backs and task
 notifications are notices. The card's subject already read the label; the
 conversation read only the flags, and only on the block path, so a bare
 string — which is how Claude Code 2.1.310 writes a delegate's hand-back, a
