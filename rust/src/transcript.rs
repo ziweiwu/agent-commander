@@ -3842,6 +3842,8 @@ mod tests {
             json!({ "type": "user", "timestamp": "2026-08-14T02:02:00.000Z", "origin": { "kind": "human" },
                     "isCompactSummary": true, "message": { "content": "This session is being continued…" } }),
             json!({ "type": "system", "subtype": "compact_boundary", "timestamp": "2026-08-14T02:03:00.000Z" }),
+            json!({ "type": "user", "timestamp": "2026-08-14T02:04:00.000Z", "origin": { "kind": "human" },
+                    "message": { "content": [{ "type": "text", "text": "[Request interrupted by user]" }] } }),
         ];
         let mut text = typed("fix the locale layout", PROMPTED_AT);
         text.push_str(&calls(BEFORE));

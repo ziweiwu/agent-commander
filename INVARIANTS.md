@@ -1863,8 +1863,10 @@ Everything unlabelled stays "you", as it always was: this app's own sends,
 typed and queued prompts, and records older than `origin`. The one unlabelled
 exception is the note Claude Code writes after Esc, `[Request interrupted by
 user]` or `… for tool use]`: blocks of text with no `isMeta`, `origin` or
-`promptSource`, so `prompt_origin` knows it by its opening words alone, trimmed,
-with or without a picture beside it. It was a "you" bubble and `you: [Request
+`promptSource`, so `prompt_origin` knows it by its whole text, trimmed, matching
+one of those two forms exactly, with or without a picture beside it, and so
+does `is_typed_by_a_person` even on a record labelled `human` or `typed`. A
+prompt that goes on past the note stays "you". It was a "you" bubble and `you: [Request
 interrupted by user]` on the card's line, 19 times in the 300 newest transcripts
 on this machine. A person typing that exact bracketed text is misread as the
 note, which is accepted: the bracketed form is Claude Code's.

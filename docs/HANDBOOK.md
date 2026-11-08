@@ -960,7 +960,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1877 tests: 832 Rust (the server) + 1045 vitest (the web app)
+npm test           # 1878 tests: 833 Rust (the server) + 1045 vitest (the web app)
 npm run e2e        # 489 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
