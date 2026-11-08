@@ -869,6 +869,19 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   `npm run verify:kani`.*
 - **FR-BROWSE-2** — Containment MUST use a path-segment check, never a string
   prefix: `/abc` is not inside `/a`. **(INV-9)**
+- **FR-BROWSE-3** — A browsed path MUST read `~` and `~/…` as the home
+  directory, as a spawn does, before it is resolved, and MUST refuse any other
+  relative path, `~user` included, rather than resolve it against the server's
+  working directory. The browser's header MUST show a path under
+  `/Users/<name>` or `/home/<name>` as `~/…` and any other path in full, so
+  what it shows can usually be typed back. The `~` goes by path shape, not by
+  the server's real home: a root under another account's `/Users/<name>` or
+  `/home/<name>` is labelled `~/…` too, and typing that back is refused as
+  outside the root. With the browser open, `Esc` MUST close the browser and return
+  focus to Browse, not close the dialog (FR-UI-14), and an `Esc` that cancels
+  an IME composition MUST do neither. **(INV-9)**
+  *`browse::inv9_tilde_*`, `test/ui/folder-browser.test.tsx`,
+  `test/ui/escape-levels.test.tsx`.*
 
 ### 6.3 Pruning
 
@@ -1345,7 +1358,7 @@ unverified.
 | INV-6 — guard destructive keys | FR-ATT-9, FR-SEND-4 |
 | INV-7 — two command shapes | FR-KIND-1, FR-CTL-9, FR-SPAWN-3, FR-SPAWN-7, FR-TERM-1, FR-TERM-2, FR-TERM-3 |
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
-| INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2 |
+| INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2, FR-BROWSE-3 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
 | INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-CHAT-17, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |

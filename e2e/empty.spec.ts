@@ -34,6 +34,32 @@ test.describe('the first-run screen', () => {
     await expect(page.getByTestId('new-agent-browse')).toHaveAttribute('aria-expanded', 'true')
   })
 
+  test('Esc backs out of the browser, and the browser reads ~ as home (INV-9)', async ({ page }) => {
+    await page.goto('/')
+    await page.getByTestId('empty-new-agent').click()
+    const browser = page.getByTestId('folder-browser')
+    await expect(browser).toBeVisible()
+
+    await page.keyboard.press('Escape')
+    await expect(browser).toHaveCount(0)
+    await expect(page.getByTestId('new-agent-dialog')).toBeVisible()
+    await expect(page.getByTestId('new-agent-browse')).toBeFocused()
+
+    await page.getByTestId('new-agent-dir').fill('~')
+    await page.getByTestId('new-agent-browse').click()
+    await expect(browser).toContainText('~')
+    await expect(browser).not.toContainText('Could not read that folder')
+
+    await page.getByTestId('new-agent-browse').click()
+    await page.getByTestId('new-agent-dir').fill('Projects')
+    await page.getByTestId('new-agent-browse').click()
+    await expect(browser).toContainText('Use an absolute path or one starting with ~/')
+
+    await page.keyboard.press('Escape')
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('new-agent-dialog')).toHaveCount(0)
+  })
+
   test('the help link lands on the phone setup', async ({ page }) => {
     await page.goto('/')
     await page.getByTestId('empty-help').click()

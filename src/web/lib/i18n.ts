@@ -506,6 +506,7 @@ const EN = {
   browseEmpty: 'No subfolders here.',
   browseChoose: 'Use this folder',
   browseFailed: 'Could not read that folder: {error}',
+  browseNeedsAbsolute: 'Use an absolute path or one starting with ~/',
   defaultDir: 'Default directory',
   defaultDirSet: 'Set current as default',
   /* fullscreen */
@@ -965,6 +966,7 @@ const ZH: Record<Key, string> = {
   browseEmpty: '这里没有子文件夹。',
   browseChoose: '使用此文件夹',
   browseFailed: '无法读取该文件夹：{error}',
+  browseNeedsAbsolute: '请使用绝对路径或以 ~/ 开头的路径',
   defaultDir: '默认目录',
   defaultDirSet: '将当前设为默认',
   fullscreenTitle: '全屏',

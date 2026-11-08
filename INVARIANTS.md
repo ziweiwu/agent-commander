@@ -1363,6 +1363,11 @@ change. The parent of a contained path used to be checked for containment
 again, and a label used to have a form for a path outside the root; neither
 state can now be written down, so neither is asserted.
 
+`~` is the home directory here as it is for a spawn; any other relative path
+is refused rather than resolved against the server's working directory. The
+expansion happens before `realpath`, so `~/../..` and `~/link-to-slash` still
+meet the containment check, and `~user` is refused, never looked up.
+
 Listing is metadata only — names and directory-ness. It never reads a file.
 
 `browse::inv9_*` covers traversal, an escaping symlink, and the
