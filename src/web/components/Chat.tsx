@@ -13,6 +13,7 @@ import { conversationLang } from '../lib/promptLang.ts'
 import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useDraft } from '../hooks/useDraft.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
+import { refusedAsKeypresses } from '../store/pasteGuard.ts'
 import { useStore } from '../store/store.ts'
 import {
   interruptAndSend,
@@ -636,7 +637,7 @@ export function Chat({ agent }: { agent: Agent }) {
      * dropped socket, which is the failure nobody forgives. The text stays
      * where it is, and sending it again stays the user's decision.
      */
-    if (!online) return
+    if (!online || refusedAsKeypresses(text)) return
     draftRef.current = ''
     // Interrupting is only meaningful against an agent that is actually working;
     // on an idle one the two modes are the same act, so the Escape is not sent.

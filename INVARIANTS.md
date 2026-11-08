@@ -166,6 +166,24 @@ The text itself never reaches tmux's argument lexer. A paste is staged in a
 wrong — no stray quote can end an argument early and turn the rest of someone's
 prompt into tmux commands.
 
+**Bracketed paste is a wrapper, not a sanitiser.** `-p` puts `ESC[200~` and
+`ESC[201~` around the text and passes whatever is inside straight through, so
+text carrying `ESC[201~` ended the paste early and everything after it reached
+the agent as keypresses: a `\r` that submits, a lone `ESC` that interrupts
+(INV-6's guarded key, with no confirmation), `ESC[Z` that cycles the
+permission mode. Copying from a hostile page and pasting into the composer or
+the Attach paste line was enough. So text carrying ESC (and so the paste
+terminator) or any other control character except tab and line breaks is
+refused before it reaches tmux: `pane::check_paste`, inside `Panes::paste`,
+the one choke point every paste and every typed slash command goes through. It is
+refused rather than stripped, so nothing is silently altered, and the
+browser runs the same check first on every path to `paste` — the composer,
+Interrupt & send (before its Escape), the Attach view's typing, its paste
+line, the goal field — so the refusal is said in the reader's language, no
+echo is drawn and no draft is cleared. `\r` is allowed because it has to be:
+xterm's own paste turns line breaks into CR, and the Attach view sends
+xterm's data through `paste`.
+
 Sending less often is not sending less. The Attach view coalesces keystrokes:
 exactly one paste is allowed in flight, and characters typed while it is
 outstanding accumulate into the next one, so a burst of typing arrives as
@@ -255,6 +273,16 @@ the fleet; the agent on screen keeps its draft through the gap after a
 - `test/ui/attach-typing.test.tsx` — one write in flight, a burst coalesced
   without loss or reordering, Enter flushed behind its text, and a dropped
   socket that discards rather than replays
+- `pane::tests::inv2_a_paste_carrying_escape_is_refused_before_tmux`,
+  `inv2_tabs_and_line_breaks_still_paste`,
+  `inv2_every_other_control_character_is_refused`, and
+  `mock::tests::inv2_a_paste_carrying_escape_is_refused_like_a_real_pane` —
+  `ESC[201~` runs no tmux command at all, tab and both line breaks still paste
+- `test/ui/paste-escape.test.tsx` — every client path to `paste` refuses the
+  same text with nothing on the wire, no echo and no Escape, in both
+  languages, and characters typed around a refused chunk are not lost; the
+  composer, the paste line and the goal field keep the draft
+  (`Chat.test.tsx`, `term-paste.test.tsx`, `ChatControls.test.tsx`)
 - `pane::tests` (the control-path group) — a write that fails after reaching tmux is
   never retried down the other path, a read that fails is, and the user's text
   never appears on a tmux command line. The path is a value as well as a rule:
@@ -2024,7 +2052,9 @@ refused with "command too long". So `spawn::MAX_TASK` is 8 KiB rather than
 and the new-agent route reads a body big enough for a task at that cap after
 JSON has escaped it. A control character other than a line break is refused
 in it: a task is typed into a dialog, and the line break is the one a person
-types there.
+types there. A paste follows the same rule with the two characters a paste
+legitimately carries, tab and the carriage return xterm turns line breaks
+into, and nothing else (`pane::check_paste`, INV-2).
 
 - `spawn::inv12_a_task_over_the_cap_is_refused`, counted in bytes as tmux
   counts; `a_task_at_the_cap_still_fits_on_tmux_s_command_line`;

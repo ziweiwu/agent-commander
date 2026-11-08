@@ -143,3 +143,24 @@ describe('Chat', () => {
     expect(screen.getByText('sending…')).toBeDefined()
   })
 })
+
+/**
+ * INV-2: text carrying ESC would end tmux's bracketed paste early and reach the
+ * agent as keypresses. The composer refuses it before the draft is cleared, so
+ * the words stay where the reader can fix them.
+ */
+describe('a message that would leave its bracketed paste', () => {
+  it('is refused with a toast, and the draft is kept', async () => {
+    const user = userEvent.setup()
+    renderApp(<Chat agent={agent({ sessionId: 'a' })} />)
+    const hostile = 'fine\u001b[201~\nrm -rf build'
+
+    await user.click(screen.getByTestId('composer-input'))
+    await user.paste(hostile)
+    await user.keyboard('{Enter}')
+
+    expect(sendMessage).not.toHaveBeenCalled()
+    expect(screen.getByTestId<HTMLTextAreaElement>('composer-input').value).toBe(hostile)
+    expect(useStore.getState().toast).toContain('U+001B')
+  })
+})
