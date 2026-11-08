@@ -155,7 +155,8 @@ export type GroupKey = (typeof GROUPS)[number]['key']
  * told nothing matches, while a card two inches away wears that badge, is the
  * plainest kind of broken search there is. Both the id and the label are
  * checked, so `terminal` and `Terminal` find it, and so would a kind whose label
- * and id differ.
+ * and id differ. The folder is checked as `tildePath` draws it for the same
+ * reason: `~/Pro` is what the card shows, so it is what gets typed.
  */
 export function matches(agent: Agent, query: string): boolean {
   const q = query.trim().toLowerCase()
@@ -163,6 +164,7 @@ export function matches(agent: Agent, query: string): boolean {
   return [
     agent.name,
     agent.cwd,
+    tildePath(agent.cwd),
     agent.folder,
     agent.gitBranch,
     agent.activity,

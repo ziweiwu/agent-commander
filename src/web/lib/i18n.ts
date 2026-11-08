@@ -244,6 +244,8 @@ const EN = {
   attachPictureTitle: 'Put a picture where this agent can read it, and write its path into the box',
   picturePlaced: 'The path is in the box — say what to do with it, then Send.',
   pictureFailed: 'That picture was not sent: {error}',
+  pasteControlChar:
+    'Not sent: the text contains a control character (U+{code}) that the terminal would treat as a keypress.',
   send: 'Send',
   hintEnterSend: 'send',
   hintShiftEnter: 'newline',
@@ -744,6 +746,7 @@ const ZH: Record<Key, string> = {
   attachPictureTitle: '把图片放到该代理能读取的位置，并把路径写进输入框',
   picturePlaced: '路径已写入输入框——补充要做什么，然后点发送。',
   pictureFailed: '图片未能发送：{error}',
+  pasteControlChar: '未发送：文本含有控制字符（U+{code}），终端会把它当作按键。',
   send: '发送',
   hintEnterSend: '发送',
   hintShiftEnter: '换行',

@@ -427,3 +427,24 @@ describe('clear and compact from the composer strip', () => {
     expect(screen.queryByTestId('compact-agent')).toBeNull()
   })
 })
+
+/**
+ * INV-2: a goal is typed into the agent's prompt as `/goal <condition>`, so a
+ * condition carrying ESC is refused here, in the reader's language, before the
+ * server's own refusal could only say it in English.
+ */
+describe('a goal carrying a control character', () => {
+  it('is refused with a toast, and the field keeps it', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ lang: 'zh-CN' })
+    renderApp(<ChatControls agent={agent({ sessionId: 'a' })} />)
+    await user.click(screen.getByTestId('goal-toggle'))
+    await user.click(screen.getByTestId('goal-input'))
+    await user.paste('done\u001b[Z')
+    await user.click(screen.getByTestId('goal-apply'))
+
+    expect(setAgentGoal).not.toHaveBeenCalled()
+    expect((screen.getByTestId('goal-input') as HTMLInputElement).value).toBe('done\u001b[Z')
+    expect(useStore.getState().toast).toBe('未发送：文本含有控制字符（U+001B），终端会把它当作按键。')
+  })
+})

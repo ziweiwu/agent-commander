@@ -145,6 +145,14 @@ describe('matches', () => {
   it('does not match unrelated text', () => {
     expect(matches(FLEET[0] as Agent, 'zzz')).toBe(false)
   })
+
+  it('matches the folder as the card draws it, with ~ for home (FR-FLEET-6)', () => {
+    const home = { ...(FLEET[0] as Agent), cwd: '/Users/someone/Projects/x' }
+    expect(matches(home, '~/Pro')).toBe(true)
+    expect(matches(home, '/Users/someone/Pro')).toBe(true)
+    expect(matches({ ...home, cwd: '/home/someone/x' }, '~/x')).toBe(true)
+    expect(matches({ ...home, cwd: '/opt/Projects/x' }, '~/Pro')).toBe(false)
+  })
 })
 
 

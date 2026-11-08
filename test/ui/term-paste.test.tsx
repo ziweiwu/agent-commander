@@ -328,3 +328,25 @@ describe('plain Enter in the box runs the text', () => {
     expect(runText).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * INV-2: the paste line is where a clipboard copied from a hostile page lands
+ * on a phone. Text carrying ESC is refused by both verbs, and the line keeps it.
+ */
+describe('a paste line carrying a control character', () => {
+  it('neither stages nor runs it, and keeps it in the box', async () => {
+    const user = userEvent.setup()
+    open()
+    const hostile = 'ls\u001b[201~\nrm -rf build'
+
+    await user.click(input())
+    await user.paste(hostile)
+    await user.click(send())
+    await user.click(run())
+
+    expect(sendText).not.toHaveBeenCalled()
+    expect(runText).not.toHaveBeenCalled()
+    expect(input().value).toBe(hostile)
+    expect(useStore.getState().toast).toContain('U+001B')
+  })
+})

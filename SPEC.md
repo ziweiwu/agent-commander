@@ -181,7 +181,9 @@ the default for an unrecognised kind is deny.
   has done nothing since, so a session opened a moment ago is the newest rather
   than unknown. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-6** — The search box MUST filter on name, folder, branch, activity
-  and status, and MUST narrow the same list the status chips and sort do.
+  and status, and MUST narrow the same list the status chips and sort do. The
+  folder matches both as stored and as the card draws it, so `~/Pro` finds
+  `/Users/me/Projects`. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-7** — The active status filter, sort key and sort direction MUST
   persist together in this browser and survive a reload, a new tab and a browser
   restart. Restoring one while resetting another leaves a view nobody picked.
@@ -429,7 +431,8 @@ over the list with a back control; on a wide one, a second column.
   indented. *`transcript::reads_a_typed_slash_command_as_the_command_it_ran`.*
 - **FR-CHAT-17** — Only a person MAY be drawn as **you**. A `user` record from
   another agent, a task notification, or Claude Code's own note (`isMeta`,
-  local-command output) MUST NOT be, whether its content is a string or blocks:
+  local-command output, the `[Request interrupted by user…]` note it writes
+  after Esc) MUST NOT be, whether its content is a string or blocks:
   the origin MUST be read from the record's label before its flags, since a
   peer's message is flagged `isMeta` too. A delegate's hand-back MUST be a
   notice naming the delegate ("«general-purpose» reported back"), with its
@@ -440,6 +443,7 @@ over the list with a back control; on a wide one, a second column.
   stay **you**. **(INV-11)**
   *`transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
   `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`,
+  `transcript::inv11_claude_codes_interrupt_note_is_not_the_owner_speaking`,
   `test/ui/message-notices.test.tsx`.*
 - **FR-CHAT-2** — A message the user sends MUST appear immediately as *sending…*
   and settle only when the agent's own transcript confirms it. *`test/ui/delivery.test.tsx`.*
@@ -961,6 +965,15 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 - **NFR-SEC-13** — User text MUST NEVER reach tmux's argument lexer. A paste MUST
   be staged through a mode-0600 file so there is no quoting rule to get wrong.
   **(INV-1, INV-2)**
+- **NFR-SEC-17** — Pasted text MUST NOT carry a control character other than
+  tab, `\n` or `\r`; such text MUST be refused before any tmux command runs,
+  never stripped. Bracketed paste does not sanitise: `ESC[201~` inside the text
+  ends the paste and the rest arrives as keypresses. The browser MUST run the
+  same check before echoing, queuing or clearing a draft, and say the refusal
+  in the reader's language. `\r` stays allowed because xterm's paste in the
+  Attach view sends line breaks as CR. **(INV-2)** *`pane::tests`
+  `inv2_a_paste_carrying_escape_is_refused_before_tmux`,
+  `test/ui/paste-escape.test.tsx`.*
 - **NFR-SEC-14** — A write MUST pick its path before a byte is sent and MUST NOT
   change its mind: one shared tmux buffer name once meant two overlapping pastes
   ran `load(A) → load(B) → paste(into A)`, and A's agent received B's text.
@@ -1208,9 +1221,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | Key | Does |
 |---|---|
 | `/` | focus the filter box |
-| `↑` `↓`, `k` `j` | move through the agent list |
+| `↑` `↓`, `k` `j` | move through the agent list (`↓` leaves the filter box; there `k` `j` are letters) |
 | `Enter` | open the focused agent |
-| `Esc` | close the agent, or clear the filter box |
+| `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift+Enter` | in the message box: send / newline |
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
@@ -1222,6 +1235,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   the character; they do nothing while an input method is composing, and
   nothing inside the terminal, where every key is the agent's. `Alt` stands in
   for `⌥` on Windows and Linux. *`test/ui/hop.test.tsx`.*
+
+  `/` and `Esc` reach the filter box on every route, with an agent open too.
+  *`test/ui/filter-keys.test.tsx`.*
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*
@@ -1322,7 +1338,7 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14, NFR-SEC-17 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-16, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |

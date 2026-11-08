@@ -185,6 +185,10 @@ select in the header switches it to **terminals** alone, or to **both**.
   gone is marked as unreachable on its card, and both the message box and the
   terminal's own line refuse rather than accepting something that would go
   nowhere.
+- **A paste stays text.** Text carrying an escape or another control character
+  (anything but tab and line breaks) is refused with a message rather than
+  sent, because it would end the terminal's bracketed paste early and arrive
+  as keypresses — an Enter, an interrupt, a mode change.
 - **Loopback by default.** Binding anything else requires a token, and the
   server answers only same-origin requests, so a page in another tab cannot
   drive your agents.

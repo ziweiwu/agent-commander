@@ -179,6 +179,24 @@ The text itself never reaches tmux's argument lexer. A paste is staged in a
 wrong — no stray quote can end an argument early and turn the rest of someone's
 prompt into tmux commands.
 
+**Bracketed paste is a wrapper, not a sanitiser.** `-p` puts `ESC[200~` and
+`ESC[201~` around the text and passes whatever is inside straight through, so
+text carrying `ESC[201~` ended the paste early and everything after it reached
+the agent as keypresses: a `\r` that submits, a lone `ESC` that interrupts
+(INV-6's guarded key, with no confirmation), `ESC[Z` that cycles the
+permission mode. Copying from a hostile page and pasting into the composer or
+the Attach paste line was enough. So text carrying ESC (and so the paste
+terminator) or any other control character except tab and line breaks is
+refused before it reaches tmux: `pane::check_paste`, inside `Panes::paste`,
+the one choke point every paste and every typed slash command goes through. It is
+refused rather than stripped, so nothing is silently altered, and the
+browser runs the same check first on every path to `paste` — the composer,
+Interrupt & send (before its Escape), the Attach view's typing, its paste
+line, the goal field — so the refusal is said in the reader's language, no
+echo is drawn and no draft is cleared. `\r` is allowed because it has to be:
+xterm's own paste turns line breaks into CR, and the Attach view sends
+xterm's data through `paste`.
+
 Sending less often is not sending less. The Attach view coalesces keystrokes:
 exactly one paste is allowed in flight, and characters typed while it is
 outstanding accumulate into the next one, so a burst of typing arrives as
@@ -268,6 +286,16 @@ the fleet; the agent on screen keeps its draft through the gap after a
 - `test/ui/attach-typing.test.tsx` — one write in flight, a burst coalesced
   without loss or reordering, Enter flushed behind its text, and a dropped
   socket that discards rather than replays
+- `pane::tests::inv2_a_paste_carrying_escape_is_refused_before_tmux`,
+  `inv2_tabs_and_line_breaks_still_paste`,
+  `inv2_every_other_control_character_is_refused`, and
+  `mock::tests::inv2_a_paste_carrying_escape_is_refused_like_a_real_pane` —
+  `ESC[201~` runs no tmux command at all, tab and both line breaks still paste
+- `test/ui/paste-escape.test.tsx` — every client path to `paste` refuses the
+  same text with nothing on the wire, no echo and no Escape, in both
+  languages, and characters typed around a refused chunk are not lost; the
+  composer, the paste line and the goal field keep the draft
+  (`Chat.test.tsx`, `term-paste.test.tsx`, `ChatControls.test.tsx`)
 - `pane::tests` (the control-path group) — a write that fails after reaching tmux is
   never retried down the other path, a read that fails is, and the user's text
   never appears on a tmux command line. The path is a value as well as a rule:
@@ -1853,8 +1881,9 @@ absence-of-evidence rule the Prune button was removed for.
 
 **And the conversation never puts machinery's words in the person's mouth.**
 A `user` record from another agent (`peer`), a task notification, or Claude
-Code's own note (`isMeta`, local-command output) is never drawn as the person
-speaking, whether spelled as a string or as blocks; hand-backs and task
+Code's own note (`isMeta`, local-command output, and Claude Code's own
+`[Request interrupted by user…]` note) is never drawn as the person speaking,
+whether spelled as a string or as blocks; hand-backs and task
 notifications are notices. The card's subject already read the label; the
 conversation read only the flags, and only on the block path, so a bare
 string — which is how Claude Code 2.1.310 writes a delegate's hand-back, a
@@ -1872,7 +1901,16 @@ carries, not its content, which wraps the same words in a fixed frame of
 Claude Code's own. A task's end carries its
 `<summary>` and nothing else of the markup. A note is drawn as nothing.
 Everything unlabelled stays "you", as it always was: this app's own sends,
-typed and queued prompts, and records older than `origin`.
+typed and queued prompts, and records older than `origin`. The one unlabelled
+exception is the note Claude Code writes after Esc, `[Request interrupted by
+user]` or `… for tool use]`: blocks of text with no `isMeta`, `origin` or
+`promptSource`, so `prompt_origin` knows it by its whole text, trimmed, matching
+one of those two forms exactly, with or without a picture beside it, and so
+does `is_typed_by_a_person` even on a record labelled `human` or `typed`. A
+prompt that goes on past the note stays "you". It was a "you" bubble and `you: [Request
+interrupted by user]` on the card's line, 19 times in the 300 newest transcripts
+on this machine. A person typing that exact bracketed text is misread as the
+note, which is accepted: the bracketed form is Claude Code's.
 
 - `transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
   `inv11_a_hand_back_spelled_as_blocks_is_the_same_notice` and
@@ -1882,6 +1920,9 @@ typed and queued prompts, and records older than `origin`.
   `inv11_an_unlabelled_task_notification_is_the_same_notice`
 - `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`
   — drawn as nothing, while a person typing beside them is still "you"
+- `transcript::inv11_claude_codes_interrupt_note_is_not_the_owner_speaking` —
+  the note alone, `… for tool use]`, and beside a picture are not "you" and
+  not on the card's line, while a person quoting it mid-sentence still is
 - `test/ui/message-notices.test.tsx` — each notice in both languages, the
   disclosure closed by default and drawn only when there is something in it
 
@@ -2024,7 +2065,9 @@ refused with "command too long". So `spawn::MAX_TASK` is 8 KiB rather than
 and the new-agent route reads a body big enough for a task at that cap after
 JSON has escaped it. A control character other than a line break is refused
 in it: a task is typed into a dialog, and the line break is the one a person
-types there.
+types there. A paste follows the same rule with the two characters a paste
+legitimately carries, tab and the carriage return xterm turns line breaks
+into, and nothing else (`pane::check_paste`, INV-2).
 
 - `spawn::inv12_a_task_over_the_cap_is_refused`, counted in bytes as tmux
   counts; `a_task_at_the_cap_still_fits_on_tmux_s_command_line`;

@@ -173,8 +173,9 @@ used to arrive as a **You** bubble holding the report. It reads *«general-purpo
 reported back* now, with the report behind **show report**, and the card's line
 says the same. Another agent's message reads *message from «name»* behind
 **show message**, a background task's end reads *background task ·* and its
-summary, and Claude Code's notes to itself — local-command output among them —
-are not drawn at all.
+summary, and Claude Code's notes to itself — local-command output among them,
+and the *[Request interrupted by user]* it writes after you press Esc — are not
+drawn at all.
 
 ### Notifications
 
@@ -361,6 +362,15 @@ anywhere. The box grows to show a pasted snippet and scrolls past a few lines,
 rather than pushing the pane off the screen. Shift+Enter types a newline by
 hand.
 
+Whatever you paste, here or in the message box, has to stay text. A paste is
+wrapped in the terminal's bracketed-paste markers, and an escape character
+inside it can end that wrapper early, so the rest would reach the agent as
+keypresses: an Enter that submits, an Esc that interrupts, a Shift+Tab that
+changes its mode. Copying from a web page is enough to carry one. So text with
+an escape or any other control character other than tab and line breaks is
+not sent: a message says which character it found, and the text stays in the
+box for you to fix.
+
 On a touch screen, tapping the capture opens the phone's keyboard in that box,
 so a line is typed where you can read and correct it, then Enter runs it. The
 keys a phone lacks (arrows, Tab, Esc, Ctrl-C) are on the bar beside it. Nothing
@@ -388,9 +398,9 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | Key | Does |
 |---|---|
 | `/` | focus the filter box |
-| `↑` `↓` (or `k` `j`) | move through the agent list |
+| `↑` `↓` (or `k` `j`) | move through the agent list (`↓` leaves the filter box; there `k` `j` are letters) |
 | `Enter` | open the focused agent |
-| `Esc` | close the agent (or clear the filter box) |
+| `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
@@ -501,6 +511,8 @@ Nothing hides: the active chip carries a glyph as well as a fill, so arriving
 at an already-filtered dashboard reads as a filter rather than an empty fleet.
 The search box deliberately does not persist — a one-off lookup coming back on
 a reload with no visible cause is just confusing.
+It finds a folder the way the card draws it, so `~/Pro` works as well as
+`/Users/you/Pro`.
 
 Sessions Claude Code names for itself look like `ziweiwu-35`, which
 distinguishes nothing when several are running. Where a session was
@@ -966,7 +978,7 @@ npm run mock -- -p 4501
 
 ```
 npm run mock       # fixture agents on 4400 — safe to iterate against
-npm test           # 1876 tests: 831 Rust (the server) + 1045 vitest (the web app)
+npm test           # 1909 tests: 837 Rust (the server) + 1072 vitest (the web app)
 npm run e2e        # 489 end-to-end tests: desktop/tablet/phone on Chromium,
                    # and phone/tablet again on WebKit — every browser on iOS is
                    # WebKit, and this app is meant to be used from a phone
