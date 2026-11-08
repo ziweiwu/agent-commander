@@ -741,10 +741,16 @@ fn valid_session_cookie(value: &str, token: &str, now: u64) -> bool {
 /// percent-encoded by the same rules — `+` is a literal plus here, not a space
 /// — and decoding one as if it were a query component would corrupt any token
 /// containing it.
+///
+/// A pair with no `=` is skipped, not the end of the search: another site's
+/// cookie on the same host must not hide this one. Skipping it admits nothing,
+/// because what is found is still checked by `valid_session_cookie`.
 fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     let header = headers.get(header::COOKIE)?.to_str().ok()?;
     for pair in header.split(';') {
-        let (key, value) = pair.split_once('=')?;
+        let Some((key, value)) = pair.split_once('=') else {
+            continue;
+        };
         if key.trim() == name {
             return Some(value.trim().to_string());
         }
@@ -7061,6 +7067,41 @@ mod tests {
         assert_eq!(patch.tokens, None);
         assert_eq!(patch.subagents, None);
         assert_eq!(patch.since_prompt, None);
+    }
+
+    /// INV-3: a pair with no `=` is someone else's cookie, not the end of the
+    /// header. Returning on it 401'd every request from a browser that held one.
+    #[test]
+    fn inv3_a_nameless_pair_before_the_session_does_not_hide_it() {
+        for raw_header in ["x; ac_session=v", "ac_session; ac_session=v", "; ac_session=v", "x;;ac_session=v; y"] {
+            let mut headers = HeaderMap::new();
+            headers.insert(header::COOKIE, raw_header.parse().unwrap());
+            assert_eq!(cookie_value(&headers, SESSION_COOKIE).as_deref(), Some("v"), "{raw_header}");
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(header::COOKIE, "x; ac_session; y".parse().unwrap());
+        assert_eq!(cookie_value(&headers, SESSION_COOKIE), None, "a bare name carries no value");
+    }
+
+    #[tokio::test]
+    async fn inv3_a_nameless_pair_lets_the_right_cookie_through_and_no_other() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let valid = session_cookie("s3cret", SESSION_MAX_AGE);
+        let wrong = session_cookie("rotated", SESSION_MAX_AGE);
+        let cases = [
+            (format!("x; ac_session={valid}"), "200"),
+            (format!("x; ac_session={wrong}"), "401"),
+            ("x; ac_session=s3cret".to_string(), "401"),
+            ("x; ac_session".to_string(), "401"),
+            ("x; ac_session=".to_string(), "401"),
+        ];
+        for (cookie, expected) in cases {
+            let request = format!(
+                "GET /api/agents HTTP/1.1\r\nHost: 127.0.0.1\r\nCookie: {cookie}\r\nConnection: close\r\n\r\n"
+            );
+            let res = raw(h.port, &request).await;
+            assert!(status(&res).contains(expected), "{cookie}: {}", status(&res));
+        }
     }
 }
 
