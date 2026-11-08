@@ -181,7 +181,9 @@ the default for an unrecognised kind is deny.
   has done nothing since, so a session opened a moment ago is the newest rather
   than unknown. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-6** — The search box MUST filter on name, folder, branch, activity
-  and status, and MUST narrow the same list the status chips and sort do.
+  and status, and MUST narrow the same list the status chips and sort do. The
+  folder matches both as stored and as the card draws it, so `~/Pro` finds
+  `/Users/me/Projects`. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-7** — The active status filter, sort key and sort direction MUST
   persist together in this browser and survive a reload, a new tab and a browser
   restart. Restoring one while resetting another leaves a view nobody picked.
@@ -1204,9 +1206,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | Key | Does |
 |---|---|
 | `/` | focus the filter box |
-| `↑` `↓`, `k` `j` | move through the agent list |
+| `↑` `↓`, `k` `j` | move through the agent list (`↓` leaves the filter box; there `k` `j` are letters) |
 | `Enter` | open the focused agent |
-| `Esc` | close the agent, or clear the filter box |
+| `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift+Enter` | in the message box: send / newline |
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
@@ -1218,6 +1220,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   the character; they do nothing while an input method is composing, and
   nothing inside the terminal, where every key is the agent's. `Alt` stands in
   for `⌥` on Windows and Linux. *`test/ui/hop.test.tsx`.*
+
+  `/` and `Esc` reach the filter box on every route, with an agent open too.
+  *`test/ui/filter-keys.test.tsx`.*
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*
