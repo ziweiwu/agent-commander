@@ -817,7 +817,7 @@ impl AgentBudgets {
     }
 
     #[cfg(test)]
-    fn held(&self) -> usize {
+    pub(crate) fn held(&self) -> usize {
         self.by_session.lock().expect("agent budgets poisoned").len()
     }
 }

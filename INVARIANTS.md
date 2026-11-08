@@ -2086,7 +2086,8 @@ charged here.
   `POST …/mode` meet a `429` carrying `TOO_MUCH_INPUT` and do not all reach
   the agent; `inv12_one_agent_s_flood_leaves_another_agent_s_controls_alone`;
   `inv12_a_picture_is_charged_to_the_same_agent_s_budget`;
-  `inv12_the_owner_s_own_use_is_never_refused`
+  `inv12_the_owner_s_own_use_is_never_refused`;
+  `inv12_an_id_the_fleet_does_not_hold_is_not_charged`
 
 **A first task is bounded too, and tighter than a paste** (F5). It reaches the
 agent on the `tmux new-session` command line rather than through a buffer, and

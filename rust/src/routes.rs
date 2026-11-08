@@ -1559,9 +1559,9 @@ fn value_of(body: &serde_json::Value) -> String {
 /// megabyte through the fleet socket would sit in front of every other tab's
 /// frames until it finished, and the socket's own cap (`MAX_FRAME_BYTES`) was
 /// sized for keystrokes. An upload is charged one unit of the agent's HTTP
-/// budget, whatever its size: a person never reaches it, and a loop cannot
-/// fill the disk. It is charged before the body is read, so a refused upload
-/// is not buffered first (INV-12).
+/// budget, whatever its size: a person never reaches it, and a loop is only
+/// slowed, since nothing here caps what the store holds. It is charged before
+/// the body is read, so a refused upload is not buffered first (INV-12).
 async fn handle_picture(app: &App, body: Body, session_id: &str) -> Response {
     use crate::pictures::Refused;
     if out_of_budget(app, session_id) {
@@ -7249,10 +7249,15 @@ mod tests {
         assert!(status(&res).contains("200"), "{}", status(&res));
     }
 
+    /// Later than any real clock. A bucket drained at this time gains nothing
+    /// before the next real request, because a clock behind the bucket's own
+    /// pays no refill, so the refusal below cannot depend on timing.
+    const AFTER_ANY_REAL_CLOCK: i64 = i64::MAX / 2;
+
     #[tokio::test]
     async fn inv12_a_picture_is_charged_to_the_same_agent_s_budget() {
         let h = blocked(FakePanes::new()).await;
-        assert!(press_mode_until_refused(h.port, BLOCKED).await < CONTROL_FLOOD);
+        while h.app.agent_budgets.take_at(BLOCKED, AFTER_ANY_REAL_CLOCK) {}
         let res = post_bytes(h.port, &picture_path(BLOCKED), &a_png()).await;
         assert!(status(&res).contains("429"), "{}", status(&res));
         let answer: serde_json::Value = serde_json::from_str(&body(&res)).unwrap();
@@ -7281,6 +7286,20 @@ mod tests {
             let res = post_bytes(h.port, &picture_path(BLOCKED), &a_png()).await;
             assert!(status(&res).contains("200"), "photo {photo}: {}", status(&res));
         }
+    }
+
+    /// Each route is flooded past the burst, so charging an invented id would
+    /// show as a 429 and as an entry in the map.
+    #[tokio::test]
+    async fn inv12_an_id_the_fleet_does_not_hold_is_not_charged() {
+        let h = plain(FakePanes::new()).await;
+        for _ in 0..CONTROL_FLOOD {
+            let control = post(h.port, &mode_path("nobody"), "", None).await;
+            assert!(!status(&control).contains("429"), "{}", status(&control));
+            let picture = post_bytes(h.port, &picture_path("nobody"), &a_png()).await;
+            assert!(!status(&picture).contains("429"), "{}", status(&picture));
+        }
+        assert_eq!(h.app.agent_budgets.held(), 0, "an invented id entered the map");
     }
 }
 
