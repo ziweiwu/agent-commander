@@ -184,6 +184,12 @@ pub(crate) enum PromptOrigin {
 /// `isMeta` and the output not.
 const LOCAL_COMMAND_TAGS: &[&str] = &["<local-command-stdout>", "<local-command-caveat>"];
 
+/// How Claude Code's note after Esc opens, `[Request interrupted by user]` or
+/// `… for tool use]`: blocks of text with no marker field at all, so only its
+/// words tell it apart. A person typing that exact bracketed text is misread,
+/// which is accepted.
+const INTERRUPT_NOTE: &str = "[Request interrupted by user";
+
 /// The opening tag of a background task's end, which records written before
 /// `origin` existed carry with `promptSource: "system"` and nothing else.
 const TASK_NOTIFICATION_TAG: &str = "<task-notification";
@@ -222,13 +228,18 @@ fn is_local_command_output(rec: &Value) -> bool {
     string_content(rec).is_some_and(|text| LOCAL_COMMAND_TAGS.iter().any(|tag| text.starts_with(tag)))
 }
 
-/// What Claude Code marks as its own rather than anybody's words: a note it
-/// files beside a picture or a command (`isMeta`), a compaction summary, and a
-/// tool result.
+/// What Claude Code files as its own rather than anybody's words: a note it
+/// files beside a picture or a command (`isMeta`), a compaction summary, a
+/// tool result, and its note that the person interrupted the turn.
 fn is_claude_codes_own_note(rec: &Value) -> bool {
     rec.get("isCompactSummary").and_then(Value::as_bool) == Some(true)
         || rec.get("isMeta").and_then(Value::as_bool) == Some(true)
         || rec.get("toolUseResult").is_some()
+        || is_the_interrupt_note(rec)
+}
+
+fn is_the_interrupt_note(rec: &Value) -> bool {
+    prompt_text(rec).is_some_and(|text| text.trim_start().starts_with(INTERRUPT_NOTE))
 }
 
 /// What a person typed while the agent worked, when the turn read it at its

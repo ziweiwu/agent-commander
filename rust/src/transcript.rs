@@ -4395,6 +4395,31 @@ mod tests {
             assert_eq!(RecordSets::new().disposition(kind), Disposition::Meta, "the fallback for {kind}");
         }
     }
+
+    /// INV-11: Claude Code's note after Esc is its own words, not the owner's,
+    /// whether alone or beside a picture.
+    #[test]
+    fn inv11_claude_codes_interrupt_note_is_not_the_owner_speaking() {
+        let note = |blocks: Value| json!({ "type": "user", "timestamp": "2026-11-07T10:00:00Z",
+            "message": { "role": "user", "content": blocks } }).to_string();
+        let plain = note(json!([{ "type": "text", "text": "[Request interrupted by user]" }]));
+        let for_tool_use = note(json!([{ "type": "text", "text": "  [Request interrupted by user for tool use]" }]));
+        let beside_a_picture = note(json!([
+            { "type": "text", "text": "[Request interrupted by user]" },
+            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo=" } },
+        ]));
+        for line in [&plain, &for_tool_use, &beside_a_picture] {
+            let out = parse(&[line]);
+            assert!(out.events.iter().all(|event| event.kind != TimelineKind::User), "{line}: {:?}", out.events);
+            assert!(!out.patch.activity.as_deref().unwrap_or("").starts_with("you:"), "{line}: {:?}", out.patch.activity);
+        }
+        let person = json!({ "type": "user", "timestamp": "2026-11-07T10:01:00Z",
+            "message": { "role": "user", "content": [{ "type": "text", "text": "why did you stop at [Request interrupted by user]" }] } })
+            .to_string();
+        let out = parse(&[&plain, &person]);
+        let said: Vec<&str> = out.events.iter().filter(|event| event.kind == TimelineKind::User).map(|event| event.text.as_str()).collect();
+        assert_eq!(said, vec!["why did you stop at [Request interrupted by user]"]);
+    }
 }
 
 #[cfg(test)]

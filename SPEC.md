@@ -429,7 +429,8 @@ over the list with a back control; on a wide one, a second column.
   indented. *`transcript::reads_a_typed_slash_command_as_the_command_it_ran`.*
 - **FR-CHAT-17** — Only a person MAY be drawn as **you**. A `user` record from
   another agent, a task notification, or Claude Code's own note (`isMeta`,
-  local-command output) MUST NOT be, whether its content is a string or blocks:
+  local-command output, the `[Request interrupted by user…]` note it writes
+  after Esc) MUST NOT be, whether its content is a string or blocks:
   the origin MUST be read from the record's label before its flags, since a
   peer's message is flagged `isMeta` too. A delegate's hand-back MUST be a
   notice naming the delegate ("«general-purpose» reported back"), with its
@@ -440,6 +441,7 @@ over the list with a back control; on a wide one, a second column.
   stay **you**. **(INV-11)**
   *`transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
   `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`,
+  `transcript::inv11_claude_codes_interrupt_note_is_not_the_owner_speaking`,
   `test/ui/message-notices.test.tsx`.*
 - **FR-CHAT-2** — A message the user sends MUST appear immediately as *sending…*
   and settle only when the agent's own transcript confirms it. *`test/ui/delivery.test.tsx`.*

@@ -1840,8 +1840,8 @@ absence-of-evidence rule the Prune button was removed for.
 
 **And the conversation never puts machinery's words in the person's mouth.**
 A `user` record from another agent (`peer`), a task notification, or Claude
-Code's own note (`isMeta`, local-command output) is never drawn as the person
-speaking, whether spelled as a string or as blocks; hand-backs and task
+Code's own note (`isMeta`, local-command output, and Claude Code's own
+`[Request interrupted by user…]` note) is never drawn as the person speaking, whether spelled as a string or as blocks; hand-backs and task
 notifications are notices. The card's subject already read the label; the
 conversation read only the flags, and only on the block path, so a bare
 string — which is how Claude Code 2.1.310 writes a delegate's hand-back, a
@@ -1859,7 +1859,14 @@ carries, not its content, which wraps the same words in a fixed frame of
 Claude Code's own. A task's end carries its
 `<summary>` and nothing else of the markup. A note is drawn as nothing.
 Everything unlabelled stays "you", as it always was: this app's own sends,
-typed and queued prompts, and records older than `origin`.
+typed and queued prompts, and records older than `origin`. The one unlabelled
+exception is the note Claude Code writes after Esc, `[Request interrupted by
+user]` or `… for tool use]`: blocks of text with no `isMeta`, `origin` or
+`promptSource`, so `prompt_origin` knows it by its opening words alone, trimmed,
+with or without a picture beside it. It was a "you" bubble and `you: [Request
+interrupted by user]` on the card's line, 19 times in the 300 newest transcripts
+on this machine. A person typing that exact bracketed text is misread as the
+note, which is accepted: the bracketed form is Claude Code's.
 
 - `transcript::inv11_a_hand_back_is_a_notice_rather_than_the_owner_speaking`,
   `inv11_a_hand_back_spelled_as_blocks_is_the_same_notice` and
@@ -1869,6 +1876,9 @@ typed and queued prompts, and records older than `origin`.
   `inv11_an_unlabelled_task_notification_is_the_same_notice`
 - `transcript::inv11_local_command_output_and_claude_codes_own_notes_are_not_messages`
   — drawn as nothing, while a person typing beside them is still "you"
+- `transcript::inv11_claude_codes_interrupt_note_is_not_the_owner_speaking` —
+  the note alone, `… for tool use]`, and beside a picture are not "you" and
+  not on the card's line, while a person quoting it mid-sentence still is
 - `test/ui/message-notices.test.tsx` — each notice in both languages, the
   disclosure closed by default and drawn only when there is something in it
 
