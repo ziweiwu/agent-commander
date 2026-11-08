@@ -208,6 +208,18 @@ your thumb moves when the connection drops or comes back. Every *as of* goes on
 counting while the connection stays down; the pill's full reason, "server
 unreachable — is Tailscale up?", is its tooltip.
 
+Opening the app cold paints the fleet this browser last saw, so a phone waking
+over Tailscale has something to look at while the connection forms. Until the
+first live update arrives, that list is a memory and says so: the caption stays
+up even once the connection has opened, the pill reads *connecting…* rather than
+*live*, each card reads **Last seen 5m ago — waiting for a live update** in place
+of what it is doing, and the terminal mark claims nothing. Send, Attach's
+Run, the answer buttons and Prune stay off until that update confirms the pane
+is still there. A
+first visit, with nothing remembered, shows no counts in the status chips or the
+kind menu until
+the server has given some.
+
 After you answer a single question from the card, the card offers **Next:
 ‹name› · waiting 14m ⌥H** — the same agent the chip and ⌥H open. It never
 moves you on by itself; press it (or ⌥H) when you are ready. Arriving that way
@@ -775,8 +787,8 @@ Nothing is closed without a confirmation that names the sessions first, they are
 closed one at a time through the same `/exit`-then-kill path as **Close agent**,
 and one refusing to exit does not stop the rest — the toast afterwards reports
 what actually closed rather than what was attempted. The button is unavailable
-while the fleet view is not live, because a card from a dropped connection is a
-memory rather than a reading (INV-11).
+while the fleet view is not live, because a card from a dropped connection, or
+one remembered from your last visit, is a memory rather than a reading (INV-11).
 
 ## How it works
 

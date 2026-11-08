@@ -665,6 +665,7 @@ function handle(msg: ServerMessage): void {
         agents: msg.agents,
         mock: msg.mock,
         fleetAt,
+        fleetLive: true,
         caughtUp: msg.caughtUp,
         visit: followVisit(state.visit, msg),
       })

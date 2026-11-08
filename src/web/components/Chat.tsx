@@ -15,7 +15,7 @@ import { useDraft } from '../hooks/useDraft.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { refuseRepeat, useArrival } from '../hooks/useArrival.ts'
 import { refusedAsKeypresses } from '../store/pasteGuard.ts'
-import { useStore } from '../store/store.ts'
+import { selectLive, useStore } from '../store/store.ts'
 import {
   interruptAndSend,
   sendConfirmedKey,
@@ -388,7 +388,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * So the composer refuses instead, and says so beside itself rather than only
    * in the header chip at the other end of the screen.
    */
-  const online = conn === 'open'
+  const online = useStore(selectLive)
   /** Whether a message typed here could actually arrive. */
   const sendable = online && !paneExited
   // The interface language is only the fallback, for a chat with nothing in it.

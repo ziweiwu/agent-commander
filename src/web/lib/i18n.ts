@@ -65,6 +65,7 @@ const EN = {
   /* cards */
   notAttachable: 'not attachable',
   reachable: 'terminal reachable',
+  reachUnconfirmed: 'terminal not confirmed yet',
   ageBlockedTitle: 'How long this agent has been waiting on you, not when it last wrote.',
   cardNew: 'new',
   cardNewTitle:
@@ -78,6 +79,10 @@ const EN = {
   sincePromptFloorTitle:
     'Your last prompt is older than the part of the transcript this app read, so there is no clock: this counts the calls in what was read, and there were at least that many.',
   noPromptsYet: 'No prompts yet — waiting for its first instruction.',
+  lastSeen: 'Last seen {when} — waiting for a live update',
+  lastSeenNoTime: 'Waiting for a live update',
+  lastSeenTitle:
+    'Remembered from this browser’s last visit. What it is doing now arrives with the first live update.',
   descriptionTitle: 'What this session last asked for, in its own words.',
   statusFromPane: 'quiet',
   /* delegates — INV-13 and INV-15 in the words themselves */
@@ -427,6 +432,8 @@ const EN = {
   sortTokens: 'Output tokens',
   staleFleet: 'Not connected — showing the last state received {when}.',
   staleFleetNoTime: 'Not connected — showing the last state received.',
+  staleFleetAwaiting: 'Waiting for a live update — showing the last state received {when}.',
+  staleFleetAwaitingNoTime: 'Waiting for a live update — showing the last state received.',
   sortDuration: 'Running longest',
   sortName: 'Name',
   sortFirst: 'first',
@@ -599,6 +606,7 @@ const ZH: Record<Key, string> = {
   waitingStarting: '正在启动',
   notAttachable: '无法接入',
   reachable: '终端可连接',
+  reachUnconfirmed: '终端尚未确认',
   ageBlockedTitle: '这是该 agent 等待你的时长，而不是它最后一次写入的时间。',
   cardNew: '新',
   cardNewTitle: '自上次在本应用中打开后，它又有了动作。你可能已在终端里看过。',
@@ -610,6 +618,9 @@ const ZH: Record<Key, string> = {
   sincePromptFloorTitle:
     '你上次的提示早于本应用读到的对话记录范围，所以没有计时：这里数的是已读部分中的调用，至少有这么多。',
   noPromptsYet: '还没有任何指令 —— 正在等待第一条消息。',
+  lastSeen: '{when}的记录 — 等待实时更新',
+  lastSeenNoTime: '等待实时更新',
+  lastSeenTitle: '这是此浏览器上次访问时记下的状态。它现在在做什么，要等第一次实时更新才知道。',
   descriptionTitle: '这个会话最近提出的要求，用它自己的话。',
   statusFromPane: '窗格静默',
   delegatesNone: '未委派任何子代理',
@@ -898,6 +909,8 @@ const ZH: Record<Key, string> = {
   sortTokens: '输出 token',
   staleFleet: '未连接 — 显示 {when} 收到的最后状态。',
   staleFleetNoTime: '未连接 — 显示最后收到的状态。',
+  staleFleetAwaiting: '等待实时更新 — 显示 {when}收到的最后状态。',
+  staleFleetAwaitingNoTime: '等待实时更新 — 显示最后收到的状态。',
   sortDuration: '运行最久',
   sortName: '名称',
   sortFirst: '优先',

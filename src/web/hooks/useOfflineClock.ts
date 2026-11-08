@@ -1,5 +1,5 @@
 import { useEffect, useReducer } from 'react'
-import { useStore } from '../store/store.ts'
+import { selectLive, useStore } from '../store/store.ts'
 
 /** How often an offline caption is redrawn while `relative` still reads it in seconds. */
 export const OFFLINE_TICK_MS = 10_000
@@ -23,14 +23,16 @@ export function offlineTickDelay(sinceDown: number): number {
  * is INV-11's failure in the one caption that exists to prevent it. This is the
  * render the missing frame would have caused.
  *
- * Nothing runs while connected. The timer is armed when `conn` leaves `open` and
- * cleared the moment it returns, so it costs nothing against INV-4 or the idle
+ * Nothing runs while live. The timer is armed when `conn` leaves `open`, or
+ * from boot until the first live fleet frame (FR-FLEET-11: a remembered fleet
+ * ages too while the socket is open and silent), and cleared the moment the
+ * fleet is live, so it costs nothing against INV-4 or the idle
  * energy budget, and it makes no request: it only redraws. A timeout re-armed
  * after each tick rather than an interval, so the cadence can slow to a minute
  * once the caption counts minutes.
  */
 export function useOfflineClock(): number {
-  const offline = useStore((s) => s.conn !== 'open')
+  const offline = !useStore(selectLive)
   const [, redraw] = useReducer((ticks: number) => ticks + 1, 0)
   useEffect(() => {
     if (!offline) return

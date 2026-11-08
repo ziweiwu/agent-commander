@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Agent, PendingPrompt } from '../../shared/types.ts'
-import { useStore } from '../store/store.ts'
+import { selectLive, useStore } from '../store/store.ts'
 import { answerPrompt, sendConfirmedKey, sendKey } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { refuseRepeat, useArrival } from '../hooks/useArrival.ts'
@@ -119,7 +119,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
    * This flag is the visible half; `press` below reads what the socket
    * actually did, because `conn` lags a socket that is already closing.
    */
-  const online = useStore((s) => s.conn === 'open')
+  const online = useStore(selectLive)
   /*
    * INV-2's "exactly once", and the reason it is a ref: `sent` is React state
    * and does not land until React flushes, so two presses in one batch — key

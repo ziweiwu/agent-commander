@@ -4,7 +4,7 @@ import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
 import { PaneTerm } from '../lib/term.ts'
 import { refusedAsKeypresses } from '../store/pasteGuard.ts'
-import { useStore } from '../store/store.ts'
+import { selectLive, useStore } from '../store/store.ts'
 import {
   requestHistory,
   sendConfirmedKey,
@@ -418,6 +418,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
    * shape the message composer uses for the same reason.
    */
   const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('paste', agent.sessionId, boxRef)
+  const live = useStore(selectLive)
   const coarse = useIsCoarse()
   const { wrapRef, scaleRef, termRef, term, guarded, typed } = usePaneTerm({
     agent,
@@ -450,12 +451,16 @@ export function Terminal({ agent, onExit }: TerminalProps) {
     if (text !== '') typed(text)
   }
 
-  /** Put it at the prompt and run it. */
+  /**
+   * Put it at the prompt and run it. This submits, the same verb as the
+   * composer's Send, so it waits for the first live frame too (FR-FLEET-11),
+   * and returns before taking the draft so that what was typed survives.
+   */
   const runDraft = (): void => {
     // The same refusal `typed` makes for the staging verb. Nothing reaches a
     // pane whose process has gone, and the riskier of the two verbs must not
     // be the one relying on a `disabled` attribute for that.
-    if (exited) return
+    if (exited || !live) return
     const text = takeDraft()
     if (text !== '') runText(text)
   }
@@ -707,7 +712,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         variant="compact"
         type="submit"
         data-testid="term-compose-run"
-        disabled={exited || draft.length === 0}
+        disabled={exited || !live || draft.length === 0}
         title={t('termComposeRunTitle')}
       >
         {t('termComposeRun')}
