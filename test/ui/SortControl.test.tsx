@@ -21,6 +21,13 @@ describe('SortControl', () => {
     expect(useStore.getState().fleet.sort).toBe('tokens')
   })
 
+  it('spells out the sort names above the phone width', () => {
+    renderApp(<SortControl />)
+    const names = screen.getAllByRole('option').map((option) => option.textContent)
+    expect(names).toContain('Recent activity')
+    expect(names).toContain('Running longest')
+  })
+
   it('toggles direction both ways', async () => {
     const user = userEvent.setup()
     renderApp(<SortControl />)
