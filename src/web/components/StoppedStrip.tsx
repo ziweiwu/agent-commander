@@ -61,7 +61,7 @@ function StripButton({ group, lens }: { group: StoppedGroup; lens: StopCause | u
     }),
     left && t('stoppedStripResets', { t: formatUptime(lang, left) }),
     advice && t(advice),
-    pressed && t('stoppedStripShowAll'),
+    t(pressed ? 'stoppedStripShowAll' : 'stoppedStripShowOnly'),
   ].filter(Boolean)
 
   return (

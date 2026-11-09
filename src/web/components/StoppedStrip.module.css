@@ -3,8 +3,12 @@
  * hand's amber: nothing here is waiting on a reply from the owner.
  * It wraps, because a phone cannot hold the sentence on one line and cutting
  * it would cut the part that says what to do.
+ * It never shrinks: the fleet column is a flex column, and beside an open
+ * agent a shrinkable strip was squeezed to 34 of its 71px and printed its
+ * wrapped sentence over the heading below it.
  */
 .strip {
+  flex-shrink: 0;
   width: 100%;
   min-height: 36px;
   padding: 8px 12px;
