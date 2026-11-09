@@ -98,6 +98,19 @@ test.describe('the fleet', () => {
     await expect(page.getByTestId('empty-state')).toBeVisible()
   })
 
+  test('searches the title and the last prompt the card is labelled with', async ({ page }) => {
+    await openFleet(page)
+    const search = page.getByTestId('search')
+
+    await search.fill('alternative markdown editor')
+    await expect(card(page, 'mock-idle-ce')).toBeVisible()
+    await expect(card(page, 'mock-idle-db')).toHaveCount(0)
+
+    await search.fill('npm download numbers')
+    await expect(card(page, 'mock-idle-db')).toBeVisible()
+    await expect(card(page, 'mock-idle-ce')).toHaveCount(0)
+  })
+
   test('opens an agent by URL and keeps it across a reload', async ({ page }) => {
     // The URL is the selection state, so a deep link is the same thing as a
     // click — including on a reload straight into /agent/:id, which is the case

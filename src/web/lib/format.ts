@@ -1,5 +1,6 @@
 import { specOf } from '../../shared/agent-kinds.ts'
 import type { Agent, RateLimits } from '../../shared/types.ts'
+import { plainText } from './chat.ts'
 
 /**
  * Time is returned as structured parts rather than English strings so the
@@ -157,12 +158,21 @@ export type GroupKey = (typeof GROUPS)[number]['key']
  * checked, so `terminal` and `Terminal` find it, and so would a kind whose label
  * and id differ. The folder is checked as `tildePath` draws it for the same
  * reason: `~/Pro` is what the card shows, so it is what gets typed.
+ *
+ * The title, description and last prompt are in here because they are what the
+ * card leads with: sessions started in one folder differ only by what they were
+ * asked to do. The description is checked as `plainText` draws it as well, since
+ * the card shows it without its markdown.
  */
 export function matches(agent: Agent, query: string): boolean {
   const q = query.trim().toLowerCase()
   if (!q) return true
   return [
     agent.name,
+    agent.aiTitle,
+    agent.description,
+    agent.description && plainText(agent.description),
+    agent.lastPrompt,
     agent.cwd,
     tildePath(agent.cwd),
     agent.folder,

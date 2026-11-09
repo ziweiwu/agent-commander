@@ -180,8 +180,10 @@ the default for an unrecognised kind is deny.
   **(INV-11)** `recent` reads a session's last activity, or its start when it
   has done nothing since, so a session opened a moment ago is the newest rather
   than unknown. *`test/fleet-ui.test.ts`.*
-- **FR-FLEET-6** — The search box MUST filter on name, folder, branch, activity
-  and status, and MUST narrow the same list the status chips and sort do. The
+- **FR-FLEET-6** — The search box MUST filter on name, AI title, description,
+  last prompt, folder, branch, activity, status and kind, and MUST narrow the
+  same list the status chips and sort do. The description matches as stored and
+  as the card draws it, without its markdown. The
   folder matches both as stored and as the card draws it, so `~/Pro` finds
   `/Users/me/Projects`. *`test/fleet-ui.test.ts`.*
 - **FR-FLEET-7** — The active status filter, sort key and sort direction MUST

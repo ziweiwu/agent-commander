@@ -29,7 +29,7 @@ const EN = {
   connOfflineShort: 'offline · {when}',
   connOfflineNoTime: 'offline',
   searchPlaceholder: 'Filter agents…',
-  searchLabel: 'Filter agents by name, folder, branch or activity',
+  searchLabel: 'Filter agents by name, title, description, last prompt, folder, branch or activity',
   /* groups */
   groupWaiting: 'Needs you',
   groupBusy: 'Working',
@@ -575,7 +575,7 @@ const ZH: Record<Key, string> = {
   connOfflineShort: '离线 · {when}',
   connOfflineNoTime: '离线',
   searchPlaceholder: '筛选代理…',
-  searchLabel: '按名称、目录、分支或活动筛选代理',
+  searchLabel: '按名称、标题、描述、上次的提示、目录、分支或活动筛选代理',
   groupWaiting: '需要你处理',
   groupBusy: '运行中',
   groupIdle: '空闲',
