@@ -494,6 +494,7 @@ fn idle_under_a_title_it_wrote_itself() -> Agent {
         // Auto-named, but the agent titled its own conversation.
         derived_name: Some(true),
         ai_title: Some("Find an alternative markdown editor to Obsidian".into()),
+        last_prompt: Some("compare how each one exports to PDF".into()),
         cwd: "/Users/demo".into(),
         folder: "demo".into(),
         status: AgentStatus::Idle,

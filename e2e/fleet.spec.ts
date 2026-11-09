@@ -103,12 +103,12 @@ test.describe('the fleet', () => {
     const search = page.getByTestId('search')
 
     await search.fill('alternative markdown editor')
-    await expect(card(page, 'mock-idle-ce')).toBeVisible()
-    await expect(card(page, 'mock-idle-db')).toHaveCount(0)
+    await expect(card(page, AGENT.idleAlt)).toBeVisible()
+    await expect(card(page, AGENT.idle)).toHaveCount(0)
 
-    await search.fill('npm download numbers')
-    await expect(card(page, 'mock-idle-db')).toBeVisible()
-    await expect(card(page, 'mock-idle-ce')).toHaveCount(0)
+    await search.fill('exports to PDF')
+    await expect(card(page, AGENT.idleAlt)).toBeVisible()
+    await expect(card(page, AGENT.idle)).toHaveCount(0)
   })
 
   test('opens an agent by URL and keeps it across a reload', async ({ page }) => {
