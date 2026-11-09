@@ -55,6 +55,58 @@ async function auditHeldModeChord(page, tag) {
   await page.locator(T('toast')).waitFor({ state: 'detached', timeout: TOAST_GONE_MS }).catch(() => {})
 }
 
+/** How many Tab stops past the Chat tab the conversation may sit and still count as reachable. */
+const TAB_STOPS_TO_CONVERSATION = 60
+
+/**
+ * FR-UI-13: arrows on a select are the select's. The fleet's walk ran from
+ * anywhere that was not a text field and called `preventDefault`, so ArrowDown
+ * on the sort select moved focus to a card and left the sort where it was.
+ *
+ * The value is not required to move: Chromium on macOS answers ArrowDown on a
+ * closed select by opening its menu, which is the key's native meaning there.
+ * What is required is that the app left the key alone — focus kept, default
+ * not prevented — and the phone and tablet profiles do see the value change.
+ * The sort is put back afterwards, because it decides which card opens next.
+ */
+async function auditSelectArrows(page, tag) {
+  const select = page.locator(T('sort-select'))
+  if (!(await select.isVisible())) return
+  const before = await select.inputValue()
+  await select.focus()
+  await page.evaluate(() => {
+    window.addEventListener('keydown', (e) => { window.__arrowPrevented = e.defaultPrevented }, { once: true })
+  })
+  await page.keyboard.press('ArrowDown')
+  const left = await page.evaluate(
+    () => document.activeElement?.getAttribute('data-testid') === 'sort-select' && !window.__arrowPrevented,
+  )
+  if (!left) add('2.1.1', 'P0', `${tag}: ArrowDown on the sort select was taken from it`)
+  await page.keyboard.press('Escape')
+  await select.selectOption(before)
+}
+
+/**
+ * FR-UI-13: a keyboard reader can reach the conversation and scroll it. It
+ * was no Tab stop at all, so nothing earlier than the newest screen could be
+ * read without a mouse.
+ */
+async function auditConversationReach(page, tag) {
+  await page.locator(T('tab-chat')).focus()
+  let reached = false
+  for (let i = 0; i < TAB_STOPS_TO_CONVERSATION && !reached; i += 1) {
+    await page.keyboard.press('Tab')
+    reached = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'chat-scroll')
+  }
+  if (!reached) {
+    add('2.1.1', 'P0', `${tag}: the conversation is not reached within ${TAB_STOPS_TO_CONVERSATION} Tab stops`)
+    return
+  }
+  await page.keyboard.press('ArrowUp')
+  const stayed = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'chat-scroll')
+  if (!stayed) add('2.1.1', 'P0', `${tag}: ArrowUp on the conversation moved focus off it`)
+}
+
 async function openChat(page) {
   const cards = await page.$$(T('agent-card'))
   await cards[1].click()
@@ -65,10 +117,12 @@ async function visitStates(page, tag) {
   const states = []
   await page.waitForSelector(T('agent-card'))
   states.push('fleet')
+  await auditSelectArrows(page, tag)
 
   await openChat(page)
   states.push('chat')
   await auditHeldModeChord(page, tag)
+  await auditConversationReach(page, tag)
 
   await page.click(T('tab-attach'))
   await page.waitForSelector('.xterm-screen', { timeout: 6000 }).catch(() => {})

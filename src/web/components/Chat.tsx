@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { emptyNotice } from '../lib/chat.ts'
@@ -37,6 +37,28 @@ const PIN_SLACK = 60
 
 /** Within this window, an identical quick prompt is a mis-tap, not a decision. */
 const QUICK_REPEAT_MS = 1000
+
+/** How much of the conversation's height one PageUp or PageDown moves: a page, less a line kept in view. */
+const PAGE_FRACTION = 0.9
+
+/**
+ * PageUp and PageDown in the message box scroll the conversation above it.
+ * From the box the conversation sits behind the Shift+Tab chord, so without
+ * this a keyboard reader in the composer had no way back to an earlier message
+ * (FR-UI-13). A draft tall enough to scroll inside itself keeps both keys for
+ * its own caret, and a modified press (Shift+PageUp selects) is left alone.
+ * Focus never moves and nothing is sent: this is scrolling only (INV-2).
+ */
+function pageConversation(press: KeyboardEvent<HTMLTextAreaElement>, scroller: HTMLElement | null): boolean {
+  if (press.key !== 'PageUp' && press.key !== 'PageDown') return false
+  if (press.shiftKey || press.altKey || press.ctrlKey || press.metaKey) return false
+  const box = press.currentTarget
+  if (!scroller || box.scrollHeight > box.clientHeight) return false
+  press.preventDefault()
+  const step = scroller.clientHeight * PAGE_FRACTION
+  scroller.scrollTop += press.key === 'PageUp' ? -step : step
+  return true
+}
 
 /**
  * The one place the composer says why it will not send, named so the controls
@@ -710,6 +732,9 @@ export function Chat({ agent }: { agent: Agent }) {
           ref={scrollRef}
           className={styles.scroll}
           data-testid="chat-scroll"
+          tabIndex={0}
+          role="region"
+          aria-label={t('conversation')}
           data-overflow={answering ? scrollEdge : undefined}
           onScroll={(e) => {
             const el = e.currentTarget
@@ -932,6 +957,7 @@ export function Chat({ agent }: { agent: Agent }) {
                * quick replies, so those are precisely its users.
                */
               if (e.nativeEvent.isComposing) return
+              if (pageConversation(e, scrollRef.current)) return
               // Slack's convention: Enter sends, Shift+Enter starts a new line.
               if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
                 e.preventDefault()

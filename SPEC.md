@@ -1268,6 +1268,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift+Enter` | in the message box: send / newline |
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
+| `PageUp` `PageDown` | in the message box: scroll the conversation a page, unless the draft scrolls itself |
+| `↑` `↓` `PageUp` `PageDown` `Space` | on the conversation, one Tab stop named "Conversation": scroll it |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
 | `⌥H` | open the agent that has needed you longest — or, from one that is waiting, the next in that order — on Chat; "Nothing needs you" when none does |
@@ -1279,7 +1281,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   for `⌥` on Windows and Linux. *`test/ui/hop.test.tsx`.*
 
   `/` and `Esc` reach the filter box on every route, with an agent open too.
-  *`test/ui/filter-keys.test.tsx`.*
+  *`test/ui/filter-keys.test.tsx`.* `↑` `↓` `k` `j` move through the list only
+  from the list, the page body and the filter box; from anywhere else they keep
+  their native meaning, so a select takes its arrows. The conversation keys and
+  these limits move focus and scroll only, and send nothing (INV-2).
+  *`test/ui/keyboard-scroll.test.tsx`.*
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*
