@@ -226,12 +226,16 @@ async function auditAnswerGroup(page, id) {
   })
   const group = await axNode(page, T('answer-options'))
   if (group?.role !== 'group' || !expected || !group.name.includes(expected)) {
-    add('4.1.2', 'P1', `${id}: answer options are not a group named by "${expected}" (role ${group?.role}, name "${group?.name}")`)
+    const saw = `role ${group?.role}, name "${group?.name}"`
+    add('4.1.2', 'P1', `${id}: answer options are not a group named by "${expected}" (${saw})`)
   }
-  const preview = await page.$eval(T('answer-preview'), (el) => el.textContent?.trim().split('\n')[0] ?? '').catch(() => null)
+  const flat = (text) => text.replace(/\s+/g, ' ').trim()
+  const preview = await page
+    .$eval(T('answer-preview'), (el) => el.textContent?.split('\n')[0] ?? '')
+    .catch(() => null)
   if (preview === null) return
   const withPreview = await axNode(page, `${T('answer-option')}:has(${T('answer-preview')})`)
-  if (!withPreview?.description.includes(preview)) {
+  if (!flat(withPreview?.description ?? '').includes(flat(preview))) {
     add('1.3.1', 'P1', `${id}: an option's worked example is not in its accessible description`)
   }
 }
