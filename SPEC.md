@@ -608,6 +608,28 @@ epistemic rather than functional.
   *`e2e/blocked-shapes.spec.ts`, `e2e/fades.spec.ts`,
   `test/ui/AgentDetail.test.tsx`, `test/ui/answer-card.test.tsx`,
   `scripts/audit-mobile.mjs`, `scripts/audit-workspace.mjs`.*
+- **FR-ANS-9** — The full text of what is being approved MUST be reachable
+  from the card in one press. While a plan or command runs past its box (120px
+  on a phone, 180px on a desk), its last line fades and a button under it
+  names the line count (`Show all 31 lines`); pressing it lifts the cap for
+  that prompt, sends nothing and moves no focus, and a new prompt starts
+  capped again. It is one-way: there is no "Show less", because collapsing
+  pulls the options up under the finger and a double tap's second press
+  would land on `Yes` outside the arrival window (INV-2). An option's
+  `preview` keeps its own scrolling box for now: it is drawn inside the
+  option's button, where a second button cannot go.
+  *`e2e/blocked-shapes.spec.ts`, `test/ui/answer-card.test.tsx`,
+  `scripts/audit-ux.mjs`.*
+- **FR-ANS-10** — The options MUST be a group whose accessible name says what
+  they answer: the dialog's title and its question, and for a plan or command
+  its label and, up to 200 characters, the text itself — past that, the label
+  alone, so a plan is not read out on every focus. A card with none of those
+  falls back to `Question from the agent`. Each option keeps its `Answer …`
+  name and is described by its own description and worked example, then by
+  the card's drawn or multi-select caveat. The ids are unique per card. This
+  is markup only: where focus lands and the arrival guards (FR-ANS-7) are
+  unchanged.
+  *`test/ui/answer-card.test.tsx`, `scripts/audit-a11y.mjs`.*
 
 ### 4.3 Attach
 
@@ -1386,7 +1408,7 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14, NFR-SEC-17 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-ANS-9, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14, NFR-SEC-17 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-16, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |
@@ -1400,7 +1422,7 @@ unverified.
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
-| INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
+| INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7, FR-ANS-10 |
 | INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-UI-21, FR-ATT-14, FR-PRUNE-6 |
 | INV-18 — a link goes where the text says | FR-CHAT-11 |
 

@@ -158,7 +158,8 @@ goes out; nothing is answered from the lock screen.
 
 1. Open <http://127.0.0.1:4317>. Agents that need you are at the top.
 2. Tap a card. **Chat** shows the conversation, with an answer card when the
-   agent is blocked. **Attach** shows the terminal. Whatever you half-type stays
+   agent is blocked; a plan or command too long for its box offers **Show
+   all** before you approve it. **Attach** shows the terminal. Whatever you half-type stays
    with that agent while you look at another one or go full screen. The
    header's **✕** closes the panel; **Close agent**, which ends the session,
    sits alone behind the **⋮** beside it. The tap or Enter that opened a

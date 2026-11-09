@@ -45,6 +45,19 @@
   overflow-wrap: anywhere;
 }
 
+/**
+ * FR-ANS-9: pressed "Show all", the box keeps its frame and drops its cap, so
+ * the options below only ever move down. After the width rule's cap by
+ * specificity, not by order.
+ */
+.detail.expanded {
+  max-height: none;
+  overflow: visible;
+}
+.showAll {
+  align-self: flex-start;
+}
+
 .options {
   display: flex;
   flex-direction: column;

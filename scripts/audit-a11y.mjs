@@ -113,6 +113,31 @@ async function openChat(page) {
   await page.waitForSelector(T('agent-detail'))
 }
 
+/**
+ * Earlier output is a surface of its own — a scroll box with a capture in
+ * it — and one nothing else here opens, so it would be judged by nobody.
+ *
+ * Located and waited for explicitly rather than clicked outright, because
+ * `page.click` also requires the element to be *stable*: two consecutive
+ * animation frames with an identical bounding box. This button sits inside
+ * the Attach tab, where the pane capture repaints continuously, so on a busy
+ * machine those two frames need never match — the click then retries until
+ * the 30s timeout and the whole audit dies without reporting a single
+ * finding, which reads exactly like a pass that never ran. Measured at load
+ * average 14.7 it failed twice in a row here.
+ *
+ * Presence, visibility and enabledness are all still required. Only the
+ * stability check is waived, and only because it is the one precondition
+ * that cannot hold next to a live capture.
+ */
+async function openHistory(page) {
+  const history = page.locator(T('history-toggle'))
+  await history.waitFor({ state: 'visible', timeout: 10_000 })
+  await history.click({ force: true })
+  await page.waitForSelector(T('term-history'), { timeout: 6000 }).catch(() => {})
+  await page.waitForTimeout(SETTLE_MS)
+}
+
 async function visitStates(page, tag) {
   const states = []
   await page.waitForSelector(T('agent-card'))
@@ -129,28 +154,7 @@ async function visitStates(page, tag) {
   await page.waitForTimeout(600)
   states.push('terminal')
 
-  /*
-   * Earlier output is a surface of its own — a scroll box with a capture in
-   * it — and one nothing else here opens, so it would be judged by nobody.
-   *
-   * Located and waited for explicitly rather than clicked outright, because
-   * `page.click` also requires the element to be *stable*: two consecutive
-   * animation frames with an identical bounding box. This button sits inside
-   * the Attach tab, where the pane capture repaints continuously, so on a busy
-   * machine those two frames need never match — the click then retries until
-   * the 30s timeout and the whole audit dies without reporting a single
-   * finding, which reads exactly like a pass that never ran. Measured at load
-   * average 14.7 it failed twice in a row here.
-   *
-   * Presence, visibility and enabledness are all still required. Only the
-   * stability check is waived, and only because it is the one precondition
-   * that cannot hold next to a live capture.
-   */
-  const history = page.locator(T('history-toggle'))
-  await history.waitFor({ state: 'visible', timeout: 10_000 })
-  await history.click({ force: true })
-  await page.waitForSelector(T('term-history'), { timeout: 6000 }).catch(() => {})
-  await page.waitForTimeout(SETTLE_MS)
+  await openHistory(page)
   states.push('terminal-history')
 
   return states
@@ -291,6 +295,53 @@ for (const [profile, options] of [
 
     await context.close()
   }
+}
+
+/**
+ * 4.1.2 / 1.3.1 — FR-ANS-10: the options of an answer card are a group named
+ * by what they answer (its question, or the label of its plan or command), and
+ * an option's worked example reaches its description. Read from Chromium's own
+ * accessibility tree, not recomputed here.
+ */
+const BLOCKED_FIXTURES = ['mock-waiting', 'mock-plan', 'mock-permission']
+async function axNode(page, selector) {
+  const cdp = await page.context().newCDPSession(page)
+  const { root } = await cdp.send('DOM.getDocument', { depth: 0 })
+  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector })
+  if (!nodeId) return null
+  const { nodes } = await cdp.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false })
+  const node = nodes[0]
+  return { role: node?.role?.value ?? '', name: node?.name?.value ?? '', description: node?.description?.value ?? '' }
+}
+async function auditAnswerGroup(page, id) {
+  await page.goto(`${BASE}agent/${id}`, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('answer-options'))
+  const expected = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="answer-card"]')
+    const question = card?.querySelector('[data-testid="answer-question"]')?.textContent?.trim()
+    const label = card?.querySelector('[data-testid="answer-detail-label"]')?.textContent?.trim()
+    return question || label || ''
+  })
+  const group = await axNode(page, T('answer-options'))
+  if (group?.role !== 'group' || !expected || !group.name.includes(expected)) {
+    const saw = `role ${group?.role}, name "${group?.name}"`
+    add('4.1.2', 'P1', `${id}: answer options are not a group named by "${expected}" (${saw})`)
+  }
+  const flat = (text) => text.replace(/\s+/g, ' ').trim()
+  const preview = await page
+    .$eval(T('answer-preview'), (el) => el.textContent?.split('\n')[0] ?? '')
+    .catch(() => null)
+  if (preview === null) return
+  const withPreview = await axNode(page, `${T('answer-option')}:has(${T('answer-preview')})`)
+  if (!flat(withPreview?.description ?? '').includes(flat(preview))) {
+    add('1.3.1', 'P1', `${id}: an option's worked example is not in its accessible description`)
+  }
+}
+{
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  for (const id of BLOCKED_FIXTURES) await auditAnswerGroup(page, id)
+  await context.close()
 }
 
 await browser.close()
