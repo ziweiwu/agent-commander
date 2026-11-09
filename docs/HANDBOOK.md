@@ -514,6 +514,10 @@ with what the order means — "most"/"least", "newest"/"oldest" — because nobo
 thinks in "ascending tokens". A session with no value for the chosen key sorts
 last in *both* directions: unknown is not a claim that it is the cheapest.
 
+On a phone the picker sits beside the filter box on one row, so its choices use
+their short names ("Recent", "Context", "Tokens", "Longest", "Name") and the
+direction is the arrow alone.
+
 The status filter you pick — need you / working / idle — is remembered, along
 with the sort key and direction, in `localStorage` beside theme and language.
 It survives a reload, a new tab and quitting the browser, so a view you chose

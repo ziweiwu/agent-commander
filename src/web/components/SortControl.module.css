@@ -72,6 +72,13 @@
   .senseLabel {
     display: none;
   }
+  .wrap {
+    gap: 4px;
+  }
+  .select {
+    flex: 0 0 auto;
+    padding-inline: 6px;
+  }
 }
 
 @media (pointer: coarse), (max-width: 560px) {

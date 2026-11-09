@@ -32,7 +32,9 @@
  * Three full-width rows took 157px above the first heading at the desk, for a
  * sort select stretched to 1290px and two 708px buttons. The bases here put
  * all three on one row from about 800px of column and leave the 288px list
- * beside an open agent, and a phone, on three rows as before.
+ * beside an open agent on three rows as before. A phone gets two: filter and
+ * sort on one, the actions on the other, because every row above the first
+ * card is a row a one-thumb glance has to scroll past.
  */
 .toolbar {
   display: flex;
@@ -74,6 +76,13 @@
 }
 
 @media (max-width: 560px) {
+  .search {
+    flex: 1 1 0;
+  }
+  .sort {
+    flex: 0 0 auto;
+    max-width: none;
+  }
   .actions {
     flex: 1 1 100%;
     flex-wrap: wrap;

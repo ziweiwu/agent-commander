@@ -43,3 +43,11 @@
 .searchbar input:focus + .slashHint {
   display: none;
 }
+@media (max-width: 560px) {
+  .searchbar input {
+    padding-right: 8px;
+  }
+  .slashHint {
+    display: none;
+  }
+}

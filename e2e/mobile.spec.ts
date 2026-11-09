@@ -261,3 +261,92 @@ test.describe('@phone offline, the topbar holds still', () => {
     })
   }
 })
+
+/**
+ * Round 4's A3: two rows of toolbar on a phone, not three.
+ *
+ * The verdict's line is y=330 on a 390px WebKit viewport, set before the
+ * stopped strip existed. The strip is drawn only while agents are stopped and
+ * sits between the toolbar and the first card, so its share of the height is
+ * taken back out and the comparison stays the one the verdict meant.
+ */
+const FIRST_CARD_LINE = 330
+const SAME_ROW_TOLERANCE = 2
+/** The gap `.column` leaves below the strip, which the strip takes with it. */
+const STRIP_GAP = 12
+const TOUCH_TARGET = 44
+const NO_ZOOM_FONT = '16px'
+/** Below this a filter box stops showing a useful part of what is typed. */
+const SEARCH_FLOOR = 120
+/** The width of the native select's arrow, which `clientWidth` includes. */
+const SELECT_ARROW = 12
+
+interface ToolbarMeasure {
+  search: { y: number; width: number; height: number; font: string }
+  sort: { y: number; width: number; height: number; font: string }
+  newAgentTop: number
+  firstCardTop: number
+  stripSpace: number
+  optionWiderThanSelect: string[]
+  sideways: number
+}
+
+function measureToolbar(page: Page): Promise<ToolbarMeasure> {
+  return page.evaluate(({ gap, arrow }) => {
+    const element = <T extends Element>(id: string) =>
+      document.querySelector<T>(`[data-testid="${id}"]`)!
+    const metrics = (control: HTMLElement) => {
+      const box = control.getBoundingClientRect()
+      return { y: box.y, width: box.width, height: box.height, font: getComputedStyle(control).fontSize }
+    }
+    const select = element<HTMLSelectElement>('sort-select')
+    const strip = document.querySelector('[data-testid="stopped-strip"]')
+    const pen = document.createElement('canvas').getContext('2d')!
+    const style = getComputedStyle(select)
+    pen.font = `${style.fontSize} ${style.fontFamily}`
+    const textRoom =
+      select.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) - arrow
+    return {
+      search: metrics(element('search')),
+      sort: metrics(select),
+      newAgentTop: element('new-agent-button').getBoundingClientRect().y,
+      firstCardTop: element('agent-card').getBoundingClientRect().y,
+      stripSpace: strip ? strip.getBoundingClientRect().height + gap : 0,
+      optionWiderThanSelect: [...select.options]
+        .filter((option) => pen.measureText(option.textContent ?? '').width > textRoom)
+        .map((option) => option.textContent ?? ''),
+      sideways: document.documentElement.scrollWidth - innerWidth,
+    }
+  }, { gap: STRIP_GAP, arrow: SELECT_ARROW })
+}
+
+function expectUsableRow(measure: ToolbarMeasure): void {
+  expect(Math.abs(measure.search.y - measure.sort.y)).toBeLessThanOrEqual(SAME_ROW_TOLERANCE)
+  expect(measure.newAgentTop).toBeGreaterThan(measure.search.y + measure.search.height - 1)
+  expect(measure.search.width).toBeGreaterThanOrEqual(SEARCH_FLOOR)
+  expect(measure.search.height).toBeGreaterThanOrEqual(TOUCH_TARGET)
+  expect(measure.sort.height).toBeGreaterThanOrEqual(TOUCH_TARGET)
+  expect(measure.search.font).toBe(NO_ZOOM_FONT)
+  expect(measure.sort.font).toBe(NO_ZOOM_FONT)
+  expect(measure.optionWiderThanSelect).toEqual([])
+  expect(measure.sideways).toBeLessThanOrEqual(1)
+}
+
+for (const locale of ['en-US', 'zh-CN']) {
+  test.describe(`@phone the fleet toolbar, ${locale}`, () => {
+    test.use({ locale })
+
+    test('search and sort share a row and the first card comes up', async ({ page }) => {
+      await openFleet(page)
+      const measure = await measureToolbar(page)
+      expectUsableRow(measure)
+      expect(measure.firstCardTop - measure.stripSpace).toBeLessThan(FIRST_CARD_LINE)
+    })
+
+    test('and still fit at the narrowest supported width', async ({ page }) => {
+      await page.setViewportSize({ width: 320, height: 568 })
+      await openFleet(page)
+      expectUsableRow(await measureToolbar(page))
+    })
+  })
+}
