@@ -66,6 +66,12 @@ const ALLOWED: Record<string, Hidden> = {
       'the test below that keeps it on every shape',
   },
 
+  '.slashHint': {
+    reason:
+      "the filter box's `/` hint: the key still works from a keyboard, and at a phone's width " +
+      'the hint costs the room the filter and sort need to share a row (FR-UI-21)',
+  },
+
   // Decoration and chrome that name nothing about the agent on screen.
   '.gutter': { reason: 'the message rail is decorative; grouping survives it' },
   '.sheetMode .title': {

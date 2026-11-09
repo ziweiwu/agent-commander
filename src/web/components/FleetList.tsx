@@ -184,8 +184,9 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
       {/**
         * One row at the desk: filter, sort and the actions share it, and the
         * column's own width wraps them back to three rows in the 288px list
-        * beside an open agent and on a phone. No new width cut: FR-UI-1's two
-        * stay two.
+        * beside an open agent. On a phone filter and sort share a row and the
+        * actions take the next (FR-UI-21), at the existing phone cut: FR-UI-1's
+        * two widths stay two.
         */}
       <div className={styles.toolbar}>
         <div className={styles.search}>

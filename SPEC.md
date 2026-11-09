@@ -1189,6 +1189,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   dialog MUST open on the folder browser at home rather than a bare path field.
   *`test/ui/FleetList.test.tsx`, `test/ui/NewAgentDialog.test.tsx`,
   `e2e/empty.spec.ts`.*
+- **FR-UI-21** — Below the phone cut the fleet's filter box and sort picker MUST
+  share one row and New agent MUST keep its own, so the toolbar costs two rows
+  above the first card rather than three. The picker's option text MAY shorten
+  there ("Recent", "Longest", in both languages) and the `/` hint MAY go, but
+  neither control becomes icon-only and the filter box MUST stay at least 120px
+  wide at 320px, at 16px text and a 44px touch target **(INV-17)**.
+  *`e2e/mobile.spec.ts`, `test/responsive.test.ts`.*
 - **FR-UI-2** — Text inputs MUST be at least 16px so iOS does not zoom the page,
   tap targets MUST be at least 44px, and safe-area insets MUST keep content clear
   of a notch in both orientations. The audit measures 44 in both directions, on
@@ -1385,7 +1392,7 @@ unverified.
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7 |
-| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-ATT-14, FR-PRUNE-6 |
+| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-UI-21, FR-ATT-14, FR-PRUNE-6 |
 | INV-18 — a link goes where the text says | FR-CHAT-11 |
 
 ---
