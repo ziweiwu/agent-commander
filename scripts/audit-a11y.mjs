@@ -20,43 +20,141 @@ const browser = await chromium.launch()
 /** Long enough for a freshly opened surface to have laid itself out. */
 const SETTLE_MS = 600
 
-async function visitStates(page) {
-  const states = []
-  await page.waitForSelector(T('agent-card'))
-  states.push('fleet')
+/** How many keydowns a held Shift+Tab is driven as: what a second's hold repeats. */
+const HELD_KEYDOWNS = 10
+/**
+ * The chord's "sent" toast lasts 5s and sits over the controls the focus sweep
+ * later judges, so the sweep waits it out rather than report the toast.
+ */
+const TOAST_GONE_MS = 8000
 
+/**
+ * INV-2's "exactly once" for the composer's mode chord. A held key is one
+ * keydown and then repeats, and each `POST …/mode` is a `BTab` into a live
+ * agent, so a hold may send one and no more.
+ */
+async function auditHeldModeChord(page, tag) {
+  const box = page.locator(T('composer-input'))
+  if (!(await box.isEnabled())) {
+    add('INV-2', 'P1', `${tag}: the composer is disabled, so the held Shift+Tab check could not run`)
+    return
+  }
+  let posts = 0
+  const count = (req) => {
+    if (req.method() === 'POST' && new URL(req.url()).pathname.endsWith('/mode')) posts += 1
+  }
+  page.on('request', count)
+  await box.focus()
+  await page.keyboard.down('Shift')
+  for (let i = 0; i < HELD_KEYDOWNS; i += 1) await page.keyboard.down('Tab')
+  await page.keyboard.up('Tab')
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(SETTLE_MS)
+  page.off('request', count)
+  if (posts > 1) add('INV-2', 'P0', `${tag}: a held Shift+Tab in the composer sent ${posts} mode chords, not 1`)
+  await page.locator(T('toast')).waitFor({ state: 'detached', timeout: TOAST_GONE_MS }).catch(() => {})
+}
+
+/** How many Tab stops past the Chat tab the conversation may sit and still count as reachable. */
+const TAB_STOPS_TO_CONVERSATION = 60
+
+/**
+ * FR-UI-13: arrows on a select are the select's. The fleet's walk ran from
+ * anywhere that was not a text field and called `preventDefault`, so ArrowDown
+ * on the sort select moved focus to a card and left the sort where it was.
+ *
+ * The value is not required to move: Chromium on macOS answers ArrowDown on a
+ * closed select by opening its menu, which is the key's native meaning there.
+ * What is required is that the app left the key alone — focus kept, default
+ * not prevented — and the phone and tablet profiles do see the value change.
+ * The sort is put back afterwards, because it decides which card opens next.
+ */
+async function auditSelectArrows(page, tag) {
+  const select = page.locator(T('sort-select'))
+  if (!(await select.isVisible())) return
+  const before = await select.inputValue()
+  await select.focus()
+  await page.evaluate(() => {
+    window.addEventListener('keydown', (e) => { window.__arrowPrevented = e.defaultPrevented }, { once: true })
+  })
+  await page.keyboard.press('ArrowDown')
+  const left = await page.evaluate(
+    () => document.activeElement?.getAttribute('data-testid') === 'sort-select' && !window.__arrowPrevented,
+  )
+  if (!left) add('2.1.1', 'P0', `${tag}: ArrowDown on the sort select was taken from it`)
+  await page.keyboard.press('Escape')
+  await select.selectOption(before)
+}
+
+/**
+ * FR-UI-13: a keyboard reader can reach the conversation and scroll it. It
+ * was no Tab stop at all, so nothing earlier than the newest screen could be
+ * read without a mouse.
+ */
+async function auditConversationReach(page, tag) {
+  await page.locator(T('tab-chat')).focus()
+  let reached = false
+  for (let i = 0; i < TAB_STOPS_TO_CONVERSATION && !reached; i += 1) {
+    await page.keyboard.press('Tab')
+    reached = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'chat-scroll')
+  }
+  if (!reached) {
+    add('2.1.1', 'P0', `${tag}: the conversation is not reached within ${TAB_STOPS_TO_CONVERSATION} Tab stops`)
+    return
+  }
+  await page.keyboard.press('ArrowUp')
+  const stayed = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'chat-scroll')
+  if (!stayed) add('2.1.1', 'P0', `${tag}: ArrowUp on the conversation moved focus off it`)
+}
+
+async function openChat(page) {
   const cards = await page.$$(T('agent-card'))
   await cards[1].click()
   await page.waitForSelector(T('agent-detail'))
+}
+
+/**
+ * Earlier output is a surface of its own — a scroll box with a capture in
+ * it — and one nothing else here opens, so it would be judged by nobody.
+ *
+ * Located and waited for explicitly rather than clicked outright, because
+ * `page.click` also requires the element to be *stable*: two consecutive
+ * animation frames with an identical bounding box. This button sits inside
+ * the Attach tab, where the pane capture repaints continuously, so on a busy
+ * machine those two frames need never match — the click then retries until
+ * the 30s timeout and the whole audit dies without reporting a single
+ * finding, which reads exactly like a pass that never ran. Measured at load
+ * average 14.7 it failed twice in a row here.
+ *
+ * Presence, visibility and enabledness are all still required. Only the
+ * stability check is waived, and only because it is the one precondition
+ * that cannot hold next to a live capture.
+ */
+async function openHistory(page) {
+  const history = page.locator(T('history-toggle'))
+  await history.waitFor({ state: 'visible', timeout: 10_000 })
+  await history.click({ force: true })
+  await page.waitForSelector(T('term-history'), { timeout: 6000 }).catch(() => {})
+  await page.waitForTimeout(SETTLE_MS)
+}
+
+async function visitStates(page, tag) {
+  const states = []
+  await page.waitForSelector(T('agent-card'))
+  states.push('fleet')
+  await auditSelectArrows(page, tag)
+
+  await openChat(page)
   states.push('chat')
+  await auditHeldModeChord(page, tag)
+  await auditConversationReach(page, tag)
 
   await page.click(T('tab-attach'))
   await page.waitForSelector('.xterm-screen', { timeout: 6000 }).catch(() => {})
   await page.waitForTimeout(600)
   states.push('terminal')
 
-  /*
-   * Earlier output is a surface of its own — a scroll box with a capture in
-   * it — and one nothing else here opens, so it would be judged by nobody.
-   *
-   * Located and waited for explicitly rather than clicked outright, because
-   * `page.click` also requires the element to be *stable*: two consecutive
-   * animation frames with an identical bounding box. This button sits inside
-   * the Attach tab, where the pane capture repaints continuously, so on a busy
-   * machine those two frames need never match — the click then retries until
-   * the 30s timeout and the whole audit dies without reporting a single
-   * finding, which reads exactly like a pass that never ran. Measured at load
-   * average 14.7 it failed twice in a row here.
-   *
-   * Presence, visibility and enabledness are all still required. Only the
-   * stability check is waived, and only because it is the one precondition
-   * that cannot hold next to a live capture.
-   */
-  const history = page.locator(T('history-toggle'))
-  await history.waitFor({ state: 'visible', timeout: 10_000 })
-  await history.click({ force: true })
-  await page.waitForSelector(T('term-history'), { timeout: 6000 }).catch(() => {})
-  await page.waitForTimeout(SETTLE_MS)
+  await openHistory(page)
   states.push('terminal-history')
 
   return states
@@ -84,7 +182,7 @@ for (const [profile, options] of [
     await page.goto(BASE, { waitUntil: 'networkidle' })
     const tag = `${profile}/${scheme}`
 
-    await visitStates(page)
+    await visitStates(page, tag)
 
     // 4.1.2 — every interactive control needs an accessible name.
     const unnamed = await page.$$eval(

@@ -139,12 +139,16 @@ put them there arrives on them: the auto-repeat of a held Enter, the second tap
 of a double tap 100-900ms behind the first. On 3cc6501 each of those answered
 `Yes` to `rm -rf dist && npm run build`, or pasted "continue" with Enter. So a
 repeated keydown (`event.repeat`) never activates an answer option, a picker key or a
-quick reply, and any press within `ARRIVAL_GUARD_MS` (600ms, `useArrival`) of a
-question, a set's next question or the menu appearing sends nothing. The
+quick reply, nor sends the composer's Shift+Tab chord a second time, and any
+press within `ARRIVAL_GUARD_MS` (600ms, `useArrival`) of a question, a set's
+next question or the menu appearing sends nothing. The
 window restarts with each new prompt id, and the press it swallows shows
 nothing, because it is not an error. Checked by the `INV-2 the gesture …`
-tests in `answer-card.test.tsx` and `QuickPrompts.test.tsx`, and by
-`e2e/gesture-send.spec.ts` on the wire.
+tests in `answer-card.test.tsx` and `QuickPrompts.test.tsx`, by the
+`INV-2 … held Shift+Tab` tests in `chat-interrupt.test.tsx`, and by
+`e2e/gesture-send.spec.ts` on the wire. The chord shares the Mode button's
+in-flight guard (`useSendShiftTab`), because a held Shift+Tab in the composer
+was once ten `BTab`s for ten keydowns.
 
 The chat's optimistic echo is display-only. A pending message is drawn
 immediately so sending feels instant, but it is sent exactly once; `reconcile()`

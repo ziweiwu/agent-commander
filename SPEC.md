@@ -486,7 +486,10 @@ over the list with a back control; on a wide one, a second column.
 - **FR-CHAT-6** — `Enter` MUST send and `Shift+Enter` MUST insert a newline.
   `Shift+Tab` in the box MUST send the chord to the agent (§5.1); the cost — that
   it no longer tabs focus backwards — is accepted, and `Tab` and `Escape` MUST
-  still move focus. *`test/ui/escape-levels.test.tsx`.*
+  still move focus. A held chord MUST send once: a repeated keydown, and a press
+  while the last one is still on its way, send nothing, as the Mode button's do.
+  `Option+Shift+Tab` is not the chord; it is left to the browser.
+  *`test/ui/escape-levels.test.tsx`, `test/ui/chat-interrupt.test.tsx`.*
 - **FR-CHAT-7** — The quick replies MUST be offered from the composer's menu
   (FR-CTL-12), closed at rest. As a row of chips they overflowed the row that
   held them at every width the detail panel has — two of five out of sight at
@@ -1287,6 +1290,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift+Enter` | in the message box: send / newline |
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
+| `PageUp` `PageDown` | in the message box: scroll the conversation a page, unless the draft scrolls itself |
+| `↑` `↓` `PageUp` `PageDown` `Space` | on the conversation, one Tab stop named "Conversation": scroll it |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
 | `⌥H` | open the agent that has needed you longest — or, from one that is waiting, the next in that order — on Chat; "Nothing needs you" when none does |
@@ -1298,7 +1303,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   for `⌥` on Windows and Linux. *`test/ui/hop.test.tsx`.*
 
   `/` and `Esc` reach the filter box on every route, with an agent open too.
-  *`test/ui/filter-keys.test.tsx`.*
+  *`test/ui/filter-keys.test.tsx`.* `↑` `↓` `k` `j` move through the list only
+  from the list, the page body and the filter box; from anywhere else they keep
+  their native meaning, so a select takes its arrows. The conversation keys and
+  these limits move focus and scroll only, and send nothing (INV-2).
+  *`test/ui/keyboard-scroll.test.tsx`.*
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*

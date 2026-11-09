@@ -13,6 +13,7 @@
  * `Escape`, and queue mode may not send one at all.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { act } from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router-dom'
@@ -273,6 +274,53 @@ describe('Shift+Tab cycles the permission mode', () => {
     await user.keyboard('{Shift>}{Tab}{/Shift}')
 
     expect(transport.sendShiftTab).toHaveBeenCalledExactlyOnceWith()
+  })
+
+  it('INV-2 sends one chord for a held Shift+Tab, and keeps focus where it is', () => {
+    open(working({ status: 'idle' }))
+    const box = screen.getByTestId('composer-input')
+    box.focus()
+
+    const first = fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })
+    const held = [1, 2, 3].map(() => fireEvent.keyDown(box, { key: 'Tab', shiftKey: true, repeat: true }))
+
+    expect(transport.sendShiftTab).toHaveBeenCalledOnce()
+    expect(first).toBe(false)
+    expect(held).toEqual([false, false, false])
+    expect(document.activeElement).toBe(box)
+  })
+
+  it('INV-2 drops a second press while the first is still on its way', () => {
+    transport.sendShiftTab.mockReturnValueOnce(new Promise(() => {}) as never)
+    open(working({ status: 'idle' }))
+    const box = screen.getByTestId('composer-input')
+
+    fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })
+    fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })
+
+    expect(transport.sendShiftTab).toHaveBeenCalledOnce()
+  })
+
+  it('sends a second chord for a second, separate press once the first has landed', async () => {
+    open(working({ status: 'idle' }))
+    const box = screen.getByTestId('composer-input')
+
+    fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })
+    await vi.waitFor(() => expect(transport.sendShiftTab).toHaveBeenCalledOnce())
+    await act(async () => {})
+    fireEvent.keyDown(box, { key: 'Tab', shiftKey: true })
+
+    expect(transport.sendShiftTab).toHaveBeenCalledTimes(2)
+  })
+
+  it('leaves Option+Shift+Tab, Safari\'s backward key, to the browser', () => {
+    open(working({ status: 'idle' }))
+    const box = screen.getByTestId('composer-input')
+
+    const passed = fireEvent.keyDown(box, { key: 'Tab', shiftKey: true, altKey: true })
+
+    expect(transport.sendShiftTab).not.toHaveBeenCalled()
+    expect(passed).toBe(true)
   })
 })
 
