@@ -20,15 +20,55 @@ const browser = await chromium.launch()
 /** Long enough for a freshly opened surface to have laid itself out. */
 const SETTLE_MS = 600
 
-async function visitStates(page) {
+/** How many keydowns a held Shift+Tab is driven as: what a second's hold repeats. */
+const HELD_KEYDOWNS = 10
+/**
+ * The chord's "sent" toast lasts 5s and sits over the controls the focus sweep
+ * later judges, so the sweep waits it out rather than report the toast.
+ */
+const TOAST_GONE_MS = 8000
+
+/**
+ * INV-2's "exactly once" for the composer's mode chord. A held key is one
+ * keydown and then repeats, and each `POST …/mode` is a `BTab` into a live
+ * agent, so a hold may send one and no more.
+ */
+async function auditHeldModeChord(page, tag) {
+  const box = page.locator(T('composer-input'))
+  if (!(await box.isEnabled())) {
+    add('INV-2', 'P1', `${tag}: the composer is disabled, so the held Shift+Tab check could not run`)
+    return
+  }
+  let posts = 0
+  const count = (req) => {
+    if (req.method() === 'POST' && new URL(req.url()).pathname.endsWith('/mode')) posts += 1
+  }
+  page.on('request', count)
+  await box.focus()
+  await page.keyboard.down('Shift')
+  for (let i = 0; i < HELD_KEYDOWNS; i += 1) await page.keyboard.down('Tab')
+  await page.keyboard.up('Tab')
+  await page.keyboard.up('Shift')
+  await page.waitForTimeout(SETTLE_MS)
+  page.off('request', count)
+  if (posts > 1) add('INV-2', 'P0', `${tag}: a held Shift+Tab in the composer sent ${posts} mode chords, not 1`)
+  await page.locator(T('toast')).waitFor({ state: 'detached', timeout: TOAST_GONE_MS }).catch(() => {})
+}
+
+async function openChat(page) {
+  const cards = await page.$$(T('agent-card'))
+  await cards[1].click()
+  await page.waitForSelector(T('agent-detail'))
+}
+
+async function visitStates(page, tag) {
   const states = []
   await page.waitForSelector(T('agent-card'))
   states.push('fleet')
 
-  const cards = await page.$$(T('agent-card'))
-  await cards[1].click()
-  await page.waitForSelector(T('agent-detail'))
+  await openChat(page)
   states.push('chat')
+  await auditHeldModeChord(page, tag)
 
   await page.click(T('tab-attach'))
   await page.waitForSelector('.xterm-screen', { timeout: 6000 }).catch(() => {})
@@ -84,7 +124,7 @@ for (const [profile, options] of [
     await page.goto(BASE, { waitUntil: 'networkidle' })
     const tag = `${profile}/${scheme}`
 
-    await visitStates(page)
+    await visitStates(page, tag)
 
     // 4.1.2 — every interactive control needs an accessible name.
     const unnamed = await page.$$eval(

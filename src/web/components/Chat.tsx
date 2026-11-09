@@ -14,13 +14,13 @@ import { useIsCoarse } from '../hooks/useMediaQuery.ts'
 import { useDraft } from '../hooks/useDraft.ts'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { refuseRepeat, useArrival } from '../hooks/useArrival.ts'
+import { useSendShiftTab } from '../hooks/useSendShiftTab.ts'
 import { refusedAsKeypresses } from '../store/pasteGuard.ts'
 import { useStore } from '../store/store.ts'
 import {
   interruptAndSend,
   sendConfirmedKey,
   sendMessage,
-  sendShiftTab,
   uploadPicture,
 } from '../store/transport.ts'
 import { loadSendMode, saveSendMode, type SendMode } from '../lib/prefs.ts'
@@ -461,10 +461,10 @@ export function Chat({ agent }: { agent: Agent }) {
    * had worked. `send_shift_tab` in `rust/src/control.rs` carries the
    * measurement that settled it.
    */
-  const shiftTab = async () => {
+  const { send: sendModeChord } = useSendShiftTab()
+  const shiftTab = (): void => {
     if (!attachable) return
-    const result = await sendShiftTab()
-    showToast(result.ok ? t('shiftTabSent') : t('controlFailed', { error: result.error }))
+    sendModeChord()
   }
 
   /**
@@ -939,9 +939,10 @@ export function Chat({ agent }: { agent: Agent }) {
                 return
               }
               // The chord Claude Code uses for this, so the habit carries over.
-              if (e.key === 'Tab' && e.shiftKey) {
+              if (e.key === 'Tab' && e.shiftKey && !e.altKey) {
                 e.preventDefault()
-                void shiftTab()
+                if (e.repeat) return
+                shiftTab()
               }
             }}
           />

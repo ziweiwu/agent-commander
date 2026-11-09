@@ -486,7 +486,10 @@ over the list with a back control; on a wide one, a second column.
 - **FR-CHAT-6** — `Enter` MUST send and `Shift+Enter` MUST insert a newline.
   `Shift+Tab` in the box MUST send the chord to the agent (§5.1); the cost — that
   it no longer tabs focus backwards — is accepted, and `Tab` and `Escape` MUST
-  still move focus. *`test/ui/escape-levels.test.tsx`.*
+  still move focus. A held chord MUST send once: a repeated keydown, and a press
+  while the last one is still on its way, send nothing, as the Mode button's do.
+  `Option+Shift+Tab` is not the chord; it is left to the browser.
+  *`test/ui/escape-levels.test.tsx`, `test/ui/chat-interrupt.test.tsx`.*
 - **FR-CHAT-7** — The quick replies MUST be offered from the composer's menu
   (FR-CTL-12), closed at rest. As a row of chips they overflowed the row that
   held them at every width the detail panel has — two of five out of sight at

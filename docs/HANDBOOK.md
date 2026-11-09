@@ -660,7 +660,8 @@ Shift+Tab is sent as `BTab` — a control key the agent handles wherever it is,
 exactly as it would from the keyboard of the terminal this app stands in for.
 **Shift+Tab** in the message box does the same thing as the button; the cost is
 that Shift+Tab no longer tabs backwards out of the box, though Tab and Escape
-still move focus.
+still move focus. Holding the chord sends it once, like a double click on the
+button: press it again to cycle again. Option+Shift+Tab is left to the browser.
 
 Model is allowed for a different reason: it types, but through the very same
 paste the message box already uses on working agents. Sending *"use opus
