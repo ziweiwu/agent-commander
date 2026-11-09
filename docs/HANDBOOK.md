@@ -418,9 +418,15 @@ and `cols` and `rows` never travel back to tmux (INV-1).
 | `Esc` | clear the filter box if it has text, else close the agent |
 | `Enter` / `Shift`+`Enter` | in the message box: send / newline |
 | `Shift`+`Tab` | in the message box: send Shift+Tab to the agent, which cycles its permission mode, mid-task included |
+| `PageUp` / `PageDown` | in the message box: scroll the conversation a page, unless your draft scrolls itself |
+| `↑` `↓` `PageUp` `PageDown` `Space` | on the conversation (one Tab stop, named *Conversation*): scroll it |
 | `Shift`+`Esc` | close the agent from inside the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent down the list, on the tab you are on |
 | `⌥H` | open the agent that has needed you longest, or from one that is waiting, the next in that order; a toast says *Nothing needs you* when none does |
+
+`↑` `↓` and `k` `j` walk the list only from the list itself, the page or the
+filter box. Anywhere else the arrows do what they normally do: a select changes
+its value, the conversation scrolls.
 
 The ⌥ chords are `Alt` on Windows and Linux. They go by the key you press
 rather than the character Option makes of it, wait while a Pinyin or other
@@ -662,7 +668,8 @@ Shift+Tab is sent as `BTab` — a control key the agent handles wherever it is,
 exactly as it would from the keyboard of the terminal this app stands in for.
 **Shift+Tab** in the message box does the same thing as the button; the cost is
 that Shift+Tab no longer tabs backwards out of the box, though Tab and Escape
-still move focus.
+still move focus. Holding the chord sends it once, like a double click on the
+button: press it again to cycle again. Option+Shift+Tab is left to the browser.
 
 Model is allowed for a different reason: it types, but through the very same
 paste the message box already uses on working agents. Sending *"use opus

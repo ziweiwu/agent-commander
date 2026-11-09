@@ -1,7 +1,5 @@
-import { useRef, useState } from 'react'
 import type { Agent } from '../../shared/types.ts'
-import { useStore } from '../store/store.ts'
-import { sendShiftTab } from '../store/transport.ts'
+import { useSendShiftTab } from '../hooks/useSendShiftTab.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { modeLabel } from '../lib/modes.ts'
 import styles from './ShiftTabButton.module.css'
@@ -55,16 +53,7 @@ export function ShiftTabButton({
   size?: ShiftTabButtonSize
 }) {
   const t = useTranslate()
-  const showToast = useStore((s) => s.showToast)
-  const [pending, setPending] = useState(false)
-  /*
-   * INV-2's "exactly once", applied to a control: `pending` is React state and
-   * does not land until React flushes, so two clicks delivered in one batch —
-   * a double tap, key repeat on a focused button — would both read it as false
-   * and both send a Shift+Tab into a live session. The ref is cleared
-   * synchronously, so the second finds it taken.
-   */
-  const sendingRef = useRef(false)
+  const { pending, send } = useSendShiftTab()
 
   /*
    * Permitted while the agent is working, and INV-8 says why: this sends a
@@ -75,18 +64,8 @@ export function ShiftTabButton({
   const disabled = !agent.paneId || pending
 
   const press = (): void => {
-    if (sendingRef.current || disabled) return
-    sendingRef.current = true
-    setPending(true)
-    void (async () => {
-      try {
-        const result = await sendShiftTab()
-        showToast(result.ok ? t('shiftTabSent') : t('controlFailed', { error: result.error }))
-      } finally {
-        sendingRef.current = false
-        setPending(false)
-      }
-    })()
+    if (disabled) return
+    send()
   }
 
   /*

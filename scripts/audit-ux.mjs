@@ -109,10 +109,11 @@ for (const scheme of ['light', 'dark']) {
   })
   if (noRing) add('high', 'a11y', 'focused element has no visible focus indicator')
 
+  await page.focus(T('search'))
   const before = await page.evaluate(() => document.activeElement?.textContent?.slice(0, 20))
   await page.keyboard.press('ArrowDown')
   const after = await page.evaluate(() => document.activeElement?.textContent?.slice(0, 20))
-  if (before === after) add('med', 'keyboard', 'ArrowDown does not move between agents')
+  if (before === after) add('med', 'keyboard', 'ArrowDown from the filter box does not move between agents')
 
   await page.click(T('agent-card'))
   await page.waitForSelector(T('agent-detail'))

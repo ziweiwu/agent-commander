@@ -215,6 +215,7 @@ export function App() {
       }
 
       if (e.altKey || (typing && target !== searchRef.current)) return
+      if (!walksCards(target, searchRef.current)) return
 
       if (e.key === 'ArrowDown' || (e.key === 'j' && !typing)) {
         e.preventDefault()
@@ -395,6 +396,20 @@ function Filters() {
       )}
     </div>
   )
+}
+
+/**
+ * Whether ArrowUp/ArrowDown and j/k walk the fleet's cards from here: only from
+ * the list itself, the page body and the filter box (FR-UI-13). Anywhere else
+ * the keys keep their own meaning. The walk used to run from any element that
+ * was not a text field, so a select lost its arrows, the conversation could not
+ * be scrolled from them, and ArrowUp on a button in the agent's panel threw
+ * focus onto a card.
+ */
+function walksCards(target: HTMLElement | null, search: HTMLInputElement | null): boolean {
+  if (target === null || target === document.body || target === search) return true
+  if (target instanceof HTMLSelectElement) return false
+  return target.closest('[data-testid="fleet-list"]') !== null
 }
 
 function moveCardFocus(delta: number): void {

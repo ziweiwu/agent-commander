@@ -572,6 +572,7 @@ const EN = {
   filterKindClaude: 'Claude',
   filterKindAll: 'both',
   staleServer: 'this server does not know that request — it is probably still running an older version. Restart it and reload.',
+  conversation: 'Conversation',
 } as const
 
 export type Key = keyof typeof EN
@@ -1043,6 +1044,7 @@ const ZH: Record<Key, string> = {
   filterKindClaude: '个 Claude',
   filterKindAll: '全部',
   staleServer: '这个服务端不认识该请求，多半仍在运行旧版本。重启服务端并刷新页面。',
+  conversation: '对话',
 }
 
 const DICTS: Record<Lang, Record<Key, string>> = { en: EN, 'zh-CN': ZH }
