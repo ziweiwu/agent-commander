@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { Agent, PendingPrompt } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { answerPrompt, sendConfirmedKey, sendKey } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { refuseRepeat, useArrival } from '../hooks/useArrival.ts'
+import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { Button } from './ui/Button.tsx'
 import { LazyPanePeek } from './LazyTerminal.tsx'
 import { shortName } from '../lib/naming.ts'
@@ -99,6 +100,76 @@ function detailLabel(tool: string): 'answerPlan' | 'answerCommand' | 'answerAbou
   if (tool === 'ExitPlanMode') return 'answerPlan'
   if (tool === 'Bash') return 'answerCommand'
   return 'answerAbout'
+}
+
+/** Lines as the reader counts them: a trailing newline is not one more. */
+function lineCount(text: string): number {
+  return text.trimEnd().split('\n').length
+}
+
+/** What the press offers, by whether the text is one line or several. */
+const SHOW_ALL = { one: 'answerShowAllOne', many: 'answerShowAll' } as const
+/** What it says once pressed, the same way round. */
+const SHOWN_ALL = { one: 'answerShownAllOne', many: 'answerShownAll' } as const
+
+/**
+ * The plan or command being approved, capped, with one press that shows all
+ * of it (FR-ANS-9).
+ *
+ * The box is capped at 120px on a phone and 180px on a desk, and a phone hides
+ * the scrollbar at rest, so a three-step plan read as one and a half with
+ * nothing to say there was more — directly above the button that approves it.
+ * While the text runs past the box, its last line fades (`useOverflowEdge`)
+ * and a button under it names how many lines there are.
+ *
+ * **One way only.** There is no "Show less": collapsing pulls the options up
+ * under the finger, and the second tap of a double tap would land on `Yes`
+ * outside the arrival window (INV-2). For the same reason the button, once
+ * drawn, stays for this prompt: scrolling the box to its end or rotating the
+ * phone never takes it away and lifts the options into its place. Once pressed
+ * it stays where it was and says the text is all shown, so a keyboard press
+ * keeps its focus rather than dropping it to the page. The press sends
+ * nothing and moves no focus; the parent keys this on the prompt, so the next
+ * one starts collapsed.
+ */
+function AnswerDetail({ label, text }: { label: string; text: string }) {
+  const t = useTranslate()
+  const id = useId()
+  const [ref, edge] = useOverflowEdge<HTMLPreElement>()
+  const [clipped, setClipped] = useState(false)
+  const [expanded, setExpanded] = useState(false)
+  useEffect(() => {
+    if (edge.startsWith('bottom')) setClipped(true)
+  }, [edge])
+  const lines = lineCount(text)
+  return (
+    <>
+      <p className={styles.label}>{label}</p>
+      <pre
+        ref={ref}
+        id={id}
+        className={`${styles.detail} ${expanded ? styles.expanded : ''}`}
+        data-testid="answer-detail"
+        data-overflow={expanded ? undefined : edge}
+        data-expanded={expanded || undefined}
+      >
+        {text}
+      </pre>
+      {clipped && (
+        <Button
+          variant="compact"
+          className={styles.showAll}
+          data-testid="answer-show-all"
+          aria-controls={id}
+          aria-expanded={expanded}
+          aria-disabled={expanded || undefined}
+          onClick={() => setExpanded(true)}
+        >
+          {t((expanded ? SHOWN_ALL : SHOW_ALL)[lines === 1 ? 'one' : 'many'], { count: lines })}
+        </Button>
+      )}
+    </>
+  )
 }
 
 export interface AnswerCardProps {
@@ -293,12 +364,11 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
       )}
 
       {prompt?.detail !== undefined && (
-        <>
-          <p className={styles.label}>{t(detailLabel(prompt.tool))}</p>
-          <pre className={styles.detail} data-testid="answer-detail">
-            {prompt.detail}
-          </pre>
-        </>
+        <AnswerDetail
+          key={[prompt.id, prompt.tool, prompt.detail].join('\n')}
+          label={t(detailLabel(prompt.tool))}
+          text={prompt.detail}
+        />
       )}
 
       {/*

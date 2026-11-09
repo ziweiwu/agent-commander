@@ -313,6 +313,13 @@ between a control you can trust with a live agent and one you cannot: a
 mislabelled button here answers somebody's question wrongly, and the capture
 is what makes a wrong label visible instead of silent.
 
+**You see the whole of what you approve.** The plan or command sits in a box
+capped at 120px on a phone and 180px on a desk. When it runs past that, its
+last line fades and a button under it says how much there is — *Show all 31
+lines* — and one press shows all of it for that prompt. There is no *Show
+less*: collapsing would pull the options up under your finger, so a double
+tap's second press could land on *Yes*. The next prompt starts capped again.
+
 The card also refuses while the connection is down, and says so, rather than
 disabling itself and announcing an answer it never sent.
 

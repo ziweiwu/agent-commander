@@ -605,6 +605,18 @@ epistemic rather than functional.
   *`e2e/blocked-shapes.spec.ts`, `e2e/fades.spec.ts`,
   `test/ui/AgentDetail.test.tsx`, `test/ui/answer-card.test.tsx`,
   `scripts/audit-mobile.mjs`, `scripts/audit-workspace.mjs`.*
+- **FR-ANS-9** — The full text of what is being approved MUST be reachable
+  from the card in one press. While a plan or command runs past its box (120px
+  on a phone, 180px on a desk), its last line fades and a button under it
+  names the line count (`Show all 31 lines`); pressing it lifts the cap for
+  that prompt, sends nothing and moves no focus, and a new prompt starts
+  capped again. It is one-way: there is no "Show less", because collapsing
+  pulls the options up under the finger and a double tap's second press
+  would land on `Yes` outside the arrival window (INV-2). An option's
+  `preview` keeps its own scrolling box for now: it is drawn inside the
+  option's button, where a second button cannot go.
+  *`e2e/blocked-shapes.spec.ts`, `test/ui/answer-card.test.tsx`,
+  `scripts/audit-ux.mjs`.*
 
 ### 4.3 Attach
 
@@ -1377,7 +1389,7 @@ unverified.
 | Invariant | Requirements it governs |
 |---|---|
 | INV-1 — never disturb the real terminal | FR-ATT-1, FR-ATT-2, NFR-SEC-13 |
-| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14, NFR-SEC-17 |
+| INV-2 — no input without intent | FR-CHAT-3, FR-CHAT-5, FR-CHAT-10, FR-ANS-7, FR-ANS-9, FR-SPAWN-7, FR-NOTIFY-10, NFR-SEC-11 … 14, NFR-SEC-17 |
 | INV-3 — loopback by default | NFR-SEC-1 … NFR-SEC-4 |
 | INV-4 — bounded polling cost | FR-ATT-12, FR-CHAT-16, NFR-OPS-3 |
 | INV-5 — degrade, don't error | FR-HON-3, FR-HON-4 |

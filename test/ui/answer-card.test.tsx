@@ -956,3 +956,88 @@ describe('INV-2 the gesture that opened a question never answers it', () => {
     expect(sendKey).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * The plan box is capped at 120px on a phone and 180px on a desk, and a
+ * phone hides the scrollbar at rest: a three-step plan read as one step and a
+ * half, with nothing to say there was more, above the button that approves it.
+ * jsdom has no layout, so the box's two heights are set by hand.
+ */
+describe('FR-ANS-9 the whole plan or command before its Yes', () => {
+  const TALL_PX = 157
+  const BOX_PX = 118
+  const LONG_PLAN: PendingPrompt = {
+    ...PLAN,
+    detail: '## Plan\n1. Backfill\n2. Swap\n3. Drop the old table\n',
+  }
+  const layout = (scroll: number, client: number) => {
+    const proto = HTMLPreElement.prototype
+    const restore = [
+      Object.getOwnPropertyDescriptor(proto, 'scrollHeight'),
+      Object.getOwnPropertyDescriptor(proto, 'clientHeight'),
+    ]
+    Object.defineProperty(proto, 'scrollHeight', { configurable: true, get: () => scroll })
+    Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => client })
+    return () => {
+      for (const [name, was] of [['scrollHeight', restore[0]], ['clientHeight', restore[1]]] as const) {
+        if (was) Object.defineProperty(proto, name, was)
+        else delete (proto as unknown as Record<string, unknown>)[name]
+      }
+    }
+  }
+  let undo: () => void = () => {}
+  afterEach(() => undo())
+
+  it('FR-ANS-9 offers one press that shows every line, and sends nothing for it', () => {
+    undo = layout(TALL_PX, BOX_PX)
+    useStore.setState({ prompt: LONG_PLAN })
+    renderApp(<Chat agent={blocked()} />)
+    const landed = document.activeElement
+    const showAll = screen.getByRole('button', { name: 'Show all 4 lines' })
+    expect(screen.getByTestId('answer-detail').dataset.overflow).toBe('bottom')
+
+    fireEvent.click(showAll)
+
+    expect(answerPrompt).not.toHaveBeenCalled()
+    expect(sendKey).not.toHaveBeenCalled()
+    expect(document.activeElement, 'the press moves no focus').toBe(landed)
+    const detail = screen.getByTestId('answer-detail')
+    expect(detail.dataset.expanded).toBe('true')
+    expect(detail.dataset.overflow).toBeUndefined()
+  })
+
+  it('FR-ANS-9 has no Show less, so nothing can pull the options up under a second tap', () => {
+    undo = layout(TALL_PX, BOX_PX)
+    renderApp(<AnswerCard agent={blocked()} prompt={LONG_PLAN} />)
+    fireEvent.click(screen.getByTestId('answer-show-all'))
+    const after = screen.getByTestId('answer-show-all')
+    expect(after.getAttribute('aria-expanded')).toBe('true')
+    expect(after.textContent).toBe('All 4 lines shown')
+    fireEvent.click(after)
+    expect(screen.getByTestId('answer-detail').dataset.expanded).toBe('true')
+    expect(screen.queryByRole('button', { name: /show less/i })).toBeNull()
+  })
+
+  it('FR-ANS-9 draws no button for text that fits', () => {
+    undo = layout(BOX_PX, BOX_PX)
+    renderApp(<AnswerCard agent={blocked()} prompt={LONG_PLAN} />)
+    expect(screen.queryByTestId('answer-show-all')).toBeNull()
+    expect(screen.getByTestId('answer-detail').dataset.overflow).toBe('none')
+  })
+
+  it('FR-ANS-9 starts the next prompt collapsed', () => {
+    undo = layout(TALL_PX, BOX_PX)
+    const { rerender } = renderApp(<AnswerCard agent={blocked()} prompt={LONG_PLAN} />)
+    fireEvent.click(screen.getByTestId('answer-show-all'))
+    rerender(<AnswerCard agent={blocked()} prompt={{ ...LONG_PLAN, id: 'next-plan', detail: 'one\ntwo' }} />)
+    expect(screen.getByTestId('answer-detail').dataset.expanded).toBeUndefined()
+    expect(screen.getByRole('button', { name: 'Show all 2 lines' })).toBeTruthy()
+  })
+
+  it('FR-ANS-9 says it in Chinese, and names a single wrapped line as one', () => {
+    undo = layout(TALL_PX, BOX_PX)
+    useStore.setState({ lang: 'zh-CN' })
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...PERMISSION, detail: 'x'.repeat(900) }} />)
+    expect(screen.getByTestId('answer-show-all').textContent).toBe('显示整行')
+  })
+})

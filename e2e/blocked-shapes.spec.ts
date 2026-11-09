@@ -57,6 +57,32 @@ test.describe('a plan awaiting approval', () => {
   })
 })
 
+test.describe('the whole plan before its Yes @phone', () => {
+  test('FR-ANS-9 a plan taller than the box says so, and one press shows all of it', async ({ page }) => {
+    await page.goto(`/agent/${AGENT.plan}`)
+    const detail = page.getByTestId('answer-detail')
+    await expect(detail).toBeVisible()
+    await expect
+      .poll(() => detail.evaluate((el) => el.scrollHeight - el.clientHeight))
+      .toBeGreaterThan(1)
+    const showAll = page.getByRole('button', { name: /Show all/ })
+    await expect(showAll).toBeVisible()
+
+    const firstOption = page.getByTestId('answer-option').first()
+    const before = (await firstOption.boundingBox())!.y
+    const scrollBefore = await page.getByTestId('chat-scroll').evaluate((el) => el.scrollTop)
+    await showAll.click()
+
+    await expect
+      .poll(() => detail.evaluate((el) => el.scrollHeight - el.clientHeight))
+      .toBeLessThanOrEqual(1)
+    const scrollAfter = await page.getByTestId('chat-scroll').evaluate((el) => el.scrollTop)
+    const after = (await firstOption.boundingBox())!.y
+    expect(after + (scrollAfter - scrollBefore), 'option 1 moved down, never up').toBeGreaterThan(before)
+    await expect(page.getByTestId('answer-card')).toBeVisible()
+  })
+})
+
 test.describe('a tool awaiting permission', () => {
   test('INV-16 shows what the tool would do, and the drawn choices marked as drawn', async ({
     page,

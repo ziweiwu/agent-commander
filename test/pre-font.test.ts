@@ -65,7 +65,7 @@ function namesAFamily(css: string, className: string): boolean {
 describe('a <pre> names its font family', () => {
   it('finds the pre elements it guards, so an empty sweep cannot pass for a clean one', () => {
     const found = preElements().map(({ file, classes }) => `${file}:${classes.join('+')}`)
-    expect(found).toEqual(expect.arrayContaining(['AnswerCard.tsx:detail', 'AnswerCard.tsx:preview']))
+    expect(found).toEqual(expect.arrayContaining(['AnswerCard.tsx:detail+expanded', 'AnswerCard.tsx:preview']))
   })
 
   it('gives every pre a class whose rule sets the family', () => {

@@ -338,6 +338,44 @@ await page.screenshot({ path: `${OUT}/07-theme-dark-forced.png` })
   await page.close()
 }
 
+/**
+ * FR-ANS-9: a plan or command clipped by its box says so, and one press shows
+ * all of it. Every clipped `answer-detail` needs an `answer-show-all` beside
+ * it, and after the press nothing is clipped.
+ */
+const BLOCKED_WITH_DETAIL = ['mock-plan', 'mock-permission']
+const SETTLE_MS = 300
+const EXPAND_MS = 200
+const clippedDetails = (page) =>
+  page.$$eval(T('answer-detail'), (els) =>
+    els
+      .filter((el) => el.scrollHeight > el.clientHeight + 1)
+      .map((el) => ({
+        marked: [...(el.parentElement?.children ?? [])].some(
+          (c) => c.getAttribute('data-testid') === 'answer-show-all',
+        ),
+      })),
+  )
+async function checkShowAll(page, where) {
+  const clipped = await clippedDetails(page)
+  const unmarked = clipped.filter((c) => !c.marked).length
+  if (unmarked) add('high', 'answer', `${where}: ${unmarked} clipped plan/command with no "Show all"`)
+  if (unmarked || clipped.length === 0) return
+  await page.click(T('answer-show-all'))
+  await page.waitForTimeout(EXPAND_MS)
+  if ((await clippedDetails(page)).length) add('high', 'answer', `${where}: "Show all" left the text clipped`)
+}
+for (const vp of VIEWPORTS) {
+  const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } })
+  for (const id of BLOCKED_WITH_DETAIL) {
+    await page.goto(`${BASE}agent/${id}`, { waitUntil: 'networkidle' })
+    await page.waitForSelector(T('answer-detail'))
+    await page.waitForTimeout(SETTLE_MS)
+    await checkShowAll(page, `${vp.name} ${id}`)
+  }
+  await page.close()
+}
+
 // ---------- responsive ----------
 for (const vp of VIEWPORTS) {
   const page = await browser.newPage({ viewport: { width: vp.width, height: vp.height } })
