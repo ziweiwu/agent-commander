@@ -1,7 +1,8 @@
 /** Pure filtering and grouping for the agent list. */
 import { TERMINAL_KIND, hasTranscripts } from '../../shared/agent-kinds.ts'
-import type { Agent, AgentStatus } from '../../shared/types.ts'
+import type { Agent, AgentStatus, StopCause } from '../../shared/types.ts'
 import { GROUPS, type GroupKey, matches } from './format.ts'
+import { stopOf, stoppedGroup } from './stopped.ts'
 
 export type StatusFilter = 'all' | GroupKey
 
@@ -17,6 +18,11 @@ export interface FleetState {
   dir: SortDir
   /** Which kinds of session the fleet is about: Claude, plain terminals, or both. */
   kinds: KindScope
+  /**
+   * Narrowed to the cards the strip counts, by tapping it. Not persisted, like
+   * the query: it is a one-off look at something happening now.
+   */
+  stopped?: StopCause
 }
 
 /**
@@ -142,11 +148,45 @@ export function countByGroup(agents: Agent[]): Record<GroupKey, number> {
   }
 }
 
-/** Apply the status filter and the free-text query. */
+/**
+ * The cause the strip is narrowing to, while the strip still stands.
+ *
+ * The strip is the only way out of this filter, so the filter ends with it: a
+ * single stopped agent speaking up would otherwise strand the list on a view
+ * with no control to leave it.
+ */
+function stoppedLens(scoped: Agent[], state: FleetState): StopCause | undefined {
+  return stoppedGroup(scoped)?.cause === state.stopped ? state.stopped : undefined
+}
+
+/**
+ * The fleet state with the lens let go once the strip it belongs to is gone.
+ *
+ * Masking it was not enough: a group that re-formed would narrow the list again
+ * with nobody having tapped anything. Same object when nothing ended.
+ */
+export function endingStoppedLens(agents: Agent[], state: FleetState): FleetState {
+  if (state.stopped === undefined || stoppedLens(inScope(agents, state), state)) return state
+  return { ...state, stopped: undefined }
+}
+
+/**
+ * The state the list is drawn and walked from. The strip is hidden while the
+ * socket is down, so its lens stands aside there and returns with the socket.
+ */
+export function listedFleet({ fleet, conn }: { fleet: FleetState; conn: string }): FleetState {
+  return conn === 'open' ? fleet : { ...fleet, stopped: undefined }
+}
+
+/** Apply the status filter, the free-text query and the stopped lens. */
 export function visibleAgents(agents: Agent[], state: FleetState): Agent[] {
-  return inScope(agents, state).filter(
+  const scoped = inScope(agents, state)
+  const lens = stoppedLens(scoped, state)
+  return scoped.filter(
     (a) =>
-      (state.filter === 'all' || IN_GROUP[state.filter].has(a.status)) && matches(a, state.query),
+      (lens === undefined || stopOf(a)?.cause === lens) &&
+      (state.filter === 'all' || IN_GROUP[state.filter].has(a.status)) &&
+      matches(a, state.query),
   )
 }
 

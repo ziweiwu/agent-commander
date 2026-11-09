@@ -1,0 +1,33 @@
+/**
+ * The fleet's one shared stop. Plain words on the panel colours, never the
+ * hand's amber: nothing here is waiting on a reply from the owner.
+ * It wraps, because a phone cannot hold the sentence on one line and cutting
+ * it would cut the part that says what to do.
+ */
+.strip {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 12px;
+  text-align: start;
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.strip:hover {
+  border-color: var(--text);
+}
+/** An active filter is more than a fill (FR-FLEET-9): the edge, and the words it adds. */
+.strip[aria-pressed='true'] {
+  border-color: var(--text);
+  font-weight: var(--weight-strong);
+}
+@media (pointer: coarse) {
+  .strip {
+    min-height: 44px;
+  }
+}

@@ -153,6 +153,10 @@
         "contextSize": 200000,
         "costUsd": 0.41,
         "at": 1786597000000
+      },
+      "stoppedBy": {
+        "cause": "authentication_failed",
+        "at": 1786599040000
       }
     },
     {
@@ -173,7 +177,11 @@
       "tokens": 31900,
       "aiTitle": "Find an alternative markdown editor to Obsidian",
       "lastPrompt": "compare how each one exports to PDF",
-      "derivedName": true
+      "derivedName": true,
+      "stoppedBy": {
+        "cause": "authentication_failed",
+        "at": 1786549600000
+      }
     },
     {
       "sessionId": "mock-idle-db",

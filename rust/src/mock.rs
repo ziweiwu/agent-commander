@@ -25,7 +25,7 @@ use crate::transcript::drawn_choices;
 use crate::types::{
     SessionUsage,
     now_ms, Agent, AgentStatus, AgentTree, GoalState, PendingPrompt, PromptOption, RateLimits,
-    RunningProcess, SincePrompt, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
+    RunningProcess, SincePrompt, StopCause, StoppedBy, SubagentNode, SubagentState, TimelineEvent, TimelineKind, UsageWindow,
     Hunk, Outcome, RefusedBy, Refusals, ToolOutcome, ToolResultView,
 };
 
@@ -471,6 +471,7 @@ fn idle_in_the_home_directory() -> Agent {
         ),
         last_activity_at: Some(START - 960_000),
         tokens: Some(59_800),
+        stopped_by: Some(StoppedBy { cause: StopCause::AuthenticationFailed, at: START - 960_000 }),
         usage: Some(SessionUsage {
             context_pct: Some(18.0),
             context_size: Some(200_000),
@@ -504,6 +505,7 @@ fn idle_under_a_title_it_wrote_itself() -> Agent {
         activity: Some("Done — `~/.zshrc` updated (backup at `~/.zshrc.bak.2026`)".into()),
         last_activity_at: Some(START - 50_400_000),
         tokens: Some(31_900),
+        stopped_by: Some(StoppedBy { cause: StopCause::AuthenticationFailed, at: START - 50_400_000 }),
         pane_id: Some("%73".into()),
         tmux_session: Some("claude-mock-f".into()),
         agent_kind: CLAUDE_KIND.into(),

@@ -210,6 +210,17 @@ the default for an unrecognised kind is deny.
   second card there would aim its controls at the parent.
   *`tmux_source::tests::two_claude_sessions_in_split_panes_of_one_tmux_session_both_appear`,
   `tmux_source::tests::a_nested_claude_sharing_its_parents_pane_is_one_agent`.*
+- **FR-FLEET-13** — An idle card MUST state an API-error stop beside its status,
+  in words: `Stopped · sign-in failed 4m ago`, `limit reached`, `server error`,
+  or `API error` for anything else. The fleet MUST say so once above the list
+  only when two or more cards share one cause and no stopped card has another;
+  mixed causes stay on the cards. Tapping the strip MUST narrow the list to
+  those cards and clear a status filter or query that would hide them; the
+  narrowing MUST end when the strip does, so the list is never left with no way
+  out, and MUST NOT resume by itself if a group re-forms. The strip's reset time MUST come only from a fresh five-hour reading
+  that reads as spent. Neither the marker nor the strip may send anything
+  (INV-2, §1.2). *`test/stopped.test.ts`, `test/ui/stopped-strip.test.tsx`,
+  `e2e/stopped.spec.ts`.*
 
 ### 3.2 The card
 
@@ -1368,7 +1379,7 @@ unverified.
 | INV-8 — control actions guarded and verified | FR-CTL-1, FR-CTL-6, FR-CTL-7, FR-CTL-10 |
 | INV-9 — the browser cannot leave its root | FR-BROWSE-1, FR-BROWSE-2, FR-BROWSE-3 |
 | INV-10 — the bridge cannot break a session | NFR-QUOTA-5 |
-| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-CHAT-17, FR-FLEET-5, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
+| INV-11 — never assert more than you know | FR-STATUS-3, FR-CARD-3, FR-CARD-5, FR-CARD-7, FR-CARD-8, FR-CARD-9, FR-CARD-10, FR-CARD-11, FR-CHAT-15, FR-CHAT-16, FR-CHAT-17, FR-FLEET-5, FR-FLEET-13, FR-PRUNE-2, FR-PRUNE-4, FR-PRUNE-5, FR-QUOTA-3, FR-CTL-3, FR-CTL-10, FR-NOTIFY-6, FR-HON-1, FR-HON-6 |
 | INV-12 — input is bounded | NFR-SEC-15, FR-SPAWN-7 |
 | INV-13 — a tree claims only what the sidecars say | FR-DEL-1, FR-DEL-3 |
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |

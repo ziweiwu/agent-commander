@@ -26,6 +26,7 @@ import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.t
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
 import { followVisit, visitOf } from '../lib/newSince.ts'
 import { refusedAsKeypresses } from './pasteGuard.ts'
+import { endingStoppedLens } from '../lib/filter.ts'
 import { useStore, type ToolResultEntry } from './store.ts'
 
 let socket: WebSocket | null = null
@@ -663,6 +664,7 @@ function handle(msg: ServerMessage): void {
       const fleetAt = Date.now()
       useStore.setState({
         agents: msg.agents,
+        fleet: endingStoppedLens(msg.agents, state.fleet),
         mock: msg.mock,
         fleetAt,
         caughtUp: msg.caughtUp,

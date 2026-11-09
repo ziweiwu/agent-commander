@@ -1529,6 +1529,15 @@ existing tail (INV-4: no new read). Three rules keep it inside what is known:
 - **The prompt is the one `describe` already trusts.** A task notification, an
   SDK send and a compaction summary are machinery; a clock any of them
   restarted would say a two-hour run had just begun.
+- **An API-error stop is stated from the record's own `error` field and clears
+  with the next record.** The record is an assistant one with
+  `isApiErrorMessage`, its `error` read against an allow-list (`other` for
+  anything else, or none); its English is never read. It applies only while it
+  is the last user or assistant record of the agent's own: of nine real error
+  records, eight were followed by a `system` record and none was last in its
+  file, so bookkeeping and a delegate's sidechain neither set nor clear it. The
+  card says *stopped*, never *failed* or *crashed* (INV-13's rule on delegates,
+  applied to the agent itself: a sign-in failed, and the agent stopped).
 - **Counts only, and only its own.** A delegate's calls are its effort, counted
   on its own node (INV-13's precedent); its records in the parent's file
   neither restart the clock nor add to the count. What was said is never

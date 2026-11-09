@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
-import { grouped, unusedAgents, type StatusFilter } from '../lib/filter.ts'
+import { grouped, listedFleet, unusedAgents, type StatusFilter } from '../lib/filter.ts'
 import { displayName } from '../lib/naming.ts'
 import { closeAgentById } from '../store/transport.ts'
 import type { Key } from '../lib/i18n.ts'
@@ -17,6 +17,7 @@ import { Button } from './ui/Button.tsx'
 import { ICON_INLINE, Icon } from './ui/Icon.tsx'
 import { SearchBar } from './SearchBar.tsx'
 import { SortControl } from './SortControl.tsx'
+import { StoppedStrip } from './StoppedStrip.tsx'
 import styles from './FleetList.module.css'
 
 const GROUP_KEY: Record<string, Key> = {
@@ -76,7 +77,8 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const [pruning, setPruning] = useState(false)
   const phone = useLayout() === 'phone'
 
-  const groups = useMemo(() => grouped(agents, fleet), [agents, fleet])
+  const view = useMemo(() => listedFleet({ fleet, conn }), [conn, fleet])
+  const groups = useMemo(() => grouped(agents, view), [agents, view])
   const seenThrough = useStore((s) => s.seenThrough)
   /**
    * The idle sessions that did something since they were last opened in this
@@ -213,6 +215,8 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
         * went stale twenty minutes ago.
         */}
       {conn !== 'open' && agents.length > 0 && <StaleCaption fleetAt={fleetAt} />}
+
+      <StoppedStrip />
 
       <div
         className={styles.list}
