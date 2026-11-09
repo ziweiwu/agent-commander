@@ -511,8 +511,10 @@ Nothing hides: the active chip carries a glyph as well as a fill, so arriving
 at an already-filtered dashboard reads as a filter rather than an empty fleet.
 The search box deliberately does not persist — a one-off lookup coming back on
 a reload with no visible cause is just confusing.
-It finds a folder the way the card draws it, so `~/Pro` works as well as
-`/Users/you/Pro`.
+It searches what the card says: the name, the agent's own title, the
+description and the last prompt, as well as the folder, branch, activity, status
+and kind. It finds a folder the way the card draws it, so `~/Pro` works as well
+as `/Users/you/Pro`.
 
 Sessions Claude Code names for itself look like `ziweiwu-35`, which
 distinguishes nothing when several are running. Where a session was

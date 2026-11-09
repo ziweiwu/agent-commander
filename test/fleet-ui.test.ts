@@ -153,6 +153,38 @@ describe('matches', () => {
     expect(matches({ ...home, cwd: '/home/someone/x' }, '~/x')).toBe(true)
     expect(matches({ ...home, cwd: '/opt/Projects/x' }, '~/Pro')).toBe(false)
   })
+
+  describe('the text the card leads with (FR-FLEET-6)', () => {
+    const unrelated = agent({ sessionId: 'x', name: 'ziweiwu-x', cwd: '/Users/me/demo', folder: 'demo' })
+
+    it('matches the description', () => {
+      expect(matches({ ...unrelated, description: 'migrate billing tables' }, 'billing')).toBe(true)
+    })
+
+    it('matches the title the agent wrote for itself', () => {
+      expect(matches({ ...unrelated, aiTitle: 'Find a markdown editor' }, 'markdown')).toBe(true)
+    })
+
+    it('matches the last prompt, past its first line', () => {
+      expect(matches({ ...unrelated, lastPrompt: 'ok\ncheck the npm numbers' }, 'npm numbers')).toBe(true)
+    })
+
+    it('matches a description as the card draws it, without its markdown', () => {
+      const formatted = { ...unrelated, description: 'fix the `matches` **search** box' }
+      expect(matches(formatted, 'matches search box')).toBe(true)
+    })
+
+    it('still answers no when none of the three holds the word', () => {
+      const described = { ...unrelated, description: 'one', aiTitle: 'two', lastPrompt: 'three' }
+      expect(matches(described, 'billing')).toBe(false)
+    })
+
+    it('leaves the status and kind words matching', () => {
+      const described = { ...unrelated, description: 'migrate billing tables' }
+      expect(matches(described, 'idle')).toBe(true)
+      expect(matches(described, 'claude')).toBe(true)
+    })
+  })
 })
 
 
