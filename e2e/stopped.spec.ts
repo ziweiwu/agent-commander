@@ -6,7 +6,7 @@
 import { expect, test } from '@playwright/test'
 import { AGENT, card, openFleet } from './helpers.ts'
 
-const STRIP_SENTENCE = /^2 agents stopped: sign-in failed since .*\d\d:\d\d\. Sign in again, then message them\./
+const STRIP_SENTENCE = /^2 agents stopped: sign-in failed since .*\d\d:\d\d\. Sign in again, then message them\. Tap to show only these\.$/
 
 test.describe('an agent stopped by an API error', () => {
   test('says so on its idle card, and the fleet says it once', async ({ page }) => {
@@ -37,6 +37,20 @@ test.describe('an agent stopped by an API error', () => {
     await expect(strip).toHaveAttribute('aria-pressed', 'true')
     await strip.click()
     await expect(page.getByTestId('agent-card')).toHaveCount(before)
+  })
+
+  test('keeps its full height beside an open agent on a laptop @desktop', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await openFleet(page)
+    await card(page, AGENT.busy).click()
+    await expect(page.getByTestId('agent-detail')).toBeVisible()
+    const strip = page.getByTestId('stopped-strip')
+    await expect(strip).toBeVisible()
+    const fit = await strip.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }))
+    expect(fit.scroll).toBeLessThanOrEqual(fit.client)
+    const box = await strip.boundingBox()
+    const heading = await page.getByTestId('group-title').first().boundingBox()
+    expect(box!.y + box!.height).toBeLessThanOrEqual(heading!.y + 1)
   })
 
   test('offers no way to act on the agents: the strip is one button, and it filters', async ({ page }) => {
