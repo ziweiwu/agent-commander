@@ -26,7 +26,7 @@ import {
   type ChatMessage,
   type Outcomes,
 } from '../lib/chat.ts'
-import type { FleetState, KindScope, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
+import { endingStoppedLens, type FleetState, type KindScope, type SortDir, type SortKey, type StatusFilter } from '../lib/filter.ts'
 import type { StopCause } from '../../shared/types.ts'
 import type { SeenThrough, Visit } from '../lib/newSince.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
@@ -560,7 +560,7 @@ export const useStore = create<AppState>()((set, get) => ({
     })),
   setKinds: (kinds) => {
     saveKinds(kinds)
-    set((s) => ({ fleet: { ...s.fleet, kinds } }))
+    set((s) => ({ fleet: endingStoppedLens(s.agents, { ...s.fleet, kinds }) }))
   },
   setFilter: (filter) => {
     saveFilter(filter)

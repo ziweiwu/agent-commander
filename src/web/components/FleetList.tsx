@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
-import { grouped, unusedAgents, type StatusFilter } from '../lib/filter.ts'
+import { grouped, listedFleet, unusedAgents, type StatusFilter } from '../lib/filter.ts'
 import { displayName } from '../lib/naming.ts'
 import { closeAgentById } from '../store/transport.ts'
 import type { Key } from '../lib/i18n.ts'
@@ -77,8 +77,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
   const [pruning, setPruning] = useState(false)
   const phone = useLayout() === 'phone'
 
-  /** The strip is hidden while the socket is down, so its filter must not outlive it there. */
-  const view = useMemo(() => (conn === 'open' ? fleet : { ...fleet, stopped: undefined }), [conn, fleet])
+  const view = useMemo(() => listedFleet({ fleet, conn }), [conn, fleet])
   const groups = useMemo(() => grouped(agents, view), [agents, view])
   const seenThrough = useStore((s) => s.seenThrough)
   /**

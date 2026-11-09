@@ -484,3 +484,47 @@ describe('R5 the chip, the hand-off and ⌥H name one "next"', () => {
     expect(visited).toEqual(['/agent/w2', '/agent/w3', '/agent/w1', '/agent/w2'])
   })
 })
+
+describe('C1 the strip\'s narrowing', () => {
+  const stop = { cause: 'authentication_failed' as const, at: NOW - 4 * MINUTE }
+  const ALPHA = agent({ sessionId: 'a', name: 'alpha', status: 'idle', paneId: '%5', stoppedBy: stop, lastActivityAt: NOW - MINUTE })
+  const BETA = agent({ sessionId: 'b', name: 'beta', status: 'idle', paneId: '%6', stoppedBy: stop, lastActivityAt: NOW - 2 * MINUTE })
+  const STOPPED_FLEET = [ALPHA, BETA, W1]
+  const listText = (): string => screen.getByTestId('fleet-list').textContent ?? ''
+
+  it('ends with the strip, and does not come back when the same group re-forms', () => {
+    const ws = liveFleet(STOPPED_FLEET)
+    shell('/')
+    fireEvent.click(screen.getByTestId('stopped-strip'))
+    expect(listText()).not.toContain('first-blocked')
+
+    const { stoppedBy: _gone, ...spokenTo } = ALPHA
+    act(() => ws.deliver({ type: 'fleet', agents: [{ ...spokenTo, status: 'busy' }, BETA, W1], mock: false }))
+    expect(screen.queryByTestId('stopped-strip')).toBeNull()
+
+    act(() => ws.deliver({ type: 'fleet', agents: STOPPED_FLEET, mock: false }))
+    expect(screen.getByTestId('stopped-strip').getAttribute('aria-pressed')).toBe('false')
+    expect(listText()).toContain('first-blocked')
+  })
+
+  it('ends when the scope leaves the group behind', () => {
+    liveFleet(STOPPED_FLEET)
+    shell('/')
+    fireEvent.click(screen.getByTestId('stopped-strip'))
+    act(() => useStore.getState().setKinds('terminals'))
+    act(() => useStore.getState().setKinds('claude'))
+    expect(useStore.getState().fleet.stopped).toBeUndefined()
+  })
+
+  it('stands aside while the socket is down, for the list and for ⌥J alike', () => {
+    const ws = liveFleet(STOPPED_FLEET)
+    shell('/agent/b')
+    fireEvent.click(screen.getByTestId('stopped-strip'))
+    expect(listText()).not.toContain('first-blocked')
+
+    act(() => ws.close())
+    expect(listText()).toContain('first-blocked')
+    chord(document.body, 'KeyJ')
+    expect(where.path).toBe('/agent/w1')
+  })
+})

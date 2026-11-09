@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { focusAgent } from '../store/transport.ts'
+import { listedFleet } from '../lib/filter.ts'
 import { agentPath, listNeighbour, nextUp, type AgentTab } from '../lib/hop.ts'
 import { useTranslate } from './useTranslate.ts'
 
@@ -91,7 +92,7 @@ export function useHopKeys(): void {
         return
       }
       const step = chord === 'next' ? 1 : -1
-      const target = listNeighbour(state.agents, state.fleet, state.selected, step)
+      const target = listNeighbour(state.agents, listedFleet(state), state.selected, step)
       if (target) hop(target.sessionId, state.selected ? state.tab : 'chat')
     }
     document.addEventListener('keydown', onKey)

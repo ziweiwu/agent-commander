@@ -217,7 +217,7 @@ the default for an unrecognised kind is deny.
   mixed causes stay on the cards. Tapping the strip MUST narrow the list to
   those cards and clear a status filter or query that would hide them; the
   narrowing MUST end when the strip does, so the list is never left with no way
-  out. The strip's reset time MUST come only from a fresh five-hour reading
+  out, and MUST NOT resume by itself if a group re-forms. The strip's reset time MUST come only from a fresh five-hour reading
   that reads as spent. Neither the marker nor the strip may send anything
   (INV-2, §1.2). *`test/stopped.test.ts`, `test/ui/stopped-strip.test.tsx`,
   `e2e/stopped.spec.ts`.*

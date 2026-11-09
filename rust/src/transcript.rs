@@ -2014,9 +2014,13 @@ impl TranscriptTail {
         // silence is exactly what a delegated run looks like from here.
         if size == self.offset {
             let (prompt, prompt_changed) = self.report_prompt();
+            let mut patch = self.delegation().await;
+            if first {
+                patch.stopped_by = Some(self.stopped_by);
+            }
             return TailRead {
                 events: Vec::new(),
-                patch: self.delegation().await,
+                patch,
                 first,
                 prompt,
                 prompt_changed,
@@ -4590,6 +4594,18 @@ mod tests {
         assert!(tail.read_next().await.patch.stopped_by.flatten().is_some());
         fs::write(&path, format!("{}\n", turn_duration())).unwrap();
         assert_eq!(tail.read_next().await.patch.stopped_by, Some(None), "a replaced file holds no stop");
+    }
+
+    /// INV-11: a transcript emptied in place holds no stop either, and an empty
+    /// file reaches the read that returns before any batch is parsed.
+    #[tokio::test]
+    async fn inv11_a_transcript_truncated_to_nothing_drops_the_stop() {
+        let (root, path) = projects();
+        append(&path, format!("{}\n", api_error(json!("rate_limit"))).as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        assert!(tail.read_next().await.patch.stopped_by.flatten().is_some());
+        fs::write(&path, "").unwrap();
+        assert_eq!(tail.read_next().await.patch.stopped_by, Some(None), "an emptied file holds no stop");
     }
 }
 
