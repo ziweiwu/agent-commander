@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import type { Agent, PendingPrompt } from '../../shared/types.ts'
+import type { Agent, PendingPrompt, PromptOption } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
 import { answerPrompt, sendConfirmedKey, sendKey } from '../store/transport.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
@@ -102,6 +102,53 @@ function detailLabel(tool: string): 'answerPlan' | 'answerCommand' | 'answerAbou
   return 'answerAbout'
 }
 
+/** A detail longer than this names the options by its label alone, or a plan is read in full on every focus. */
+const NAMED_DETAIL_MAX = 200
+
+/** The ids one card's parts are referred to by, unique per card so two cards on a page cannot borrow each other's words. */
+function answerIds(base: string) {
+  return {
+    header: `${base}header`,
+    question: `${base}question`,
+    label: `${base}label`,
+    detail: `${base}detail`,
+    drawn: `${base}drawn`,
+    multi: `${base}multi`,
+    description: (index: number) => `${base}description-${index}`,
+    preview: (index: number) => `${base}preview-${index}`,
+  }
+}
+type AnswerIds = ReturnType<typeof answerIds>
+
+/**
+ * What names the options as a group (FR-ANS-10): the dialog's title, its
+ * question, and what is being approved — the command or plan itself when it
+ * is short, its label when it is not.
+ */
+function groupLabelledBy(prompt: PendingPrompt | null, ids: AnswerIds): string | undefined {
+  const parts: string[] = []
+  if (prompt?.header !== undefined) parts.push(ids.header)
+  if (prompt?.question !== undefined) parts.push(ids.question)
+  if (prompt?.detail !== undefined) parts.push(ids.label)
+  if (prompt?.detail !== undefined && prompt.detail.length <= NAMED_DETAIL_MAX) parts.push(ids.detail)
+  return parts.length > 0 ? parts.join(' ') : undefined
+}
+
+/**
+ * What an option is read with after its name. Its `aria-label` keeps the
+ * `Answer` prefix and replaces its content, so its description and worked
+ * example are joined here, ahead of the card's caveat about what a press
+ * means.
+ */
+function optionDescribedBy(option: PromptOption, index: number, ids: AnswerIds, note: string | undefined) {
+  const parts = [
+    option.description !== undefined ? ids.description(index) : undefined,
+    option.preview !== undefined ? ids.preview(index) : undefined,
+    note,
+  ].filter((id) => id !== undefined)
+  return parts.length > 0 ? parts.join(' ') : undefined
+}
+
 /** Lines as the reader counts them: a trailing newline is not one more. */
 function lineCount(text: string): number {
   return text.trimEnd().split('\n').length
@@ -132,9 +179,9 @@ const SHOWN_ALL = { one: 'answerShownAllOne', many: 'answerShownAll' } as const
  * nothing and moves no focus; the parent keys this on the prompt, so the next
  * one starts collapsed.
  */
-function AnswerDetail({ label, text }: { label: string; text: string }) {
+function AnswerDetail({ label, text, ids }: { label: string; text: string; ids: AnswerIds }) {
   const t = useTranslate()
-  const id = useId()
+  const id = ids.detail
   const [ref, edge] = useOverflowEdge<HTMLPreElement>()
   const [clipped, setClipped] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -144,7 +191,9 @@ function AnswerDetail({ label, text }: { label: string; text: string }) {
   const lines = lineCount(text)
   return (
     <>
-      <p className={styles.label}>{label}</p>
+      <p className={styles.label} id={ids.label} data-testid="answer-detail-label">
+        {label}
+      </p>
       <pre
         ref={ref}
         id={id}
@@ -181,6 +230,7 @@ export interface AnswerCardProps {
 
 export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
   const t = useTranslate()
+  const ids = answerIds(useId())
   const showToast = useStore((s) => s.showToast)
   /*
    * With the socket down `answerPrompt` sends nothing, and this card used to
@@ -282,6 +332,9 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
    * stated in full needs no second opinion.
    */
   const peek = agent.paneId !== undefined && (drawn || multi || inSet || !answerable)
+  /** The card's own caveat about what pressing an option means, read after each option's words. */
+  const note = drawn ? ids.drawn : multi ? ids.multi : undefined
+  const labelledBy = groupLabelledBy(prompt, ids)
 
   /*
    * Sends the *choice*, not the keystroke. The server holds the prompt's id and
@@ -343,7 +396,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
         * before the question itself has been read.
         */}
       {prompt?.header !== undefined && (
-        <p className={styles.header} data-testid="answer-header">
+        <p className={styles.header} id={ids.header} data-testid="answer-header">
           {prompt.header}
         </p>
       )}
@@ -358,7 +411,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
       )}
 
       {prompt?.question !== undefined && (
-        <p className={styles.question} data-testid="answer-question" tabIndex={-1}>
+        <p className={styles.question} id={ids.question} data-testid="answer-question" tabIndex={-1}>
           {prompt.question}
         </p>
       )}
@@ -368,6 +421,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
           key={[prompt.id, prompt.tool, prompt.detail].join('\n')}
           label={t(detailLabel(prompt.tool))}
           text={prompt.detail}
+          ids={ids}
         />
       )}
 
@@ -390,7 +444,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
       {answerable && drawn && (
         <p
           className={styles.drawnNote}
-          id="answer-drawn-note"
+          id={ids.drawn}
           data-testid="answer-drawn"
           data-read={read || undefined}
         >
@@ -404,13 +458,20 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
         * one: each ticks a row and nothing is submitted until Enter.
         */}
       {answerable && multi && (
-        <p className={styles.drawnNote} id="answer-multi-note" data-testid="answer-multi">
+        <p className={styles.drawnNote} id={ids.multi} data-testid="answer-multi">
           {t('answerMultiSelect')}
         </p>
       )}
 
       {answerable ? (
-        <div className={styles.options} data-testid="answer-options" data-drawn={drawn || undefined}>
+        <div
+          className={styles.options}
+          role="group"
+          aria-labelledby={labelledBy}
+          aria-label={labelledBy === undefined ? t('answerGroup') : undefined}
+          data-testid="answer-options"
+          data-drawn={drawn || undefined}
+        >
           {options.map((option, index) => (
             <Button
               key={option.label}
@@ -419,9 +480,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
               disabled={disabled}
               title={option.description ?? option.label}
               aria-label={t(multi ? 'answerToggle' : 'answerOption', { label: option.label })}
-              aria-describedby={
-                drawn ? 'answer-drawn-note' : multi ? 'answer-multi-note' : undefined
-              }
+              aria-describedby={optionDescribedBy(option, index, ids, note)}
               /*
                * The number is what is sent, and showing it is not decoration:
                * it is the same key the terminal is offering, so the two
@@ -435,7 +494,9 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
               </span>
               <span className={styles.optionLabel}>{option.label}</span>
               {option.description !== undefined && (
-                <span className={styles.description}>{option.description}</span>
+                <span className={styles.description} id={ids.description(index)}>
+                  {option.description}
+                </span>
               )}
               {/*
                 * The option's worked example — a folder tree, a rendered
@@ -447,7 +508,7 @@ export function AnswerCard({ agent, prompt, onAnswered }: AnswerCardProps) {
                 * out in columns or lines that mean something.
                 */}
               {option.preview !== undefined && (
-                <pre className={styles.preview} data-testid="answer-preview">
+                <pre className={styles.preview} id={ids.preview(index)} data-testid="answer-preview">
                   {option.preview}
                 </pre>
               )}

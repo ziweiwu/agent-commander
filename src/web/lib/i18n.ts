@@ -212,6 +212,7 @@ const EN = {
   answerShowAllOne: 'Show the whole line',
   answerShownAll: 'All {count} lines shown',
   answerShownAllOne: 'The whole line is shown',
+  answerGroup: 'Question from the agent',
   uptimePrefix: 'up',
   /* chat */
   you: 'You',
@@ -751,6 +752,7 @@ const ZH: Record<Key, string> = {
   answerShowAllOne: '显示整行',
   answerShownAll: '已显示全部 {count} 行',
   answerShownAllOne: '已显示整行',
+  answerGroup: '代理的提问',
   uptimePrefix: '已运行',
   you: '你',
   agent: '代理',

@@ -334,6 +334,12 @@ and for 600ms after a question (or a set's next question) appears its buttons
 ignore presses without saying so. The replies in the **⋯** menu behave the
 same way after it opens.
 
+**A screen reader hears what a button answers.** The options are a group
+named by the dialog's title and question, or by the command or plan being
+approved (its label alone when it is long, so a plan is not read out on every
+focus). Each option is still announced as *Answer Yes*, followed by its own
+description and worked example and then the note that the labels are drawn.
+
 ### On a phone
 
 The layout is built for actually using this from Tailscale on a phone, not just

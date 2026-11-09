@@ -197,7 +197,7 @@ describe('INV-16 the card names only what the transcript named', () => {
     ])
     expect(screen.getByTestId('answer-drawn').textContent).toMatch(/how Claude Code draws/)
     expect(screen.getByTestId('answer-options').getAttribute('data-drawn')).toBe('true')
-    expect(options[0]?.getAttribute('aria-describedby')).toBe('answer-drawn-note')
+    expect(options[0]?.getAttribute('aria-describedby')?.split(' ')).toContain(screen.getByTestId('answer-drawn').id)
     expect(screen.getByTestId('answer-peek')).toBeTruthy()
     expect(screen.getByTestId('pane-peek')).toBeTruthy()
     // What *is* known is still shown: the plan being approved.
@@ -1039,5 +1039,62 @@ describe('FR-ANS-9 the whole plan or command before its Yes', () => {
     useStore.setState({ lang: 'zh-CN' })
     renderApp(<AnswerCard agent={blocked()} prompt={{ ...PERMISSION, detail: 'x'.repeat(900) }} />)
     expect(screen.getByTestId('answer-show-all').textContent).toBe('显示整行')
+  })
+})
+
+/**
+ * Focus lands on `Answer Yes`, and nothing tied that button to
+ * `rm -rf dist && npm run build`: the options were a bare div, and each
+ * button's `aria-label` replaced its own description and worked example.
+ * Markup only — where focus lands and the arrival guards are unchanged.
+ */
+describe('FR-ANS-10 the options are named by what they answer', () => {
+  it('FR-ANS-10 names a permission’s options by the command they would release', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...PERMISSION, detail: 'rm -rf dist && npm run build' }} />)
+    const group = screen.getByRole('group', { name: /rm -rf dist && npm run build/ })
+    expect(group.dataset.testid).toBe('answer-options')
+    expect(screen.getByRole('group', { name: /The command it would run/ })).toBe(group)
+  })
+
+  it('FR-ANS-10 names a question’s options by the question, and its title', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...QUESTION, header: 'Migration' }} />)
+    expect(screen.getByRole('group', { name: 'Migration Which migration should run first?' })).toBeTruthy()
+  })
+
+  it('FR-ANS-10 names a long plan by its label, so the plan is not read on every focus', () => {
+    const plan = `## Plan\n${'1. A step that says a great deal about itself\n'.repeat(8)}`
+    renderApp(<AnswerCard agent={blocked()} prompt={{ ...PLAN, detail: plan }} />)
+    const group = screen.getByTestId('answer-options')
+    expect(screen.getByRole('group', { name: 'The plan under review' })).toBe(group)
+  })
+
+  it('FR-ANS-10 gives an option its description and worked example to read after its name', () => {
+    const withPreview: PendingPrompt = {
+      ...QUESTION,
+      options: [
+        { label: 'Backfill', description: 'Slower', preview: 't0 starts\nt1 caught up' },
+        { label: 'Swap', description: 'Faster' },
+      ],
+    }
+    renderApp(<AnswerCard agent={blocked()} prompt={withPreview} />)
+    expect(screen.getByRole('button', { name: 'Answer Backfill', description: /Slower.*t0 starts/s })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Answer Swap', description: 'Faster' })).toBeTruthy()
+  })
+
+  it('FR-ANS-10 keeps the drawn caveat beside the option’s own words', () => {
+    renderApp(<AnswerCard agent={blocked()} prompt={PERMISSION} />)
+    const yes = screen.getByRole('button', { name: 'Answer Yes', description: /Allow this once.*how Claude Code draws/s })
+    expect(yes).toBe(screen.getAllByTestId('answer-option')[0])
+  })
+
+  it('FR-ANS-10 gives two cards on one page ids of their own', () => {
+    renderApp(
+      <>
+        <AnswerCard agent={blocked()} prompt={PERMISSION} />
+        <AnswerCard agent={blocked()} prompt={PLAN} />
+      </>,
+    )
+    const ids = [...document.querySelectorAll('[data-testid="answer-card"] [id]')].map((el) => el.id)
+    expect(new Set(ids).size).toBe(ids.length)
   })
 })

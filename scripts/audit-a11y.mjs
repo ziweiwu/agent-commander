@@ -199,6 +199,49 @@ for (const [profile, options] of [
   }
 }
 
+/**
+ * 4.1.2 / 1.3.1 — FR-ANS-10: the options of an answer card are a group named
+ * by what they answer (its question, or the label of its plan or command), and
+ * an option's worked example reaches its description. Read from Chromium's own
+ * accessibility tree, not recomputed here.
+ */
+const BLOCKED_FIXTURES = ['mock-waiting', 'mock-plan', 'mock-permission']
+async function axNode(page, selector) {
+  const cdp = await page.context().newCDPSession(page)
+  const { root } = await cdp.send('DOM.getDocument', { depth: 0 })
+  const { nodeId } = await cdp.send('DOM.querySelector', { nodeId: root.nodeId, selector })
+  if (!nodeId) return null
+  const { nodes } = await cdp.send('Accessibility.getPartialAXTree', { nodeId, fetchRelatives: false })
+  const node = nodes[0]
+  return { role: node?.role?.value ?? '', name: node?.name?.value ?? '', description: node?.description?.value ?? '' }
+}
+async function auditAnswerGroup(page, id) {
+  await page.goto(`${BASE}agent/${id}`, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('answer-options'))
+  const expected = await page.evaluate(() => {
+    const card = document.querySelector('[data-testid="answer-card"]')
+    const question = card?.querySelector('[data-testid="answer-question"]')?.textContent?.trim()
+    const label = card?.querySelector('[data-testid="answer-detail-label"]')?.textContent?.trim()
+    return question || label || ''
+  })
+  const group = await axNode(page, T('answer-options'))
+  if (group?.role !== 'group' || !expected || !group.name.includes(expected)) {
+    add('4.1.2', 'P1', `${id}: answer options are not a group named by "${expected}" (role ${group?.role}, name "${group?.name}")`)
+  }
+  const preview = await page.$eval(T('answer-preview'), (el) => el.textContent?.trim().split('\n')[0] ?? '').catch(() => null)
+  if (preview === null) return
+  const withPreview = await axNode(page, `${T('answer-option')}:has(${T('answer-preview')})`)
+  if (!withPreview?.description.includes(preview)) {
+    add('1.3.1', 'P1', `${id}: an option's worked example is not in its accessible description`)
+  }
+}
+{
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  for (const id of BLOCKED_FIXTURES) await auditAnswerGroup(page, id)
+  await context.close()
+}
+
 await browser.close()
 
 const order = { P0: 0, P1: 1, P2: 2 }
