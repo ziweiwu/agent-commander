@@ -125,6 +125,19 @@ shows no clock and says `at least 214 calls in what was read`; when no prompt
 was read at all, the card keeps the ordinary age. On a narrow card it shortens
 to `47m · 214 calls` (or `≥214 calls`), with the whole sentence on hover.
 
+An idle agent that **stopped on an API error** says why next to its status:
+`Stopped · sign-in failed 4m ago`, `Stopped · limit reached`, `Stopped · server
+error`, or `Stopped · API error` for anything else. It comes from the `error`
+field of the transcript's own error record, never its English, and only while
+that is the last thing said to or by the agent; a later message of either kind
+clears it. When two or more agents share one cause, and no stopped agent has
+another, a single line sits above the list: `3 agents stopped: sign-in failed
+since 11:18. Sign in again, then message them.` Tap it to narrow the list to
+those agents and tap it again to see them all. A limit quotes the reset time
+only while the five-hour meter is fresh and spent. Neither the line nor the
+marker sends anything: the app does not retry, and messaging an agent stays
+yours. Mixed causes draw no line; each card still says its own.
+
 ### Delegates
 
 Every card carries a line about what the agent handed out — `4 delegates ·

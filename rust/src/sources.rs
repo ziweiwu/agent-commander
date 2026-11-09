@@ -77,6 +77,9 @@ pub struct AgentPatch {
     /// `Some(None)` clears it: a transcript that was replaced and holds no
     /// prompt has nothing left to count from (INV-11).
     pub since_prompt: Option<Option<crate::types::SincePrompt>>,
+    /// `Some(None)` clears it: the agent was spoken to, or answered, after the
+    /// error record, so the error no longer says why it is idle (INV-11).
+    pub stopped_by: Option<Option<crate::types::StoppedBy>>,
 }
 
 impl AgentPatch {
@@ -101,6 +104,7 @@ impl AgentPatch {
             && self.usage.is_none()
             && self.refusals.is_none()
             && self.since_prompt.is_none()
+            && self.stopped_by.is_none()
     }
 
     /// Apply this patch onto an agent in place.
@@ -123,6 +127,7 @@ impl AgentPatch {
         if let Some(v) = &self.usage { agent.usage = Some(v.clone()) }
         if let Some(v) = self.refusals { agent.refusals = Some(v) }
         if let Some(v) = self.since_prompt { agent.since_prompt = v }
+        if let Some(v) = self.stopped_by { agent.stopped_by = v }
         if let Some(v) = &self.cwd {
             agent.cwd = v.clone();
             // Keep the precomputed basename in step with the path it describes.

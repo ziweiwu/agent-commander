@@ -397,6 +397,7 @@ fn card_fields(patch: AgentPatch) -> AgentPatch {
         running: None,
         usage: None,
         since_prompt: patch.since_prompt,
+        stopped_by: patch.stopped_by,
     }
 }
 
@@ -427,6 +428,9 @@ fn differs(agent: &Agent, patch: &AgentPatch) -> bool {
         return true;
     }
     if matches!(patch.since_prompt, Some(v) if agent.since_prompt != v) {
+        return true;
+    }
+    if matches!(patch.stopped_by, Some(v) if agent.stopped_by != v) {
         return true;
     }
     if matches!(patch.last_activity_at, Some(v) if agent.last_activity_at != Some(v))

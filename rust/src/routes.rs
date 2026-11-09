@@ -2808,8 +2808,11 @@ async fn pump_timeline(
 /// the map without a broadcast, each enricher pass found it changed and put
 /// its figure back with one, and any fleet frame in between carried this
 /// tail's, so the card switched between the two while it sat open. The open
-/// agent's counts move at the enricher's pace, like every other card's.
+/// agent's counts move at the enricher's pace, like every other card's. So
+/// does its API-error stop: this later backfill can hold no conversation
+/// record at all, where the enricher's has read the error.
 fn leave_window_counts_to_the_enricher(patch: &mut crate::sources::AgentPatch) {
+    patch.stopped_by = None;
     patch.since_prompt = None;
     patch.refusals = None;
     patch.tokens = None;
@@ -7180,6 +7183,7 @@ mod tests {
                 tokens: Some(4_096),
                 subagents: Some(1),
                 since_prompt: Some(Some(crate::types::SincePrompt { at: None, calls: 3 })),
+                stopped_by: Some(None),
                 ..Default::default()
             };
             Ok(TailRead { patch, first: true, ..Default::default() })
@@ -7205,6 +7209,7 @@ mod tests {
         assert_eq!(patch.tokens, None);
         assert_eq!(patch.subagents, None);
         assert_eq!(patch.since_prompt, None);
+        assert_eq!(patch.stopped_by, None);
     }
 
     /// INV-3: a pair with no `=` is someone else's cookie, not the end of the

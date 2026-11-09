@@ -69,6 +69,11 @@ a laptop or from a phone.
   device clears the mark on every device, and the conversation draws a line
   where the new part begins. It never says "unread": you may have followed it
   in the terminal, and all the app knows is what it showed you.
+- **Stopped by an API error, said once.** An idle agent whose last turn the
+  API refused says why beside its status (`Stopped · sign-in failed 4m ago`),
+  and the fleet says it in one line above the list when two or more agents
+  stopped for the same reason. It clears on the agent's next message; the app
+  never sends one.
 - **Works on a phone** over Tailscale, and keeps working when the network does
   not: a sleeping phone's socket is noticed and replaced rather than left
   looking live, and the conversation says it is loading rather than claiming the

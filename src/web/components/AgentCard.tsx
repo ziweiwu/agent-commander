@@ -12,6 +12,7 @@ import {
   usd,
 } from '../lib/format.ts'
 import { plainText } from '../lib/chat.ts'
+import { STOP_CAUSE_KEY, stopOf } from '../lib/stopped.ts'
 import { claimOf, isStallCandidate, type DelegationClaim } from '../lib/delegation.ts'
 import { trailOf } from '../lib/trail.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
@@ -179,6 +180,13 @@ export const AgentCard = memo(function AgentCard({
    * `CONTEXT_WARN_PCT`, where "about to compact" is something a fleet-wide
    * glance wants — below that it is a fact a reader asks for, so it folds.
    */
+  const stop = stopOf(agent)
+  const stoppedLine = stop
+    ? t('stoppedMarker', {
+        cause: t(STOP_CAUSE_KEY[stop.cause]),
+        when: formatRelative(lang, relative(stop.at)),
+      })
+    : ''
   const contextPct = agent.usage?.contextPct
   const contextRounded = contextPct === undefined ? undefined : Math.round(contextPct)
   const contextHot = contextRounded !== undefined && contextRounded >= CONTEXT_WARN_PCT
@@ -268,7 +276,9 @@ export const AgentCard = memo(function AgentCard({
          * own words on the end. Every one of those facts is worth having and
          * none of them is worth hearing in that order before the name.
          */
-        aria-label={`${displayName(agent)} — ${statusText(agent)} — ${tildePath(agent.cwd)}`}
+        aria-label={[displayName(agent), statusText(agent), stoppedLine, tildePath(agent.cwd)]
+          .filter(Boolean)
+          .join(' — ')}
         onClick={() => onSelect(agent.sessionId)}
       >
         {/*
@@ -380,6 +390,12 @@ export const AgentCard = memo(function AgentCard({
             >
               {statusText(agent)}
             </span>
+
+            {stop && (
+              <span className={styles.stopped} data-testid="agent-stopped" data-cause={stop.cause}>
+                {stoppedLine}
+              </span>
+            )}
 
             {agent.activity ? (
               <span className={styles.activity} data-testid="agent-activity" title={agent.activity}>

@@ -102,7 +102,13 @@ refusals?: Refusals,
  * a request that has just begun. Absent when the tail has read no prompt
  * and read the whole file, so there is nothing to count from (INV-11).
  */
-sincePrompt?: SincePrompt, };
+sincePrompt?: SincePrompt, 
+/**
+ * The API refused this agent's last turn, and nothing has been said to it
+ * since (INV-11). Read from the record's own `error` field, never its
+ * words, and gone with the next user or assistant record.
+ */
+stoppedBy?: StoppedBy, };
 
 export type AgentStatus = "busy" | "idle" | "waiting" | "unknown";
 
@@ -451,6 +457,17 @@ export type SessionUsage = { contextPct?: number, contextSize?: number, costUsd?
  * rather than a count (INV-11). Counts only, never what was said.
  */
 export type SincePrompt = { at?: number, calls: number, };
+
+/**
+ * Which refusal stopped an agent: the `error` Claude Code writes on the
+ * record, with anything outside this list read as `Other`.
+ */
+export type StopCause = "authentication_failed" | "rate_limit" | "server_error" | "billing_error" | "invalid_request" | "other";
+
+/**
+ * Why an agent stopped, and when the record saying so was written.
+ */
+export type StoppedBy = { cause: StopCause, at: number, };
 
 /**
  * One delegate in an agent's tree, and everything below it.

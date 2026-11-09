@@ -217,6 +217,19 @@
   font-style: italic;
 }
 
+/**
+ * Why an idle agent stopped. Words, in the plain text colour: it is news on a
+ * card the eye reads past, and amber belongs to the hand.
+ */
+.stopped {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text);
+  font-weight: var(--weight-strong);
+}
+
 .status[data-status='busy'] {
   color: var(--busy);
 }

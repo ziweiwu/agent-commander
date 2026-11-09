@@ -133,6 +133,34 @@ pub struct Agent {
     /// and read the whole file, so there is nothing to count from (INV-11).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub since_prompt: Option<SincePrompt>,
+    /// The API refused this agent's last turn, and nothing has been said to it
+    /// since (INV-11). Read from the record's own `error` field, never its
+    /// words, and gone with the next user or assistant record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopped_by: Option<StoppedBy>,
+}
+
+/// Which refusal stopped an agent: the `error` Claude Code writes on the
+/// record, with anything outside this list read as `Other`.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopCause {
+    AuthenticationFailed,
+    RateLimit,
+    ServerError,
+    BillingError,
+    InvalidRequest,
+    Other,
+}
+
+/// Why an agent stopped, and when the record saying so was written.
+#[cfg_attr(test, derive(ts_rs::TS), ts(export_to = "wire.ts"))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoppedBy {
+    pub cause: StopCause,
+    pub at: i64,
 }
 
 /// Auto mode's refusals in the window of a transcript that was read.

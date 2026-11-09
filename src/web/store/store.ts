@@ -27,6 +27,7 @@ import {
   type Outcomes,
 } from '../lib/chat.ts'
 import type { FleetState, KindScope, SortDir, SortKey, StatusFilter } from '../lib/filter.ts'
+import type { StopCause } from '../../shared/types.ts'
 import type { SeenThrough, Visit } from '../lib/newSince.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
@@ -344,6 +345,8 @@ export interface AppState {
   setScheme: (scheme: Scheme) => void
   setLang: (lang: Lang) => void
   setQuery: (query: string) => void
+  /** Narrow the fleet to the cards the strip counts, or stop narrowing it. */
+  setStopped: (stopped: StopCause | undefined) => void
   setFilter: (filter: StatusFilter) => void
   setKinds: (scope: KindScope) => void
   setSort: (sort: SortKey) => void
@@ -551,6 +554,10 @@ export const useStore = create<AppState>()((set, get) => ({
   },
 
   setQuery: (query) => set((s) => ({ fleet: { ...s.fleet, query } })),
+  setStopped: (stopped) =>
+    set((s) => ({
+      fleet: stopped ? { ...s.fleet, stopped, filter: 'all', query: '' } : { ...s.fleet, stopped },
+    })),
   setKinds: (kinds) => {
     saveKinds(kinds)
     set((s) => ({ fleet: { ...s.fleet, kinds } }))

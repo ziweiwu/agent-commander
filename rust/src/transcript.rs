@@ -23,7 +23,8 @@ use crate::describe::{prompt_origin, PromptOrigin};
 use crate::sources::{AgentPatch, TailApi, TailRead};
 use crate::types::{
     now_ms, Agent, GoalState, NoticeKind, Outcome, PendingPrompt, PromptOption, Question, Refusals,
-    RefusedBy, SincePrompt, TimelineEvent, TimelineKind, ToolOutcome, ToolResultView,
+    RefusedBy, SincePrompt, StopCause, StoppedBy, TimelineEvent, TimelineKind, ToolOutcome,
+    ToolResultView,
 };
 
 /// On first read, at least this much of the transcript is loaded...
@@ -1227,6 +1228,9 @@ impl Batch<'_> {
             self.read_session_state(rec);
             return;
         }
+        if let Some(stop) = stop_told_by(rec, kind) {
+            self.out.patch.stopped_by = Some(stop);
+        }
         // Attachments carry no timeline meaning, but this one carries session
         // state: the goal the session is working towards. Last write wins, the
         // same way permission mode does.
@@ -1612,6 +1616,34 @@ fn is_a_person_prompting_this_agent(rec: &Value, kind: &str) -> bool {
         && crate::describe::is_typed_by_a_person(rec)
 }
 
+/// What this record says about why the agent is idle, if it says anything.
+///
+/// Only the agent's own user and assistant records speak: the `system` and
+/// `last-prompt` records that follow an error are bookkeeping, as is a
+/// delegate's sidechain, and neither sets nor clears the stop. Read before the
+/// mid-turn test, because a dequeued repeat of a message is still the person
+/// speaking to the agent after the error.
+fn stop_told_by(rec: &Value, kind: &str) -> Option<Option<StoppedBy>> {
+    if !CONVERSATION_TYPES.contains(&kind) || sidechain_of(rec).is_some() {
+        return None;
+    }
+    let refused = kind == "assistant" && rec.get("isApiErrorMessage").and_then(Value::as_bool) == Some(true);
+    Some(refused.then(|| StoppedBy { cause: stop_cause(rec), at: record_time(rec) }))
+}
+
+/// The record's own `error` value, with no field or an unknown value read as
+/// `Other`: the English sentence beside it is never consulted.
+fn stop_cause(rec: &Value) -> StopCause {
+    match rec.get("error").and_then(Value::as_str) {
+        Some("authentication_failed") => StopCause::AuthenticationFailed,
+        Some("rate_limit") => StopCause::RateLimit,
+        Some("server_error") => StopCause::ServerError,
+        Some("billing_error") => StopCause::BillingError,
+        Some("invalid_request") => StopCause::InvalidRequest,
+        _ => StopCause::Other,
+    }
+}
+
 fn is_compaction(rec: &Value, kind: &str) -> bool {
     kind == "system" && rec.get("subtype").and_then(Value::as_str) == Some("compact_boundary")
 }
@@ -1807,6 +1839,9 @@ pub struct TranscriptTail {
     /// it has not seen is one that was never written rather than one the
     /// backfill did not reach back to.
     read_from_the_top: bool,
+    /// The stop the newest record read says this agent is under, held so that
+    /// a read with no conversation in it repeats it and a replaced file drops it.
+    stopped_by: Option<StoppedBy>,
     /// What the person was last drawn saying, carried from one read to the
     /// next so that one message recorded twice is drawn once (INV-11).
     last_said: Option<LastSaid>,
@@ -1832,6 +1867,7 @@ impl TranscriptTail {
             prompt_at: None,
             calls_since_prompt: 0,
             read_from_the_top: false,
+            stopped_by: None,
             last_said: None,
         }
     }
@@ -2077,6 +2113,7 @@ impl TranscriptTail {
             self.window_since = None;
             self.prompt_at = None;
             self.calls_since_prompt = 0;
+            self.stopped_by = None;
             self.last_said = None;
             first = true;
         }
@@ -2157,6 +2194,10 @@ impl TranscriptTail {
         self.track_prompt(result.prompted);
         self.last_said = result.last_said.take();
         result.patch.since_prompt = Some(self.since_prompt());
+        if let Some(told) = result.patch.stopped_by {
+            self.stopped_by = told;
+        }
+        result.patch.stopped_by = Some(self.stopped_by);
         self.total_tokens += result.patch.tokens.unwrap_or(0);
         self.total_subagents += result.patch.subagents.unwrap_or(0);
         if self.total_tokens > 0 {
@@ -4425,6 +4466,130 @@ mod tests {
             .map(|event| event.text.as_str())
             .collect();
         assert_eq!(said, vec![quoting]);
+    }
+
+    /// The assistant record Claude Code writes itself when the API refuses a
+    /// turn. Field names as the real ones have them; the words are invented.
+    fn api_error(error: Value) -> Value {
+        let mut record = json!({ "type": "assistant", "timestamp": "2026-11-08T11:18:00.000Z",
+            "isApiErrorMessage": true, "error": error,
+            "message": { "role": "assistant", "model": "<synthetic>",
+                "content": [{ "type": "text", "text": "fixture words nobody matches on" }] } });
+        if record["error"].is_null() {
+            record.as_object_mut().unwrap().remove("error");
+        }
+        record
+    }
+
+    fn after_error(error: Value, then: &[Value]) -> Option<Option<StoppedBy>> {
+        let mut lines = vec![api_error(error).to_string()];
+        lines.extend(then.iter().map(Value::to_string));
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        parse(&lines).patch.stopped_by
+    }
+
+    fn turn_duration() -> Value {
+        json!({ "type": "system", "subtype": "turn_duration", "timestamp": "2026-11-08T11:18:01.000Z" })
+    }
+
+    fn typed_prompt() -> Value {
+        json!({ "type": "user", "timestamp": "2026-11-08T11:30:00.000Z", "message": { "content": "carry on" } })
+    }
+
+    /// INV-11: the error record is hardly ever the last line of its file, so
+    /// a reading of "the last record" that counts bookkeeping says the agent
+    /// is fine on the day every agent has stopped.
+    #[test]
+    fn inv11_an_api_error_stop_survives_the_system_record_after_it_and_clears_with_a_user_record() {
+        let stopped = after_error(json!("authentication_failed"), &[turn_duration()]);
+        let stop = stopped.flatten().expect("a system record says nothing about the stop");
+        assert_eq!(stop.cause, StopCause::AuthenticationFailed);
+        assert_eq!(stop.at, parse_iso8601_ms("2026-11-08T11:18:00.000Z").unwrap());
+        assert_eq!(after_error(json!("authentication_failed"), &[typed_prompt()]), Some(None));
+    }
+
+    /// INV-11: every bookkeeping type Claude Code has been seen to write after
+    /// an error, and an assistant reply, each judged by the same rule.
+    #[test]
+    fn inv11_only_a_user_or_assistant_record_speaks_about_the_stop() {
+        let quiet = [
+            json!({ "type": "last-prompt", "lastPrompt": "later" }),
+            json!({ "type": "queue-operation", "timestamp": "2026-11-08T11:18:02.000Z" }),
+            json!({ "type": "mode" }),
+            json!({ "type": "atis-latch" }),
+            json!({ "type": "permission-mode", "permissionMode": "auto" }),
+            json!({ "type": "ai-title", "aiTitle": "a title" }),
+            json!({ "type": "bridge-session" }),
+            json!({ "type": "file-history-snapshot" }),
+            json!({ "type": "system", "subtype": "local_command", "timestamp": "2026-11-08T11:18:03.000Z" }),
+        ];
+        let stopped = after_error(json!("rate_limit"), &quiet).flatten().expect("all bookkeeping");
+        assert_eq!(stopped.cause, StopCause::RateLimit);
+        let reply = json!({ "type": "assistant", "timestamp": "2026-11-08T11:40:00.000Z",
+            "message": { "role": "assistant", "content": [{ "type": "text", "text": "ok" }] } });
+        assert_eq!(after_error(json!("rate_limit"), &[reply]), Some(None));
+    }
+
+    /// INV-11: a delegate's sidechain is its own conversation, so it neither
+    /// marks the parent nor clears a stop the parent is under.
+    #[test]
+    fn inv11_a_delegates_api_error_is_not_the_parents_stop() {
+        let mut delegate = api_error(json!("server_error"));
+        delegate["isSidechain"] = json!(true);
+        assert_eq!(parse(&[&delegate.to_string()]).patch.stopped_by, None);
+        let stopped = after_error(json!("server_error"), &[delegate]).flatten();
+        assert_eq!(stopped.map(|stop| stop.cause), Some(StopCause::ServerError));
+    }
+
+    /// INV-11: the cause is the record's own enum value, and anything else is
+    /// `other` rather than a guess at what the English says.
+    #[test]
+    fn inv11_the_stop_cause_is_the_error_field_and_nothing_else() {
+        for (error, want) in [
+            ("authentication_failed", StopCause::AuthenticationFailed),
+            ("rate_limit", StopCause::RateLimit),
+            ("server_error", StopCause::ServerError),
+            ("billing_error", StopCause::BillingError),
+            ("invalid_request", StopCause::InvalidRequest),
+            ("a_value_from_a_later_cli", StopCause::Other),
+        ] {
+            assert_eq!(after_error(json!(error), &[]).flatten().unwrap().cause, want, "{error}");
+        }
+        assert_eq!(after_error(Value::Null, &[]).flatten().unwrap().cause, StopCause::Other, "no error field");
+        let structured = after_error(json!({ "code": "unknown" }), &[]).flatten().unwrap();
+        assert_eq!(structured.cause, StopCause::Other, "not a string");
+    }
+
+    /// INV-11: the flag is what decides. The same `error` on a record without
+    /// `isApiErrorMessage`, or a `<synthetic>` reply, is ordinary conversation.
+    #[test]
+    fn inv11_only_the_api_error_flag_marks_a_stop() {
+        let mut unflagged = api_error(json!("authentication_failed"));
+        unflagged["isApiErrorMessage"] = json!(false);
+        assert_eq!(parse(&[&unflagged.to_string()]).patch.stopped_by, Some(None));
+    }
+
+    /// INV-4 and INV-11 together: the record and what follows it arrive in
+    /// different reads, and a transcript that is replaced takes the stop away.
+    #[tokio::test]
+    async fn inv11_the_tail_carries_a_stop_across_reads_and_drops_it_with_the_file() {
+        let (root, path) = projects();
+        append(&path, format!("{}\n", api_error(json!("rate_limit"))).as_bytes());
+        let mut tail = TranscriptTail::new(SESSION, root.path());
+        let stop = tail.read_next().await.patch.stopped_by.flatten().expect("the error was read");
+        assert_eq!(stop.cause, StopCause::RateLimit);
+
+        append(&path, format!("{}\n", turn_duration()).as_bytes());
+        let held = tail.read_next().await.patch.stopped_by;
+        assert_eq!(held, Some(Some(stop)), "a batch of bookkeeping repeats it");
+
+        append(&path, format!("{}\n", typed_prompt()).as_bytes());
+        assert_eq!(tail.read_next().await.patch.stopped_by, Some(None), "the next message clears it");
+
+        append(&path, format!("{}\n", api_error(json!("rate_limit"))).as_bytes());
+        assert!(tail.read_next().await.patch.stopped_by.flatten().is_some());
+        fs::write(&path, format!("{}\n", turn_duration())).unwrap();
+        assert_eq!(tail.read_next().await.patch.stopped_by, Some(None), "a replaced file holds no stop");
     }
 }
 
