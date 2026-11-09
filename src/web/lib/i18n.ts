@@ -163,6 +163,7 @@ const EN = {
   stoppedStripResets: 'Resets in {t}.',
   stoppedStripSignInAdvice: 'Sign in again, then message them.',
   stoppedStripShowAll: 'Showing only these; tap to show all.',
+  stoppedStripShowOnly: 'Tap to show only these.',
   agentGone: 'That agent is no longer running.',
   /* detail */
   tabChat: 'Chat',
@@ -708,6 +709,7 @@ const ZH: Record<Key, string> = {
   stoppedStripResets: '{t} 后重置。',
   stoppedStripSignInAdvice: '请重新登录后再给它们发消息。',
   stoppedStripShowAll: '仅显示这些；点按显示全部。',
+  stoppedStripShowOnly: '点按只看这些。',
   agentGone: '该代理已经结束运行。',
   tabChat: '对话',
   tabAttach: '终端',

@@ -132,8 +132,10 @@ field of the transcript's own error record, never its English, and only while
 that is the last thing said to or by the agent; a later message of either kind
 clears it. When two or more agents share one cause, and no stopped agent has
 another, a single line sits above the list: `3 agents stopped: sign-in failed
-since 11:18. Sign in again, then message them.` Tap it to narrow the list to
-those agents and tap it again to see them all. A limit quotes the reset time
+since 11:18. Sign in again, then message them. Tap to show only these.` Tap it
+to narrow the list to those agents and tap it again to see them all. The line
+keeps its full height beside an open agent, wrapping rather than being squeezed
+into the heading below it. A limit quotes the reset time
 only while the five-hour meter is fresh and spent. Neither the line nor the
 marker sends anything: the app does not retry, and messaging an agent stays
 yours. Mixed causes draw no line; each card still says its own.

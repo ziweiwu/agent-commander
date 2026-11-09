@@ -82,7 +82,7 @@ describe('C1 the strip states one shared stop', () => {
     fleet(pair('authentication_failed'))
     renderApp(<StoppedStrip />)
     expect(strip().textContent).toBe(
-      `2 agents stopped: sign-in failed since ${clock(STOP_AT)}. Sign in again, then message them.`,
+      `2 agents stopped: sign-in failed since ${clock(STOP_AT)}. Sign in again, then message them. Tap to show only these.`,
     )
     expect(stoppedGroup(pair('authentication_failed'))?.count).toBe(2)
   })
@@ -92,14 +92,14 @@ describe('C1 the strip states one shared stop', () => {
     fleet(pair('authentication_failed'))
     renderApp(<StoppedStrip />)
     expect(strip().textContent).toBe(
-      `2 个 agent 已停止：登录失败，自 ${clock(STOP_AT)} 起。请重新登录后再给它们发消息。`,
+      `2 个 agent 已停止：登录失败，自 ${clock(STOP_AT)} 起。请重新登录后再给它们发消息。点按只看这些。`,
     )
   })
 
   it('gives no sign-in instruction for any other cause', () => {
     fleet(pair('server_error'))
     renderApp(<StoppedStrip />)
-    expect(strip().textContent).toBe(`2 agents stopped: server error since ${clock(STOP_AT)}.`)
+    expect(strip().textContent).toBe(`2 agents stopped: server error since ${clock(STOP_AT)}. Tap to show only these.`)
   })
 
   it('does not draw for a mixed fleet', () => {
@@ -121,7 +121,7 @@ describe('C1 the strip states one shared stop', () => {
       stopped('b', 'server_error'),
     ])
     renderApp(<StoppedStrip />)
-    expect(strip().textContent).toMatch(new RegExp(`since [^.]+ ${clock(lastWeek)}\\.$`))
+    expect(strip().textContent).toMatch(new RegExp(`since [^.]+ ${clock(lastWeek)}\\. Tap to show only these\\.$`))
   })
 })
 
@@ -139,7 +139,7 @@ describe('C1 INV-11 a limit quotes the reset only from a fresh five-hour reading
   }
 
   it('adds the reset when the five-hour window reads spent', () => {
-    expect(shown(limits(97))).toBe(`2 agents stopped: limit reached since ${clock(STOP_AT)}. Resets in 1h 20m.`)
+    expect(shown(limits(97))).toBe(`2 agents stopped: limit reached since ${clock(STOP_AT)}. Resets in 1h 20m. Tap to show only these.`)
   })
 
   it('omits it from a stale reading', () => {
@@ -168,6 +168,7 @@ describe('C1 INV-2 tapping the strip filters, and sends nothing', () => {
     expect(useStore.getState().fleet).toMatchObject({ stopped: 'authentication_failed', filter: 'all', query: '' })
     expect(strip().getAttribute('aria-pressed')).toBe('true')
     expect(strip().textContent).toContain('Showing only these')
+    expect(strip().textContent).not.toContain('Tap to show only these')
 
     fireEvent.click(strip())
     expect(useStore.getState().fleet.stopped).toBeUndefined()

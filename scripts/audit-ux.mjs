@@ -32,6 +32,31 @@ const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844 },
 ]
 
+/** A sub-pixel rounding allowance, the same one the width checks use. */
+const SPILL_SLACK_PX = 1
+
+/**
+ * Text that has outgrown its own box while nothing clips or scrolls it, so it
+ * is drawn over whatever follows (C5: the stopped strip squeezed to 34 of 71px
+ * beside an open agent, its sentence printed over "Needs you"). Only boxes
+ * holding text of their own count, and inline boxes are skipped because they
+ * report a clientHeight of 0. Read on main at 5925d37, the strip was the only
+ * element this flagged in the fleet and open-agent states it is run on.
+ */
+const textSpills = (page) =>
+  page.evaluate(
+    (slack) =>
+      [...document.querySelectorAll('body *')]
+        .filter((el) => {
+          if (el.clientHeight === 0) return false
+          if (![...el.childNodes].some((n) => n.nodeType === Node.TEXT_NODE && n.textContent.trim())) return false
+          if (getComputedStyle(el).overflowY !== 'visible') return false
+          return el.scrollHeight > el.clientHeight + slack
+        })
+        .map((el) => `${el.dataset.testid ?? el.tagName.toLowerCase()}(${el.scrollHeight}>${el.clientHeight})`),
+    SPILL_SLACK_PX,
+  )
+
 const browser = await chromium.launch()
 
 for (const scheme of ['light', 'dark']) {
@@ -384,6 +409,8 @@ for (const vp of VIEWPORTS) {
 
   const ov = await page.evaluate(() => ({ s: document.documentElement.scrollWidth, i: innerWidth }))
   if (ov.s > ov.i + 1) add('high', 'responsive', `${vp.name}: horizontal overflow ${ov.s} > ${ov.i}`)
+  const spilledAtRest = await textSpills(page)
+  if (spilledAtRest.length) add('high', 'overlap', `${vp.name}: text taller than its box: ${spilledAtRest.slice(0, 5)}`)
 
   /*
    * Asked for, not counted. This used to take `cards[1]` on the reasoning that
@@ -409,6 +436,10 @@ for (const vp of VIEWPORTS) {
     }
   })
   if (after.s > after.i + 1) add('high', 'responsive', `${vp.name}: overflow after opening (${after.s} > ${after.i})`)
+  const spilledOpen = await textSpills(page)
+  if (spilledOpen.length) {
+    add('high', 'overlap', `${vp.name}: text taller than its box with an agent open: ${spilledOpen.slice(0, 5)}`)
+  }
   if (vp.width < 900 && !after.visible) {
     add('high', 'responsive', `${vp.name}: detail offscreen at y=${after.top}`)
   }
