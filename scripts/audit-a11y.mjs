@@ -7,7 +7,7 @@
  * Contrast is measured separately against the design tokens.
  */
 import { chromium, devices } from 'playwright'
-import { unpaintedEdges, untilStill } from './lib/focus-ring.mjs'
+import { FULL_STRENGTH, unpaintedEdges, untilStill } from './lib/focus-ring.mjs'
 import { TARGET_SIZE_CONTROLS } from './lib/targets.mjs'
 
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
@@ -177,6 +177,92 @@ async function tabTo(page, tag, from, testId) {
 async function reportRing(page, tag, what) {
   const edges = await focusedUnpainted(page)
   if (edges.length) add('2.4.7', 'P0', `${tag}: focus ring not painted on ${what} (unpainted: ${edges.join(', ')})`)
+}
+
+/** The answer keys under a labelled answer, in the order Tab reaches them. */
+const ANSWER_KEYS = ['Up', 'Down', 'Space', 'Enter', 'Escape']
+
+/**
+ * Where focus is, named, whether it sits inside the conversation's scroll box,
+ * and whether it is an inline that wrapped. A link broken over two lines is
+ * ringed line by line, so the edges of its bounding box are not where its ring
+ * is, and the screenshot cannot judge it by them.
+ */
+async function conversationStop(page) {
+  return page.evaluate(() => {
+    const active = document.activeElement
+    const scroll = document.querySelector('[data-testid="chat-scroll"]')
+    return {
+      testId: active?.getAttribute('data-testid') ?? '',
+      label: (active?.getAttribute('data-testid') || active?.getAttribute('aria-label') || active?.tagName || '').slice(0, 24),
+      inConversation: Boolean(scroll && active && active !== scroll && scroll.contains(active)),
+      wrapped: (active?.getClientRects().length ?? 0) > 1,
+    }
+  })
+}
+
+/**
+ * The agent blocked on a permission, once its conversation has stopped
+ * growing. The pane peek in its answer card lands a beat after the card, and
+ * the height it adds can move a focused control into the fade with no Tab to
+ * scroll it clear, which would be judged as a ring the fade took.
+ */
+async function openQuestion(page) {
+  await page.goto(`${BASE}agent/mock-permission`, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('answer-card'))
+  await page.waitForSelector(T('pane-peek'))
+  await untilStill(page, T('chat-scroll'))
+}
+
+/**
+ * 2.4.7 for the stops inside a fading scroll box. The fade is a `mask-image`,
+ * so a control Tab stops on in its bottom 28px fades with it, ring included,
+ * and Tab scrolls the next control in flush with the box's bottom edge, which
+ * is exactly there. The conversation with a question open is the box that
+ * fades and holds the most stops; it is walked from its top, so every stop is
+ * one Tab brought in.
+ */
+async function auditFadeZoneRings(page, tag) {
+  await openQuestion(page)
+  await page.locator(T('chat-scroll')).evaluate((el) => el.scrollTo({ top: 0 }))
+  await page.locator(T('tab-chat')).focus()
+  const faded = []
+  for (let i = 0; i < TAB_STOPS_TO_CONVERSATION; i += 1) {
+    await page.keyboard.press('Tab')
+    const stop = await conversationStop(page)
+    if (stop.testId === 'composer-input') break
+    if (!stop.inConversation || stop.wrapped) continue
+    const edges = await focusedUnpainted(page)
+    if (edges.length) faded.push(`${stop.label} (unpainted: ${edges.join(', ')})`)
+  }
+  if (faded.length) {
+    const named = faded.slice(0, NAMED_IN_A_FINDING).join('; ')
+    add('2.4.7', 'P0', `${tag}: ${faded.length} focus stop(s) in the fading conversation lost their ring: ${named}`)
+  }
+}
+
+/**
+ * 2.4.7 under a muted row. The answer keys below a labelled answer are muted,
+ * and an `opacity` on their row blends each key's ring into the card behind
+ * it: still the `--focus` hue, so `unpaintedEdges` at its own tolerance can
+ * pass it, and dimmed from 5.0:1 to 3.3-3.5:1 against the card on the default
+ * palette. So each key is judged at `FULL_STRENGTH`, with
+ * the conversation at its end so no fade is judged with it.
+ */
+async function auditMutedKeyRings(page, tag) {
+  await openQuestion(page)
+  await page.waitForSelector(T('answer-keys-fallback'))
+  await page.locator(T('answer-option')).last().focus()
+  const dimmed = []
+  for (const name of ANSWER_KEYS) {
+    if (!(await tabTo(page, tag, null, `answer-key-${name}`))) return
+    await page.locator(T('chat-scroll')).evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
+    const active = await page.evaluateHandle(() => document.activeElement)
+    const edges = await unpaintedEdges(page, active, { tolerance: FULL_STRENGTH })
+    await active.dispose()
+    if (edges.length) dimmed.push(`${name} (${edges.join(', ')})`)
+  }
+  if (dimmed.length) add('2.4.7', 'P0', `${tag}: answer key ring(s) not at full strength: ${dimmed.join(', ')}`)
 }
 
 async function openChat(page) {
@@ -372,6 +458,8 @@ for (const [profile, options] of [
       if (!reduced) add('2.3.3', 'P1', 'no prefers-reduced-motion handling in the stylesheet')
     }
 
+    await auditFadeZoneRings(page, tag)
+    await auditMutedKeyRings(page, tag)
     await auditScrollBoxRings(page, tag)
 
     await context.close()

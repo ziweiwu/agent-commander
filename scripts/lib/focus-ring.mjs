@@ -42,6 +42,16 @@ const SETTLE_MS = 300
 /** The share of an edge's samples the ring must reach to count as painted. */
 export const RING_PAINTED = 0.8
 
+/**
+ * A tolerance for asking whether the ring is painted at full strength, not
+ * merely painted. `TOLERANCE` lets a ring through that an ancestor's
+ * `opacity` has blended a quarter of the way into the surface behind it, since
+ * that ring is still the `--focus` hue; at a quarter, the blend moves a ring
+ * pixel further from `--focus` than this on every palette, while a solid 2px
+ * ring keeps pixels well inside it.
+ */
+export const FULL_STRENGTH = 24
+
 /** Positions from `start` to `end`, `STEP` apart, keeping clear of the corners. */
 function along(start, end) {
   const out = []
@@ -133,8 +143,10 @@ function scoreEdge(rows, isRing) {
  *
  * `target` is a Playwright locator or element handle. The page is
  * screenshotted at CSS scale, so a device pixel ratio does not move the band.
+ * `tolerance` is how far from `--focus` a pixel may be and still be the ring;
+ * `FULL_STRENGTH` asks for the ring undimmed.
  */
-export async function ringSides(page, target) {
+export async function ringSides(page, target, { tolerance = TOLERANCE } = {}) {
   await page.waitForTimeout(SETTLE_MS)
   const box = await target.evaluate(boxAndFocus)
   const rows = edgeRows(box)
@@ -142,7 +154,7 @@ export async function ringSides(page, target) {
   const points = Object.values(rows).flat(2)
   const colours = await page.evaluate(readPixels, { data: shot.toString('base64'), points })
   const [red, green, blue] = (box.focus.match(/\d+/g) ?? []).map(Number)
-  const isRing = (rgb) => rgb !== null && Math.hypot(rgb[0] - red, rgb[1] - green, rgb[2] - blue) < TOLERANCE
+  const isRing = (rgb) => rgb !== null && Math.hypot(rgb[0] - red, rgb[1] - green, rgb[2] - blue) < tolerance
   const { clip } = box
   const visible = ([x, y]) => x >= clip.left && x < clip.right && y >= clip.top && y < clip.bottom
   let next = 0
@@ -179,8 +191,8 @@ export async function untilStill(page, selector) {
 }
 
 /** The on-screen edges whose score is under `RING_PAINTED`, so an empty list means painted. */
-export async function unpaintedEdges(page, target) {
-  const sides = await ringSides(page, target)
+export async function unpaintedEdges(page, target, options) {
+  const sides = await ringSides(page, target, options)
   return Object.entries(sides)
     .filter(([, share]) => share !== null && share < RING_PAINTED)
     .map(([side, share]) => `${side} ${share.toFixed(2)}`)
