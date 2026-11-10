@@ -52,6 +52,18 @@ test.describe('a focused scroll box shows its ring', () => {
     await expectRingPainted(page, scroll)
   })
 
+  test('the conversation keeps its ring off after a mouse click', async ({ page }) => {
+    await page.goto(`/agent/${AGENT.permission}`)
+    await expect(page.getByTestId('answer-card')).toBeVisible()
+    const scroll = page.getByTestId('chat-scroll')
+    await scroll.click({ position: { x: 4, y: 4 } })
+    await expect(scroll).toBeFocused()
+    const sides = await ringSides(page, scroll)
+    for (const [side, share] of Object.entries(sides)) {
+      expect(share ?? 0, `${side} edge of the focus ring`).toBeLessThan(RING_PAINTED)
+    }
+  })
+
   test('a tool result Tab scrolls in against the conversation edge', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     const edit = page.getByTitle('Edit: src/components/Header.astro')
