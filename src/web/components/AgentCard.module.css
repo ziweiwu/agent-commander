@@ -563,6 +563,17 @@
   background: var(--panel-2);
   color: var(--text);
 }
+/**
+ * The card and its Details button share an edge, and whichever is drawn later
+ * covers the other's ring there: the button hid the card's right side, and the
+ * open panel below hides both bottoms. The focused one is lifted over its
+ * neighbours, which changes nothing while neither is focused.
+ */
+.card:focus-visible,
+.disclosure:focus-visible {
+  position: relative;
+  z-index: 1;
+}
 .card[aria-current='true'] + .disclosure {
   border-color: var(--focus);
   border-left-color: var(--line);

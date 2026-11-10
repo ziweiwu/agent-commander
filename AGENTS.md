@@ -777,6 +777,14 @@ commit.
   conversation's ring is drawn by `.region`, outside the mask; the tool
   result's is inset; the history box keeps an outset ring and a
   `scroll-margin` that stops focus scrolling short of the clip and the fade.
+  The fleet had the same clip twice: the desk's column and the phone's filter
+  strip scroll, and a horizontal scroller clips vertically too, so cards,
+  Details buttons, chips and the toolbar lost the ring's outside half at
+  their edge. Each scroller now has `--ring-reach` (`global.css`) of padding
+  inside its clip, given back as a negative margin so nothing moves, and a
+  `scroll-padding` of the same so Tab does not scroll a box flush again. A card
+  and its Details button share an edge, and the one drawn later covered the
+  other's ring there, so the focused one is lifted with a `z-index`.
   `scripts/lib/focus-ring.mjs` reads the ring off a screenshot, and the audit
   and `e2e/focus-ring.spec.ts` both judge by it.
 - **A guard is not verified by watching it pass.** `test/icons.test.ts` sweeps

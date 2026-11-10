@@ -27,6 +27,21 @@
 }
 
 /**
+ * The scroll clips at the column's own edge, and every card, its Details
+ * button and the toolbar sit flush against it, so each lost the outside half
+ * of its focus ring there. The room is inside the clip and given back outside
+ * it, so the cards stay where they were; `scroll-padding` keeps a card Tab
+ * scrolls in from landing flush against the top or the bottom again.
+ */
+@media (min-width: 901px) {
+  .column {
+    padding: var(--ring-reach);
+    margin: calc(-1 * var(--ring-reach));
+    scroll-padding: var(--ring-reach);
+  }
+}
+
+/**
  * Filter, sort and the actions, as one row that the column's width wraps.
  *
  * Three full-width rows took 157px above the first heading at the desk, for a

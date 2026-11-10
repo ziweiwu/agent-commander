@@ -64,6 +64,25 @@ body.no-scroll {
   border-radius: var(--radius-sm);
 }
 
+/**
+ * How far the ring above reaches past its element's edge: its 2px offset and
+ * its 2px width. A scroller that clips is given this much room inside its own
+ * edge, and taken back with a margin, so a box flush against it keeps its
+ * whole ring and nothing moves while nothing is focused.
+ */
+:root {
+  --ring-reach: 4px;
+}
+
+/**
+ * The window is a scroller too. Where the document scrolls, a phone's or a
+ * tablet's, Tab brought a card in flush against the bottom of the screen with
+ * its ring's lower half below it.
+ */
+html {
+  scroll-padding: var(--ring-reach);
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
