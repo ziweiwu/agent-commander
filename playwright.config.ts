@@ -117,7 +117,7 @@ const MOCK_SERVER: PlaywrightTestConfig['webServer'] = {
   command:
     `npm run build:web && ` +
     `./scripts/cargo.sh build --release --manifest-path rust/Cargo.toml && ` +
-    `rust/target/release/agent-commander --mock --port ${PORT}`,
+    `rust/target/release/agent-commander --mock --browse-root node_modules --port ${PORT}`,
   url: `http://127.0.0.1:${PORT}/`,
   reuseExistingServer: !process.env.CI,
   timeout: 120_000,

@@ -126,6 +126,23 @@ html {
     linear-gradient(to right, #000 calc(100% - 28px), transparent 100%);
   mask-composite: intersect;
 }
+/**
+ * Room for a focus ring clear of the fade. The fade is a `mask-image`, so a
+ * control Tab stops on inside its 28px fades with it, ring included, and Tab
+ * scrolls the next control in flush with the box's edge, which is exactly
+ * there. Scroll padding makes focus scrolling stop that far short: the fade's
+ * 28px, and 6px for the ring's 2px offset, its 2px width and two spare. It
+ * moves nothing until something is scrolled into view, and it lifts with the
+ * fade.
+ */
+[data-overflow='bottom'],
+[data-overflow='bottom right'] {
+  scroll-padding-bottom: 34px;
+}
+[data-overflow='right'],
+[data-overflow='bottom right'] {
+  scroll-padding-right: 34px;
+}
 
 @media (prefers-reduced-motion: reduce) {
   * {

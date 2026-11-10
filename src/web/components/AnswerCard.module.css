@@ -141,10 +141,17 @@
   gap: 6px;
 }
 
-/*
+/**
  * The keys when a labelled answer exists above them: below a rule, muted, and
- * introduced by `.fallback`. Opacity rather than a smaller target — the
+ * introduced by `.fallback`. Muted rather than a smaller target — the
  * buttons keep their 44px on a touch screen, they just stop competing.
+ *
+ * Muted by colour, not `opacity`. An opacity on the row blends everything its
+ * keys paint into the card behind them, and a focused key's ring is painted by
+ * the key, so the ring was dimmed with the row. `--dim` is within a few levels
+ * of where the keys' text sat at 75% over `--panel-2`, which the card and the
+ * keys are both drawn on. The edge keeps `--line-strong` whole, which the 75%
+ * had taken under the 3:1 a control's boundary needs.
  */
 .fallback {
   margin: 4px 0 0;
@@ -153,8 +160,8 @@
   font-size: var(--text-xs);
   color: var(--dim);
 }
-.secondary {
-  opacity: 0.75;
+.secondary > button {
+  color: var(--dim);
 }
 
 @media (max-width: 560px) {

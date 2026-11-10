@@ -789,6 +789,23 @@ commit.
   covered the bottom of its ring.
   `scripts/lib/focus-ring.mjs` reads the ring off a screenshot, and the audit
   and `e2e/focus-ring.spec.ts` both judge by it.
+
+  **The fade took every control Tab stopped on near its foot, not just the
+  history box.** Tab scrolls the next control in flush with the box's bottom
+  edge, which is the middle of the 28px fade, so walking a conversation with a
+  question open faded a tool row, an option and the answer keys on every
+  shape. `[data-overflow]` now carries `scroll-padding` of the fade plus the
+  ring (34px) on each edge it fades, in `global.css`, so focus scrolling stops
+  clear of it wherever the fade is drawn; it moves nothing else and lifts with
+  the fade. The folder list fades inside the new-agent dialog, which scrolls
+  itself on a short screen and clipped a folder Tab brought in flush with its
+  foot, so the dialog carries 6px of `scroll-padding` for the ring. And
+  `opacity` on a container dims the rings inside it with everything else: the
+  answer keys' muted row blended their rings from 5.0:1 to about 3.4:1, which
+  `ringSides` at its own tolerance still passed on the dark palettes. The row is
+  muted by colour now, and `FULL_STRENGTH` is the tolerance that asks for a
+  ring undimmed. `.list[data-stale]` in `FleetList.module.css` still mutes a
+  stale fleet by opacity, rings included.
 - **A guard is not verified by watching it pass.** `test/icons.test.ts` sweeps
   for icon buttons that lost their accessible name, and it shipped toothless:
   it stripped JSX tags with `/<[^>]*>/`, which breaks on the `>` inside

@@ -14,8 +14,8 @@
  * a11y audit reads too).
  */
 import { expect, type Locator, type Page, test } from '@playwright/test'
-import { RING_PAINTED, ringSides, untilStill } from '../scripts/lib/focus-ring.mjs'
-import { AGENT, openAgent } from './helpers.ts'
+import { FULL_STRENGTH, RING_PAINTED, ringSides, unpaintedEdges, untilStill } from '../scripts/lib/focus-ring.mjs'
+import { AGENT, openAgent, openFleet } from './helpers.ts'
 
 async function expectRingPainted(page: Page, target: Locator): Promise<void> {
   const sides = await ringSides(page, target)
@@ -87,8 +87,6 @@ test.describe('a focused scroll box shows its ring', () => {
  * WebKit's Tab passes buttons by, as Safari's does by default, so there the
  * strip's sweep judges the kind select and the Chromium phone judges the chips.
  */
-import { unpaintedEdges } from '../scripts/lib/focus-ring.mjs'
-import { openFleet } from './helpers.ts'
 
 /** Generous: a fleet sweep reads one screenshot per Tab stop. */
 const SWEEP_TIMEOUT_MS = 150_000
@@ -218,7 +216,6 @@ test.describe('a focus stop at the fleet edge shows its ring', () => {
   test('a folder row keeps its ring with the row under it hovered', async ({ page }) => {
     await openFleet(page)
     await page.getByTestId('new-agent-button').click()
-    await page.getByTestId('new-agent-dir').fill('~')
     const browse = page.getByTestId('new-agent-browse')
     if ((await browse.getAttribute('aria-expanded')) !== 'true') await browse.click()
     const rows = page.getByTestId('browse-entry')
@@ -252,7 +249,7 @@ test.describe('a focus stop beside a neighbour that paints over it', () => {
     await focused.focus()
     await page.keyboard.press('Shift')
     expect(await focused.evaluate((el) => el.matches(':focus-visible'))).toBe(true)
-    const sides = await ringSides(page, focused, OUTER_RING_BAND)
+    const sides = await ringSides(page, focused, { band: OUTER_RING_BAND })
     expect(sides.top ?? 0, 'top edge, beside the pressed row').toBeGreaterThanOrEqual(RING_PAINTED)
     expect(sides.bottom ?? 0, 'bottom edge, beside the hovered row').toBeGreaterThanOrEqual(RING_PAINTED)
   })
@@ -272,5 +269,157 @@ test.describe('a focus stop beside a neighbour that paints over it', () => {
     for (const [side, share] of Object.entries(sides)) {
       expect(share ?? 0, `${side} edge of the focus ring`).toBeGreaterThanOrEqual(RING_PAINTED)
     }
+  })
+})
+
+/**
+ * The key that walks every control. WebKit's Tab, as Safari's does by
+ * default, stops only on fields and boxes and skips every button; Option+Tab
+ * is the one a keyboard reader there walks the buttons with.
+ */
+const walkKey = (browserName: string): string => (browserName === 'webkit' ? 'Alt+Tab' : 'Tab')
+
+/**
+ * Where focus is, by test id, whether it sits inside the conversation's scroll
+ * box, and whether it is an inline that wrapped. A link broken over two lines
+ * is ringed line by line, so the edges of its bounding box are not where its
+ * ring is, and the screenshot cannot judge it by them.
+ */
+async function focusStop(page: Page): Promise<{ testId: string; inConversation: boolean; wrapped: boolean }> {
+  return page.evaluate(() => {
+    const active = document.activeElement
+    const scroll = document.querySelector('[data-testid="chat-scroll"]')
+    return {
+      testId: active?.getAttribute('data-testid') ?? active?.tagName ?? '',
+      inConversation: Boolean(scroll && active && active !== scroll && scroll.contains(active)),
+      wrapped: (active?.getClientRects().length ?? 0) > 1,
+    }
+  })
+}
+
+/** The conversation's stops, walked by keyboard from the Chat tab, each judged by the screenshot. */
+async function unpaintedStopsInConversation(page: Page, key: string): Promise<{ judged: number; unpainted: string[] }> {
+  const unpainted: string[] = []
+  let judged = 0
+  await page.getByTestId('tab-chat').focus()
+  for (let i = 0; i < 60; i += 1) {
+    await page.keyboard.press(key)
+    const stop = await focusStop(page)
+    if (stop.testId === 'composer-input') break
+    if (!stop.inConversation || stop.wrapped) continue
+    judged += 1
+    const edges = await unpaintedEdges(page, page.locator(':focus'))
+    if (edges.length) unpainted.push(`${stop.testId}: ${edges.join(', ')}`)
+  }
+  return { judged, unpainted }
+}
+
+const ANSWER_KEYS = ['Up', 'Down', 'Space', 'Enter', 'Escape']
+
+/**
+ * Open the agent blocked on a permission and wait until its conversation has
+ * stopped growing. The pane peek in its answer card lands a beat after the
+ * card, and the height it adds moved a focused key into the fade after the
+ * focus had been placed, with no Tab to scroll it clear.
+ */
+async function openQuestion(page: Page): Promise<void> {
+  await page.goto(`/agent/${AGENT.permission}`)
+  await expect(page.getByTestId('answer-card')).toBeVisible()
+  await expect(page.getByTestId('pane-peek')).toBeVisible()
+  await untilStill(page, '[data-testid="chat-scroll"]')
+}
+
+/**
+ * The scroll-edge fade is a `mask-image`, so anything a keyboard reader stops
+ * on inside its bottom 28px fades with it, ring included. Tab scrolls the next
+ * control into view flush with the box's bottom edge, which is exactly there.
+ * And the answer keys sit in a row muted by `opacity`, which an outline
+ * cannot escape: the ring was painted, but blended a quarter of the way into
+ * the card behind it.
+ */
+for (const [shape, use] of [
+  ['', {}],
+  ['@desktop at 1280x800', { viewport: { width: 1280, height: 800 } }],
+  ['@phone held sideways', { viewport: { width: 844, height: 390 } }],
+] as const) {
+  test.describe(`a focus stop in a fading or muted box shows its ring ${shape}`.trim(), () => {
+    test.use(use)
+
+    test('every stop in a fading conversation clears the fade', async ({ page, browserName }) => {
+      test.setTimeout(120_000)
+      await openQuestion(page)
+      const scroll = page.getByTestId('chat-scroll')
+      await scroll.evaluate((el) => el.scrollTo({ top: 0 }))
+      await expect(scroll).toHaveAttribute('data-overflow', /bottom/)
+      const { judged, unpainted } = await unpaintedStopsInConversation(page, walkKey(browserName))
+      expect(judged, 'stops walked inside the conversation').toBeGreaterThan(0)
+      expect(unpainted, 'stops whose ring did not reach the screen').toEqual([])
+    })
+
+    test('every answer key is ringed at full strength in the muted row', async ({ page, browserName }) => {
+      test.setTimeout(60_000)
+      await openQuestion(page)
+      await expect(page.getByTestId('answer-keys-fallback')).toBeVisible()
+      const scroll = page.getByTestId('chat-scroll')
+      const dimmed: string[] = []
+      await page.getByTestId('answer-option').last().focus()
+      for (const name of ANSWER_KEYS) {
+        const target = page.getByTestId(`answer-key-${name}`)
+        await expect
+          .poll(
+            async () => {
+              await page.keyboard.press(walkKey(browserName))
+              return (await focusStop(page)).testId
+            },
+            { intervals: [0], timeout: 15_000 },
+          )
+          .toBe(`answer-key-${name}`)
+        await expect
+          .poll(async () => {
+            await scroll.evaluate((el) => el.scrollTo({ top: el.scrollHeight }))
+            return (await scroll.getAttribute('data-overflow'))?.includes('bottom') ?? false
+          })
+          .toBe(false)
+        const sides = await ringSides(page, target, { tolerance: FULL_STRENGTH })
+        const weak = Object.entries(sides).filter(([, share]) => share !== null && share < RING_PAINTED)
+        const said = weak.map(([side, share]) => `${side} ${share?.toFixed(2)}`)
+        if (said.length) dimmed.push(`${name}: ${said.join(', ')}`)
+      }
+      expect(dimmed, 'answer keys whose ring is dimmed').toEqual([])
+    })
+  })
+}
+
+test.describe('the folder list @phone held sideways', () => {
+  test.use({ viewport: { width: 844, height: 390 } })
+
+  /**
+   * The other box that fades and holds a column of stops. Held sideways it is
+   * 30dvh, about two rows, so every Tab brings the next folder in at its foot.
+   * The e2e server roots the picker at `node_modules`, long enough to scroll
+   * on every machine, so the fade is always there to judge.
+   * The pointer is moved off the list first: the tap that opened it leaves a
+   * row hovered, and a hovered row's background covers the ring of the row
+   * above it, which is a neighbour covering a ring rather than the fade.
+   */
+  test('every folder Tab reaches clears the fade', async ({ page, browserName }) => {
+    test.setTimeout(60_000)
+    await page.goto('/')
+    await page.getByTestId('new-agent-button').click()
+    await page.getByTestId('new-agent-browse').click()
+    const entries = page.getByTestId('browse-entry')
+    await expect(entries.first()).toBeVisible()
+    const list = page.locator('[data-testid="folder-browser"] [data-overflow]')
+    await expect(list).toHaveAttribute('data-overflow', 'bottom')
+    await page.mouse.move(0, 0)
+    await entries.first().focus()
+    const unpainted: string[] = []
+    for (let i = 0; i < 12; i += 1) {
+      await page.keyboard.press(walkKey(browserName))
+      if ((await focusStop(page)).testId !== 'browse-entry') break
+      const edges = await unpaintedEdges(page, page.locator(':focus'))
+      if (edges.length) unpainted.push(`folder ${i + 2}: ${edges.join(', ')}`)
+    }
+    expect(unpainted, 'folders whose ring did not reach the screen').toEqual([])
   })
 })
