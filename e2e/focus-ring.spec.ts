@@ -201,8 +201,8 @@ test.describe('the folder list @phone held sideways', () => {
   /**
    * The other box that fades and holds a column of stops. Held sideways it is
    * 30dvh, about two rows, so every Tab brings the next folder in at its foot.
-   * The listing is this machine's home folder, so a home too small to scroll
-   * has no fade to judge and the test says so rather than passing on nothing.
+   * The e2e server roots the picker at `node_modules`, long enough to scroll
+   * on every machine, so the fade is always there to judge.
    * The pointer is moved off the list first: the tap that opened it leaves a
    * row hovered, and a hovered row's background covers the ring of the row
    * above it, which is a neighbour covering a ring rather than the fade.
@@ -215,7 +215,7 @@ test.describe('the folder list @phone held sideways', () => {
     const entries = page.getByTestId('browse-entry')
     await expect(entries.first()).toBeVisible()
     const list = page.locator('[data-testid="folder-browser"] [data-overflow]')
-    test.skip((await list.getAttribute('data-overflow')) !== 'bottom', 'the home folder is too short to scroll')
+    await expect(list).toHaveAttribute('data-overflow', 'bottom')
     await page.mouse.move(0, 0)
     await entries.first().focus()
     const unpainted: string[] = []
