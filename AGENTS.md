@@ -764,6 +764,21 @@ commit.
   that cannot hold next to a capture. If an audit ever exits non-zero with no
   `===== AUDIT =====` line, it did not run.
 
+- **A computed focus ring is not a painted one.** The conversation became a
+  Tab stop with `outline: 2px solid` computed and `:focus-visible` matched,
+  and `audit:a11y` passed it, while nothing blue reached the screen: with a
+  question open the box carries the scroll-edge fade, and a `mask-image`
+  clips everything its element paints to the border box, the outline outside
+  it included. Two neighbours of the same shape: a box Tab scrolls flush
+  against a scroller's edge loses the outside half of its ring to that clip,
+  and one stopped inside an ancestor's 28px fade has its ring faded with it.
+  An inset ring is not always the answer either: on the history box the
+  positioned capture inside painted over the box's own outline. So the
+  conversation's ring is drawn by `.region`, outside the mask; the tool
+  result's is inset; the history box keeps an outset ring and a
+  `scroll-margin` that stops focus scrolling short of the clip and the fade.
+  `scripts/lib/focus-ring.mjs` reads the ring off a screenshot, and the audit
+  and `e2e/focus-ring.spec.ts` both judge by it.
 - **A guard is not verified by watching it pass.** `test/icons.test.ts` sweeps
   for icon buttons that lost their accessible name, and it shipped toothless:
   it stripped JSX tags with `/<[^>]*>/`, which breaks on the `>` inside

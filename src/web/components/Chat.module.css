@@ -27,6 +27,30 @@
   overscroll-behavior-y: contain;
 }
 
+/**
+ * The conversation's focus ring is drawn by `.region`, inside the box.
+ *
+ * With a question open the box carries the scroll-edge fade, and a
+ * `mask-image` clips everything its element paints to the border box, the
+ * outline outside it included: the global ring matched and nothing reached the
+ * screen. `.region` holds exactly this box and carries no mask, so a ring laid
+ * over its inside edge is clear of the fade, stays put while the conversation
+ * scrolls under it, and sits above the answer card at the foot.
+ */
+.scroll:focus-visible {
+  outline: none;
+}
+.region:has(> .scroll:focus-visible)::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
 /*
  * The cap is what a conversation needs when the page scrolls behind it: past
  * 56vh the transcript would grow the document rather than scroll itself. The

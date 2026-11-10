@@ -7,6 +7,7 @@
  * Contrast is measured separately against the design tokens.
  */
 import { chromium, devices } from 'playwright'
+import { unpaintedEdges } from './lib/focus-ring.mjs'
 import { TARGET_SIZE_CONTROLS } from './lib/targets.mjs'
 
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
@@ -105,6 +106,76 @@ async function auditConversationReach(page, tag) {
   await page.keyboard.press('ArrowUp')
   const stayed = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'chat-scroll')
   if (!stayed) add('2.1.1', 'P0', `${tag}: ArrowUp on the conversation moved focus off it`)
+}
+
+/**
+ * 2.4.7 for a focus stop that scrolls, judged by the screenshot.
+ *
+ * A scroll box is where a computed ring and a painted one part: its own
+ * scroll-edge fade is a `mask-image`, which clips the box's outline to its
+ * border box, and a box flush against a scroller's edge loses the outside half
+ * of its ring to that clip. The conversation shipped as a Tab stop that passed
+ * the style check above with nothing blue on screen. So for these the pixels
+ * decide, whatever the style says, and a ring drawn by a wrapper (the
+ * conversation's is) counts as the box's own.
+ */
+/** How many offending stops a finding names before it stops listing them. */
+const NAMED_IN_A_FINDING = 4
+
+async function judgeScrollStop(page, stop) {
+  const edges = await focusedUnpainted(page)
+  stop.visible = edges.length === 0
+  if (edges.length) stop.edges = edges.join(', ')
+}
+
+/**
+ * The focusable scroll boxes the Tab sweep above never reaches in the shape
+ * that hides their ring: the conversation with a question open, which is when
+ * the fade is on it, and a tool result Tab has scrolled flush against the
+ * conversation's edge. Each is reached by Tab, as a keyboard reader reaches
+ * it, and judged by the screenshot.
+ */
+async function auditScrollBoxRings(page, tag) {
+  await page.goto(`${BASE}agent/mock-permission`, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('answer-card'))
+  if (await tabTo(page, tag, T('tab-chat'), 'chat-scroll')) {
+    await reportRing(page, tag, 'the conversation with a question open')
+  }
+
+  await page.goto(`${BASE}agent/mock-idle-kb`, { waitUntil: 'networkidle' })
+  const expand = page.getByTitle('Edit: src/components/Header.astro').getByTestId('tool-expand')
+  await expand.click()
+  await page.waitForSelector(T('tool-result-body'))
+  await page.locator(T('chat-scroll')).evaluate((el) => el.scrollTo({ top: 0 }))
+  await expand.focus()
+  if (await tabTo(page, tag, null, 'tool-result-body')) {
+    await reportRing(page, tag, 'a tool result Tab scrolled to the conversation edge')
+  }
+}
+
+/** The edges of the focused element's ring that did not reach the screen. */
+async function focusedUnpainted(page) {
+  const active = await page.evaluateHandle(() => document.activeElement)
+  const edges = await unpaintedEdges(page, active)
+  await active.dispose()
+  return edges
+}
+
+/** Tab from `from` (or from where focus is) until `testId` holds it; false, and said, if it never does. */
+async function tabTo(page, tag, from, testId) {
+  if (from) await page.locator(from).focus()
+  for (let i = 0; i < TAB_STOPS_TO_CONVERSATION; i += 1) {
+    await page.keyboard.press('Tab')
+    const at = await page.evaluate(() => document.activeElement?.getAttribute('data-testid'))
+    if (at === testId) return true
+  }
+  add('2.1.1', 'P0', `${tag}: ${testId} is not reached within ${TAB_STOPS_TO_CONVERSATION} Tab stops`)
+  return false
+}
+
+async function reportRing(page, tag, what) {
+  const edges = await focusedUnpainted(page)
+  if (edges.length) add('2.4.7', 'P0', `${tag}: focus ring not painted on ${what} (unpainted: ${edges.join(', ')})`)
 }
 
 async function openChat(page) {
@@ -235,6 +306,7 @@ for (const [profile, options] of [
         if (!el || el === document.body) return null
         const style = getComputedStyle(el)
         const label = (el.getAttribute('aria-label') || el.textContent || el.tagName).trim().slice(0, 24)
+        const scrolls = [style.overflowX, style.overflowY].some((o) => o === 'auto' || o === 'scroll')
         const visible =
           el.matches(':focus-visible') && (style.outlineStyle !== 'none' || style.boxShadow !== 'none')
         const r = el.getBoundingClientRect()
@@ -243,13 +315,19 @@ for (const [profile, options] of [
           const mid = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
           covered = Boolean(mid) && !el.contains(mid) && !mid.contains(el)
         }
-        return { label, visible, covered }
+        return { label, scrolls, visible, covered }
       })
       if (!stop) continue
+      if (stop.scrolls) await judgeScrollStop(page, stop)
       if (!stop.visible) invisible.push(stop)
       if (stop.covered) obscured.push(stop)
     }
-    if (invisible.length) add('2.4.7', 'P0', `${tag}: ${invisible.length} focus stop(s) with no visible indicator: ${invisible.slice(0, 4).map((p) => p.label).join(', ')}`)
+    const named = invisible
+      .slice(0, NAMED_IN_A_FINDING)
+      .map((p) => p.label + (p.edges ? ` (unpainted: ${p.edges})` : ''))
+    if (invisible.length) {
+      add('2.4.7', 'P0', `${tag}: ${invisible.length} focus stop(s) with no visible indicator: ${named.join(', ')}`)
+    }
     if (obscured.length) add('2.4.11', 'P1', `${tag}: ${obscured.length} focus stop(s) obscured by another element: ${obscured.slice(0, 4).map((p) => p.label).join(', ')}`)
 
     // 1.3.1 — structure: one h1, headings in order, a main landmark.
@@ -292,6 +370,8 @@ for (const [profile, options] of [
       )
       if (!reduced) add('2.3.3', 'P1', 'no prefers-reduced-motion handling in the stylesheet')
     }
+
+    await auditScrollBoxRings(page, tag)
 
     await context.close()
   }

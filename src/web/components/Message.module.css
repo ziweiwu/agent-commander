@@ -231,6 +231,13 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
 }
+/**
+ * Inside its own edge: Tab scrolls this box flush against the conversation's,
+ * and the conversation's clip took the half of the ring that lay outside.
+ */
+.resultBody:focus-visible {
+  outline-offset: -2px;
+}
 .resultText {
   margin: 0;
   padding: 6px 8px;

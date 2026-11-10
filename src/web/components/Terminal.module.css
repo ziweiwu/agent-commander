@@ -248,6 +248,21 @@
   background: #000;
   border-radius: var(--radius-md);
 }
+/**
+ * Room for the focus ring when Tab scrolls this box into view.
+ *
+ * On a landscape phone Tab brought it in flush against the detail pane's
+ * bottom edge, where the pane's clip took the ring's bottom side, or a few
+ * pixels above it, inside the 28px scroll-edge fade the pane carries
+ * (`[data-overflow]` in `global.css`), which faded the ring to nothing. An
+ * inset ring is no answer: the positioned capture inside paints over the
+ * box's own outline, and nothing of it showed. So the ring stays outside, and
+ * focus scrolling stops short of both: 6px for the ring's 2px offset and 2px
+ * width with two spare, and below, the fade's 28px on top of that.
+ */
+.historyScroll {
+  scroll-margin: 6px 6px 34px;
+}
 /* Sized by the component from the capture's own measured height, so the box scrolls. */
 .historySpacer {
   position: relative;
