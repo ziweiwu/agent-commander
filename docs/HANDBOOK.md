@@ -1292,6 +1292,15 @@ defining a card's edge. It finds the palettes by parsing the stylesheet rather
 than from a list of scheme names, so a scheme added to the generator and
 forgotten here cannot ship unaudited.
 
+`audit-a11y.mjs` judges a focus ring by the screenshot wherever the focused
+element scrolls, because there the computed outline and the painted one part:
+the conversation matched `:focus-visible` with a 2px ring while its scroll-edge
+fade, a `mask-image`, clipped all of it. It reads the `--focus` colour along
+each edge (`scripts/lib/focus-ring.mjs`, which `e2e/focus-ring.spec.ts` shares),
+and also Tabs to the conversation with a question open and to a tool result
+scrolled flush against the conversation, the two shapes its general sweep
+never reaches.
+
 ### Randomised QA
 
 `scripts/qa-fuzz.mjs` explores the app semi-randomly — clicking, typing and
