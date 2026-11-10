@@ -53,12 +53,14 @@ function along(start, end) {
  * For each edge, one row of points per position along it: the band across the
  * edge, outside to inside. The first point of a row is the edge itself.
  */
-function edgeRows(box) {
+function edgeRows(box, band) {
   const right = box.left + box.width - 1
   const bottom = box.top + box.height - 1
-  const depths = [0]
-  for (let depth = 1; depth <= OUTSIDE; depth += 1) depths.push(-depth)
-  for (let depth = 1; depth <= INSIDE; depth += 1) depths.push(depth)
+  const depths = band ?? [0]
+  if (!band) {
+    for (let depth = 1; depth <= OUTSIDE; depth += 1) depths.push(-depth)
+    for (let depth = 1; depth <= INSIDE; depth += 1) depths.push(depth)
+  }
   const rows = (positions, point) => positions.map((pos) => depths.map((depth) => point(pos, depth)))
   const xs = along(box.left, right)
   const ys = along(box.top, bottom)
@@ -133,11 +135,14 @@ function scoreEdge(rows, isRing) {
  *
  * `target` is a Playwright locator or element handle. The page is
  * screenshotted at CSS scale, so a device pixel ratio does not move the band.
+ * `band` narrows the depths read across each edge, negative outside, so a
+ * ring covered by a neighbour only where they overlap is told apart from a
+ * whole one: the default band finds half a ring as readily as all of it.
  */
-export async function ringSides(page, target) {
+export async function ringSides(page, target, band) {
   await page.waitForTimeout(SETTLE_MS)
   const box = await target.evaluate(boxAndFocus)
-  const rows = edgeRows(box)
+  const rows = edgeRows(box, band)
   const shot = await page.screenshot({ scale: 'css' })
   const points = Object.values(rows).flat(2)
   const colours = await page.evaluate(readPixels, { data: shot.toString('base64'), points })

@@ -108,9 +108,7 @@ async function stopName(page: Page): Promise<string> {
 
 /**
  * Each on-screen edge of the focused element's ring that is short of painted.
- * An edge a scroller holds out of view is not judged, as the audit judges it:
- * Chromium does not scroll the phone strip to a focused kind select, so its
- * right edge sits past the strip's clip, where no ring could show.
+ * An edge a scroller holds out of view is not judged, as the audit judges it.
  */
 async function shortEdges(page: Page): Promise<string[]> {
   const active = await page.evaluateHandle(() => document.activeElement as HTMLElement)
@@ -230,5 +228,49 @@ test.describe('a focus stop at the fleet edge shows its ring', () => {
     await page.keyboard.press('Shift')
     expect(await rows.nth(1).evaluate((el) => el.matches(':focus-visible'))).toBe(true)
     await expectRingPainted(page, rows.nth(1))
+  })
+})
+
+/**
+ * The ring's outer pixels, 3px and 4px past the edge: past the 2px gap between
+ * menu rows, so they are what a neighbouring row covers.
+ */
+const OUTER_RING_BAND = [-3, -4]
+
+test.describe('a focus stop beside a neighbour that paints over it', () => {
+  test('a settings row keeps its whole ring between the pressed row and a hovered one', async ({ page }) => {
+    await openFleet(page)
+    await page.getByTestId('settings-button').click()
+    const rows = page.getByTestId('settings-menu').getByRole('menuitemradio')
+    const pressed = page.locator('[data-testid^="scheme-"][aria-pressed="true"]')
+    const index = await rows.evaluateAll(
+      (all) => all.findIndex((row) => row.getAttribute('aria-pressed') === 'true' && row.dataset.testid?.startsWith('scheme-')),
+    )
+    await expect(pressed).toHaveCount(1)
+    const focused = rows.nth(index + 1)
+    await rows.nth(index + 2).hover()
+    await focused.focus()
+    await page.keyboard.press('Shift')
+    expect(await focused.evaluate((el) => el.matches(':focus-visible'))).toBe(true)
+    const sides = await ringSides(page, focused, OUTER_RING_BAND)
+    expect(sides.top ?? 0, 'top edge, beside the pressed row').toBeGreaterThanOrEqual(RING_PAINTED)
+    expect(sides.bottom ?? 0, 'bottom edge, beside the hovered row').toBeGreaterThanOrEqual(RING_PAINTED)
+  })
+
+  test('@phone Tab brings the kind select into the filter strip with its ring', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openFleet(page)
+    const select = page.getByTestId('kind-select')
+    const strip = select.locator('xpath=..')
+    await tabTo(page, page.getByTestId('search'), 'kind-select')
+    await page.waitForTimeout(300)
+    const [inner, outer] = await Promise.all([select.boundingBox(), strip.boundingBox()])
+    if (!inner || !outer) throw new Error('the select or its strip has no box')
+    expect(inner.x, 'left of the select inside the strip').toBeGreaterThanOrEqual(outer.x)
+    expect(inner.x + inner.width, 'right of the select inside the strip').toBeLessThanOrEqual(outer.x + outer.width)
+    const sides = await ringSides(page, select)
+    for (const [side, share] of Object.entries(sides)) {
+      expect(share ?? 0, `${side} edge of the focus ring`).toBeGreaterThanOrEqual(RING_PAINTED)
+    }
   })
 })
