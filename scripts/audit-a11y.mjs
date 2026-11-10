@@ -179,6 +179,59 @@ async function reportRing(page, tag, what) {
   if (edges.length) add('2.4.7', 'P0', `${tag}: focus ring not painted on ${what} (unpainted: ${edges.join(', ')})`)
 }
 
+/**
+ * 2.4.7 at the fleet's own edges, judged by the screenshot. The desk's fleet
+ * column scrolls, so its `overflow` clips the outside half of the ring of
+ * anything flush against it: every card, its Details button and the toolbar.
+ * The phone's filter strip scrolls sideways, which clips it vertically as
+ * well, so a chip lost its top and bottom. And a card's right edge sits under
+ * its own Details button, drawn after it. The Tab sweep above judges style
+ * alone for these, so every stop in each place is Tabbed to and read off the
+ * screen. Once per profile, since a clip does not change with the scheme.
+ */
+const FLEET_STOPS_JUDGED = 24
+
+async function sweepFleetRings(page, tag, scope, what) {
+  const box = await page.$(scope)
+  if (!box) return
+  await page.evaluate(() => document.activeElement?.blur())
+  const unpainted = []
+  let judged = 0
+  for (let i = 0; i < TAB_STOPS_TO_CONVERSATION * 2 && judged < FLEET_STOPS_JUDGED; i += 1) {
+    await page.keyboard.press('Tab')
+    const within = await box.evaluate((el) => el.contains(document.activeElement))
+    if (!within) {
+      if (judged > 0) break
+      continue
+    }
+    judged += 1
+    const edges = await focusedUnpainted(page)
+    if (edges.length === 0) continue
+    const name = await page.evaluate(() => document.activeElement?.getAttribute('data-testid') ?? '?')
+    unpainted.push(`${name} (unpainted: ${edges.join(', ')})`)
+  }
+  await box.dispose()
+  if (unpainted.length) {
+    const named = unpainted.slice(0, NAMED_IN_A_FINDING).join(', ')
+    add('2.4.7', 'P0', `${tag}: ${unpainted.length} focus stop(s) in ${what} with a clipped ring: ${named}`)
+  }
+}
+
+const FILTER_STRIP = `div:has(> ${T('filter-chip')})`
+const FLEET_COLUMN = `div:has(> ${T('fleet-list')})`
+
+async function auditFleetEdgeRings(page, tag) {
+  await page.goto(BASE, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('agent-card'))
+  await sweepFleetRings(page, tag, FILTER_STRIP, 'the filter strip')
+  await sweepFleetRings(page, tag, FLEET_COLUMN, 'the fleet')
+  await page.goto(`${BASE}agent/mock-idle-kb`, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('agent-detail'))
+  if (await page.locator(T('agent-card')).first().isVisible()) {
+    await sweepFleetRings(page, tag, FLEET_COLUMN, 'the fleet beside an open agent')
+  }
+}
+
 /** The answer keys under a labelled answer, in the order Tab reaches them. */
 const ANSWER_KEYS = ['Up', 'Down', 'Space', 'Enter', 'Escape']
 
@@ -461,6 +514,7 @@ for (const [profile, options] of [
     await auditFadeZoneRings(page, tag)
     await auditMutedKeyRings(page, tag)
     await auditScrollBoxRings(page, tag)
+    if (scheme === 'light') await auditFleetEdgeRings(page, tag)
 
     await context.close()
   }

@@ -329,13 +329,21 @@
   .title {
     font-size: var(--text-md);
   }
+  /**
+   * A strip that scrolls sideways clips up and down as well, so every chip and
+   * the kind select lost the top and bottom of its ring, and the end ones a
+   * side. The ring's room is inside the clip and given back outside it, so the
+   * chips sit where they did, with the 2px under them they always had.
+   */
   .filters {
-    width: 100%;
-    margin-left: 0;
+    width: calc(100% + 2 * var(--ring-reach));
+    margin: calc(-1 * var(--ring-reach));
+    margin-bottom: calc(2px - var(--ring-reach));
+    padding: var(--ring-reach);
+    scroll-padding-inline: var(--ring-reach);
     order: 3;
     overflow-x: auto;
     flex-wrap: nowrap;
-    padding-bottom: 2px;
   }
   .conn {
     margin-left: auto;

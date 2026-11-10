@@ -386,6 +386,7 @@ function Filters() {
           title={t('filterKindsHint')}
           value={fleet.kinds}
           onChange={(e) => setKinds(e.target.value as KindScope)}
+          onFocus={(e) => e.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' })}
         >
           {KIND_SCOPES.map((key) => (
             <option key={key} value={key}>

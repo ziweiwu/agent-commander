@@ -1299,7 +1299,10 @@ fade, a `mask-image`, clipped all of it. It reads the `--focus` colour along
 each edge (`scripts/lib/focus-ring.mjs`, which `e2e/focus-ring.spec.ts` shares),
 and also Tabs to the conversation with a question open and to a tool result
 scrolled flush against the conversation, the two shapes its general sweep
-never reaches.
+never reaches. Once per profile it also Tabs through the fleet's own edges and
+judges every stop there the same way: the phone's filter strip, the fleet
+column, and the column beside an open agent where the screen is wide enough to
+show both, since a scroller's clip cost each of them part of its ring.
 
 ### Randomised QA
 
