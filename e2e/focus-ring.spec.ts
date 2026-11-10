@@ -209,4 +209,26 @@ test.describe('a focus stop at the fleet edge shows its ring', () => {
     expect(await first.evaluate((el) => el.matches(':focus-visible'))).toBe(true)
     await expectRingPainted(page, first)
   })
+
+  /**
+   * The rows sit 1px apart and a hovered row paints its background, so the
+   * row under the pointer, or under the hover a tap leaves on a phone, covered
+   * the bottom of the ring on the row above it. The row is focused by script
+   * after a click opened the dialog, so a key is pressed to say the keyboard
+   * is in use, which is what shows the ring.
+   */
+  test('a folder row keeps its ring with the row under it hovered', async ({ page }) => {
+    await openFleet(page)
+    await page.getByTestId('new-agent-button').click()
+    await page.getByTestId('new-agent-dir').fill('~')
+    const browse = page.getByTestId('new-agent-browse')
+    if ((await browse.getAttribute('aria-expanded')) !== 'true') await browse.click()
+    const rows = page.getByTestId('browse-entry')
+    await expect(rows.nth(2)).toBeVisible()
+    await rows.nth(2).hover()
+    await rows.nth(1).focus()
+    await page.keyboard.press('Shift')
+    expect(await rows.nth(1).evaluate((el) => el.matches(':focus-visible'))).toBe(true)
+    await expectRingPainted(page, rows.nth(1))
+  })
 })

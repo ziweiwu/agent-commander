@@ -67,6 +67,16 @@
 .entry:hover {
   background: var(--panel-2);
 }
+/**
+ * The rows sit 1px apart, so a hovered row's background, or the hover a tap
+ * leaves behind on a phone, covered the bottom of the ring on the row above.
+ * The focused row is lifted over its neighbours, which changes nothing while
+ * no row is focused.
+ */
+.entry:focus-visible {
+  position: relative;
+  z-index: 1;
+}
 .icon {
   color: var(--faint);
   flex: none;

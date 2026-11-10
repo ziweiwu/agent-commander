@@ -784,7 +784,9 @@ commit.
   inside its clip, given back as a negative margin so nothing moves, and a
   `scroll-padding` of the same so Tab does not scroll a box flush again. A card
   and its Details button share an edge, and the one drawn later covered the
-  other's ring there, so the focused one is lifted with a `z-index`.
+  other's ring there, so the focused one is lifted with a `z-index`; so is a
+  folder row in the new-agent dialog, whose hovered neighbour 1px below
+  covered the bottom of its ring.
   `scripts/lib/focus-ring.mjs` reads the ring off a screenshot, and the audit
   and `e2e/focus-ring.spec.ts` both judge by it.
 - **A guard is not verified by watching it pass.** `test/icons.test.ts` sweeps
