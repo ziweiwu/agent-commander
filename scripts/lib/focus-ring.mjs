@@ -13,7 +13,9 @@
  * `--focus` token resolves to on this page. An inset ring and the global
  * outset one both land in that band. The share of samples along an edge that
  * found the colour is that edge's score, and an edge with no sample on screen
- * scores `null`: off screen is not judged. `e2e/focus-ring.spec.ts` and
+ * scores `null`: off screen is not judged, and neither is an edge an ancestor's
+ * clip has scrolled out of view, since no ring could show there; an edge that
+ * is in view with its ring clipped beyond it is judged, and fails. `e2e/focus-ring.spec.ts` and
  * `scripts/audit-a11y.mjs` both judge with it, so the two cannot disagree on
  * what "painted" means.
  */
@@ -94,7 +96,11 @@ async function readPixels({ data, points }) {
   })
 }
 
-/** The element's box and the colour `--focus` resolves to, read in the page. */
+/**
+ * Read in the page: the element's box, the colour `--focus` resolves to, and
+ * the visible rect left by every ancestor that clips, so an edge scrolled out
+ * of its scroller is told apart from a ring that edge failed to show.
+ */
 function boxAndFocus(element) {
   const rect = element.getBoundingClientRect()
   const probe = document.createElement('i')
@@ -102,7 +108,17 @@ function boxAndFocus(element) {
   document.body.append(probe)
   const focus = getComputedStyle(probe).color
   probe.remove()
-  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, focus }
+  const clip = { left: -Infinity, top: -Infinity, right: Infinity, bottom: Infinity }
+  for (let up = element.parentElement; up; up = up.parentElement) {
+    const style = getComputedStyle(up)
+    if (style.overflowX === 'visible' && style.overflowY === 'visible') continue
+    const outer = up.getBoundingClientRect()
+    clip.left = Math.max(clip.left, outer.left)
+    clip.top = Math.max(clip.top, outer.top)
+    clip.right = Math.min(clip.right, outer.right)
+    clip.bottom = Math.min(clip.bottom, outer.bottom)
+  }
+  return { left: rect.left, top: rect.top, width: rect.width, height: rect.height, focus, clip }
 }
 
 /** An edge's share of on-screen rows that found the ring, or `null` with none on screen. */
@@ -127,13 +143,39 @@ export async function ringSides(page, target) {
   const colours = await page.evaluate(readPixels, { data: shot.toString('base64'), points })
   const [red, green, blue] = (box.focus.match(/\d+/g) ?? []).map(Number)
   const isRing = (rgb) => rgb !== null && Math.hypot(rgb[0] - red, rgb[1] - green, rgb[2] - blue) < TOLERANCE
+  const { clip } = box
+  const visible = ([x, y]) => x >= clip.left && x < clip.right && y >= clip.top && y < clip.bottom
   let next = 0
   const scores = {}
   for (const [side, sideRows] of Object.entries(rows)) {
-    const read = sideRows.map((row) => row.map(() => colours[next++]))
+    const read = sideRows.map((row) => {
+      const rgbs = row.map(() => colours[next++])
+      return visible(row[0]) ? rgbs : [null]
+    })
     scores[side] = scoreEdge(read, isRing)
   }
   return scores
+}
+
+/** How often, and for how long at most, `untilStill` reads a scroll box. */
+const STILL_POLL_MS = 150
+const STILL_LIMIT_MS = 5000
+
+/**
+ * Wait until a scroll box has stopped moving: the same height and offset on
+ * two reads in a row. A conversation is still landing a beat after it is
+ * drawn, and a re-render then moves it; a box Tab had just scrolled into view
+ * was then measured half out of it, which reads exactly like a clipped ring.
+ */
+export async function untilStill(page, selector) {
+  const read = () => page.locator(selector).evaluate((box) => `${box.scrollHeight}:${box.scrollTop}`)
+  let last = await read()
+  for (let waited = 0; waited < STILL_LIMIT_MS; waited += STILL_POLL_MS) {
+    await page.waitForTimeout(STILL_POLL_MS)
+    const now = await read()
+    if (now === last) return
+    last = now
+  }
 }
 
 /** The on-screen edges whose score is under `RING_PAINTED`, so an empty list means painted. */

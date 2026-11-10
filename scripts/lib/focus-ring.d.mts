@@ -10,3 +10,6 @@ export function ringSides(page: Page, target: Locator | ElementHandle): Promise<
 
 /** The on-screen edges whose score is under `RING_PAINTED`, so an empty list means painted. */
 export function unpaintedEdges(page: Page, target: Locator | ElementHandle): Promise<string[]>
+
+/** Wait until the scroll box `selector` names reads the same height and offset twice in a row. */
+export function untilStill(page: Page, selector: string): Promise<void>

@@ -14,7 +14,7 @@
  * a11y audit reads too).
  */
 import { expect, type Locator, type Page, test } from '@playwright/test'
-import { RING_PAINTED, ringSides } from '../scripts/lib/focus-ring.mjs'
+import { RING_PAINTED, ringSides, untilStill } from '../scripts/lib/focus-ring.mjs'
 import { AGENT, openAgent } from './helpers.ts'
 
 async function expectRingPainted(page: Page, target: Locator): Promise<void> {
@@ -58,6 +58,7 @@ test.describe('a focused scroll box shows its ring', () => {
     await edit.getByTestId('tool-expand').click()
     const body = page.getByTestId('tool-result-body')
     await expect(body).toBeVisible()
+    await untilStill(page, '[data-testid="chat-scroll"]')
     await page.getByTestId('chat-scroll').evaluate((el) => el.scrollTo({ top: 0 }))
     await tabTo(page, edit.getByTestId('tool-expand'), 'tool-result-body')
     await expectRingPainted(page, body)

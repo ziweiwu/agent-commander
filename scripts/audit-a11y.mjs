@@ -7,7 +7,7 @@
  * Contrast is measured separately against the design tokens.
  */
 import { chromium, devices } from 'playwright'
-import { unpaintedEdges } from './lib/focus-ring.mjs'
+import { unpaintedEdges, untilStill } from './lib/focus-ring.mjs'
 import { TARGET_SIZE_CONTROLS } from './lib/targets.mjs'
 
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
@@ -146,6 +146,7 @@ async function auditScrollBoxRings(page, tag) {
   const expand = page.getByTitle('Edit: src/components/Header.astro').getByTestId('tool-expand')
   await expand.click()
   await page.waitForSelector(T('tool-result-body'))
+  await untilStill(page, T('chat-scroll'))
   await page.locator(T('chat-scroll')).evaluate((el) => el.scrollTo({ top: 0 }))
   await expand.focus()
   if (await tabTo(page, tag, null, 'tool-result-body')) {
