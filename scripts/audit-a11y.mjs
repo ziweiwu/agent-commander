@@ -194,7 +194,7 @@ async function conversationStop(page) {
     const scroll = document.querySelector('[data-testid="chat-scroll"]')
     return {
       testId: active?.getAttribute('data-testid') ?? '',
-      label: (active?.getAttribute('data-testid') || active?.getAttribute('aria-label') || active?.tagName || '').slice(0, 24),
+      label: active?.getAttribute('data-testid') || active?.getAttribute('aria-label') || active?.tagName || '',
       inConversation: Boolean(scroll && active && active !== scroll && scroll.contains(active)),
       wrapped: (active?.getClientRects().length ?? 0) > 1,
     }

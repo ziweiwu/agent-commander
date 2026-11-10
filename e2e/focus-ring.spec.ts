@@ -187,7 +187,8 @@ for (const [shape, use] of [
           .toBe(false)
         const sides = await ringSides(page, target, { tolerance: FULL_STRENGTH })
         const weak = Object.entries(sides).filter(([, share]) => share !== null && share < RING_PAINTED)
-        if (weak.length) dimmed.push(`${name}: ${weak.map(([side, share]) => `${side} ${share?.toFixed(2)}`).join(', ')}`)
+        const said = weak.map(([side, share]) => `${side} ${share?.toFixed(2)}`)
+        if (said.length) dimmed.push(`${name}: ${said.join(', ')}`)
       }
       expect(dimmed, 'answer keys whose ring is dimmed').toEqual([])
     })
