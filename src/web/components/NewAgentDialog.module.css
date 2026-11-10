@@ -30,6 +30,16 @@
   padding: 16px 18px 18px;
   padding-bottom: max(18px, env(safe-area-inset-bottom));
 }
+/**
+ * The dialog scrolls when the screen is short, and the folder list inside it
+ * then runs past its foot. Tab scrolls the dialog too, bringing a folder in
+ * flush with its edge, where the dialog's clip took the ring's outer half. So
+ * focus scrolling stops 6px short: the ring's 2px offset, its 2px width and
+ * two spare.
+ */
+.modal {
+  scroll-padding: 6px;
+}
 .head {
   display: flex;
   align-items: center;
