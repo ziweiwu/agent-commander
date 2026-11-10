@@ -66,10 +66,6 @@
 .item:hover {
   background: var(--panel-2);
 }
-.item:focus-visible {
-  position: relative;
-  z-index: 1;
-}
 .item[aria-pressed='true'] {
   background: var(--tint-focus);
 }

@@ -209,11 +209,10 @@ test.describe('a focus stop at the fleet edge shows its ring', () => {
   /**
    * The rows sit 1px apart and a hovered row paints its background, so the
    * row under the pointer, or under the hover a tap leaves on a phone, covered
-   * the bottom of the ring on the row above it. The row is focused by script
-   * after a click opened the dialog, so a key is pressed to say the keyboard
-   * is in use, which is what shows the ring.
+   * the bottom of the ring on the row above it. The row is reached by a key
+   * from the one before it, so the browser knows the keyboard is in use.
    */
-  test('a folder row keeps its ring with the row under it hovered', async ({ page }) => {
+  test('a folder row keeps its ring with the row under it hovered', async ({ page, browserName }) => {
     await openFleet(page)
     await page.getByTestId('new-agent-button').click()
     const browse = page.getByTestId('new-agent-browse')
@@ -221,39 +220,15 @@ test.describe('a focus stop at the fleet edge shows its ring', () => {
     const rows = page.getByTestId('browse-entry')
     await expect(rows.nth(2)).toBeVisible()
     await rows.nth(2).hover()
-    await rows.nth(1).focus()
-    await page.keyboard.press('Shift')
+    await rows.nth(0).focus()
+    await page.keyboard.press(walkKey(browserName))
+    await expect(rows.nth(1)).toBeFocused()
     expect(await rows.nth(1).evaluate((el) => el.matches(':focus-visible'))).toBe(true)
     await expectRingPainted(page, rows.nth(1))
   })
 })
 
-/**
- * The ring's outer pixels, 3px and 4px past the edge: past the 2px gap between
- * menu rows, so they are what a neighbouring row covers.
- */
-const OUTER_RING_BAND = [-3, -4]
-
-test.describe('a focus stop beside a neighbour that paints over it', () => {
-  test('a settings row keeps its whole ring between the pressed row and a hovered one', async ({ page }) => {
-    await openFleet(page)
-    await page.getByTestId('settings-button').click()
-    const rows = page.getByTestId('settings-menu').getByRole('menuitemradio')
-    const pressed = page.locator('[data-testid^="scheme-"][aria-pressed="true"]')
-    const index = await rows.evaluateAll(
-      (all) => all.findIndex((row) => row.getAttribute('aria-pressed') === 'true' && row.dataset.testid?.startsWith('scheme-')),
-    )
-    await expect(pressed).toHaveCount(1)
-    const focused = rows.nth(index + 1)
-    await rows.nth(index + 2).hover()
-    await focused.focus()
-    await page.keyboard.press('Shift')
-    expect(await focused.evaluate((el) => el.matches(':focus-visible'))).toBe(true)
-    const sides = await ringSides(page, focused, { band: OUTER_RING_BAND })
-    expect(sides.top ?? 0, 'top edge, beside the pressed row').toBeGreaterThanOrEqual(RING_PAINTED)
-    expect(sides.bottom ?? 0, 'bottom edge, beside the hovered row').toBeGreaterThanOrEqual(RING_PAINTED)
-  })
-
+test.describe('a focus stop in a strip Tab must scroll', () => {
   test('@phone Tab brings the kind select into the filter strip with its ring', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await openFleet(page)

@@ -8,10 +8,9 @@ export const RING_PAINTED: number
 /** A `tolerance` that asks for the ring at full strength, as no ancestor's `opacity` leaves it. */
 export const FULL_STRENGTH: number
 
-/** How far from `--focus` a pixel may be and still count as the ring, and which depths across each edge to read, negative outside. */
+/** How far from `--focus` a pixel may be and still count as the ring. */
 export interface RingOptions {
   tolerance?: number
-  band?: number[]
 }
 
 /** Each edge's share of samples where the `--focus` colour is painted near it; `null` for an edge off screen. */
