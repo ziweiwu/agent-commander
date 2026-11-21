@@ -178,6 +178,11 @@ const SHOWN_ALL = { one: 'answerShownAllOne', many: 'answerShownAll' } as const
  * keeps its focus rather than dropping it to the page. The press sends
  * nothing and moves no focus; the parent keys this on the prompt, so the next
  * one starts collapsed.
+ *
+ * While the box scrolls it is a named region and a Tab stop, so a keyboard or
+ * switch user can scroll it too. It comes before the options in reading order
+ * and takes no focus of its own: opening the card still lands on option 1
+ * (INV-2).
  */
 function AnswerDetail({ label, text, ids }: { label: string; text: string; ids: AnswerIds }) {
   const t = useTranslate()
@@ -185,10 +190,13 @@ function AnswerDetail({ label, text, ids }: { label: string; text: string; ids: 
   const [ref, edge] = useOverflowEdge<HTMLPreElement>()
   const [clipped, setClipped] = useState(false)
   const [expanded, setExpanded] = useState(false)
+  const [overflowed, setOverflowed] = useState(false)
   useEffect(() => {
     if (edge.startsWith('bottom')) setClipped(true)
+    if (edge !== 'none') setOverflowed(true)
   }, [edge])
   const lines = lineCount(text)
+  const scrolls = overflowed && !expanded
   return (
     <>
       <p className={styles.label} id={ids.label} data-testid="answer-detail-label">
@@ -201,6 +209,9 @@ function AnswerDetail({ label, text, ids }: { label: string; text: string; ids: 
         data-testid="answer-detail"
         data-overflow={expanded ? undefined : edge}
         data-expanded={expanded || undefined}
+        tabIndex={scrolls ? 0 : undefined}
+        role={scrolls ? 'region' : undefined}
+        aria-label={scrolls ? t('answerDetailRegion', { label }) : undefined}
       >
         {text}
       </pre>

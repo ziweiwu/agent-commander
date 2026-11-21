@@ -149,3 +149,21 @@ test.describe('the fleet', () => {
     await expect(page.getByTestId('attach-blocked-note')).toHaveText(/not running inside tmux/i)
   })
 })
+
+/**
+ * A2+B4 on a desk: Esc from an agent's composer used to unmount the box that
+ * held focus and leave it on <body>, 43 Tabs from the eighth card. Leaving
+ * puts it back on the card the agent was opened from.
+ */
+test.describe('leaving an agent', () => {
+  test('puts focus back on its card after Enter then Esc @desktop', async ({ page }) => {
+    await openFleet(page)
+    await card(page, AGENT.idleAlt).press('Enter')
+    await expect(page.getByTestId('agent-detail')).toBeVisible()
+    await expect(page.getByTestId('composer-input')).toBeFocused()
+
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(/\/$/)
+    await expect(card(page, AGENT.idleAlt)).toBeFocused()
+  })
+})

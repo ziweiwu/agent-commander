@@ -9,7 +9,7 @@
  * from the pane's own geometry, and the browser's width never travels back.
  */
 import { expect, test } from '@playwright/test'
-import { AGENT, openAgent } from './helpers.ts'
+import { AGENT, card, openAgent } from './helpers.ts'
 
 test.describe('the terminal', () => {
   test('paints frames captured from the pane', async ({ page }) => {
@@ -225,14 +225,30 @@ test.describe('the terminal', () => {
     await expect(page.getByTestId('term-wrap')).toBeVisible()
   })
 
-  test('Shift+Escape is the way out @desktop', async ({ page }) => {
+  test('Shift+Escape is the way out @desktop @desktop-safari', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()
+
+    const input = page.locator('[data-testid="terminal"] textarea.xterm-helper-textarea')
+    const hint = await input.getAttribute('aria-describedby')
+    await expect(page.locator(`[id="${hint}"]`)).toHaveText('Shift+Esc leaves the terminal')
 
     await page.getByTestId('term-wrap').click()
     await page.keyboard.press('Shift+Escape')
 
     await expect(page).toHaveURL(/\/$/)
+    await expect(card(page, AGENT.idle)).toBeFocused()
+  })
+
+  test('Shift+Escape after clicking the Attach tab shows the ring on the card @desktop @desktop-safari', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm')).toBeVisible()
+    await page.keyboard.press('Shift+Escape')
+
+    await expect(page).toHaveURL(/\/$/)
+    await expect(card(page, AGENT.idle)).toBeFocused()
+    expect(await card(page, AGENT.idle).evaluate((el) => el.matches(':focus-visible'))).toBe(true)
   })
 })

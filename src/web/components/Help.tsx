@@ -68,7 +68,7 @@ export function Help({ onClose }: { onClose: () => void }) {
   return (
     <article className={styles.help} data-testid="help-page">
       <header className={styles.head}>
-        <h2>{t('helpTitle')}</h2>
+        <h2 tabIndex={-1}>{t('helpTitle')}</h2>
         {/* Reported by the server rather than baked into the bundle: with the
             Mac app those two can be different builds, and the one that matters
             is the one answering. Absent from a server built before it existed,

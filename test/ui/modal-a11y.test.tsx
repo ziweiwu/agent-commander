@@ -14,7 +14,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { act } from 'react'
-import { screen } from '@testing-library/react'
+import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { NewAgentDialog } from '../../src/web/components/NewAgentDialog.tsx'
 import { useStore } from '../../src/web/store/store.ts'
@@ -76,6 +76,31 @@ describe('modal chrome', () => {
     renderApp(<NewAgentDialog />)
     // The dialog takes focus for itself on open.
     expect(document.activeElement).not.toBe(trigger)
+
+    await act(async () => {
+      useStore.setState({ newAgentOpen: false })
+    })
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
+  })
+
+  /**
+   * WebKit does not focus a button it clicks, so the focus history never saw
+   * the New agent button, and Escape after a refused submit left focus on
+   * <body> there while Chromium put it back. A press is a record of the
+   * opener too, in every engine.
+   */
+  it('returns focus to an opener the click never focused, as in WebKit', async () => {
+    const trigger = document.createElement('button')
+    trigger.setAttribute('data-testid', 'new-agent-button')
+    document.body.append(trigger)
+    fireEvent.pointerDown(trigger)
+    fireEvent.click(trigger)
+    expect(document.activeElement).not.toBe(trigger)
+
+    useStore.setState({ newAgentOpen: true, env })
+    renderApp(<NewAgentDialog />)
+    fireEvent.click(screen.getByTestId('new-agent-submit'))
 
     await act(async () => {
       useStore.setState({ newAgentOpen: false })

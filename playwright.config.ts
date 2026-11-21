@@ -104,6 +104,11 @@ const PROJECTS = [
     use: { ...devices['iPad Pro 11'], ...WEBKIT },
     grepInvert: /@phone|@desktop|@once/,
   },
+  {
+    name: 'desktop-safari',
+    use: { ...devices['Desktop Safari'], ...WEBKIT },
+    grep: /@desktop-safari/,
+  },
 ]
 
 const MOCK_SERVER: PlaywrightTestConfig['webServer'] = {

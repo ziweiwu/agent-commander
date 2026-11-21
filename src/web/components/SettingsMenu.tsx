@@ -3,6 +3,7 @@ import { useStore } from '../store/store.ts'
 import { LANGUAGES, LANGUAGE_NAMES } from '../lib/i18n.ts'
 import { SCHEMES, THEMES, type Scheme, type Theme } from '../lib/prefs.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
+import { useEscapeLayer } from '../hooks/useEscapeLayer.ts'
 import { Button } from './ui/Button.tsx'
 import styles from './SettingsMenu.module.css'
 import { Icon } from './ui/Icon.tsx'
@@ -90,6 +91,7 @@ export function SettingsMenu() {
     setOpen(false)
     wrapRef.current?.querySelector<HTMLElement>('[data-testid="settings-button"]')?.focus()
   }
+  useEscapeLayer(open ? closeAndRefocus : null)
   /** Which edge the menu hangs from; see the effect below. */
   const [side, setSide] = useState<'right' | 'left'>('right')
 

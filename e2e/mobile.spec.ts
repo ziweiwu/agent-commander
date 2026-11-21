@@ -86,6 +86,18 @@ test.describe('@phone the sheet', () => {
     expect(insets.right).toBeLessThanOrEqual(12)
   })
 
+  test('but keeps bordered blocks off the panel edge', async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 659 })
+    await openAgent(page, AGENT.plan)
+
+    const panel = await page.getByTestId('agent-detail').boundingBox()
+    for (const id of ['blocked-banner', 'answer-card', 'composer-input', 'composer-send']) {
+      const box = await page.getByTestId(id).boundingBox()
+      expect(box!.x - panel!.x, id).toBeGreaterThanOrEqual(6)
+      expect(panel!.x + panel!.width - (box!.x + box!.width), id).toBeGreaterThanOrEqual(6)
+    }
+  })
+
   test('and in landscape, where there is least of it', async ({ page }) => {
     await page.setViewportSize({ width: 844, height: 380 })
     await openAgent(page, AGENT.idle)
@@ -134,6 +146,24 @@ const MIN_NAME_PX = 60
  * `overflow: hidden` edge and impossible to press, and from 320 to 390 the
  * agent's name got about 0px. The tabs now drop to a second row instead.
  */
+/**
+ * A2+B4 on a phone: opening an agent puts focus on its heading rather than on
+ * <body>, the tab title names it by a name that is not conversation (INV-3),
+ * and ‹ Agents puts focus back on its card.
+ */
+test.describe('@phone where you are', () => {
+  test('a tapped card lands on its heading, titles the tab, and back returns to it', async ({ page }) => {
+    await openFleet(page)
+    await card(page, AGENT.idleAlt).click()
+    await expect(page.getByTestId('detail-name')).toBeFocused()
+    await expect(page).toHaveTitle(/ · agent-commander$/)
+
+    await page.getByTestId('back-button').click()
+    await expect(card(page, AGENT.idleAlt)).toBeFocused()
+    await expect(page).toHaveTitle(/^(\(\d+\) )?agent-commander$/)
+  })
+})
+
 test.describe('@phone the sheet header', () => {
   for (const [what, sessionId] of [
     ['an idle agent', AGENT.idle],

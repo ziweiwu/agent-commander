@@ -423,6 +423,9 @@
   .sheet .pane {
     padding-inline: 0;
   }
+  .blocked {
+    margin-inline: 8px;
+  }
 }
 .sheet .close,
 .sheet .where {

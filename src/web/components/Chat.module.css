@@ -479,6 +479,9 @@
    at 460px, where the paired Interrupt buttons squeezed the box to 32px.
    Applied at the phone layout's one cut. */
 @media (max-width: 560px) {
+  .composer {
+    padding-inline: 8px;
+  }
   .stopGlyph {
     display: inline-flex;
   }

@@ -1018,6 +1018,31 @@ describe('FR-ANS-9 the whole plan or command before its Yes', () => {
     expect(screen.queryByRole('button', { name: /show less/i })).toBeNull()
   })
 
+  /**
+   * axe's scrollable-region-focusable: a capped plan scrolls, and a keyboard
+   * or switch user could not reach it to scroll it. It is a named region and a
+   * Tab stop while it scrolls, before the options in reading order only:
+   * opening the card still puts focus on option 1 (INV-2, round 3's R1).
+   */
+  it('FR-ANS-9 makes a plan that scrolls a named Tab stop, and still lands on option 1', () => {
+    undo = layout(TALL_PX, BOX_PX)
+    useStore.setState({ prompt: LONG_PLAN })
+    renderApp(<Chat agent={blocked()} />)
+    const detail = screen.getByTestId('answer-detail')
+    expect(detail.tabIndex).toBe(0)
+    expect(screen.getByRole('region', { name: /scroll/i })).toBe(detail)
+    expect(document.activeElement).toBe(screen.getAllByTestId('answer-option')[0])
+    const order = detail.compareDocumentPosition(screen.getAllByTestId('answer-option')[0] as HTMLElement)
+    expect(order & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('FR-ANS-9 leaves a plan that fits out of the Tab order', () => {
+    undo = layout(BOX_PX, BOX_PX)
+    renderApp(<AnswerCard agent={blocked()} prompt={LONG_PLAN} />)
+    expect(screen.getByTestId('answer-detail').tabIndex).toBe(-1)
+    expect(screen.queryByRole('region')).toBeNull()
+  })
+
   it('FR-ANS-9 draws no button for text that fits', () => {
     undo = layout(BOX_PX, BOX_PX)
     renderApp(<AnswerCard agent={blocked()} prompt={LONG_PLAN} />)

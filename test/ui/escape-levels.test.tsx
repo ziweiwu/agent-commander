@@ -14,10 +14,10 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import userEvent from '@testing-library/user-event'
-import { App } from '../../src/web/components/App.tsx'
+import { App, FleetRoute } from '../../src/web/components/App.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, resetStore } from './helpers.tsx'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { fireEvent, render, screen } from '@testing-library/react'
 
 const navigate = vi.hoisted(() => vi.fn())
@@ -171,5 +171,78 @@ describe('a key event that did not come from an element', () => {
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     }).not.toThrow()
     expect(useStore.getState().fullscreen).toBe(false)
+  })
+})
+
+let path = ''
+
+function Probe() {
+  path = useLocation().pathname
+  return null
+}
+
+function routed(startPath: string) {
+  return render(
+    <MemoryRouter initialEntries={[startPath]}>
+      <Probe />
+      <Routes>
+        <Route path="/*" element={<App />}>
+          <Route index element={<FleetRoute />} />
+          <Route path="agent/:sessionId" element={<FleetRoute />} />
+        </Route>
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+/**
+ * The innermost open thing closes first (WAI-ARIA APG menu and disclosure).
+ * Pressed with a click that leaves focus on <body>, as WebKit does, Escape
+ * went past the open settings row or settings menu and left the agent: URL
+ * `/`, focus on <body>. It must close the layer, keep the URL, and put focus
+ * on the control that opened it; the next Escape takes the ladder's step.
+ */
+describe('Escape closes the innermost open thing first', () => {
+  const open = (startPath = '/agent/a') => {
+    useStore.setState({ agents: [agent({ sessionId: 'a' })], selected: 'a' })
+    routed(startPath)
+  }
+
+  it('closes the agent’s settings row and keeps the agent open', async () => {
+    const user = userEvent.setup()
+    open()
+    fireEvent.click(screen.getByTestId('controls-toggle'))
+    expect(screen.getByTestId('agent-controls')).toBeTruthy()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('agent-controls')).toBeNull()
+    expect(path).toBe('/agent/a')
+    expect(document.activeElement).toBe(screen.getByTestId('controls-toggle'))
+
+    await user.keyboard('{Escape}')
+    expect(path).toBe('/')
+  })
+
+  it('closes the settings menu in the topbar and keeps the agent open', async () => {
+    const user = userEvent.setup()
+    open()
+    fireEvent.click(screen.getByTestId('settings-button'))
+    expect(screen.getByTestId('settings-menu')).toBeTruthy()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('settings-menu')).toBeNull()
+    expect(path).toBe('/agent/a')
+    expect(document.activeElement).toBe(screen.getByTestId('settings-button'))
+  })
+
+  it('closes the composer’s menu and keeps the agent open', async () => {
+    const user = userEvent.setup()
+    open()
+    fireEvent.click(screen.getByTestId('strip-toggle'))
+    expect(screen.getByTestId('composer-strip')).toBeTruthy()
+
+    await user.keyboard('{Escape}')
+    expect(screen.queryByTestId('composer-strip')).toBeNull()
+    expect(path).toBe('/agent/a')
   })
 })

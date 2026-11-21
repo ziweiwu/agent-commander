@@ -119,6 +119,12 @@ export function useModalChrome(ref: RefObject<HTMLElement | null>, active: boole
  *
  * `focusin` sees every one of these in order, so walking back to the most
  * recent entry outside the dialog finds the real opener.
+ *
+ * A press is recorded as well, because `focusin` alone missed the opener in
+ * WebKit: Safari does not focus a button it clicks, so the New agent button
+ * never reached this list, and Escape left focus on <body> there while
+ * Chromium put it back. `pointerdown` names the control pressed in every
+ * engine, before the focus it may or may not bring.
  */
 const HISTORY_MAX = 10
 const history: HTMLElement[] = []
@@ -133,18 +139,20 @@ function openerFor(container: HTMLElement): HTMLElement | null {
   return null
 }
 
+function remember(target: EventTarget | null): void {
+  if (!(target instanceof HTMLElement) || target === document.body) return
+  if (history.at(-1) === target) return
+  history.push(target)
+  if (history.length > HISTORY_MAX) history.shift()
+}
+
 function startTracking(): void {
   if (tracking || typeof document === 'undefined') return
   tracking = true
+  document.addEventListener('focusin', (event) => remember(event.target), true)
   document.addEventListener(
-    'focusin',
-    (event) => {
-      const target = event.target
-      if (!(target instanceof HTMLElement) || target === document.body) return
-      if (history.at(-1) === target) return
-      history.push(target)
-      if (history.length > HISTORY_MAX) history.shift()
-    },
+    'pointerdown',
+    (event) => remember(event.target instanceof Element ? event.target.closest(FOCUSABLE) : null),
     true,
   )
 }

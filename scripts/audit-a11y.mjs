@@ -56,6 +56,72 @@ async function auditHeldModeChord(page, tag) {
   await page.locator(T('toast')).waitFor({ state: 'detached', timeout: TOAST_GONE_MS }).catch(() => {})
 }
 
+/**
+ * A6: the agent's tabs are the APG tabs pattern, manual activation. Every
+ * tablist has exactly one Tab stop, every tab controls a panel labelled by a
+ * tab, and ArrowRight from the selected Chat tab moves focus to Attach without
+ * selecting it, so an arrow never mounts a terminal.
+ */
+async function auditTabs(page, tag) {
+  const lists = await page.$$eval('[role="tablist"]', (els) =>
+    els.map((list) => {
+      const tabs = [...list.querySelectorAll('[role="tab"]')]
+      const panelOf = (tab) => document.getElementById(tab.getAttribute('aria-controls') ?? '')
+      const labelled = (panel) => document.getElementById(panel?.getAttribute('aria-labelledby') ?? '')?.getAttribute('role') === 'tab'
+      return {
+        stops: tabs.filter((tab) => tab.tabIndex === 0).length,
+        panels: tabs.every((tab) => panelOf(tab)?.getAttribute('role') === 'tabpanel' && labelled(panelOf(tab))),
+      }
+    }),
+  )
+  for (const list of lists) {
+    if (list.stops !== 1) add('2.1.1', 'P1', `${tag}: a tablist has ${list.stops} Tab stops, not 1`)
+    if (!list.panels) add('4.1.2', 'P1', `${tag}: a tab controls no tabpanel labelled by a tab`)
+  }
+  const chat = page.locator(T('tab-chat'))
+  if (!(await chat.isVisible()) || (await chat.getAttribute('aria-selected')) !== 'true') return
+  await chat.focus()
+  await page.keyboard.press('ArrowRight')
+  const moved = await page.evaluate(
+    () =>
+      document.activeElement?.getAttribute('data-testid') === 'tab-attach' &&
+      document.querySelector('[data-testid="tab-chat"]')?.getAttribute('aria-selected') === 'true',
+  )
+  if (!moved) add('2.1.1', 'P1', `${tag}: ArrowRight on the Chat tab did not move focus to Attach alone`)
+}
+
+/**
+ * A2+B4, a route pass: every move between the fleet, an agent and Help
+ * retitles the tab, and on a touch screen leaves focus somewhere rather than
+ * on <body>, where VoiceOver loses its place.
+ */
+async function goBack(page) {
+  const back = page.locator(T('back-button'))
+  if (await back.isVisible()) await back.click()
+  else await page.keyboard.press('Escape')
+}
+
+async function auditRoutes(page, tag) {
+  const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches)
+  await page.goto(BASE, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('agent-card'))
+  const moves = [
+    ['opening an agent', () => page.locator(T('agent-card')).nth(1).click(), T('agent-detail')],
+    ['going back', () => goBack(page), T('agent-card')],
+    ['opening Help', () => page.locator(T('help-button')).click(), T('help-page')],
+    ['closing Help', () => page.locator(T('help-close')).click(), T('agent-card')],
+  ]
+  for (const [what, move, landed] of moves) {
+    const before = await page.title()
+    await move()
+    await page.waitForSelector(landed)
+    await page.waitForTimeout(SETTLE_MS)
+    const after = await page.evaluate(() => ({ title: document.title, body: document.activeElement === document.body }))
+    if (what.startsWith('opening') && after.title === before) add('2.4.2', 'P1', `${tag}: ${what} left the tab title at "${before}"`)
+    if (coarse && after.body) add('2.4.3', 'P1', `${tag}: ${what} left focus on <body>`)
+  }
+}
+
 /** How many Tab stops past the Chat tab the conversation may sit and still count as reachable. */
 const TAB_STOPS_TO_CONVERSATION = 60
 
@@ -359,6 +425,7 @@ async function visitStates(page, tag) {
   states.push('chat')
   await auditHeldModeChord(page, tag)
   await auditConversationReach(page, tag)
+  await auditTabs(page, tag)
 
   await page.click(T('tab-attach'))
   await page.waitForSelector('.xterm-screen', { timeout: 6000 }).catch(() => {})
@@ -515,6 +582,7 @@ for (const [profile, options] of [
     await auditMutedKeyRings(page, tag)
     await auditScrollBoxRings(page, tag)
     if (scheme === 'light') await auditFleetEdgeRings(page, tag)
+    if (scheme === 'light') await auditRoutes(page, tag)
 
     await context.close()
   }

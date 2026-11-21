@@ -782,12 +782,11 @@ function handle(msg: ServerMessage): void {
   }
 }
 
-/** Surface newly blocked agents in the tab title, for a backgrounded window. */
+/** Announce newly blocked agents; the tab title's count is `useRouteTitle`'s. */
 function announceBlocked(agents: Agent[]): void {
   const blocked = agents.filter((a) => a.status === 'waiting')
   const fresh = blocked.filter((a) => !announced.has(a.sessionId))
   announced = new Set(blocked.map((a) => a.sessionId))
-  document.title = blocked.length ? `(${blocked.length}) agent-commander` : 'agent-commander'
   if (fresh.length === 0) return
   const region = document.getElementById('live-region')
   if (region) region.textContent = blockedAnnouncement(fresh)
