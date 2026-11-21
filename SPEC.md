@@ -679,8 +679,14 @@ epistemic rather than functional.
   step, and the server MUST refuse them unless the client states the user was
   asked. **(INV-6)** *`test/ui/key-map.test.tsx`, `control::tests`.*
 - **FR-ATT-10** — `Shift+Esc` MUST leave the terminal, because plain `Esc`
-  belongs to the agent — and MUST discard exactly one level, not two.
-  *`test/ui/escape-levels.test.tsx`.*
+  belongs to the agent — and MUST discard exactly one level, not two. The
+  terminal MUST say so where it is (WCAG 2.1.2): the key bar's hint reads
+  "Shift+Esc leaves the terminal" and is the description of xterm's input. It
+  sits in the hint the key bar already draws at 900px and wider, so a phone,
+  which has no Tab or Esc to be trapped by, gains no row (INV-17). Leaving puts
+  focus on the step it lands on, never on the body (FR-UI-22).
+  *`test/ui/escape-levels.test.tsx`, `test/ui/term-leave.test.tsx`,
+  `e2e/attach.spec.ts`.*
 - **FR-ATT-11** — A pane that has ended MUST be reported as ended, above the
   capture and ahead of it in reading order, with input disabled. Nothing else
   changes on screen when a pane dies: a frozen capture is indistinguishable from

@@ -308,6 +308,11 @@ export class PaneTerm {
     this.#observeContainer(host)
   }
 
+  /** Point the input xterm types through at the element that says how to leave it. */
+  describeInputBy(id: string): void {
+    this.term.textarea?.setAttribute('aria-describedby', id)
+  }
+
   /**
    * Re-fit whenever the box the pane lives in changes shape.
    *

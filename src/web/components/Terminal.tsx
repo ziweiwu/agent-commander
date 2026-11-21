@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
@@ -113,6 +113,8 @@ interface PaneTermOptions {
   exited: boolean
   /** Whether the earlier-output panel is taking room above the capture. */
   historyOpen: boolean
+  /** The id of the line that says how to leave the terminal. */
+  leaveHintId: string
 }
 
 /** The DOM and xterm handles the hooks below share. */
@@ -138,6 +140,7 @@ interface PaneHandlers extends PaneInput {
 interface PaneViewport {
   fullscreen: boolean
   coarse: boolean
+  leaveHintId: string
 }
 
 /**
@@ -224,6 +227,7 @@ function openTerminal(term: PaneTerm, viewport: PaneViewport): void {
   // finds no host to measure and is silently skipped — leaving the pane
   // unscaled and clipped, with no later geometry change to recover.
   term.scheduleRescale()
+  term.describeInputBy(viewport.leaveHintId)
   if (!viewport.coarse) term.focus()
   // Ask the server to re-attach: that resets its frame diff so this new
   // terminal gets a full repaint rather than a delta against rows it never
@@ -237,7 +241,7 @@ function usePaneLifecycle(
   host: PaneHost,
   handlers: RefObject<PaneHandlers>,
 ): void {
-  const { agent, fullscreen } = options
+  const { agent, fullscreen, leaveHintId } = options
   const coarse = useIsCoarse()
   const [, forceRender] = useState(0)
 
@@ -256,7 +260,7 @@ function usePaneLifecycle(
     host.termRef.current = term
 
     const cancel = openWhenSized(term, wrap, scale, (opened) =>
-      openTerminal(opened, { fullscreen, coarse }),
+      openTerminal(opened, { fullscreen, coarse, leaveHintId }),
     )
 
     return () => {
@@ -422,12 +426,14 @@ export function Terminal({ agent, onExit }: TerminalProps) {
    */
   const { draft, draftRef, write: writeDraft, clear: clearDraft } = useDraft('paste', agent.sessionId, boxRef)
   const coarse = useIsCoarse()
+  const leaveHintId = useId()
   const { wrapRef, scaleRef, termRef, term, guarded, typed } = usePaneTerm({
     agent,
     onExit,
     fullscreen,
     exited,
     historyOpen: history !== null,
+    leaveHintId,
   })
 
   /**
@@ -587,7 +593,11 @@ export function Terminal({ agent, onExit }: TerminalProps) {
          * had already been given (FR-ATT-7).
          */}
       </div>
-      {!exited && <span className={styles.hint}>{t('termHint')}</span>}
+      {!exited && (
+        <span className={styles.hint}>
+          {t('termHint')} · <span id={leaveHintId}>{t('termLeaveHint')}</span>
+        </span>
+      )}
     </div>
   )
 

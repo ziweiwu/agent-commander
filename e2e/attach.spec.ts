@@ -9,7 +9,7 @@
  * from the pane's own geometry, and the browser's width never travels back.
  */
 import { expect, test } from '@playwright/test'
-import { AGENT, openAgent } from './helpers.ts'
+import { AGENT, card, openAgent } from './helpers.ts'
 
 test.describe('the terminal', () => {
   test('paints frames captured from the pane', async ({ page }) => {
@@ -230,9 +230,14 @@ test.describe('the terminal', () => {
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()
 
+    const input = page.locator('[data-testid="terminal"] textarea.xterm-helper-textarea')
+    const hint = await input.getAttribute('aria-describedby')
+    await expect(page.locator(`[id="${hint}"]`)).toHaveText('Shift+Esc leaves the terminal')
+
     await page.getByTestId('term-wrap').click()
     await page.keyboard.press('Shift+Escape')
 
     await expect(page).toHaveURL(/\/$/)
+    await expect(card(page, AGENT.idle)).toBeFocused()
   })
 })
