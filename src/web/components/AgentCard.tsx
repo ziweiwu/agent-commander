@@ -69,7 +69,10 @@ const ELLIPSIS = '…'
 
 export function capDescription(parts: readonly string[]): string {
   const joined = parts.filter(Boolean).join('. ')
-  return joined.length <= DESCRIPTION_CAP ? joined : `${joined.slice(0, DESCRIPTION_CAP - ELLIPSIS.length)}${ELLIPSIS}`
+  if (joined.length <= DESCRIPTION_CAP) return joined
+  const keep = DESCRIPTION_CAP - ELLIPSIS.length
+  const endsOnHighSurrogate = /[\uD800-\uDBFF]/.test(joined.charAt(keep - 1))
+  return `${joined.slice(0, endsOnHighSurrogate ? keep - 1 : keep)}${ELLIPSIS}`
 }
 
 export function delegateSummary(translateKey: Translate, claim: DelegationClaim): string {

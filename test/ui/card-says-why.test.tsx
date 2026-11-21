@@ -8,7 +8,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { screen, within } from '@testing-library/react'
-import { AgentCard } from '../../src/web/components/AgentCard.tsx'
+import { AgentCard, capDescription } from '../../src/web/components/AgentCard.tsx'
 import { FleetList } from '../../src/web/components/FleetList.tsx'
 import { useStore } from '../../src/web/store/store.ts'
 import { agent, renderApp, resetStore } from './helpers.tsx'
@@ -77,6 +77,13 @@ describe('A4 the card says why', () => {
       />,
     )
     expect(describedBy(screen.getByTestId('agent-card')).length).toBeLessThanOrEqual(DESCRIPTION_CAP)
+  })
+
+  it('never splits an emoji at the cap into a lone surrogate', () => {
+    const capped = capDescription([`${'x'.repeat(DESCRIPTION_CAP - 2)}😀😀 and more`])
+    expect(capped).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/)
+    expect(capped.endsWith('…')).toBe(true)
+    expect(capped.length).toBeLessThanOrEqual(DESCRIPTION_CAP)
   })
 })
 
