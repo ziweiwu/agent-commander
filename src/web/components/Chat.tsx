@@ -911,6 +911,7 @@ export function Chat({ agent }: { agent: Agent }) {
              * writing. The description says why the send is refused.
              */
             aria-describedby={sendable ? KEY_HINT_ID : OFFLINE_HINT_ID}
+            aria-label={t('messageLabel', { name: shortName(agent) })}
             placeholder={
               attachable
                 ? t('messagePlaceholder', { name: shortName(agent) })

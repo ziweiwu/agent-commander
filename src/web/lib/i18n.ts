@@ -250,6 +250,7 @@ const EN = {
   chatUnreachable:
     'Nothing has arrived for this conversation yet. An agent that has only just started has not written anything down — otherwise the server may have restarted since this page was opened.',
   messagePlaceholder: 'Message {name}',
+  messageLabel: 'Message to {name}',
   /* quick prompts — the label IS the text sent, so what you see is what the
      agent receives, in whichever language the interface is set to */
   quickPromptsLabel: 'Common replies',
@@ -800,6 +801,7 @@ const ZH: Record<Key, string> = {
   chatFirstPrompt: '{name} 已在 {folder} 中就绪，还没有收到任何任务。在下方输入第一条指令。',
   chatUnreachable: '暂时没有收到这个对话的内容。刚启动的 agent 还没有写下任何东西——否则可能是服务器在此页面打开后重启过。',
   messagePlaceholder: '发消息给 {name}',
+  messageLabel: '发给 {name} 的消息',
   quickPromptsLabel: '常用回复',
   quickPromptSend: '发送\u201c{text}\u201d',
   quickContinue: '继续',
