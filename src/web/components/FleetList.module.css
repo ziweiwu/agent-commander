@@ -245,6 +245,8 @@
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
   padding: 6px 12px;
+  white-space: pre;
+  text-align: start;
   user-select: all;
 }
 .or {

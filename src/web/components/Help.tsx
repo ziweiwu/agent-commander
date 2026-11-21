@@ -85,6 +85,19 @@ export function Help({ onClose }: { onClose: () => void }) {
 
       <p className={styles.intro}>{t('helpIntro')}</p>
 
+      <section data-testid="help-before">
+        <h3>{t('helpSectionBefore')}</h3>
+        <ul className={styles.list}>
+          <li>{t('helpBeforeTmux')}</li>
+          <li>
+            {t('helpBeforeCommands')}
+            <CodeRow text="tmux new -s work" />
+            <CodeRow text="claude" />
+          </li>
+          <li>{t('helpBeforeNew')}</li>
+        </ul>
+      </section>
+
       <section>
         <h3>{t('helpSectionBasics')}</h3>
         <ul className={styles.list}>

@@ -27,6 +27,7 @@ import {
   ageIsTimeInState,
   railOf,
   reachOf,
+  sayBlockedReason,
   sinceOf,
   type RailState,
   type SinceFace,
@@ -233,6 +234,7 @@ export const AgentCard = memo(function AgentCard({
   const exited = useStore((s) => s.exited)
   const rail = railOf(agent, exited)
   const reach = reachOf(agent, exited)
+  const goneReason = reach.reason ? sayBlockedReason(t, reach.reason, 'short') : t('notAttachable')
   /** The Answer verb goes with the hand: never beside a struck ring, a pane that has exited, or a guess. */
   const canAnswer = rail.state === 'waiting'
   /** Whether the age on this card is time-in-state rather than time-since. */
@@ -334,11 +336,11 @@ export const AgentCard = memo(function AgentCard({
               className={styles.reach}
               data-testid="agent-reach"
               data-reach={reach.reach}
-              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
+              title={reach.reach === 'gone' ? goneReason : undefined}
             >
               <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
               <span className="sr-only">
-                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
+                {reach.reach === 'gone' ? goneReason : t('reachable')}
               </span>
             </span>
             {/*

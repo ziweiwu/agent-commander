@@ -110,7 +110,10 @@ npm run e2e           # 489 end-to-end tests, five projects: desktop/tablet/phon
                       # servers: the fixture fleet on 4599 and `--mock-empty`
                       # on 4598, which `e2e/empty.spec.ts` alone points at.
                       # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
-npm run audit         # contrast, a11y, task flows, device layouts — needs a server
+npm run audit         # contrast, a11y, task flows, device layouts — needs a server;
+                      # audit:ux also reads a --mock-empty server on EMPTY_PORT
+                      # (4401; or EMPTY_BASE) for the first-run screen, and says
+                      # "did not run" as an info line when none is up
 npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transcript
                       # plus composer at desktop/laptop/tablet (and a 30% floor
                       # for a blocked agent at 1280x720), measured in a real

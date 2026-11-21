@@ -72,7 +72,7 @@ describe('FleetList', () => {
   it('offers both ways in, and the phone setup', async () => {
     const user = userEvent.setup()
     renderApp(<FleetList tiled selected={null} onSelect={() => {}} />)
-    expect(screen.getByTestId('empty-command').textContent).toBe('claude')
+    expect(screen.getByTestId('empty-command').textContent).toBe('tmux new -s work\nclaude')
     expect(screen.getByTestId('empty-help').getAttribute('href')).toBe('/help')
     await user.click(screen.getByTestId('empty-new-agent'))
     expect(useStore.getState().newAgentOpen).toBe(true)

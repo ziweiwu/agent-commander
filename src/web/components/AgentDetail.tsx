@@ -1,6 +1,7 @@
 import type { Agent } from '../../shared/types.ts'
 import { tildePath, uptimeParts } from '../lib/format.ts'
 import { formatUptime } from '../lib/i18n.ts'
+import { sayBlockedReason } from '../lib/status.ts'
 import { useRef, useState, type RefObject } from 'react'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
 import { useTabs } from '../hooks/useTabs.ts'
@@ -98,7 +99,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
     .join('  ·  ')
 
   /** The server's own sentence where there is one; a generic one otherwise. */
-  const reasonNotAttachable = agent.attachBlockedReason ?? t('termNotAttachable')
+  const reasonNotAttachable = agent.attachBlockedReason
+    ? sayBlockedReason(t, agent.attachBlockedReason)
+    : t('termNotAttachable')
 
   /**
    * Before the tabs in the sheet, so that when the row runs out it is the tabs

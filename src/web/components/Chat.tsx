@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { emptyNotice } from '../lib/chat.ts'
+import { sayBlockedReason } from '../lib/status.ts'
 import { dayMark, relative, tildePath } from '../lib/format.ts'
 import { isUnused } from '../lib/filter.ts'
 import { PENDING_PREFIX } from '../lib/succession.ts'
@@ -911,7 +912,11 @@ export function Chat({ agent }: { agent: Agent }) {
              */
             aria-describedby={sendable ? KEY_HINT_ID : OFFLINE_HINT_ID}
             placeholder={
-              attachable ? t('messagePlaceholder', { name: shortName(agent) }) : t('messageDisabled')
+              attachable
+                ? t('messagePlaceholder', { name: shortName(agent) })
+                : agent.attachBlockedReason
+                  ? sayBlockedReason(t, agent.attachBlockedReason)
+                  : t('messageDisabled')
             }
             onChange={(e) => {
               /*

@@ -1222,8 +1222,16 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   that starts an agent, as copyable text, and the New agent button as a real
   control — and point at the phone setup in Help. On a first run the New agent
   dialog MUST open on the folder browser at home rather than a bare path field.
+  The command MUST start the agent inside tmux (`tmux new -s work`, then
+  `claude`) and the sentence above it MUST say why, because an agent started
+  anywhere else can be read here and never answered; Help MUST say the same
+  under "Before you start". The server's two reasons for an agent with no
+  pane MUST reach the reader in their language on the card, the detail
+  header, the Attach tab and the composer, through one closed map
+  (`blockedReasonKey`); a reason the map does not know is shown as sent.
   *`test/ui/FleetList.test.tsx`, `test/ui/NewAgentDialog.test.tsx`,
-  `e2e/empty.spec.ts`.*
+  `test/ui/first-run-tmux.test.tsx`, `e2e/empty.spec.ts`, `audit:ux` on a
+  `--mock-empty` server.*
 - **FR-UI-21** — Below the phone cut the fleet's filter box and sort picker MUST
   share one row and New agent MUST keep its own, so the toolbar costs two rows
   above the first card rather than three. The picker's option text MAY shorten
