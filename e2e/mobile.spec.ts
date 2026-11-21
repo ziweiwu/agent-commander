@@ -74,6 +74,18 @@ test.describe('@phone the sheet', () => {
     expect(overflows).toBe(false)
   })
 
+  test('sets the conversation close to both edges of the phone', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await openAgent(page, AGENT.idle)
+
+    const insets = await page.getByTestId('chat-list').evaluate((el) => {
+      const box = el.getBoundingClientRect()
+      return { left: box.left, right: window.innerWidth - box.right }
+    })
+    expect(insets.left).toBeLessThanOrEqual(12)
+    expect(insets.right).toBeLessThanOrEqual(12)
+  })
+
   test('and in landscape, where there is least of it', async ({ page }) => {
     await page.setViewportSize({ width: 844, height: 380 })
     await openAgent(page, AGENT.idle)

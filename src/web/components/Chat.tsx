@@ -739,7 +739,8 @@ export function Chat({ agent }: { agent: Agent }) {
           onScroll={(e) => {
             const el = e.currentTarget
             setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < PIN_SLACK)
-            setQuestionOnScreen(answerRef.current !== null && partlyIn(answerRef.current, el))
+            const question = answerRef.current?.firstElementChild
+            setQuestionOnScreen(question instanceof HTMLElement && partlyIn(question, el))
           }}
         >
           <div className={styles.list} data-testid="chat-list">
