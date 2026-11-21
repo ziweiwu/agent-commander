@@ -225,7 +225,7 @@ test.describe('the terminal', () => {
     await expect(page.getByTestId('term-wrap')).toBeVisible()
   })
 
-  test('Shift+Escape is the way out @desktop', async ({ page }) => {
+  test('Shift+Escape is the way out @desktop @desktop-safari', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()
     await expect(page.getByTestId('term-wrap')).toBeVisible()
@@ -239,5 +239,16 @@ test.describe('the terminal', () => {
 
     await expect(page).toHaveURL(/\/$/)
     await expect(card(page, AGENT.idle)).toBeFocused()
+  })
+
+  test('Shift+Escape after clicking the Attach tab shows the ring on the card @desktop @desktop-safari', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm')).toBeVisible()
+    await page.keyboard.press('Shift+Escape')
+
+    await expect(page).toHaveURL(/\/$/)
+    await expect(card(page, AGENT.idle)).toBeFocused()
+    expect(await card(page, AGENT.idle).evaluate((el) => el.matches(':focus-visible'))).toBe(true)
   })
 })

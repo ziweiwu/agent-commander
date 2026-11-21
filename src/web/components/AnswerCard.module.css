@@ -178,6 +178,7 @@
   .card {
     padding: 10px;
     gap: 8px;
+    margin-inline: 8px;
   }
   .detail {
     max-height: 120px;

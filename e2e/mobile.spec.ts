@@ -86,6 +86,18 @@ test.describe('@phone the sheet', () => {
     expect(insets.right).toBeLessThanOrEqual(12)
   })
 
+  test('but keeps bordered blocks off the panel edge', async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 659 })
+    await openAgent(page, AGENT.plan)
+
+    const panel = await page.getByTestId('agent-detail').boundingBox()
+    for (const id of ['blocked-banner', 'answer-card', 'composer-input', 'composer-send']) {
+      const box = await page.getByTestId(id).boundingBox()
+      expect(box!.x - panel!.x, id).toBeGreaterThanOrEqual(6)
+      expect(panel!.x + panel!.width - (box!.x + box!.width), id).toBeGreaterThanOrEqual(6)
+    }
+  })
+
   test('and in landscape, where there is least of it', async ({ page }) => {
     await page.setViewportSize({ width: 844, height: 380 })
     await openAgent(page, AGENT.idle)

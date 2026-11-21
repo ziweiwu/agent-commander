@@ -65,7 +65,8 @@ function returnTo(from: Place, order: readonly string[], search: HTMLInputElemen
   if (from.kind !== 'agent') return
   const id = cardOf(from.id) ? from.id : nearestCard(order, from.id, (other) => cardOf(other) !== null)
   const target = id === null ? search : cardOf(id)
-  target?.focus()
+  const showRing: FocusOptions & { focusVisible: boolean } = { focusVisible: true }
+  target?.focus(showRing)
 }
 
 /**
