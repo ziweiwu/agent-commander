@@ -1081,7 +1081,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   non-loopback address without a token has anywhere else.
 - **FR-QUOTA-3** — The reading MUST age visibly. Meters only refresh while a
   Claude Code session is rendering, so past ~20 minutes they MUST dim and say
-  when the number was last true rather than implying it is current. **(INV-11)**
+  when the number was last true rather than implying it is current. A stale
+  `meter` MUST keep its last `aria-valuenow`, which the role requires, and say
+  its age in `aria-valuetext` (`62% · 3h ago` / `62% · 3 小时前`). **(INV-11)**
+  *`test/ui/UsageChips.test.tsx`.*
 - **FR-QUOTA-4** — With no reading at all — no subscription plan, or the bridge
   not installed — the meters MUST be hidden entirely rather than shown empty.
 - **NFR-QUOTA-5** — The bridge MUST never throw, never exit non-zero and never
