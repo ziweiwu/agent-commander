@@ -100,7 +100,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
 
   /** The server's own sentence where there is one; a generic one otherwise. */
   const reasonNotAttachable = agent.attachBlockedReason
-    ? sayBlockedReason(t, agent.attachBlockedReason)
+    ? sayBlockedReason(t, agent.attachBlockedReason, 'short')
     : t('termNotAttachable')
 
   /**
