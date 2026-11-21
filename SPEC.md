@@ -1078,7 +1078,8 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 ## 9. Attention
 
 - **FR-NOTIFY-1** — The browser tab title MUST carry a count while any agent is
-  waiting. Standing state may be described for as long as it stays true.
+  waiting, ahead of the place it names (FR-UI-22). Standing state may be
+  described for as long as it stays true.
   **(INV-14)**
 - **FR-NOTIFY-2** — An OS notification MUST fire only for an agent this page has
   **watched become** waiting. The first fleet frame is backlog, not news: an
@@ -1312,6 +1313,17 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 - **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
   *`test/ui/escape-levels.test.tsx`.*
+- **FR-UI-22** — Moving between the fleet, an agent and Help MUST NOT leave
+  focus on the page body. Opening an agent or Help on a touch screen MUST put
+  focus on its heading, which raises no keyboard; on a desk only where nothing
+  holds focus, so card-open focus stays on option 1 or the composer (INV-2).
+  Leaving an agent MUST put focus back on its card, or on the nearest card when
+  it has gone, else the filter box; leaving Help, on the help button. Focus
+  something on the fleet already holds is left alone. The tab title MUST name
+  where the tab is, `kb-vault · main · agent-commander` or
+  `Help · agent-commander`, after the waiting count, by a name that is not
+  conversation (INV-3). *`test/ui/route-focus.test.tsx`, `e2e/mobile.spec.ts`,
+  `e2e/fleet.spec.ts`.*
 - **FR-UI-15** — Every modal surface MUST trap focus, restore it on close, and be
   operable by keyboard alone. *`test/ui/modal-a11y.test.tsx`.*
 - **FR-UI-16** — The app MUST pass WCAG 2.2 AA on desktop and phone, in both

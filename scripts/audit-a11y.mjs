@@ -90,6 +90,38 @@ async function auditTabs(page, tag) {
   if (!moved) add('2.1.1', 'P1', `${tag}: ArrowRight on the Chat tab did not move focus to Attach alone`)
 }
 
+/**
+ * A2+B4, a route pass: every move between the fleet, an agent and Help
+ * retitles the tab, and on a touch screen leaves focus somewhere rather than
+ * on <body>, where VoiceOver loses its place.
+ */
+async function goBack(page) {
+  const back = page.locator(T('back-button'))
+  if (await back.isVisible()) await back.click()
+  else await page.keyboard.press('Escape')
+}
+
+async function auditRoutes(page, tag) {
+  const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches)
+  await page.goto(BASE, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('agent-card'))
+  const moves = [
+    ['opening an agent', () => page.locator(T('agent-card')).nth(1).click(), T('agent-detail')],
+    ['going back', () => goBack(page), T('agent-card')],
+    ['opening Help', () => page.locator(T('help-button')).click(), T('help-page')],
+    ['closing Help', () => page.locator(T('help-close')).click(), T('agent-card')],
+  ]
+  for (const [what, move, landed] of moves) {
+    const before = await page.title()
+    await move()
+    await page.waitForSelector(landed)
+    await page.waitForTimeout(SETTLE_MS)
+    const after = await page.evaluate(() => ({ title: document.title, body: document.activeElement === document.body }))
+    if (what.startsWith('opening') && after.title === before) add('2.4.2', 'P1', `${tag}: ${what} left the tab title at "${before}"`)
+    if (coarse && after.body) add('2.4.3', 'P1', `${tag}: ${what} left focus on <body>`)
+  }
+}
+
 /** How many Tab stops past the Chat tab the conversation may sit and still count as reachable. */
 const TAB_STOPS_TO_CONVERSATION = 60
 
@@ -550,6 +582,7 @@ for (const [profile, options] of [
     await auditMutedKeyRings(page, tag)
     await auditScrollBoxRings(page, tag)
     if (scheme === 'light') await auditFleetEdgeRings(page, tag)
+    if (scheme === 'light') await auditRoutes(page, tag)
 
     await context.close()
   }

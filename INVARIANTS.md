@@ -474,6 +474,14 @@ than an attacker.
   Only a browser navigation is exchanged (`Accept: text/html`), so `?token=` and
   `Authorization: Bearer` still work unchanged for curl and for tests.
 
+**The tab title leaves the device, so it carries no conversation.** A page
+title goes into browser history and the window menu, and may sync off the
+machine. So it names the open agent by `safeName` (`naming.ts`): a name
+somebody gave it, else `folder · branch`, the rule a push follows (INV-14),
+never the card's title, description or last prompt. Whether the title may
+carry the card's own name is an open owner decision; until it is made, it may
+not. `test/ui/route-focus.test.tsx` holds it.
+
 - `routes::tests` (the origin group, incl. `inv3_a_rebound_host_is_refused_even_when_origin_matches_it`) — a cross-origin WebSocket and a cross-origin form POST
   are refused, a rebound `Host` is refused down a raw socket, every honest
   spelling of loopback still serves, a tokenless server answers to no name but

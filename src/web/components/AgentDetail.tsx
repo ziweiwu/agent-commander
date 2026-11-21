@@ -124,7 +124,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           <span aria-hidden="true">‹</span>
           <span className={styles.backLabel}> {t('backLabel')}</span>
         </Button>
-        <h2 data-testid="detail-name" title={`${displayName(agent)} · ${agent.cwd}`}>
+        <h2 data-testid="detail-name" tabIndex={-1} title={`${displayName(agent)} · ${agent.cwd}`}>
           {displayName(agent)}
         </h2>
         <span

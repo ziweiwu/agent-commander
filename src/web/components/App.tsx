@@ -32,6 +32,8 @@ import { ICON_MARK, Icon } from './ui/Icon.tsx'
 import { WaitingChip } from './WaitingChip.tsx'
 import { agentPath } from '../lib/hop.ts'
 import { useHopKeys } from '../hooks/useHop.ts'
+import { useRouteFocus } from '../hooks/useRouteFocus.ts'
+import { useRouteTitle } from '../hooks/useRouteTitle.ts'
 
 /** Holds the delegation-graph poll while the fleet list is unmounted. */
 function TreePoll() {
@@ -128,6 +130,8 @@ export function App() {
   const setQuery = useStore((s) => s.setQuery)
 
   const searchRef = useRef<HTMLInputElement>(null)
+  useRouteFocus(searchRef)
+  useRouteTitle()
   const isHelp = location.pathname.startsWith('/help')
   // Help takes the whole page, so it leaves no agent selected behind it and
   // has no fleet to filter.

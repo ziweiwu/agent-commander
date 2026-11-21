@@ -134,6 +134,24 @@ const MIN_NAME_PX = 60
  * `overflow: hidden` edge and impossible to press, and from 320 to 390 the
  * agent's name got about 0px. The tabs now drop to a second row instead.
  */
+/**
+ * A2+B4 on a phone: opening an agent puts focus on its heading rather than on
+ * <body>, the tab title names it by a name that is not conversation (INV-3),
+ * and ‹ Agents puts focus back on its card.
+ */
+test.describe('@phone where you are', () => {
+  test('a tapped card lands on its heading, titles the tab, and back returns to it', async ({ page }) => {
+    await openFleet(page)
+    await card(page, AGENT.idleAlt).click()
+    await expect(page.getByTestId('detail-name')).toBeFocused()
+    await expect(page).toHaveTitle(/ · agent-commander$/)
+
+    await page.getByTestId('back-button').click()
+    await expect(card(page, AGENT.idleAlt)).toBeFocused()
+    await expect(page).toHaveTitle(/^(\(\d+\) )?agent-commander$/)
+  })
+})
+
 test.describe('@phone the sheet header', () => {
   for (const [what, sessionId] of [
     ['an idle agent', AGENT.idle],

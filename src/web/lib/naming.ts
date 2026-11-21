@@ -92,3 +92,18 @@ export function isRenamed(agent: Agent): boolean {
 export function shortName(agent: Agent, max = 22): string {
   return clip(displayName(agent), max)
 }
+
+/**
+ * A name for the agent that is never conversation, for what leaves the page.
+ *
+ * The tab title goes into the browser's history, the window menu and whatever
+ * syncs them off the device, unlike the live region and the card (INV-3). So
+ * it takes the rule `push.rs` uses for a push: a name somebody chose as it is,
+ * and a name Claude Code made up as `folder · branch`, never the title, the
+ * description or the last prompt `displayName` would lead with.
+ */
+export function safeName(agent: Pick<Agent, 'name' | 'derivedName' | 'folder' | 'gitBranch'>): string {
+  if (!isDerivedName(agent) || !agent.folder.trim()) return agent.name
+  const branch = agent.gitBranch?.trim()
+  return branch ? `${agent.folder} · ${branch}` : agent.folder
+}
