@@ -263,6 +263,19 @@
 .historyScroll {
   scroll-margin: 6px 6px 34px;
 }
+/**
+ * The same ring, at its sides, on a phone. The detail pane gave up its inline
+ * padding at 560px and narrower, so this box sits flush against the pane's
+ * edges, and the pane's fade is a `mask-image`, which clips everything outside
+ * its border box: the ring's left and right sides reached the screen at 0%.
+ * The box is inset by the ring's reach instead, the 8px that costs being the
+ * whole of it.
+ */
+@media (max-width: 560px) {
+  .history {
+    margin-inline: var(--ring-reach);
+  }
+}
 /* Sized by the component from the capture's own measured height, so the box scrolls. */
 .historySpacer {
   position: relative;
