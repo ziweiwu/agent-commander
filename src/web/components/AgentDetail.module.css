@@ -419,6 +419,10 @@
   .sheet .backLabel {
     display: none;
   }
+  .pane,
+  .sheet .pane {
+    padding-inline: 0;
+  }
 }
 .sheet .close,
 .sheet .where {

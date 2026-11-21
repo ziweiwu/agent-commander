@@ -264,8 +264,9 @@ Open an agent and you get two tabs:
   half-typed in the box alone. The prompts follow the language the conversation
   is already in rather than the one the interface is set to, so an agent being
   worked with in Chinese gets 继续 even while you read the app in English.
-  The conversation itself reads as prose: on a desktop it is held to a 46em
-  measure at 14px, each message is marked with the language it is written in
+  The conversation itself reads as prose: on a desktop it is held to a 64em
+  measure at 14px (about 900px, so a wide window keeps little empty beside it),
+  and a phone gives the pane no side inset of its own, each message is marked with the language it is written in
   (by the same test), so Chinese gets a taller line and a Chinese face rather
   than whatever the browser falls back to, and is never slanted by a fake
   italic. What the agent did sits under its words as one ruled list, the tool
