@@ -33,6 +33,7 @@ import { WaitingChip } from './WaitingChip.tsx'
 import { agentPath } from '../lib/hop.ts'
 import { useHopKeys } from '../hooks/useHop.ts'
 import { useRouteFocus } from '../hooks/useRouteFocus.ts'
+import { closeInnermostLayer } from '../hooks/useEscapeLayer.ts'
 import { useRouteTitle } from '../hooks/useRouteTitle.ts'
 
 /** Holds the delegation-graph poll while the fleet list is unmounted. */
@@ -202,6 +203,10 @@ export function App() {
         // and it must not also collapse the view out from under that dialog —
         // which is what answering the confirmation used to do.
         if (target?.closest('[data-testid="term-wrap"]')) return
+        if (closeInnermostLayer()) {
+          e.preventDefault()
+          return
+        }
         if (fullscreen) {
           e.preventDefault()
           setFullscreen(false)

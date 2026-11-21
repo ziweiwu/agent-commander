@@ -1311,8 +1311,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   these limits move focus and scroll only, and send nothing (INV-2).
   *`test/ui/keyboard-scroll.test.tsx`.*
 
-- **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press.
-  *`test/ui/escape-levels.test.tsx`.*
+- **FR-UI-14** — `Esc` MUST discard exactly one level of nesting per press,
+  and the innermost open thing first: an open menu or the agent's settings row
+  closes, focus returns to the control that opened it and the URL stays,
+  wherever focus was, before any step that leaves the agent. Plain `Esc` in the
+  terminal is still the agent's. *`test/ui/escape-levels.test.tsx`.*
 - **FR-UI-22** — Moving between the fleet, an agent and Help MUST NOT leave
   focus on the page body. Opening an agent or Help on a touch screen MUST put
   focus on its heading, which raises no keyboard; on a desk only where nothing

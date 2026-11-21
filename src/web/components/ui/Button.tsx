@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ButtonHTMLAttributes, ReactNode, Ref } from 'react'
 import styles from './Button.module.css'
 
 type Variant = 'default' | 'primary' | 'danger' | 'compact' | 'icon' | 'key'
@@ -6,6 +6,7 @@ type Variant = 'default' | 'primary' | 'danger' | 'compact' | 'icon' | 'key'
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: Variant
   children: ReactNode
+  ref?: Ref<HTMLButtonElement>
 }
 
 /**
