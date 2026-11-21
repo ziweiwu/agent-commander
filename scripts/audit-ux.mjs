@@ -334,6 +334,11 @@ await page.screenshot({ path: `${OUT}/07-theme-dark-forced.png` })
   if ((await page.evaluate(() => document.documentElement.lang)) !== 'zh-CN') {
     add('med', 'i18n', 'html lang attribute not updated')
   }
+  const mixedTerms = await page.evaluate(() => {
+    const text = document.body.innerText.replace(/agent-commander/g, '').replace(/mock-[a-z-]+/g, '')
+    return [/\bagents?\b/i.test(text) ? 'agent' : '', text.includes('助手') ? '助手' : ''].filter(Boolean)
+  })
+  if (mixedTerms.length) add('med', 'i18n', `the Chinese fleet says ${mixedTerms.join(' and ')} where it means 代理`)
   await page.screenshot({ path: `${OUT}/08-chinese.png`, fullPage: true })
   await page.click(T('settings-button'))
   await page.click(T('lang-en'))

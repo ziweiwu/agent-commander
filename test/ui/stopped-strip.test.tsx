@@ -92,7 +92,7 @@ describe('C1 the strip states one shared stop', () => {
     fleet(pair('authentication_failed'))
     renderApp(<StoppedStrip />)
     expect(strip().textContent).toBe(
-      `2 个 agent 已停止：登录失败，自 ${clock(STOP_AT)} 起。请重新登录后再给它们发消息。点按只看这些。`,
+      `2 个代理已停止：登录失败，自 ${clock(STOP_AT)} 起。请重新登录后再给它们发消息。点按只看这些。`,
     )
   })
 
