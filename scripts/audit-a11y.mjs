@@ -56,6 +56,40 @@ async function auditHeldModeChord(page, tag) {
   await page.locator(T('toast')).waitFor({ state: 'detached', timeout: TOAST_GONE_MS }).catch(() => {})
 }
 
+/**
+ * A6: the agent's tabs are the APG tabs pattern, manual activation. Every
+ * tablist has exactly one Tab stop, every tab controls a panel labelled by a
+ * tab, and ArrowRight from the selected Chat tab moves focus to Attach without
+ * selecting it, so an arrow never mounts a terminal.
+ */
+async function auditTabs(page, tag) {
+  const lists = await page.$$eval('[role="tablist"]', (els) =>
+    els.map((list) => {
+      const tabs = [...list.querySelectorAll('[role="tab"]')]
+      const panelOf = (tab) => document.getElementById(tab.getAttribute('aria-controls') ?? '')
+      const labelled = (panel) => document.getElementById(panel?.getAttribute('aria-labelledby') ?? '')?.getAttribute('role') === 'tab'
+      return {
+        stops: tabs.filter((tab) => tab.tabIndex === 0).length,
+        panels: tabs.every((tab) => panelOf(tab)?.getAttribute('role') === 'tabpanel' && labelled(panelOf(tab))),
+      }
+    }),
+  )
+  for (const list of lists) {
+    if (list.stops !== 1) add('2.1.1', 'P1', `${tag}: a tablist has ${list.stops} Tab stops, not 1`)
+    if (!list.panels) add('4.1.2', 'P1', `${tag}: a tab controls no tabpanel labelled by a tab`)
+  }
+  const chat = page.locator(T('tab-chat'))
+  if (!(await chat.isVisible()) || (await chat.getAttribute('aria-selected')) !== 'true') return
+  await chat.focus()
+  await page.keyboard.press('ArrowRight')
+  const moved = await page.evaluate(
+    () =>
+      document.activeElement?.getAttribute('data-testid') === 'tab-attach' &&
+      document.querySelector('[data-testid="tab-chat"]')?.getAttribute('aria-selected') === 'true',
+  )
+  if (!moved) add('2.1.1', 'P1', `${tag}: ArrowRight on the Chat tab did not move focus to Attach alone`)
+}
+
 /** How many Tab stops past the Chat tab the conversation may sit and still count as reachable. */
 const TAB_STOPS_TO_CONVERSATION = 60
 
@@ -359,6 +393,7 @@ async function visitStates(page, tag) {
   states.push('chat')
   await auditHeldModeChord(page, tag)
   await auditConversationReach(page, tag)
+  await auditTabs(page, tag)
 
   await page.click(T('tab-attach'))
   await page.waitForSelector('.xterm-screen', { timeout: 6000 }).catch(() => {})

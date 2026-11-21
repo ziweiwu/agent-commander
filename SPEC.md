@@ -1292,6 +1292,7 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 | `Shift+Tab` | in the message box: cycle the agent's permission mode |
 | `PageUp` `PageDown` | in the message box: scroll the conversation a page, unless the draft scrolls itself |
 | `↑` `↓` `PageUp` `PageDown` `Space` | on the conversation, one Tab stop named "Conversation": scroll it |
+| `←` `→` `Home` `End` | on the agent's Chat and Attach tabs, one Tab stop: move between them; `Enter` or `Space` selects, so an arrow never attaches (*`test/ui/tabs.test.tsx`*) |
 | `Shift+Esc` | leave the terminal, where plain `Esc` belongs to the agent |
 | `⌥J` / `⌥K` | open the next / previous agent along the list as it is grouped and sorted, on the tab already open |
 | `⌥H` | open the agent that has needed you longest — or, from one that is waiting, the next in that order — on Chat; "Nothing needs you" when none does |

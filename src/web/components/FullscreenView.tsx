@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { Agent } from '../../shared/types.ts'
 import { useTranslate } from '../hooks/useTranslate.ts'
 import { useModalChrome } from '../hooks/useModalChrome.ts'
+import { useTabs } from '../hooks/useTabs.ts'
 import { Chat } from './Chat.tsx'
 import { LazyTerminal } from './LazyTerminal.tsx'
 
@@ -35,6 +36,8 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
   const t = useTranslate()
   const transcripts = hasTranscripts(agent.agentKind)
   const overlayRef = useRef<HTMLDivElement>(null)
+  const attachTab = { key: 'attach', disabled: !agent.paneId } as const
+  const tabs = useTabs(transcripts ? [{ key: 'chat' }, attachTab] : [attachTab], tab)
 
   useModalChrome(overlayRef, true)
 
@@ -64,7 +67,7 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
         <span className={styles.title} title={agent.cwd}>
           {displayName(agent)}
         </span>
-        <div className={styles.tabs} role="tablist">
+        <div className={styles.tabs} {...tabs.listProps}>
           {/*
             The same gate as `AgentDetail`, and it was missing here: an agent
             whose CLI keeps no readable transcript has nothing to put in a
@@ -76,10 +79,9 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
           {transcripts && (
             <button
               type="button"
-              role="tab"
+              {...tabs.tabProps('chat')}
               className={styles.tab}
               data-testid="fullscreen-tab-chat"
-              aria-selected={tab === 'chat'}
               onClick={() => onTab('chat')}
             >
               {t('tabChat')}
@@ -87,10 +89,9 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
           )}
           <button
             type="button"
-            role="tab"
+            {...tabs.tabProps('attach')}
             className={styles.tab}
             data-testid="fullscreen-tab-attach"
-            aria-selected={tab === 'attach'}
             disabled={!agent.paneId}
             onClick={() => onTab('attach')}
           >
@@ -103,7 +104,7 @@ export function FullscreenView({ agent, tab, onTab, onExit }: FullscreenViewProp
         </Button>
       </header>
 
-      <div className={styles.body}>
+      <div className={styles.body} {...tabs.panelProps}>
         {tab === 'chat' && transcripts ? (
           <Chat agent={agent} />
         ) : (

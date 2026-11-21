@@ -3,6 +3,7 @@ import { tildePath, uptimeParts } from '../lib/format.ts'
 import { formatUptime } from '../lib/i18n.ts'
 import { useState } from 'react'
 import { useOverflowEdge } from '../hooks/useOverflowEdge.ts'
+import { useTabs } from '../hooks/useTabs.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import { DelegateLine, REASON_KEY, STATUS_KEY, useStatusText } from './AgentCard.tsx'
 import { aliasOfModel } from './AgentControls.tsx'
@@ -64,6 +65,8 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
   // On a landscape phone the second answer option sits below this pane's fold
   // with nothing saying so; the fade is the something.
   const [paneRef, paneEdge] = useOverflowEdge<HTMLDivElement>()
+  const attachTab = { key: 'attach', disabled: !agent.paneId } as const
+  const tabs = useTabs(transcripts ? [{ key: 'chat' }, attachTab] : [attachTab], tab)
 
   // Full screen replaces the panel entirely rather than rendering both, so the
   // conversation is not mounted twice and scrolled in two places.
@@ -177,7 +180,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
           * as they used to and nothing is lost.
           */}
         <div className={styles.controls}>
-        <div className={styles.tabs} role="tablist">
+        <div className={styles.tabs} {...tabs.listProps}>
         {/*
           Hidden rather than empty. This agent's CLI keeps no transcript this
           app can read, so the conversation would be blank forever — and a blank
@@ -187,10 +190,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         {transcripts && (
           <button
             type="button"
-            role="tab"
+            {...tabs.tabProps('chat')}
             className={styles.tab}
             data-testid="tab-chat"
-            aria-selected={tab === 'chat'}
             onClick={() => onTab('chat')}
           >
             {t('tabChat')}
@@ -198,10 +200,9 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
         )}
         <button
           type="button"
-          role="tab"
+          {...tabs.tabProps('attach')}
           className={styles.tab}
           data-testid="tab-attach"
-          aria-selected={tab === 'attach'}
           disabled={!agent.paneId}
           onClick={() => onTab('attach')}
         >
@@ -233,7 +234,7 @@ export function AgentDetail({ agent, tab, sheet, onTab, onClose }: AgentDetailPr
 
       {sheet && <StatusLine agent={agent} />}
 
-      <div className={styles.pane} ref={paneRef} data-overflow={paneEdge} data-testid="detail-pane">
+      <div className={styles.pane} ref={paneRef} data-overflow={paneEdge} data-testid="detail-pane" {...tabs.panelProps}>
         {agent.status === 'waiting' && (
           <BlockedBanner agent={agent} tab={tab} onOpenTerminal={() => onTab('attach')} />
         )}
