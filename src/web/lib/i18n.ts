@@ -108,6 +108,7 @@ const EN = {
   delegateOrphanTitle:
     'Its parent record is missing, so it was raised to the top rather than dropped — which would have taken this delegate and everything under it off the screen.',
   detailsShow: 'Details',
+  detailsShowFor: 'Details for {name}',
   detailsHide: 'Hide details',
   cardAnswer: 'Answer →',
   tokensLabel: 'Output tokens',
@@ -672,6 +673,7 @@ const ZH: Record<Key, string> = {
   delegateOrphanTitle:
     '它的父节点记录缺失，因此被提升到顶层而不是丢弃——丢弃会让这个子代理及其下所有节点从屏幕上消失。',
   detailsShow: '详情',
+  detailsShowFor: '{name} 的详情',
   detailsHide: '收起详情',
   cardAnswer: '回答 →',
   tokensLabel: '输出 token',

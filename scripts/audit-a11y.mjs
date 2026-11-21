@@ -415,11 +415,35 @@ async function openHistory(page) {
   await page.waitForTimeout(SETTLE_MS)
 }
 
+/**
+ * A4 / 2.4.6: no two visible buttons in one landmark share an accessible
+ * name. The fleet had fourteen Details buttons all called "Details", so a
+ * screen reader's list of controls could not say which card each opened.
+ */
+async function auditDuplicateNames(page, tag) {
+  const dupes = await page.$$eval('button:not([disabled])', (buttons) => {
+    const LANDMARKS = 'main, nav, aside, header, footer, [role="region"], [role="main"], [role="navigation"], [role="complementary"], [role="banner"]'
+    const seen = new Map()
+    for (const button of buttons) {
+      if (button.offsetParent === null) continue
+      const name = (button.getAttribute('aria-label') || button.textContent || button.getAttribute('title') || '').trim()
+      if (!name) continue
+      const scope = button.closest(LANDMARKS) ?? document.body
+      const names = seen.get(scope) ?? new Map()
+      names.set(name, (names.get(name) ?? 0) + 1)
+      seen.set(scope, names)
+    }
+    return [...seen.values()].flatMap((names) => [...names].filter(([, n]) => n > 1).map(([name, n]) => `"${name}" x${n}`))
+  })
+  if (dupes.length) add('2.4.6', 'P1', `${tag}: buttons in one landmark share a name: ${dupes.slice(0, NAMED_IN_A_FINDING).join(', ')}`)
+}
+
 async function visitStates(page, tag) {
   const states = []
   await page.waitForSelector(T('agent-card'))
   states.push('fleet')
   await auditSelectArrows(page, tag)
+  await auditDuplicateNames(page, tag)
 
   await openChat(page)
   states.push('chat')

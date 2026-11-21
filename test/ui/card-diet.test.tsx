@@ -119,7 +119,7 @@ describe('FR-CARD-1 the fold has one named toggle', () => {
     const toggle = screen.getByTestId('details-toggle')
     expect(toggle.textContent).toBe('')
     expect(toggle.querySelector('svg')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Details' })).toBe(toggle)
+    expect(screen.getByRole('button', { name: /^Details for \S/ })).toBe(toggle)
     expect(toggle.getAttribute('title')).toBe('Details')
   })
 
@@ -128,7 +128,7 @@ describe('FR-CARD-1 the fold has one named toggle', () => {
     const toggle = screen.getByTestId('details-toggle')
     fireEvent.click(toggle)
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
-    expect(toggle.getAttribute('aria-label')).toBe('Details')
+    expect(toggle.getAttribute('aria-label')).toMatch(/^Details for \S/)
     expect(toggle.getAttribute('title')).toBe('Hide details')
   })
 

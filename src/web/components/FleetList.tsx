@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { grouped, listedFleet, unusedAgents, type StatusFilter } from '../lib/filter.ts'
@@ -68,6 +68,7 @@ function pruneReport(translate: Translate, tally: PruneTally): string {
 
 export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListProps) {
   const t = useTranslate()
+  const listId = useId()
   const agents = useStore((s) => s.agents)
   const conn = useStore((s) => s.conn)
   const fleetAt = useStore((s) => s.fleetAt)
@@ -252,6 +253,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                 <span
                   className={group.key === 'waiting' ? styles.waitingTitle : undefined}
                   data-testid="group-title"
+                  id={`${listId}-${group.key}`}
                 >
                   {group.key === 'waiting' && <Icon name="hand" size={ICON_INLINE} />}
                   {t(GROUP_KEY[group.key] as Key)}
@@ -261,6 +263,8 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
               </h2>
               <div
                 className={`${styles.groupList} ${group.key === 'waiting' ? styles.waitingGroup : ''}`}
+                role="list"
+                aria-labelledby={`${listId}-${group.key}`}
               >
                 {group.agents.map((agent) => (
                   <AgentCard

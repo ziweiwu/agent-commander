@@ -300,7 +300,8 @@ the default for an unrecognised kind is deny.
   `transcript::inv11_the_description_follows_the_work_while_the_title_stays_put`,
   `test/ui/card-description.test.tsx`.*
 - **FR-CARD-8** — The fold's disclosure MUST be a column beside the card, as
-  tall as it, named in words (*Details* / *详情*) and carrying `aria-expanded`;
+  tall as it, named in words for its agent (*Details for rebuild-dist* /
+  *rebuild-dist 的详情*) and carrying `aria-expanded`;
   it was a strip under every card, the same word fourteen times, and its labels
   sat at four heights across one row of cards. A **waiting** card that can be
   reached MUST be the one tinted surface on the fleet (`--wash-waiting`, solved
@@ -357,6 +358,14 @@ the default for an unrecognised kind is deny.
   *`test/ui/card-usage.test.tsx`,
   `routes::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`,
   `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
+- **FR-CARD-12** — A card's accessible name MUST stay name, status, any stop
+  and folder; what it is waiting for, what it is doing, its subject, its
+  delegates as the face shows them and why it cannot be reached MUST reach it
+  as its accessible description, joined with full stops in code (never the
+  face's `::before` dots), at most 160 characters. Each status group MUST be a
+  list named by its heading, each card an item of it.
+  *`test/ui/card-says-why.test.tsx`; `audit:a11y` flags two visible buttons
+  sharing a name in one landmark.*
 
 ### 3.3 Delegates
 
