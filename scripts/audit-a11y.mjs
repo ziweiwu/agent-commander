@@ -614,13 +614,15 @@ for (const [profile, options] of [
       let skipped = false
       for (let i = 1; i < heads.length; i += 1) if (heads[i] - heads[i - 1] > 1) skipped = true
       return {
-        h1: document.querySelectorAll('h1').length,
+        h1: [...document.querySelectorAll('h1')].filter(
+          (h1) => h1.checkVisibility({ visibilityProperty: true }) && !h1.closest('[aria-hidden="true"],[inert]'),
+        ).length,
         skipped,
         main: document.querySelectorAll('main').length,
         lang: document.documentElement.lang,
       }
     })
-    if (structure.h1 !== 1) add('1.3.1', 'P1', `${tag}: expected exactly one h1, found ${structure.h1}`)
+    if (structure.h1 !== 1) add('1.3.1', 'P1', `${tag}: expected exactly one reachable h1, found ${structure.h1}`)
     if (structure.skipped) add('1.3.1', 'P2', `${tag}: heading levels skip a rank`)
     if (structure.main < 1) add('1.3.1', 'P1', `${tag}: no <main> landmark`)
     if (!structure.lang) add('3.1.1', 'P1', `${tag}: <html> has no lang attribute`)

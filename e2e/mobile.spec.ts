@@ -36,7 +36,7 @@ test.describe('@phone the sheet', () => {
     await expect(page.getByTestId('back-button')).toBeVisible()
   })
 
-  test('drops the app title, and keeps the quota on one row', async ({ page }) => {
+  test('takes the app title out of sight but not out of reach, and keeps the quota on one row', async ({ page }) => {
     await openFleet(page)
     // On the list the title is the app's own name and there is height to spare.
     await expect(page.locator('header h1')).toBeVisible()
@@ -46,7 +46,9 @@ test.describe('@phone the sheet', () => {
 
     // In the sheet it is 21px that the conversation needs more: the sheet's own
     // header already names what you are looking at.
-    await expect(page.locator('header h1')).toBeHidden()
+    const titleHeight = await page.locator('header h1').evaluate((el) => el.getBoundingClientRect().height)
+    expect(titleHeight).toBeLessThanOrEqual(1)
+    await expect(page.getByRole('heading', { level: 1, name: 'agent-commander' })).toHaveCount(1)
     // Still there, because "can I keep working" is the one thing worth the
     // height — but on one row rather than two.
     const chips = page.getByTestId('usage-chips')

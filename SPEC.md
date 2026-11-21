@@ -1361,7 +1361,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   every engine, including WebKit, which does not focus a button it clicks.
   *`test/ui/modal-a11y.test.tsx`, `e2e/control.spec.ts`.*
 - **FR-UI-16** — The app MUST pass WCAG 2.2 AA on desktop and phone, in both
-  themes. *`scripts/audit-a11y.mjs`.*
+  themes. Every route at every shape MUST have exactly one level-one heading
+  an assistive technology can reach: the phone's sheet takes the app's h1 out
+  of sight to give the conversation its 21px, never out of the tree.
+  *`scripts/audit-a11y.mjs`, `e2e/headings.spec.ts`.*
 - **FR-UI-23** — What a word on a card means MUST be reachable without a
   pointer: Help's "Reading a card" / "读懂卡片" says each one (quiet, inferred,
   delegated, since your prompt, new, the session quota, and every delegate
