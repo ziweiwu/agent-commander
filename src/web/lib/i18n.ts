@@ -210,6 +210,7 @@ const EN = {
   answerRead:
     'These labels were read off the terminal just now — they are the rows it is numbering, not something the agent wrote down. The number is what is sent.',
   answerShowAll: 'Show all {count} lines',
+  answerDetailRegion: '{label}, scrolls',
   answerShowAllOne: 'Show the whole line',
   answerShownAll: 'All {count} lines shown',
   answerShownAllOne: 'The whole line is shown',
@@ -753,6 +754,7 @@ const ZH: Record<Key, string> = {
   answerProgress: '第 {n} 个问题，共 {total} 个',
   answerRead: '这些标签是刚从终端读取的——是终端此刻正在编号的选项，而不是代理写下的内容。发送的是编号。',
   answerShowAll: '显示全部 {count} 行',
+  answerDetailRegion: '{label}（可滚动）',
   answerShowAllOne: '显示整行',
   answerShownAll: '已显示全部 {count} 行',
   answerShownAllOne: '已显示整行',

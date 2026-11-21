@@ -615,7 +615,10 @@ epistemic rather than functional.
   that prompt, sends nothing and moves no focus, and a new prompt starts
   capped again. It is one-way: there is no "Show less", because collapsing
   pulls the options up under the finger and a double tap's second press
-  would land on `Yes` outside the arrival window (INV-2). An option's
+  would land on `Yes` outside the arrival window (INV-2). While the box
+  scrolls it MUST be a Tab stop and a region named by its label ("Plan,
+  scrolls"), before the options in reading order; opening the card still puts
+  focus on option 1. An option's
   `preview` keeps its own scrolling box for now: it is drawn inside the
   option's button, where a second button cannot go.
   *`e2e/blocked-shapes.spec.ts`, `test/ui/answer-card.test.tsx`,

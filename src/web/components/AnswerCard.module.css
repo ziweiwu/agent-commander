@@ -46,6 +46,16 @@
 }
 
 /**
+ * A box that scrolls is a Tab stop (axe's scrollable-region-focusable), and
+ * its fade is a `mask-image`, which clips the ring drawn outside its border
+ * box. Focused, the fade lifts so the whole ring reaches the screen; the
+ * region's name already says it scrolls.
+ */
+.detail:focus-visible {
+  mask-image: none;
+}
+
+/**
  * FR-ANS-9: pressed "Show all", the box keeps its frame and drops its cap, so
  * the options below only ever move down. After the width rule's cap by
  * specificity, not by order.
