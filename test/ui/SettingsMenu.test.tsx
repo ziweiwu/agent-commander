@@ -249,3 +249,16 @@ describe('dismissing the menu without a mouse', () => {
     expect(screen.getByTestId('settings-menu')).toBeDefined()
   })
 })
+
+describe('the menu radios carry aria-checked, the state their role allows, not aria-pressed', () => {
+  it('uses aria-checked and never aria-pressed', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ theme: 'dark' })
+    renderApp(<SettingsMenu />)
+    await user.click(screen.getByTestId('settings-button'))
+    const radios = screen.getAllByRole('menuitemradio')
+    expect(radios.filter((radio) => radio.hasAttribute('aria-pressed'))).toEqual([])
+    expect(screen.getByTestId('theme-dark').getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByTestId('theme-light').getAttribute('aria-checked')).toBe('false')
+  })
+})

@@ -196,7 +196,6 @@ export function SettingsMenu() {
                 className={styles.item}
                 data-testid={`theme-${option}`}
                 aria-checked={theme === option}
-                aria-pressed={theme === option}
                 onClick={() => {
                   setTheme(option)
                   closeAndRefocus()
@@ -218,7 +217,6 @@ export function SettingsMenu() {
                 className={styles.item}
                 data-testid={`scheme-${option}`}
                 aria-checked={scheme === option}
-                aria-pressed={scheme === option}
                 onClick={() => {
                   setScheme(option)
                   // Left open, unlike the theme and language choices. Picking a
@@ -243,7 +241,6 @@ export function SettingsMenu() {
                 className={styles.item}
                 data-testid={`lang-${option}`}
                 aria-checked={lang === option}
-                aria-pressed={lang === option}
                 onClick={() => {
                   setLang(option)
                   closeAndRefocus()
