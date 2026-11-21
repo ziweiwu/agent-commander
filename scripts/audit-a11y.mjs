@@ -438,12 +438,59 @@ async function auditDuplicateNames(page, tag) {
   if (dupes.length) add('2.4.6', 'P1', `${tag}: buttons in one landmark share a name: ${dupes.slice(0, NAMED_IN_A_FINDING).join(', ')}`)
 }
 
+/**
+ * C4: a disabled control that says why only in `title` says it to nobody on a
+ * touch screen or a keyboard. Each visible disabled button with a title needs
+ * the same sentence in visible text beside it; the bell says it in Settings,
+ * because the phone's one-row top bar has no room for a line.
+ */
+async function disabledWithoutReason(page) {
+  return page.$$eval('button[disabled][title]', (buttons) =>
+    buttons
+      .filter((button) => button.offsetParent !== null && button.title.trim())
+      .filter((button) => button.dataset.testid !== 'notify-toggle')
+      .filter((button) => {
+        const beside = [...(button.parentElement?.children ?? [])].filter((other) => other !== button)
+        return !beside.some((other) => other.checkVisibility() && other.textContent?.includes(button.title.trim()))
+      })
+      .map((button) => button.dataset.testid || button.textContent?.trim() || 'button'),
+  )
+}
+
+async function auditDisabledReasons(page, tag) {
+  const silent = await disabledWithoutReason(page)
+  if (silent.length) add('1.3.1', 'P1', `${tag}: disabled control(s) say why only in a title: ${silent.slice(0, NAMED_IN_A_FINDING).join(', ')}`)
+  const bell = page.locator(T('notify-toggle'))
+  if (!(await bell.isVisible()) || !(await bell.isDisabled())) return
+  const why = (await bell.getAttribute('title')) ?? ''
+  await page.locator(T('settings-button')).click()
+  const said = await page.locator(T('notify-reason')).textContent().catch(() => '')
+  if (!said?.includes(why)) add('1.3.1', 'P1', `${tag}: the disabled bell's reason is not said in Settings`)
+  await page.keyboard.press('Escape')
+}
+
+/** C4: a busy agent's Close is disabled, and the row says why beside it. */
+async function auditBusyClose(page, tag) {
+  const busy = page.locator(`${T('agent-card')}[data-status="busy"]`).first()
+  if (!(await busy.count())) return
+  await busy.click()
+  await page.waitForSelector(T('agent-detail'))
+  const toggle = page.locator(T('controls-toggle'))
+  if (await toggle.isVisible()) await toggle.click()
+  await page.waitForSelector(T('close-agent'), { timeout: 4000 }).catch(() => {})
+  await auditDisabledReasons(page, `${tag} busy agent`)
+  await page.goto(BASE, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('agent-card'))
+}
+
 async function visitStates(page, tag) {
   const states = []
   await page.waitForSelector(T('agent-card'))
   states.push('fleet')
   await auditSelectArrows(page, tag)
   await auditDuplicateNames(page, tag)
+  await auditDisabledReasons(page, tag)
+  await auditBusyClose(page, tag)
 
   await openChat(page)
   states.push('chat')

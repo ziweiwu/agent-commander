@@ -82,3 +82,11 @@
     padding: 4px 12px;
   }
 }
+
+.reason {
+  flex: 1 1 12em;
+  min-width: 0;
+  text-align: end;
+  font-size: var(--text-sm);
+  color: var(--dim);
+}

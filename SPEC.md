@@ -1359,6 +1359,15 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   *`test/ui/modal-a11y.test.tsx`, `e2e/control.spec.ts`.*
 - **FR-UI-16** — The app MUST pass WCAG 2.2 AA on desktop and phone, in both
   themes. *`scripts/audit-a11y.mjs`.*
+- **FR-UI-23** — What a word on a card means MUST be reachable without a
+  pointer: Help's "Reading a card" / "读懂卡片" says each one (quiet, inferred,
+  delegated, since your prompt, new, the session quota, and every delegate
+  state and caption) in the same strings the card's titles use. A disabled
+  control MUST NOT say why only in `title`: Close says "Only while the agent is
+  idle — interrupt it first." beside itself, and a bell that cannot notify
+  says why in Settings, since the phone's one-row top bar has no room for a
+  line **(INV-17)**. *`test/ui/reading-a-card.test.tsx`; `audit:a11y` flags a
+  visible disabled button whose title is said nowhere beside it.*
 
 ---
 

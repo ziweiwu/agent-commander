@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useStore } from '../store/store.ts'
 import { loadEnv } from '../store/transport.ts'
-import { useTranslate } from '../hooks/useTranslate.ts'
+import { useTranslate, type Translate } from '../hooks/useTranslate.ts'
+import type { Key } from '../lib/i18n.ts'
+import { STATE_KEY, STATE_TITLE_KEY } from './DelegationTree.tsx'
 import { Button } from './ui/Button.tsx'
 import styles from './Help.module.css'
 
@@ -108,6 +110,21 @@ export function Help({ onClose }: { onClose: () => void }) {
         </ul>
       </section>
 
+      <section data-testid="help-reading-card">
+        <h3>{t('helpSectionReading')}</h3>
+        <p className={styles.note}>{t('helpReadingIntro')}</p>
+        <dl className={styles.keys}>
+          {cardWords(t).map(([term, meaning]) => (
+            <div key={term} className={styles.word}>
+              <dt>
+                <span className={styles.term}>{term}</span>
+              </dt>
+              <dd>{meaning}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
+
       <section>
         <h3>{t('helpSectionKeys')}</h3>
         <dl className={styles.keys}>
@@ -209,6 +226,28 @@ export function Help({ onClose }: { onClose: () => void }) {
       </section>
     </article>
   )
+}
+
+const SINCE_PROMPT_EXAMPLE = { t: '47m', n: 214 }
+const DELEGATE_STATES = ['active', 'quiet', 'done'] as const
+
+function cardWords(translateKey: Translate): Array<[string, string]> {
+  const say = (key: Key) => translateKey(key)
+  const delegateState = (state: (typeof DELEGATE_STATES)[number]): [string, string] => [
+    state === 'active' ? `${say(STATE_KEY[state])} · ${say('delegateGuess')}` : say(STATE_KEY[state]),
+    say(STATE_TITLE_KEY[state]),
+  ]
+  return [
+    [`${say('statusIdle')} · ${say('statusFromPane')}`, say('statusInferredTitle')],
+    [`${say('statusBusy')} · ${say('statusDelegated')}`, say('glossDelegated')],
+    [translateKey('sincePrompt', SINCE_PROMPT_EXAMPLE), say('sincePromptTitle')],
+    [say('cardNew'), say('cardNewTitle')],
+    [say('usageFiveHour'), say('glossSession')],
+    ...DELEGATE_STATES.map(delegateState),
+    [say('glossEffort'), say('delegateEffortTitle')],
+    [say('delegatesUnknown'), say('delegatesUnknownTitle')],
+    [say('delegateOrphan'), say('delegateOrphanTitle')],
+  ]
 }
 
 /**
