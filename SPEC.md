@@ -1325,7 +1325,9 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   conversation (INV-3). *`test/ui/route-focus.test.tsx`, `e2e/mobile.spec.ts`,
   `e2e/fleet.spec.ts`.*
 - **FR-UI-15** — Every modal surface MUST trap focus, restore it on close, and be
-  operable by keyboard alone. *`test/ui/modal-a11y.test.tsx`.*
+  operable by keyboard alone. Restoring means the control that opened it in
+  every engine, including WebKit, which does not focus a button it clicks.
+  *`test/ui/modal-a11y.test.tsx`, `e2e/control.spec.ts`.*
 - **FR-UI-16** — The app MUST pass WCAG 2.2 AA on desktop and phone, in both
   themes. *`scripts/audit-a11y.mjs`.*
 

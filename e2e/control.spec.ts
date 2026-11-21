@@ -27,6 +27,17 @@ test.describe('starting an agent', () => {
     await expect(page.getByTestId('new-agent-dialog')).toBeVisible()
   })
 
+  test('gives focus back to the New agent button on Escape, WebKit included', async ({ page }) => {
+    await openFleet(page)
+    await page.getByTestId('new-agent-button').click()
+    await expect(page.getByTestId('new-agent-dialog')).toBeVisible()
+    await page.getByTestId('new-agent-submit').click()
+
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('new-agent-dialog')).toHaveCount(0)
+    await expect(page.getByTestId('new-agent-button')).toBeFocused()
+  })
+
   test('INV-7 refuses a relative path before it can become a tmux argument', async ({ page }) => {
     await openFleet(page)
     await page.getByTestId('new-agent-button').click()
