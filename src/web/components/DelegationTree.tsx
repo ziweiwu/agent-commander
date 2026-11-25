@@ -6,7 +6,7 @@ import { formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
 import { useLang, useTranslate } from '../hooks/useTranslate.ts'
 import styles from './DelegationTree.module.css'
 
-const STATE_KEY: Record<SubagentNode['state'], Key> = {
+export const STATE_KEY: Record<SubagentNode['state'], Key> = {
   active: 'delegateActive',
   quiet: 'delegateQuiet',
   done: 'delegateDone',
@@ -18,7 +18,7 @@ const STATE_KEY: Record<SubagentNode['state'], Key> = {
  * otherwise round to "finished", and rounding it is the failure INV-13 exists
  * to prevent.
  */
-const STATE_TITLE_KEY: Record<SubagentNode['state'], Key> = {
+export const STATE_TITLE_KEY: Record<SubagentNode['state'], Key> = {
   active: 'delegateGuessTitle',
   quiet: 'delegateQuietTitle',
   done: 'delegateDoneTitle',

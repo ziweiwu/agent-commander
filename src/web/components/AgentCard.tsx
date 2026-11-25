@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { memo, useId, useMemo, useState } from 'react'
 import type { Agent, AgentTree, Refusals } from '../../shared/types.ts'
 import { CLAUDE_KIND, hasTranscripts, specOf } from '../../shared/agent-kinds.ts'
 import {
@@ -17,7 +17,7 @@ import { claimOf, isStallCandidate, type DelegationClaim } from '../lib/delegati
 import { trailOf } from '../lib/trail.ts'
 import { displayName, isRenamed } from '../lib/naming.ts'
 import { formatDay, formatRelative, formatUptime, type Key } from '../lib/i18n.ts'
-import { useLang, useTranslate } from '../hooks/useTranslate.ts'
+import { useLang, useTranslate, type Translate } from '../hooks/useTranslate.ts'
 import { useStore } from '../store/store.ts'
 import { DelegationTree } from './DelegationTree.tsx'
 import { ICON_BUTTON, ICON_INLINE, ICON_MARK, Icon } from './ui/Icon.tsx'
@@ -27,6 +27,7 @@ import {
   ageIsTimeInState,
   railOf,
   reachOf,
+  sayBlockedReason,
   sinceOf,
   type RailState,
   type SinceFace,
@@ -61,6 +62,30 @@ export const REASON_KEY: Record<string, Key> = {
   'sandbox request': 'waitingSandbox',
   'goal proposal': 'waitingGoal',
   'worker request': 'waitingWorker',
+}
+
+const DESCRIPTION_CAP = 160
+const ELLIPSIS = '…'
+
+export function capDescription(parts: readonly string[]): string {
+  const joined = parts.filter(Boolean).join('. ')
+  if (joined.length <= DESCRIPTION_CAP) return joined
+  const keep = DESCRIPTION_CAP - ELLIPSIS.length
+  const endsOnHighSurrogate = /[\uD800-\uDBFF]/.test(joined.charAt(keep - 1))
+  return `${joined.slice(0, endsOnHighSurrogate ? keep - 1 : keep)}${ELLIPSIS}`
+}
+
+export function delegateSummary(translateKey: Translate, claim: DelegationClaim): string {
+  if (claim.kind === 'unknown') return translateKey('delegatesUnknown')
+  if (claim.kind !== 'some') return ''
+  const counts = [
+    claim.active > 0 ? `${claim.active} ${translateKey('delegateActive')}` : '',
+    claim.quiet > 0 ? `${claim.quiet} ${translateKey('delegateQuiet')}` : '',
+    claim.done > 0 ? `${claim.done} ${translateKey('delegateDone')}` : '',
+  ]
+  const total =
+    claim.total === 1 ? translateKey('delegatesOne') : translateKey('delegatesMany', { n: claim.total })
+  return [total, ...counts].filter(Boolean).join(', ')
 }
 
 export const STATUS_KEY: Record<string, Key> = {
@@ -233,6 +258,7 @@ export const AgentCard = memo(function AgentCard({
   const exited = useStore((s) => s.exited)
   const rail = railOf(agent, exited)
   const reach = reachOf(agent, exited)
+  const goneReason = reach.reason ? sayBlockedReason(t, reach.reason, 'short') : t('notAttachable')
   /** The Answer verb goes with the hand: never beside a struck ring, a pane that has exited, or a guess. */
   const canAnswer = rail.state === 'waiting'
   /** Whether the age on this card is time-in-state rather than time-since. */
@@ -249,6 +275,20 @@ export const AgentCard = memo(function AgentCard({
   const runningLine = agent.running
     ? t('runningProcess', { cmd: agent.running.command, t: runningFor })
     : ''
+  const descriptionId = useId()
+  const waitingReason =
+    agent.status === 'waiting' && agent.waitingFor
+      ? REASON_KEY[agent.waitingFor]
+        ? t(REASON_KEY[agent.waitingFor] as Key)
+        : agent.waitingFor
+      : ''
+  const cardDescription = capDescription([
+    waitingReason,
+    agent.activity ? plainText(agent.activity) : runningLine,
+    plainText(descriptionLine),
+    onFace ? delegateSummary(t, claim) : '',
+    reach.reach === 'gone' ? goneReason : '',
+  ])
 
   return (
     <div
@@ -256,7 +296,13 @@ export const AgentCard = memo(function AgentCard({
       data-testid="agent-entry"
       data-session-id={agent.sessionId}
       data-rail={rail.state}
+      role="listitem"
     >
+      {cardDescription && (
+        <span id={descriptionId} hidden data-testid="agent-description-sr">
+          {cardDescription}
+        </span>
+      )}
       <button
         type="button"
         className={styles.card}
@@ -279,6 +325,7 @@ export const AgentCard = memo(function AgentCard({
         aria-label={[displayName(agent), statusText(agent), stoppedLine, tildePath(agent.cwd)]
           .filter(Boolean)
           .join(' — ')}
+        aria-describedby={cardDescription ? descriptionId : undefined}
         onClick={() => onSelect(agent.sessionId)}
       >
         {/*
@@ -334,11 +381,11 @@ export const AgentCard = memo(function AgentCard({
               className={styles.reach}
               data-testid="agent-reach"
               data-reach={reach.reach}
-              title={reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : undefined}
+              title={reach.reach === 'gone' ? goneReason : undefined}
             >
               <Icon name={reach.reach === 'gone' ? 'screen-off' : 'screen'} size={ICON_MARK} />
               <span className="sr-only">
-                {reach.reach === 'gone' ? (reach.reason ?? t('notAttachable')) : t('reachable')}
+                {reach.reach === 'gone' ? goneReason : t('reachable')}
               </span>
             </span>
             {/*
@@ -463,7 +510,7 @@ export const AgentCard = memo(function AgentCard({
         className={styles.disclosure}
         data-testid="details-toggle"
         aria-expanded={showDetails}
-        aria-label={t('detailsShow')}
+        aria-label={t('detailsShowFor', { name: displayName(agent) })}
         title={showDetails ? t('detailsHide') : t('detailsShow')}
         onClick={() => setShowDetails((open) => !open)}
       >

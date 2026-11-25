@@ -3,6 +3,7 @@ import { TOUCH_TARGETS } from './lib/targets.mjs'
 
 const OUT = process.env.SHOTS ?? '/tmp/agent-commander-audit'
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
+const EMPTY_BASE = process.env.EMPTY_BASE ?? `http://127.0.0.1:${process.env.EMPTY_PORT ?? 4401}/`
 const findings = []
 const add = (sev, area, msg) => findings.push({ sev, area, msg })
 
@@ -333,6 +334,11 @@ await page.screenshot({ path: `${OUT}/07-theme-dark-forced.png` })
   if ((await page.evaluate(() => document.documentElement.lang)) !== 'zh-CN') {
     add('med', 'i18n', 'html lang attribute not updated')
   }
+  const mixedTerms = await page.evaluate(() => {
+    const text = document.body.innerText.replace(/agent-commander/g, '').replace(/mock-[a-z-]+/g, '')
+    return [/\bagents?\b/i.test(text) ? 'agent' : '', text.includes('助手') ? '助手' : ''].filter(Boolean)
+  })
+  if (mixedTerms.length) add('med', 'i18n', `the Chinese fleet says ${mixedTerms.join(' and ')} where it means 代理`)
   await page.screenshot({ path: `${OUT}/08-chinese.png`, fullPage: true })
   await page.click(T('settings-button'))
   await page.click(T('lang-en'))
@@ -398,6 +404,30 @@ for (const vp of VIEWPORTS) {
     await page.waitForSelector(T('answer-detail'))
     await page.waitForTimeout(SETTLE_MS)
     await checkShowAll(page, `${vp.name} ${id}`)
+  }
+  await page.close()
+}
+
+/**
+ * C2: the confirmed-empty fleet names tmux, in both languages, because an
+ * agent started outside it can be read here and never answered. It needs a
+ * `--mock-empty` server (EMPTY_PORT, 4401 by default); without one the check
+ * is reported as not run rather than passed.
+ */
+{
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  const reached = await page.goto(EMPTY_BASE, { waitUntil: 'networkidle' }).catch(() => null)
+  if (!reached) {
+    add('info', 'firstRun', `no --mock-empty server at ${EMPTY_BASE}: the empty-state tmux check did not run`)
+  } else {
+    for (const lang of ['en', 'zh-CN']) {
+      await page.evaluate((l) => localStorage.setItem('agent-commander.lang', l), lang)
+      await page.reload({ waitUntil: 'networkidle' })
+      const empty = await page.waitForSelector(T('empty-state'), { timeout: 8000 }).catch(() => null)
+      const text = empty ? await empty.textContent() : ''
+      if (!/tmux/.test(text ?? '')) add('high', 'firstRun', `${lang}: the empty fleet does not mention tmux`)
+    }
+    await page.evaluate(() => localStorage.removeItem('agent-commander.lang'))
   }
   await page.close()
 }

@@ -55,17 +55,22 @@ describe('UsageChips', () => {
     expect(bar?.getAttribute('aria-label')).toMatch(/resetting/)
   })
 
-  /*
-   * A stale bar must not assert a current value: the number was true when it
-   * was read, and the label has to say so instead of implying it is now.
-   */
-  it('drops aria-valuenow and dates the reading once it is stale', () => {
-    useStore.setState({ limits: fresh({ at: Date.now() - 40 * 60_000 }) })
+  it('keeps the last value on a stale meter and says its age in the value text', () => {
+    useStore.setState({ limits: fresh({ at: Date.now() - 3 * 3_600_000 - 60_000, fiveHour: { pct: 62 } }) })
     renderApp(<UsageChips />)
     expect(screen.getByTestId('usage-chips').getAttribute('data-stale')).toBe('true')
-    const bar = screen.getByTestId('usage-five-hour').querySelector('[role="meter"]')
-    expect(bar?.hasAttribute('aria-valuenow')).toBe(false)
-    expect(bar?.getAttribute('aria-label')).toMatch(/when last read/)
+    const meter = screen.getByTestId('usage-five-hour').querySelector('[role="meter"]')
+    expect(meter?.getAttribute('aria-valuenow')).toBe('62')
+    expect(meter?.getAttribute('aria-valuetext')).toBe('62% · 3h ago')
+    expect(meter?.getAttribute('aria-label')).toMatch(/when last read/)
+  })
+
+  it('says the age in Chinese too', () => {
+    useStore.setState({ lang: 'zh-CN', limits: fresh({ at: Date.now() - 3 * 3_600_000 - 60_000, fiveHour: { pct: 62 } }) })
+    renderApp(<UsageChips />)
+    const meter = screen.getByTestId('usage-five-hour').querySelector('[role="meter"]')
+    expect(meter?.getAttribute('aria-valuenow')).toBe('62')
+    expect(meter?.getAttribute('aria-valuetext')).toBe('62% · 3 小时前')
   })
 
   /*

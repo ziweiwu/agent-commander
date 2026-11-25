@@ -68,8 +68,14 @@ function Swatch({ scheme }: { scheme: Scheme }) {
  * immediately, which is what every other menu on the platform does. Colours
  * stay open — a choice made by comparing, not by knowing.
  */
+function notifyReasonKey(): 'notifyUnsupported' | 'notifyDenied' | null {
+  if (typeof Notification === 'undefined') return 'notifyUnsupported'
+  return Notification.permission === 'denied' ? 'notifyDenied' : null
+}
+
 export function SettingsMenu() {
   const t = useTranslate()
+  const notifyReason = notifyReasonKey()
   const theme = useStore((s) => s.theme)
   const scheme = useStore((s) => s.scheme)
   const lang = useStore((s) => s.lang)
@@ -190,7 +196,6 @@ export function SettingsMenu() {
                 className={styles.item}
                 data-testid={`theme-${option}`}
                 aria-checked={theme === option}
-                aria-pressed={theme === option}
                 onClick={() => {
                   setTheme(option)
                   closeAndRefocus()
@@ -212,7 +217,6 @@ export function SettingsMenu() {
                 className={styles.item}
                 data-testid={`scheme-${option}`}
                 aria-checked={scheme === option}
-                aria-pressed={scheme === option}
                 onClick={() => {
                   setScheme(option)
                   // Left open, unlike the theme and language choices. Picking a
@@ -237,7 +241,6 @@ export function SettingsMenu() {
                 className={styles.item}
                 data-testid={`lang-${option}`}
                 aria-checked={lang === option}
-                aria-pressed={lang === option}
                 onClick={() => {
                   setLang(option)
                   closeAndRefocus()
@@ -248,6 +251,15 @@ export function SettingsMenu() {
               </button>
             ))}
           </div>
+
+          {notifyReason && (
+            <div className={styles.group}>
+              <span className={styles.label}>{t('notifications')}</span>
+              <p className={styles.reason} data-testid="notify-reason">
+                {t(notifyReason)}
+              </p>
+            </div>
+          )}
         </div>
       )}
     </div>

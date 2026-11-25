@@ -3,6 +3,7 @@ import type { RefObject } from 'react'
 import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
 import { PaneTerm } from '../lib/term.ts'
+import { sayBlockedReason } from '../lib/status.ts'
 import { refusedAsKeypresses } from '../store/pasteGuard.ts'
 import { useStore } from '../store/store.ts'
 import {
@@ -472,7 +473,7 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   if (!agent.paneId) {
     return (
       <div className={styles.notice} data-testid="term-unavailable">
-        {agent.attachBlockedReason ?? t('termNotAttachable')}
+        {agent.attachBlockedReason ? sayBlockedReason(t, agent.attachBlockedReason) : t('termNotAttachable')}
       </div>
     )
   }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useStore } from '../store/store.ts'
 import { grouped, listedFleet, unusedAgents, type StatusFilter } from '../lib/filter.ts'
@@ -68,6 +68,7 @@ function pruneReport(translate: Translate, tally: PruneTally): string {
 
 export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListProps) {
   const t = useTranslate()
+  const listId = useId()
   const agents = useStore((s) => s.agents)
   const conn = useStore((s) => s.conn)
   const fleetAt = useStore((s) => s.fleetAt)
@@ -252,6 +253,7 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
                 <span
                   className={group.key === 'waiting' ? styles.waitingTitle : undefined}
                   data-testid="group-title"
+                  id={`${listId}-${group.key}`}
                 >
                   {group.key === 'waiting' && <Icon name="hand" size={ICON_INLINE} />}
                   {t(GROUP_KEY[group.key] as Key)}
@@ -261,6 +263,8 @@ export function FleetList({ tiled, selected, onSelect, searchRef }: FleetListPro
               </h2>
               <div
                 className={`${styles.groupList} ${group.key === 'waiting' ? styles.waitingGroup : ''}`}
+                role="list"
+                aria-labelledby={`${listId}-${group.key}`}
               >
                 {group.agents.map((agent) => (
                   <AgentCard
@@ -355,6 +359,8 @@ function Loading({ label }: { label: string }) {
  * phone with nothing to show is also the moment somebody is most likely to be
  * setting the app up, so the Tailscale page in Help is one tap away.
  */
+const START_IN_TMUX = ['tmux new -s work', 'claude']
+
 function FirstRun({ onNewAgent }: { onNewAgent: () => void }) {
   const t = useTranslate()
   return (
@@ -362,9 +368,13 @@ function FirstRun({ onNewAgent }: { onNewAgent: () => void }) {
       <p className={styles.emptyTitle}>{t('emptyFleetTitle')}</p>
       <p className={styles.emptyBody}>{t('emptyFleetBody')}</p>
       <div className={styles.waysIn}>
-        <code className={styles.command} data-testid="empty-command">
-          claude
-        </code>
+        <div className={styles.commands} data-testid="empty-command">
+          {START_IN_TMUX.map((line) => (
+            <code key={line} className={styles.command} data-testid="empty-command-line">
+              {line}
+            </code>
+          ))}
+        </div>
         <span className={styles.or}>{t('emptyFleetOr')}</span>
         <Button data-testid="empty-new-agent" onClick={onNewAgent}>
           + {t('newAgent')}

@@ -77,14 +77,13 @@ function Meter({ labelKey, win, at, stale, testid }: MeterProps) {
   // duration; the full sentence stays in the title and the accessible name.
   const short = left ? formatUptime(lang, left) : t('usageResetting')
 
-  /*
-   * A stale bar must not assert a current value to a screen reader, so
-   * aria-valuenow is dropped and the label says when the number was true.
-   * Sighted users get the same information from the dimmed styling plus the
-   * title; this is the non-visual half of that.
-   */
+  const ago = formatRelative(lang, relative(at))
   const meterProps = stale
-    ? { 'aria-label': t('usageStaleMeter', { label, n: pct, t: formatRelative(lang, relative(at)) }) }
+    ? {
+        'aria-label': t('usageStaleMeter', { label, n: pct, t: ago }),
+        'aria-valuenow': pct,
+        'aria-valuetext': t('usageStaleValue', { n: pct, t: ago }),
+      }
     : { 'aria-label': t('usageMeter', { label, n: pct, reset }), 'aria-valuenow': pct }
 
   return (

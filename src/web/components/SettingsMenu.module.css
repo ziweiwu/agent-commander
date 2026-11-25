@@ -46,6 +46,13 @@
   color: var(--faint);
   padding: 4px 8px 2px;
 }
+.reason {
+  margin: 0;
+  padding: 2px 8px 6px;
+  max-width: 28ch;
+  font-size: var(--text-sm);
+  color: var(--dim);
+}
 
 .item {
   display: flex;
@@ -66,7 +73,7 @@
 .item:hover {
   background: var(--panel-2);
 }
-.item[aria-pressed='true'] {
+.item[aria-checked='true'] {
   background: var(--tint-focus);
 }
 .icon {

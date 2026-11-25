@@ -56,6 +56,12 @@
   color: var(--dim);
   font-size: var(--text-base);
 }
+.word {
+  display: contents;
+}
+.term {
+  font-weight: 600;
+}
 .keys kbd {
   font: var(--text-sm) var(--font-mono);
   border: 1px solid var(--line);

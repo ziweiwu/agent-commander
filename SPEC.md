@@ -300,7 +300,8 @@ the default for an unrecognised kind is deny.
   `transcript::inv11_the_description_follows_the_work_while_the_title_stays_put`,
   `test/ui/card-description.test.tsx`.*
 - **FR-CARD-8** — The fold's disclosure MUST be a column beside the card, as
-  tall as it, named in words (*Details* / *详情*) and carrying `aria-expanded`;
+  tall as it, named in words for its agent (*Details for rebuild-dist* /
+  *rebuild-dist 的详情*) and carrying `aria-expanded`;
   it was a strip under every card, the same word fourteen times, and its labels
   sat at four heights across one row of cards. A **waiting** card that can be
   reached MUST be the one tinted surface on the fleet (`--wash-waiting`, solved
@@ -357,6 +358,14 @@ the default for an unrecognised kind is deny.
   *`test/ui/card-usage.test.tsx`,
   `routes::inv11_the_open_conversation_leaves_window_counts_to_the_enricher`,
   `transcript::the_tail_counts_auto_mode_refusals_from_where_its_window_starts`.*
+- **FR-CARD-12** — A card's accessible name MUST stay name, status, any stop
+  and folder; what it is waiting for, what it is doing, its subject, its
+  delegates as the face shows them and why it cannot be reached MUST reach it
+  as its accessible description, joined with full stops in code (never the
+  face's `::before` dots), at most 160 characters. Each status group MUST be a
+  list named by its heading, each card an item of it.
+  *`test/ui/card-says-why.test.tsx`; `audit:a11y` flags two visible buttons
+  sharing a name in one landmark.*
 
 ### 3.3 Delegates
 
@@ -1072,7 +1081,10 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   non-loopback address without a token has anywhere else.
 - **FR-QUOTA-3** — The reading MUST age visibly. Meters only refresh while a
   Claude Code session is rendering, so past ~20 minutes they MUST dim and say
-  when the number was last true rather than implying it is current. **(INV-11)**
+  when the number was last true rather than implying it is current. A stale
+  `meter` MUST keep its last `aria-valuenow`, which the role requires, and say
+  its age in `aria-valuetext` (`62% · 3h ago` / `62% · 3 小时前`). **(INV-11)**
+  *`test/ui/UsageChips.test.tsx`.*
 - **FR-QUOTA-4** — With no reading at all — no subscription plan, or the bridge
   not installed — the meters MUST be hidden entirely rather than shown empty.
 - **NFR-QUOTA-5** — The bridge MUST never throw, never exit non-zero and never
@@ -1222,8 +1234,16 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   that starts an agent, as copyable text, and the New agent button as a real
   control — and point at the phone setup in Help. On a first run the New agent
   dialog MUST open on the folder browser at home rather than a bare path field.
+  The command MUST start the agent inside tmux (`tmux new -s work`, then
+  `claude`) and the sentence above it MUST say why, because an agent started
+  anywhere else can be read here and never answered; Help MUST say the same
+  under "Before you start". The server's two reasons for an agent with no
+  pane MUST reach the reader in their language on the card, the detail
+  header, the Attach tab and the composer, through one closed map
+  (`blockedReasonKey`); a reason the map does not know is shown as sent.
   *`test/ui/FleetList.test.tsx`, `test/ui/NewAgentDialog.test.tsx`,
-  `e2e/empty.spec.ts`.*
+  `test/ui/first-run-tmux.test.tsx`, `e2e/empty.spec.ts`, `audit:ux` on a
+  `--mock-empty` server.*
 - **FR-UI-21** — Below the phone cut the fleet's filter box and sort picker MUST
   share one row and New agent MUST keep its own, so the toolbar costs two rows
   above the first card rather than three. The picker's option text MAY shorten
@@ -1341,7 +1361,19 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   every engine, including WebKit, which does not focus a button it clicks.
   *`test/ui/modal-a11y.test.tsx`, `e2e/control.spec.ts`.*
 - **FR-UI-16** — The app MUST pass WCAG 2.2 AA on desktop and phone, in both
-  themes. *`scripts/audit-a11y.mjs`.*
+  themes. Every route at every shape MUST have exactly one level-one heading
+  an assistive technology can reach: the phone's sheet takes the app's h1 out
+  of sight to give the conversation its 21px, never out of the tree.
+  *`scripts/audit-a11y.mjs`, `e2e/headings.spec.ts`.*
+- **FR-UI-23** — What a word on a card means MUST be reachable without a
+  pointer: Help's "Reading a card" / "读懂卡片" says each one (quiet, inferred,
+  delegated, since your prompt, new, the session quota, and every delegate
+  state and caption) in the same strings the card's titles use. A disabled
+  control MUST NOT say why only in `title`: Close says "Only while the agent is
+  idle — interrupt it first." beside itself, and a bell that cannot notify
+  says why in Settings, since the phone's one-row top bar has no room for a
+  line **(INV-17)**. *`test/ui/reading-a-card.test.tsx`; `audit:a11y` flags a
+  visible disabled button whose title is said nowhere beside it.*
 
 ---
 

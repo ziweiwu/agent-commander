@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Agent } from '../../shared/types.ts'
 import { useStore } from '../store/store.ts'
@@ -43,6 +43,7 @@ export function AgentControls({ agent }: { agent: Agent }) {
   const busy = agent.status === 'busy'
   const disabled = busy || !agent.paneId || pending !== null
   const reason = busy ? t('controlBusy') : undefined
+  const reasonId = useId()
 
   const onClose = async (): Promise<void> => {
     const name = displayName(agent)
@@ -73,12 +74,18 @@ export function AgentControls({ agent }: { agent: Agent }) {
     <div className={styles.controls} data-testid="agent-controls">
       <span className={styles.spacer} />
 
+      {reason && (
+        <span className={styles.reason} id={reasonId} data-testid="close-reason">
+          {reason}
+        </span>
+      )}
       <Button
         variant="compact"
         className={styles.close}
         data-testid="close-agent"
         disabled={disabled}
         title={reason}
+        aria-describedby={reason ? reasonId : undefined}
         onClick={() => setConfirmingClose(true)}
       >
         {pending === 'close' ? t('closing') : t('closeAgent')}

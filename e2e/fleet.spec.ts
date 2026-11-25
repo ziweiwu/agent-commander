@@ -146,7 +146,7 @@ test.describe('the fleet', () => {
     // A disabled control cannot carry a tooltip — no mouse events reach it —
     // so the reason has to be beside it rather than inside the view it is
     // stopping you opening.
-    await expect(page.getByTestId('attach-blocked-note')).toHaveText(/not running inside tmux/i)
+    await expect(page.getByTestId('attach-blocked-note')).toHaveText(/not in tmux/i)
   })
 })
 

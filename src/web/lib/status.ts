@@ -19,6 +19,7 @@
  */
 import type { Agent } from '../../shared/types.ts'
 import { CLAUDE_KIND } from '../../shared/agent-kinds.ts'
+import type { Key } from './i18n.ts'
 
 /** The four shapes the rail can draw. `hand` is the fifth, and is `waiting`. */
 export type RailState = 'working' | 'waiting' | 'idle' | 'gone'
@@ -80,6 +81,31 @@ export interface Reachability {
   reach: Reach
   /** Why not, in the server's own words. Absent when it is reachable. */
   reason?: string
+}
+
+/**
+ * The two sentences `registry.rs` sends for a session with no pane, as keys.
+ *
+ * The wire keeps the server's English; the reader gets their own language. A
+ * closed map, so a sentence a newer server adds falls through unchanged
+ * rather than being guessed at.
+ */
+const BLOCKED_REASON_KEY: Readonly<Record<string, { full: Key; short: Key }>> = {
+  'session is not running inside tmux': { full: 'reasonNotInTmux', short: 'reachNotInTmux' },
+  'tmux pane id could not be parsed': { full: 'reasonPaneUnparsed', short: 'reachPaneUnparsed' },
+}
+
+export function blockedReasonKey(reason: string, form: 'full' | 'short' = 'full'): Key | undefined {
+  return Object.hasOwn(BLOCKED_REASON_KEY, reason) ? BLOCKED_REASON_KEY[reason]?.[form] : undefined
+}
+
+export function sayBlockedReason(
+  translateKey: (key: Key) => string,
+  reason: string,
+  form: 'full' | 'short' = 'full',
+): string {
+  const key = blockedReasonKey(reason, form)
+  return key ? translateKey(key) : reason
 }
 
 /**

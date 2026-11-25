@@ -74,11 +74,6 @@ const ALLOWED: Record<string, Hidden> = {
 
   // Decoration and chrome that name nothing about the agent on screen.
   '.gutter': { reason: 'the message rail is decorative; grouping survives it' },
-  '.sheetMode .title': {
-    reason:
-      "the app's own name; the sheet's header names the open agent, and FR-DET-2's wrap keeps " +
-      'at least 60px of that name on a 320px phone (e2e/mobile.spec.ts measures it)',
-  },
   '.statusLine': {
     reason:
       'a readout, not a control: the mode is on the strip’s own button and the delegates are on the card; a landscape phone needs the height for the conversation',

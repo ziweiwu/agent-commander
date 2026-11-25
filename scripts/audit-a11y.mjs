@@ -415,11 +415,82 @@ async function openHistory(page) {
   await page.waitForTimeout(SETTLE_MS)
 }
 
+/**
+ * A4 / 2.4.6: no two visible buttons in one landmark share an accessible
+ * name. The fleet had fourteen Details buttons all called "Details", so a
+ * screen reader's list of controls could not say which card each opened.
+ */
+async function auditDuplicateNames(page, tag) {
+  const dupes = await page.$$eval('button:not([disabled])', (buttons) => {
+    const LANDMARKS = 'main, nav, aside, header, footer, [role="region"], [role="main"], [role="navigation"], [role="complementary"], [role="banner"]'
+    const seen = new Map()
+    for (const button of buttons) {
+      if (button.offsetParent === null) continue
+      const name = (button.getAttribute('aria-label') || button.textContent || button.getAttribute('title') || '').trim()
+      if (!name) continue
+      const scope = button.closest(LANDMARKS) ?? document.body
+      const names = seen.get(scope) ?? new Map()
+      names.set(name, (names.get(name) ?? 0) + 1)
+      seen.set(scope, names)
+    }
+    return [...seen.values()].flatMap((names) => [...names].filter(([, n]) => n > 1).map(([name, n]) => `"${name}" x${n}`))
+  })
+  if (dupes.length) add('2.4.6', 'P1', `${tag}: buttons in one landmark share a name: ${dupes.slice(0, NAMED_IN_A_FINDING).join(', ')}`)
+}
+
+/**
+ * C4: a disabled control that says why only in `title` says it to nobody on a
+ * touch screen or a keyboard. Each visible disabled button with a title needs
+ * the same sentence in visible text beside it; the bell says it in Settings,
+ * because the phone's one-row top bar has no room for a line.
+ */
+async function disabledWithoutReason(page) {
+  return page.$$eval('button[disabled][title]', (buttons) =>
+    buttons
+      .filter((button) => button.offsetParent !== null && button.title.trim())
+      .filter((button) => button.dataset.testid !== 'notify-toggle')
+      .filter((button) => {
+        const beside = [...(button.parentElement?.children ?? [])].filter((other) => other !== button)
+        return !beside.some((other) => other.checkVisibility() && other.textContent?.includes(button.title.trim()))
+      })
+      .map((button) => button.dataset.testid || button.textContent?.trim() || 'button'),
+  )
+}
+
+async function auditDisabledReasons(page, tag) {
+  const silent = await disabledWithoutReason(page)
+  if (silent.length) add('1.3.1', 'P1', `${tag}: disabled control(s) say why only in a title: ${silent.slice(0, NAMED_IN_A_FINDING).join(', ')}`)
+  const bell = page.locator(T('notify-toggle'))
+  if (!(await bell.isVisible()) || !(await bell.isDisabled())) return
+  const why = (await bell.getAttribute('title')) ?? ''
+  await page.locator(T('settings-button')).click()
+  const said = await page.locator(T('notify-reason')).textContent().catch(() => '')
+  if (!said?.includes(why)) add('1.3.1', 'P1', `${tag}: the disabled bell's reason is not said in Settings`)
+  await page.keyboard.press('Escape')
+}
+
+/** C4: a busy agent's Close is disabled, and the row says why beside it. */
+async function auditBusyClose(page, tag) {
+  const busy = page.locator(`${T('agent-card')}[data-status="busy"]`).first()
+  if (!(await busy.count())) return
+  await busy.click()
+  await page.waitForSelector(T('agent-detail'))
+  const toggle = page.locator(T('controls-toggle'))
+  if (await toggle.isVisible()) await toggle.click()
+  await page.waitForSelector(T('close-agent'), { timeout: 4000 }).catch(() => {})
+  await auditDisabledReasons(page, `${tag} busy agent`)
+  await page.goto(BASE, { waitUntil: 'networkidle' })
+  await page.waitForSelector(T('agent-card'))
+}
+
 async function visitStates(page, tag) {
   const states = []
   await page.waitForSelector(T('agent-card'))
   states.push('fleet')
   await auditSelectArrows(page, tag)
+  await auditDuplicateNames(page, tag)
+  await auditDisabledReasons(page, tag)
+  await auditBusyClose(page, tag)
 
   await openChat(page)
   states.push('chat')
@@ -543,13 +614,15 @@ for (const [profile, options] of [
       let skipped = false
       for (let i = 1; i < heads.length; i += 1) if (heads[i] - heads[i - 1] > 1) skipped = true
       return {
-        h1: document.querySelectorAll('h1').length,
+        h1: [...document.querySelectorAll('h1')].filter(
+          (h1) => h1.checkVisibility({ visibilityProperty: true }) && !h1.closest('[aria-hidden="true"],[inert]'),
+        ).length,
         skipped,
         main: document.querySelectorAll('main').length,
         lang: document.documentElement.lang,
       }
     })
-    if (structure.h1 !== 1) add('1.3.1', 'P1', `${tag}: expected exactly one h1, found ${structure.h1}`)
+    if (structure.h1 !== 1) add('1.3.1', 'P1', `${tag}: expected exactly one reachable h1, found ${structure.h1}`)
     if (structure.skipped) add('1.3.1', 'P2', `${tag}: heading levels skip a rank`)
     if (structure.main < 1) add('1.3.1', 'P1', `${tag}: no <main> landmark`)
     if (!structure.lang) add('3.1.1', 'P1', `${tag}: <html> has no lang attribute`)
