@@ -687,7 +687,10 @@ The same "it lives in the URL" property is also what the token cannot do, and
 nothing about the `<script>` that URL then pulls in, so `GET`/`HEAD` under
 `/assets/` skip the token gate or the app 401s its own bundle. The prefix is the
 whole boundary, which is why nothing under it may ever serve agent state, and
-why a miss there 404s instead of falling through to the shell.
+why a miss there 404s instead of falling through to the shell. A browser
+navigation with no valid token or cookie gets a small 401 page naming
+`--print-url` (`signed_out_page`); the client reads a 401 from `/api/env` as
+`reach: 'signedOut'`.
 
 It is also the only place a response is cached or compressed, and both lean on
 that boundary. `serve_asset` hands the prefix to tower-http's `ServeDir`, which

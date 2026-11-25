@@ -106,14 +106,17 @@ npm run lint
 npm test              # 1912 tests: 840 Rust (the server) + 1072 vitest (the web app)
 npm run build         # vite bundle, then `cargo build --release`
 npm run e2e           # 489 end-to-end tests, five projects: desktop/tablet/phone on
-                      # Chromium, and phone/tablet again on WebKit. Two mock
-                      # servers: the fixture fleet on 4599 and `--mock-empty`
-                      # on 4598, which `e2e/empty.spec.ts` alone points at.
-                      # E2E_PORT and E2E_EMPTY_PORT move them if those are taken
+                      # Chromium, and phone/tablet again on WebKit. Three mock
+                      # servers: the fixture fleet on 4599, `--mock-empty`
+                      # on 4598, which `e2e/empty.spec.ts` alone points at, and
+                      # `--mock --token` on 4597 for `e2e/signed-out.spec.ts`.
+                      # E2E_PORT, E2E_EMPTY_PORT and E2E_TOKEN_PORT move them
 npm run audit         # contrast, a11y, task flows, device layouts — needs a server;
                       # audit:ux also reads a --mock-empty server on EMPTY_PORT
                       # (4401; or EMPTY_BASE) for the first-run screen, and says
-                      # "did not run" as an info line when none is up
+                      # "did not run" as an info line when none is up; the same for a
+                      # --mock --token server on TOKEN_PORT (4402; or TOKEN_BASE) and the
+                      # signed-out page
 npm run audit:workspace  # the work-surface bar: >=80% of the viewport is transcript
                       # plus composer at desktop/laptop/tablet (and a 30% floor
                       # for a blocked agent at 1280x720), measured in a real

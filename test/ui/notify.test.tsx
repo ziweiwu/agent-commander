@@ -163,6 +163,18 @@ describe('the live region names agents as their cards do', () => {
   it('announces each newly blocked agent by its displayed name', () => {
     const made = agent({ sessionId: 'a', status: 'waiting', name: 'ziweiwu-35', derivedName: true, aiTitle: 'Refactor the billing page' })
     const chosen = agent({ sessionId: 'b', status: 'waiting', name: 'billing' })
-    expect(blockedAnnouncement([made, chosen])).toBe('2: Refactor the billing page, billing')
+    expect(blockedAnnouncement([made, chosen], 'en')).toBe(
+      '2 agents need you: Refactor the billing page, billing',
+    )
+  })
+
+  it('says it in both languages, singular and plural', () => {
+    const one = agent({ sessionId: 'a', status: 'waiting', name: 'rebuild-dist' })
+    const two = agent({ sessionId: 'b', status: 'waiting', name: 'plan-the-migration' })
+    expect(blockedAnnouncement([one], 'en')).toBe('1 agent needs you: rebuild-dist')
+    expect(blockedAnnouncement([one, two], 'zh-CN')).toBe(
+      '2 个代理需要你：rebuild-dist，plan-the-migration',
+    )
+    expect(blockedAnnouncement([one], 'zh-CN')).toBe('1 个代理需要你：rebuild-dist')
   })
 })

@@ -78,8 +78,12 @@ export function shouldNudge(fresh: Agent[], env: NudgeEnv): boolean {
  * even where that comes from the conversation — the push the server sends
  * cannot (`push.rs`).
  */
-export function blockedAnnouncement(fresh: Agent[]): string {
-  return `${fresh.length}: ${fresh.map(displayName).join(', ')}`
+export function blockedAnnouncement(fresh: Agent[], lang: Lang): string {
+  const names = fresh.map(displayName).join(lang === 'zh-CN' ? '，' : ', ')
+  return translate(lang, fresh.length === 1 ? 'announceBlocked_one' : 'announceBlocked_other', {
+    count: fresh.length,
+    names,
+  })
 }
 
 /**

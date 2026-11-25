@@ -68,7 +68,7 @@ types into somebody's session. The server refuses `--mock` on it.
 | 4317 | Production. Real agents. `npm start`, `npm run serve`, the installed binary. |
 | 4400 | Development. `npm run dev`, `npm run mock`, and what the audit scripts target. |
 | 4500 | `npm run qa`. |
-| 4599 / 4598 | The end-to-end suite's two mock servers: the fixture fleet and `--mock-empty`. |
+| 4599 / 4598 / 4597 | The end-to-end suite's mock servers: fixtures, `--mock-empty`, `--mock --token`. |
 
 `npm run mock` serves a deliberately awkward fleet: fourteen agents, one of
 each blocked shape, a dead pane, a family of quiet delegates, a name too long

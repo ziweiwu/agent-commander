@@ -990,6 +990,11 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
 
 ### 7.2 The credential
 
+- **NFR-SEC-4a** — A browser navigation (`Accept: text/html`) outside `/api` and
+  `/ws` that carries no valid token or cookie MUST get a 401 page that names
+  `--print-url`, in the language of `Accept-Language`, and MUST NOT contain or
+  echo the token. APIs and upgrades keep the plain 401. **(INV-3)**
+  *`routes::tests::a_browser_with_no_cookie_is_told_where_the_token_comes_from`.*
 - **NFR-SEC-5** — `--token auto` MUST persist its token at mode 0600 rather than
   minting a fresh one each start: rotation on every restart breaks the link saved
   on a phone, which pushes users to a literal token in an alias, where `ps` can
@@ -1365,6 +1370,16 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   an assistive technology can reach: the phone's sheet takes the app's h1 out
   of sight to give the conversation its 21px, never out of the tree.
   *`scripts/audit-a11y.mjs`, `e2e/headings.spec.ts`.*
+- **FR-UI-24** — The page's one polite live region (`#live-region`, set by
+  `announce`, which clears it and writes on the next frame so a repeated line is
+  heard again) MUST carry every spoken line: newly blocked agents ("2 agents
+  need you: a, b" / "2 个代理需要你：a，b"), each toast (the visible toast is
+  not a second status), and the connection: "Connection lost. Reconnecting."
+  only after the socket has stayed down 5 s, and "Connected again." only after
+  a loss was spoken, so a waking phone says nothing. A 401 reads "signed out —
+  open your saved link again" in the chip, on one line in the sheet, and in the
+  live region **(INV-3)**. *`test/ui/announce.test.tsx`,
+  `test/ui/notify.test.tsx`, `e2e/signed-out.spec.ts`, `audit:a11y`.*
 - **FR-UI-23** — What a word on a card means MUST be reachable without a
   pointer: Help's "Reading a card" / "读懂卡片" says each one (quiet, inferred,
   delegated, since your prompt, new, the session quota, and every delegate

@@ -29,6 +29,7 @@ import {
 import { endingStoppedLens, type FleetState, type KindScope, type SortDir, type SortKey, type StatusFilter } from '../lib/filter.ts'
 import type { StopCause } from '../../shared/types.ts'
 import type { SeenThrough, Visit } from '../lib/newSince.ts'
+import { announce, clearAnnouncement } from '../lib/announce.ts'
 import { translate, type Key, type Lang } from '../lib/i18n.ts'
 import {
   applyLang,
@@ -68,7 +69,7 @@ export type Conn = 'connecting' | 'open' | 'closed'
  * and the caption should say so rather than promise a reconnect that cannot
  * happen from here (INV-11). Learned by a probe, never assumed.
  */
-export type Reach = 'unknown' | 'reachable' | 'unreachable'
+export type Reach = 'unknown' | 'reachable' | 'unreachable' | 'signedOut'
 
 export interface HistoryView {
   sessionId: string
@@ -550,6 +551,7 @@ export const useStore = create<AppState>()((set, get) => ({
   setLang: (lang) => {
     saveLang(lang)
     applyLang(lang)
+    clearAnnouncement()
     set({ lang })
   },
 
@@ -597,6 +599,7 @@ export const useStore = create<AppState>()((set, get) => ({
     window.clearTimeout(toastTimer)
     toastTimer = window.setTimeout(() => set({ toast: null }), 5000)
     set({ toast })
+    announce(toast)
   },
 
   setExpectSession: (expectSession) => set({ expectSession }),

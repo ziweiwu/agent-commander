@@ -21,6 +21,7 @@ import type {
   ToolOutcome,
 } from '../../shared/types.ts'
 import type { Outcomes } from '../lib/chat.ts'
+import { announce } from '../lib/announce.ts'
 import { translate } from '../lib/i18n.ts'
 import { blockedAnnouncement, notifyBlocked, shouldNudge } from '../lib/notify.ts'
 import { loadNudgeDismissed, saveFleetSnapshot } from '../lib/prefs.ts'
@@ -29,6 +30,7 @@ import { refusedAsKeypresses } from './pasteGuard.ts'
 import { endingStoppedLens } from '../lib/filter.ts'
 import { useStore, type ToolResultEntry } from './store.ts'
 
+const HTTP_UNAUTHORIZED = 401
 let socket: WebSocket | null = null
 let retry = 500
 let announced = new Set<string>()
@@ -788,8 +790,30 @@ function announceBlocked(agents: Agent[]): void {
   const fresh = blocked.filter((a) => !announced.has(a.sessionId))
   announced = new Set(blocked.map((a) => a.sessionId))
   if (fresh.length === 0) return
-  const region = document.getElementById('live-region')
-  if (region) region.textContent = blockedAnnouncement(fresh)
+  announce(blockedAnnouncement(fresh, useStore.getState().lang))
+}
+
+const LOSS_SPOKEN_AFTER_MS = 5000
+let lossTimer: number | undefined
+let lossSpoken = false
+
+function speakLossIfStillDown(): void {
+  if (lossTimer !== undefined || lossSpoken) return
+  lossTimer = window.setTimeout(() => {
+    lossTimer = undefined
+    const { conn, reach, lang } = useStore.getState()
+    if (conn === 'open') return
+    lossSpoken = true
+    announce(translate(lang, reach === 'signedOut' ? 'connSignedOut' : 'announceConnLost'))
+  }, LOSS_SPOKEN_AFTER_MS)
+}
+
+function speakReturnIfLossWasSpoken(): void {
+  window.clearTimeout(lossTimer)
+  lossTimer = undefined
+  if (!lossSpoken) return
+  lossSpoken = false
+  announce(translate(useStore.getState().lang, 'announceConnBack'))
 }
 
 /**
@@ -894,7 +918,11 @@ function probeServer(): void {
   const abort = new AbortController()
   const deadline = window.setTimeout(() => abort.abort(), RETURN_PROBE_MS)
   fetch('/api/env', { signal: abort.signal, credentials: 'same-origin' })
-    .then((res) => useStore.setState({ reach: res.ok ? 'reachable' : 'unreachable' }))
+    .then((res) =>
+      useStore.setState({
+        reach: res.ok ? 'reachable' : res.status === HTTP_UNAUTHORIZED ? 'signedOut' : 'unreachable',
+      }),
+    )
     .catch(() => useStore.setState({ reach: 'unreachable' }))
     .finally(() => window.clearTimeout(deadline))
 }
@@ -1018,6 +1046,7 @@ function onOpen(): void {
   retry = 500
   lastHeard = Date.now()
   useStore.setState({ conn: 'open', reach: 'reachable' })
+  speakReturnIfLossWasSpoken()
   presenceReportedAt = null
   tellPresence()
   const { selected, attached } = useStore.getState()
@@ -1096,6 +1125,7 @@ export function connect(): void {
     })
     // Say which kind of down this is, for the caption (INV-11).
     if (document.visibilityState === 'visible') probeServer()
+    speakLossIfStillDown()
     retryLater()
   })
 
