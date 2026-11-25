@@ -368,3 +368,18 @@
     margin-top: 5px;
   }
 }
+
+.snapshot {
+  margin: 0;
+  max-height: 30vh;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre;
+  user-select: text;
+}

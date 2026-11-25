@@ -24,6 +24,22 @@ test.describe('the terminal', () => {
     })
   })
 
+  test('Read screen puts the visible text in a focused region, once per press', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId('term-text')).toHaveCount(0)
+
+    await page.getByTestId('read-screen').click()
+
+    const region = page.getByRole('region', { name: /^Terminal text, as of \d\d:\d\d:\d\d$/ })
+    await expect(region).toContainText('Reading src/components/Header.astro')
+    await expect(region).toBeFocused()
+    await expect(region).not.toContainText('─')
+  })
+
   test('INV-4 shows earlier output on request, one page per press', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()

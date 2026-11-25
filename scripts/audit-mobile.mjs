@@ -270,6 +270,41 @@ for (const { name, device } of PROFILES) {
   await ctx.close()
 }
 
+const SHORT_PROFILES = [
+  { name: 'zoom-320x256', viewport: { width: 320, height: 256 } },
+  { name: 'short-480x237', viewport: { width: 480, height: 237 } },
+  { name: 'letterbox-844x160', viewport: { width: 844, height: 160 } },
+]
+const PLAN_AGENT = 'mock-plan'
+
+/** INV-17: a viewport this short can still scroll to the first answer option and hit it. */
+async function reportShortViewport(browser, { name, viewport }) {
+  const ctx = await browser.newContext({ viewport })
+  const page = await ctx.newPage()
+  page.on('pageerror', (e) => add('high', 'js', `${name}: ${e.message}`))
+  await page.goto(`${BASE}agent/${PLAN_AGENT}`, { waitUntil: 'networkidle' })
+  const option = page.locator('[data-testid="answer-option"]').first()
+  const missing = () => add('high', 'short', `${name}: ${PLAN_AGENT} drew no answer option`)
+  await option.waitFor({ state: 'attached', timeout: 6000 }).catch(missing)
+  await option.scrollIntoViewIfNeeded().catch(() => {})
+  await page.waitForTimeout(BLOCKED_SETTLE_MS)
+  const reachable = await page.evaluate(() => {
+    const target = document.querySelector('[data-testid="answer-option"]')
+    if (!target) return false
+    const box = target.getBoundingClientRect()
+    const x = box.left + box.width / 2
+    const y = box.top + box.height / 2
+    if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false
+    const hit = document.elementFromPoint(x, y)
+    return hit !== null && target.contains(hit)
+  })
+  if (!reachable) add('high', 'short', `${name}: the first answer option cannot be scrolled into view and hit`)
+  await page.screenshot({ path: `${OUT}/34-${name}.png`, fullPage: false })
+  await ctx.close()
+}
+
+for (const profile of SHORT_PROFILES) await reportShortViewport(browser, profile)
+
 await browser.close()
 
 const order = { high: 0, med: 1, low: 2, info: 3 }

@@ -3008,6 +3008,21 @@ now that menu at every height and width, which is the same fix applied where
 it was always true — the row cost 50px of *every* screen, and could not show
 what it held at any of them.
 
+**A short viewport can still reach the first answer option.** The one width
+cut and the two height rules above were all gated on a coarse pointer, so a
+desktop zoomed to 400% (320x256), a window dragged to 480x237 or a letterbox of
+844x160 got none of the compaction a phone gets and the conversation was 0px,
+with the answer options below a fold nothing scrolled. Below 420px of height,
+with any pointer, the top bar stops being sticky (it was 173-201px of 256 and a
+card focused by Tab sat entirely under it, WCAG 2.4.11), and below 320px the
+sheet stops being a clip (a landscape phone at 390px keeps its conversation
+scrolling inside its own box, which `e2e/fades.spec.ts` holds): it grows with
+its content and the page scrolls, so option 1 can be
+scrolled to and hit. While a keyboard is up the sheet keeps the visible
+rectangle's height, so the composer is still above the keys. The usage chips
+stay in the top bar, because nothing else shows the quota. Held by
+`e2e/responsive.spec.ts` and `scripts/audit-mobile.mjs`.
+
 **And it happened a second time, in a control nobody had written down.**
 Pasting into the Attach tab was xterm's own paste handler, which listens on the
 hidden 1px textarea behind the capture — so it needed a hardware Cmd+V. A phone

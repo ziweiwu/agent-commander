@@ -437,6 +437,19 @@ export function Terminal({ agent, onExit }: TerminalProps) {
     leaveHintId,
   })
 
+  const [snapshot, setSnapshot] = useState<{ text: string; time: string } | null>(null)
+  const snapshotRef = useRef<HTMLPreElement>(null)
+  const readScreen = () => {
+    setSnapshot({
+      text: termRef.current?.visibleText() ?? '',
+      time: new Date().toLocaleTimeString([], { hour12: false }),
+    })
+  }
+  useEffect(() => {
+    if (snapshot) snapshotRef.current?.focus()
+  }, [snapshot])
+
+
   /**
    * Empty the box and hand back what was in it, or nothing.
    *
@@ -553,6 +566,9 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         */}
       {allowsSlashCommands(agent.agentKind) && <ShiftTabButton agent={agent} size="compact" />}
       <div className={styles.view}>
+        <Button variant="compact" data-testid="read-screen" onClick={readScreen}>
+          {t('readScreen')}
+        </Button>
         {term && (term.overflowing || term.scaled || term.zoom === 'fit') && (
           <Button
             variant="compact"
@@ -765,6 +781,18 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       {pane}
       {keybar}
       {composer}
+      {snapshot && (
+        <pre
+          ref={snapshotRef}
+          className={styles.snapshot}
+          data-testid="term-text"
+          role="region"
+          aria-label={t('termTextLabel', { time: snapshot.time })}
+          tabIndex={0}
+        >
+          {snapshot.text}
+        </pre>
+      )}
     </div>
   )
 }

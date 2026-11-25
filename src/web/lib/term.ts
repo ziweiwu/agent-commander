@@ -154,6 +154,18 @@ function rowSeq(row: number, text: string): string {
   return `\u001b[${row + 1};1H\u001b[0m\u001b[2K${text}`
 }
 
+const BOX_RUN = /[\u2500-\u259f]+/g
+
+export function screenText(rows: string[]): string {
+  const lines = rows.map((row) => {
+    const hadBox = BOX_RUN.test(row)
+    BOX_RUN.lastIndex = 0
+    return hadBox ? row.replace(BOX_RUN, ' ').trim() : row.trimEnd()
+  })
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines.join('\n')
+}
+
 export class PaneTerm {
   readonly term: Terminal
   #zoom: ZoomMode = 'readable'
@@ -521,6 +533,16 @@ export class PaneTerm {
   /** The font xterm is rendering at, for tests and for reasoning about crispness. */
   get font(): number {
     return this.#font
+  }
+
+  visibleText(): string {
+    if (this.#disposed) return ''
+    const buffer = this.term.buffer.active
+    const rows: string[] = []
+    for (let row = 0; row < this.term.rows; row++) {
+      rows.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+    }
+    return screenText(rows)
   }
 
   get zoom(): ZoomMode {

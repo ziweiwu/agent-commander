@@ -370,3 +370,25 @@
     display: none;
   }
 }
+
+@media (max-height: 420px) {
+  .topbar {
+    position: static;
+  }
+  .sheetMode .topbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-height: 320px) and (max-width: 900px) {
+  :global(:root:not([data-keyboard='true'])) .sheetMode {
+    top: 0;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+  :global(:root:not([data-keyboard='true'])) .sheetMode .layout {
+    min-height: auto;
+    flex: none;
+  }
+}
