@@ -987,6 +987,58 @@ fn grant_for(method: &Method, path: &str) -> Grant {
     Grant::Read
 }
 
+fn unauthorized(gate: &Gate<'_>) -> Response {
+    match asks_for_a_page(gate) {
+        true => signed_out_page(gate.headers),
+        false => text(StatusCode::UNAUTHORIZED, "unauthorized: append ?token=... to the URL"),
+    }
+}
+
+fn asks_for_a_page(gate: &Gate<'_>) -> bool {
+    let wants_html = gate
+        .headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|accept| accept.contains("text/html"));
+    wants_html && !gate.upgrading && gate.path != "/ws" && !gate.path.starts_with("/api")
+}
+
+fn prefers_chinese(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().get(..2))
+        .is_some_and(|first| first.eq_ignore_ascii_case("zh"))
+}
+
+fn signed_out_page(headers: &HeaderMap) -> Response {
+    let (lang, title, message) = match prefers_chinese(headers) {
+        true => (
+            "zh-CN",
+            "需要令牌",
+            "这个地址需要令牌。请在 Mac 上运行 agent-commander --print-url\
+             （或查看启动时打印的那行链接），然后在这里打开。只需做一次。",
+        ),
+        false => (
+            "en",
+            "Token needed",
+            "This address needs its token. On the Mac run agent-commander --print-url \
+             (or look at the line printed when it started) and open that link here. \
+             You only need to do it once.",
+        ),
+    };
+    let page = format!(
+        "<!doctype html><html lang=\"{lang}\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <title>{title}</title>\
+         <style>:root{{color-scheme:light dark}}body{{font:16px/1.5 system-ui,sans-serif;margin:0;padding:16px}}\
+         main{{max-width:34em;margin:12vh auto 0}}</style></head>\
+         <body><main><h1>{title}</h1><p>{message}</p></main></body></html>"
+    );
+    let html = [(header::CONTENT_TYPE, "text/html; charset=utf-8")];
+    (StatusCode::UNAUTHORIZED, html, page).into_response()
+}
+
 /// The refusal this request earns, if any, before anything is routed.
 ///
 /// The upgrade path gets the same gate as HTTP, in the same order the TS
@@ -997,7 +1049,7 @@ fn refusal(app: &App, gate: Gate<'_>) -> Option<Response> {
     if (!public_asset && !app.authorized(gate.query, gate.headers))
         || (gate.upgrading && gate.path != "/ws")
     {
-        return Some(text(StatusCode::UNAUTHORIZED, "unauthorized: append ?token=... to the URL"));
+        return Some(unauthorized(&gate));
     }
     // The socket is the whole control surface — fleet contents out, pastes and
     // keys in — and CORS does not apply to it, so it gets the same gate.
@@ -4689,6 +4741,32 @@ mod tests {
         let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
         let res = get(h.port, "/api/agents", "").await;
         assert!(status(&res).contains("401"), "{}", status(&res));
+    }
+
+    #[tokio::test]
+    async fn a_browser_with_no_cookie_is_told_where_the_token_comes_from() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let res = get(h.port, "/", "Accept: text/html\r\n").await;
+        assert!(status(&res).contains("401"), "{}", status(&res));
+        assert!(res.to_ascii_lowercase().contains("content-type: text/html"), "{res}");
+        assert!(body(&res).contains("--print-url"), "{res}");
+        assert!(!res.contains("s3cret"), "{res}");
+        let zh = get(h.port, "/", "Accept: text/html\r\nAccept-Language: zh-CN,zh;q=0.9\r\n").await;
+        assert!(body(&zh).contains("这个地址需要令牌"), "{zh}");
+        assert!(body(&zh).contains("--print-url"), "{zh}");
+        let wrong = get(h.port, "/?token=nope", "Accept: text/html\r\n").await;
+        assert!(!wrong.contains("nope"), "{wrong}");
+    }
+
+    #[tokio::test]
+    async fn an_api_call_and_an_upgrade_keep_the_plain_refusal() {
+        let h = start(Some("s3cret"), FakePanes::new(), Fixtures::Real).await;
+        let api = get(h.port, "/api/env", "Accept: text/html\r\n").await;
+        assert!(status(&api).contains("401"), "{api}");
+        assert!(api.to_ascii_lowercase().contains("content-type: text/plain"), "{api}");
+        let json = get(h.port, "/", "Accept: application/json\r\n").await;
+        assert!(json.to_ascii_lowercase().contains("content-type: text/plain"), "{json}");
+        assert!(try_ws(h.port, "").await.contains("401"));
     }
 
     #[tokio::test]

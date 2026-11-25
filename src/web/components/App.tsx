@@ -50,6 +50,7 @@ function TreePoll() {
  */
 function connCaption(conn: Conn, reach: Reach): Key {
   if (conn === 'open') return 'connLive'
+  if (reach === 'signedOut') return 'connSignedOut'
   if (reach === 'unreachable') return 'connUnreachable'
   return conn === 'closed' ? 'connReconnecting' : 'connConnecting'
 }
@@ -80,7 +81,12 @@ function ConnPill({ sheet }: ConnPillProps) {
   const now = useOfflineClock()
   const caption = t(connCaption(conn, reach))
   const when = formatRelative(lang, relative(fleetAt ?? undefined, now))
-  const short = sheet && conn === 'closed' ? offlineShort(t, when) : ''
+  const short =
+    sheet && conn === 'closed'
+      ? reach === 'signedOut'
+        ? t('connSignedOutShort')
+        : offlineShort(t, when)
+      : ''
   return (
     <div
       className={styles.conn}
@@ -280,7 +286,7 @@ export function App() {
 
       <NewAgentDialog />
       {toast && (
-        <div className={styles.toast} role="status" data-testid="toast">
+        <div className={styles.toast} data-testid="toast">
           {toast}
         </div>
       )}

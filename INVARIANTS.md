@@ -346,7 +346,10 @@ passes the gate by design, and a tokenless server handed it every grant —
 another account on the machine, a container on the host network, or one of the
 supervised agents answering its own permission prompt with `curl`. So with no
 `--token` the stored one is used (`wants_the_stored_token`), `--no-token` opts
-out on loopback only, and `--mock` stays open because fixtures drive nothing.
+out on loopback only, and `--mock` stays open because fixtures drive nothing
+(`--mock --token <t>` serves fixtures behind one, which is how the signed-out page
+is looked at). The page a tokenless browser gets for `/` names `--print-url` and
+never the token.
 
 Binding loopback keeps the network out. It does nothing about the one program
 guaranteed to be running on this machine: the browser. WebSockets are exempt

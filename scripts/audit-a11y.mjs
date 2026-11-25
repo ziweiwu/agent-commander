@@ -122,6 +122,21 @@ async function auditRoutes(page, tag) {
   }
 }
 
+const LOSS_SPOKEN_WITHIN_MS = 8000
+
+async function auditConnectionAnnouncement(page, tag) {
+  const dropped = await page.context().newPage()
+  await dropped.routeWebSocket(/\/ws$/, (socket) => socket.close())
+  await dropped.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await dropped.waitForTimeout(LOSS_SPOKEN_WITHIN_MS)
+  const spoken = await dropped.evaluate(() => document.getElementById('live-region')?.textContent ?? '')
+  if (!spoken.trim()) {
+    const seconds = LOSS_SPOKEN_WITHIN_MS / 1000
+    add('4.1.3', 'P1', `${tag}: the connection was down ${seconds}s and the live region said nothing`)
+  }
+  await dropped.close()
+}
+
 /** How many Tab stops past the Chat tab the conversation may sit and still count as reachable. */
 const TAB_STOPS_TO_CONVERSATION = 60
 
@@ -656,6 +671,7 @@ for (const [profile, options] of [
     await auditScrollBoxRings(page, tag)
     if (scheme === 'light') await auditFleetEdgeRings(page, tag)
     if (scheme === 'light') await auditRoutes(page, tag)
+    if (scheme === 'light') await auditConnectionAnnouncement(page, tag)
 
     await context.close()
   }

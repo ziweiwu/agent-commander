@@ -164,6 +164,16 @@ describe('INV-11 a closed socket and an unreachable server are told apart', () =
     expect(useStore.getState().reach).toBe('unreachable')
   })
 
+  it('says signed out, not unreachable, when the server answers 401', async () => {
+    globalThis.fetch = vi.fn(() =>
+      Promise.resolve(new Response('unauthorized', { status: 401 })),
+    ) as typeof fetch
+    const ws = liveSocket()
+    ws.close()
+    await vi.advanceTimersByTimeAsync(10)
+    expect(useStore.getState().reach).toBe('signedOut')
+  })
+
   it('reports it reachable again once a probe gets through', async () => {
     serverIsDown()
     const ws = liveSocket()

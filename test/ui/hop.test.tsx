@@ -299,6 +299,24 @@ describe('the connection pill while the socket is down', () => {
     expect(visible(screen.getByTestId('connection-status'))).toBe('离线 · 刚刚')
   })
 
+  it('reads signed out on one line in the sheet, in both languages', () => {
+    setViewport(NARROW)
+    const ws = liveFleet()
+    shell('/agent/w1')
+    act(() => {
+      ws.close()
+      useStore.setState({ reach: 'signedOut' })
+    })
+    const pill = screen.getByTestId('connection-status')
+    expect(visible(pill)).toBe('signed out')
+    expect(pill.getAttribute('title')).toBe('signed out — open your saved link again')
+    act(() => useStore.getState().setLang('zh-CN'))
+    expect(visible(screen.getByTestId('connection-status'))).toBe('已退出登录')
+    expect(screen.getByTestId('connection-status').getAttribute('title')).toBe(
+      '已退出登录——请重新打开带令牌的链接',
+    )
+  })
+
   it('keeps the whole caption on screen beside the list, where the row can wrap', () => {
     const ws = liveFleet()
     shell('/agent/w1')

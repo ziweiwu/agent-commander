@@ -150,6 +150,18 @@ const EMPTY_SERVER: PlaywrightTestConfig['webServer'] = {
   stderr: 'pipe',
 }
 
+const TOKEN_PORT = Number(process.env.E2E_TOKEN_PORT ?? 4597)
+export const TOKEN_URL = `http://127.0.0.1:${TOKEN_PORT}/`
+export const TOKEN = 'e2e-signed-out-token'
+const TOKEN_SERVER: PlaywrightTestConfig['webServer'] = {
+  command: `rust/target/release/agent-commander --mock --token ${TOKEN} --port ${TOKEN_PORT}`,
+  url: `${TOKEN_URL}?token=${TOKEN}`,
+  reuseExistingServer: !process.env.CI,
+  timeout: 120_000,
+  stdout: 'ignore',
+  stderr: 'pipe',
+}
+
 export default defineConfig({
   testDir: './e2e',
   // The specs share one server, and several of them send messages into the
@@ -173,5 +185,5 @@ export default defineConfig({
   projects: PROJECTS,
 
   // The fixture server builds first; the empty one reuses its binary.
-  webServer: [MOCK_SERVER, EMPTY_SERVER],
+  webServer: [MOCK_SERVER, EMPTY_SERVER, TOKEN_SERVER],
 })

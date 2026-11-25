@@ -4,6 +4,7 @@ import { TOUCH_TARGETS } from './lib/targets.mjs'
 const OUT = process.env.SHOTS ?? '/tmp/agent-commander-audit'
 const BASE = process.env.BASE ?? `http://127.0.0.1:${process.env.PORT ?? 4400}/`
 const EMPTY_BASE = process.env.EMPTY_BASE ?? `http://127.0.0.1:${process.env.EMPTY_PORT ?? 4401}/`
+const TOKEN_BASE = process.env.TOKEN_BASE ?? `http://127.0.0.1:${process.env.TOKEN_PORT ?? 4402}/`
 const findings = []
 const add = (sev, area, msg) => findings.push({ sev, area, msg })
 
@@ -431,6 +432,28 @@ for (const vp of VIEWPORTS) {
   }
   await page.close()
 }
+
+/**
+ * C1: a browser with no cookie is told where the token comes from. It needs a
+ * `--mock --token` server (TOKEN_PORT, 4402 by default); without one the check
+ * is reported as not run rather than passed.
+ */
+async function auditSignedOutPage() {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
+  const reached = await page.goto(TOKEN_BASE, { waitUntil: 'networkidle' }).catch(() => null)
+  if (!reached) {
+    add('info', 'signedOut', `no --mock --token server at ${TOKEN_BASE}: the signed-out page check did not run`)
+    await page.close()
+    return
+  }
+  const words = (await page.locator('body').textContent()) ?? ''
+  if (!/--print-url/.test(words)) add('high', 'signedOut', 'a browser with no cookie is not told about --print-url')
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1)) {
+    add('high', 'signedOut', 'the signed-out page overflows a phone')
+  }
+  await page.close()
+}
+await auditSignedOutPage()
 
 // ---------- responsive ----------
 for (const vp of VIEWPORTS) {
