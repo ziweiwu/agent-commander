@@ -439,7 +439,13 @@ export function Terminal({ agent, onExit }: TerminalProps) {
 
   const [snapshot, setSnapshot] = useState<{ text: string; time: string } | null>(null)
   const snapshotRef = useRef<HTMLPreElement>(null)
+  const readScreenRef = useRef<HTMLButtonElement>(null)
   const readScreen = () => {
+    if (snapshot) {
+      setSnapshot(null)
+      readScreenRef.current?.focus()
+      return
+    }
     setSnapshot({
       text: termRef.current?.visibleText() ?? '',
       time: new Date().toLocaleTimeString([], { hour12: false }),
@@ -566,7 +572,13 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         */}
       {allowsSlashCommands(agent.agentKind) && <ShiftTabButton agent={agent} size="compact" />}
       <div className={styles.view}>
-        <Button variant="compact" data-testid="read-screen" onClick={readScreen}>
+        <Button
+          variant="compact"
+          data-testid="read-screen"
+          ref={readScreenRef}
+          aria-expanded={snapshot !== null}
+          onClick={readScreen}
+        >
           {t('readScreen')}
         </Button>
         {term && (term.overflowing || term.scaled || term.zoom === 'fit') && (

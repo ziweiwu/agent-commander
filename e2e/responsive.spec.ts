@@ -260,7 +260,26 @@ const SHORT_SHAPES = [
   { name: '400% zoom', width: 320, height: 256 },
   { name: 'a short wide window', width: 480, height: 237 },
   { name: 'a letterbox', width: 844, height: 160 },
+  { name: 'a landscape phone', width: 844, height: 390 },
+  { name: 'a short window above the scroll cut', width: 480, height: 400 },
 ]
+
+const UNSCROLLED_SHORT_SHAPES = SHORT_SHAPES.filter((shape) => shape.height > 320)
+
+test.describe('INV-17 the sheet topbar holds one row while the sheet does not scroll @desktop', () => {
+  for (const shape of UNSCROLLED_SHORT_SHAPES) {
+    test(`at ${shape.width}x${shape.height}, ${shape.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: shape.width, height: shape.height })
+      await page.goto(`/agent/${AGENT.plan}`)
+      await expect(page.locator('[data-sheet="true"]')).toBeAttached({ timeout: 15_000 })
+      const wrap = await page.evaluate(() => {
+        const topbar = document.querySelector('[data-sheet="true"] header')
+        return topbar ? getComputedStyle(topbar).flexWrap : 'missing'
+      })
+      expect(wrap).toBe('nowrap')
+    })
+  }
+})
 
 /** Whether the point at a box's centre belongs to that box, and is on screen. */
 async function centreIsReachable(page: Page, testId: string, nth: number): Promise<boolean> {

@@ -38,6 +38,11 @@ test.describe('the terminal', () => {
     await expect(region).toContainText('Reading src/components/Header.astro')
     await expect(region).toBeFocused()
     await expect(region).not.toContainText('─')
+
+    await page.getByTestId('read-screen').click()
+    await expect(page.getByTestId('term-text')).toHaveCount(0)
+    await expect(page.getByTestId('read-screen')).toBeFocused()
+    await expect(page.getByTestId('read-screen')).toHaveAttribute('aria-expanded', 'false')
   })
 
   test('INV-4 shows earlier output on request, one page per press', async ({ page }) => {

@@ -375,6 +375,9 @@
   .topbar {
     position: static;
   }
+}
+
+@media (max-height: 320px) {
   .sheetMode .topbar {
     flex-wrap: wrap;
   }
