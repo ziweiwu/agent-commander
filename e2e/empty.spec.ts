@@ -20,7 +20,7 @@ test.describe('the first-run screen', () => {
     const empty = page.getByTestId('empty-state')
     await expect(empty).toBeVisible()
     await expect(page.getByTestId('fleet-loading')).toHaveCount(0)
-    await expect(empty.getByTestId('empty-command')).toHaveText(/tmux new -s work\s+claude/)
+    await expect(empty.getByTestId('empty-command-line')).toHaveText(['tmux new -s work', 'claude'])
     await expect(empty).toContainText('inside tmux')
     await expect(empty.getByTestId('empty-new-agent')).toBeVisible()
     await expect(empty.getByTestId('empty-help')).toBeVisible()

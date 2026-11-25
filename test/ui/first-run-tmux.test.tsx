@@ -45,7 +45,7 @@ describe('C2 the first run says tmux', () => {
     renderApp(<FleetList tiled selected={null} onSelect={noop} />)
     const text = screen.getByTestId('empty-state').textContent ?? ''
     expect(text).toContain('tmux')
-    expect(screen.getByTestId('empty-command').textContent).toBe('tmux new -s work\nclaude')
+    expect(screen.getAllByTestId('empty-command-line').map((line) => line.textContent)).toEqual(['tmux new -s work', 'claude'])
   })
 
   it('and in Chinese', () => {

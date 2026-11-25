@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -260,5 +261,20 @@ describe('the menu radios carry aria-checked, the state their role allows, not a
     expect(radios.filter((radio) => radio.hasAttribute('aria-pressed'))).toEqual([])
     expect(screen.getByTestId('theme-dark').getAttribute('aria-checked')).toBe('true')
     expect(screen.getByTestId('theme-light').getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('highlights the selected option by the attribute it carries', async () => {
+    const user = userEvent.setup()
+    useStore.setState({ theme: 'dark', scheme: 'nordic', lang: 'en' })
+    renderApp(<SettingsMenu />)
+    await user.click(screen.getByTestId('settings-button'))
+    const css = readFileSync('src/web/components/SettingsMenu.module.css', 'utf8')
+    const selected = css.match(/\.item\[([a-z-]+)='true'\]\s*\{[^}]*background:/)
+    expect(selected, 'a background rule for the selected item').not.toBeNull()
+    const attribute = selected?.[1] ?? ''
+    for (const id of ['theme-dark', 'scheme-nordic', 'lang-en']) {
+      expect(screen.getByTestId(id).getAttribute(attribute), id).toBe('true')
+    }
+    expect(screen.getByTestId('theme-light').getAttribute(attribute)).toBe('false')
   })
 })

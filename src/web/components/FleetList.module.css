@@ -237,6 +237,12 @@
   gap: 10px 14px;
   margin-top: 16px;
 }
+.commands {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
 .command {
   font-family: var(--font-mono);
   font-size: var(--text-md);

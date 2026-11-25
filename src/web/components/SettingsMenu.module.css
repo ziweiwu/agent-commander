@@ -73,7 +73,7 @@
 .item:hover {
   background: var(--panel-2);
 }
-.item[aria-pressed='true'] {
+.item[aria-checked='true'] {
   background: var(--tint-focus);
 }
 .icon {

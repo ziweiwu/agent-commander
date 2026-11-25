@@ -359,7 +359,7 @@ function Loading({ label }: { label: string }) {
  * phone with nothing to show is also the moment somebody is most likely to be
  * setting the app up, so the Tailscale page in Help is one tap away.
  */
-const START_IN_TMUX = 'tmux new -s work\nclaude'
+const START_IN_TMUX = ['tmux new -s work', 'claude']
 
 function FirstRun({ onNewAgent }: { onNewAgent: () => void }) {
   const t = useTranslate()
@@ -368,9 +368,13 @@ function FirstRun({ onNewAgent }: { onNewAgent: () => void }) {
       <p className={styles.emptyTitle}>{t('emptyFleetTitle')}</p>
       <p className={styles.emptyBody}>{t('emptyFleetBody')}</p>
       <div className={styles.waysIn}>
-        <code className={styles.command} data-testid="empty-command">
-          {START_IN_TMUX}
-        </code>
+        <div className={styles.commands} data-testid="empty-command">
+          {START_IN_TMUX.map((line) => (
+            <code key={line} className={styles.command} data-testid="empty-command-line">
+              {line}
+            </code>
+          ))}
+        </div>
         <span className={styles.or}>{t('emptyFleetOr')}</span>
         <Button data-testid="empty-new-agent" onClick={onNewAgent}>
           + {t('newAgent')}
