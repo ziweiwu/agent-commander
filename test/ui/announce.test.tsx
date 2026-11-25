@@ -3,7 +3,7 @@
  * and the connection are heard the way a blocked agent is.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { announce } from '../../src/web/lib/announce.ts'
+import { announce, clearAnnouncement } from '../../src/web/lib/announce.ts'
 import { connect } from '../../src/web/store/transport.ts'
 import { useStore } from '../../src/web/store/store.ts'
 
@@ -94,6 +94,13 @@ describe('changing language', () => {
     useStore.getState().setLang('zh-CN')
     expect(region.textContent).toBe('')
     useStore.getState().setLang('en')
+  })
+
+  it('drops a line announced in the same frame as the clear', async () => {
+    announce('2 agents need you: a, b')
+    clearAnnouncement()
+    await frame()
+    expect(region.textContent).toBe('')
   })
 })
 

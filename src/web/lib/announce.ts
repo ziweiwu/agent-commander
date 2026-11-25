@@ -4,11 +4,16 @@ function region(): HTMLElement | null {
   return document.getElementById('live-region')
 }
 
+let generation = 0
+
 export function announce(text: string): void {
+  generation += 1
+  const mine = generation
   const first = region()
   if (first) first.textContent = ''
   let framesLeft = FRAMES_TO_WAIT_FOR_THE_REGION
   const write = (): void => {
+    if (mine !== generation) return
     const target = region()
     if (target) {
       target.textContent = text
@@ -21,6 +26,7 @@ export function announce(text: string): void {
 }
 
 export function clearAnnouncement(): void {
+  generation += 1
   const target = region()
   if (target) target.textContent = ''
 }
