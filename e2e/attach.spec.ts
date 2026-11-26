@@ -8,7 +8,7 @@
  * here is the consequence the user sees: frames arrive, the terminal is drawn
  * from the pane's own geometry, and the browser's width never travels back.
  */
-import { expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 import { AGENT, card, openAgent } from './helpers.ts'
 
 test.describe('the terminal', () => {
@@ -86,6 +86,89 @@ test.describe('the terminal', () => {
       expect(fit.overflowY).toBe('auto')
     })
   }
+
+  async function expectRegionOverTerminal(page: Page): Promise<void> {
+    await expect
+      .poll(async () => {
+        const wrap = (await page.getByTestId('term-wrap').boundingBox())!
+        const region = (await page.getByTestId('term-text').boundingBox())!
+        return [region.x - wrap.x, region.y - wrap.y, region.width - wrap.width, region.height - wrap.height].map(
+          (d) => Math.round(Math.abs(d)),
+        )
+      })
+      .toEqual([0, 0, 0, 0])
+  }
+
+  async function expectComposerInside(page: Page, band: { top: number; height: number }): Promise<void> {
+    const input = (await page.getByTestId('term-compose-input').boundingBox())!
+    const region = (await page.getByTestId('term-text').boundingBox())!
+    expect(input.y).toBeGreaterThanOrEqual(band.top - 1)
+    expect(input.y + input.height).toBeLessThanOrEqual(band.top + band.height + 1)
+    expect(region.y + region.height).toBeLessThanOrEqual(input.y + 1)
+  }
+
+  test('INV-17 the Read screen region follows the terminal through a resize', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await page.getByTestId('read-screen').click()
+    await expectRegionOverTerminal(page)
+
+    const start = page.viewportSize()!
+    for (const size of [
+      { width: start.height, height: start.width },
+      { width: 1280, height: 800 },
+      { width: 390, height: 600 },
+      start,
+    ]) {
+      await page.setViewportSize(size)
+      await expectRegionOverTerminal(page)
+      await page.getByTestId('term-compose-input').scrollIntoViewIfNeeded()
+      await expectComposerInside(page, { top: 0, height: size.height })
+    }
+  })
+
+  test('INV-17 the Read screen region stays above the composer when the keyboard opens', async ({ page, viewport }) => {
+    test.skip((viewport?.width ?? 0) > 900, 'the keyboard layout lives below 900px')
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await page.getByTestId('read-screen').click()
+    await expectRegionOverTerminal(page)
+
+    const band = { top: 0, height: Math.round(viewport!.height * 0.55) }
+    await page.evaluate(({ top, height }) => {
+      const root = document.documentElement
+      root.style.setProperty('--vvh', `${height}px`)
+      root.style.setProperty('--vvt', `${top}px`)
+      root.dataset.keyboard = 'true'
+    }, band)
+    await expectRegionOverTerminal(page)
+    await page.getByTestId('term-compose-input').scrollIntoViewIfNeeded()
+    await expectComposerInside(page, band)
+  })
+
+  test('Escape closes the Read screen region, returns to its button and stays on the agent', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    const url = page.url()
+    await page.getByTestId('read-screen').click()
+    await expect(page.getByTestId('term-text')).toBeFocused()
+
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('term-text')).toHaveCount(0)
+    await expect(page.getByTestId('read-screen')).toBeFocused()
+    await expect(page.getByTestId('read-screen')).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+    expect(page.url()).toBe(url)
+  })
 
   test('INV-4 shows earlier output on request, one page per press', async ({ page }) => {
     await openAgent(page, AGENT.idle)

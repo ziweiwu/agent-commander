@@ -370,8 +370,12 @@
   }
 }
 
+.wrap:has(.snapshot) {
+  overflow: hidden;
+}
 .snapshot {
   position: absolute;
+  inset: 0;
   z-index: 1;
   box-sizing: border-box;
   margin: 0;

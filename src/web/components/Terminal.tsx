@@ -440,28 +440,23 @@ export function Terminal({ agent, onExit }: TerminalProps) {
   const [snapshot, setSnapshot] = useState<{ text: string; time: string } | null>(null)
   const snapshotRef = useRef<HTMLPreElement>(null)
   const readScreenRef = useRef<HTMLButtonElement>(null)
+  const closeSnapshot = () => {
+    setSnapshot(null)
+    readScreenRef.current?.focus()
+  }
   const readScreen = () => {
     if (snapshot) {
-      setSnapshot(null)
-      readScreenRef.current?.focus()
+      closeSnapshot()
       return
     }
+    wrapRef.current?.scrollTo({ left: 0, top: 0 })
     setSnapshot({
       text: termRef.current?.visibleText() ?? '',
       time: new Date().toLocaleTimeString([], { hour12: false }),
     })
   }
   useLayoutEffect(() => {
-    const region = snapshotRef.current
-    if (!snapshot || !region) return
-    const wrap = region.parentElement?.querySelector<HTMLElement>('[data-testid="term-wrap"]')
-    if (wrap) {
-      region.style.top = `${wrap.offsetTop}px`
-      region.style.left = `${wrap.offsetLeft}px`
-      region.style.width = `${wrap.offsetWidth}px`
-      region.style.height = `${wrap.offsetHeight}px`
-    }
-    region.focus()
+    if (snapshot) snapshotRef.current?.focus()
   }, [snapshot])
 
 
@@ -531,6 +526,25 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       onClick={coarse && !exited ? () => boxRef.current?.focus() : undefined}
     >
       <div ref={scaleRef} className={styles.scale} data-testid="term-scale" />
+      {snapshot && (
+        <pre
+          ref={snapshotRef}
+          className={styles.snapshot}
+          data-testid="term-text"
+          role="region"
+          aria-label={t('termTextLabel', { time: snapshot.time })}
+          tabIndex={0}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return
+            event.preventDefault()
+            event.stopPropagation()
+            closeSnapshot()
+          }}
+        >
+          {snapshot.text}
+        </pre>
+      )}
     </div>
   )
 
@@ -802,18 +816,6 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       {pane}
       {keybar}
       {composer}
-      {snapshot && (
-        <pre
-          ref={snapshotRef}
-          className={styles.snapshot}
-          data-testid="term-text"
-          role="region"
-          aria-label={t('termTextLabel', { time: snapshot.time })}
-          tabIndex={0}
-        >
-          {snapshot.text}
-        </pre>
-      )}
     </div>
   )
 }
