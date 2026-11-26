@@ -154,6 +154,18 @@ function rowSeq(row: number, text: string): string {
   return `\u001b[${row + 1};1H\u001b[0m\u001b[2K${text}`
 }
 
+const BOX_RUN = /[\u2500-\u259f]+/g
+
+export function screenText(rows: string[]): string {
+  const lines = rows.map((row) => {
+    const hadBox = BOX_RUN.test(row)
+    BOX_RUN.lastIndex = 0
+    return hadBox ? row.replace(BOX_RUN, ' ').trim() : row.trimEnd()
+  })
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  return lines.join('\n')
+}
+
 export class PaneTerm {
   readonly term: Terminal
   #zoom: ZoomMode = 'readable'
@@ -523,6 +535,16 @@ export class PaneTerm {
     return this.#font
   }
 
+  visibleText(): string {
+    if (this.#disposed) return ''
+    const buffer = this.term.buffer.active
+    const rows: string[] = []
+    for (let row = 0; row < this.term.rows; row++) {
+      rows.push(buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '')
+    }
+    return screenText(rows)
+  }
+
   get zoom(): ZoomMode {
     return this.#zoom
   }
@@ -583,6 +605,7 @@ function outerHeightOfOthers(parent: HTMLElement, except: HTMLElement): number {
   for (const child of Array.from(parent.children)) {
     if (child === except || !(child instanceof HTMLElement)) continue
     const style = getComputedStyle(child)
+    if (style.position === 'absolute' || style.position === 'fixed') continue
     total += child.offsetHeight + pixels(style.marginTop) + pixels(style.marginBottom)
   }
   return total

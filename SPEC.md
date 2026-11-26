@@ -715,6 +715,13 @@ epistemic rather than functional.
   its history is, and MUST NOT disturb the live frame diff. A pane that has
   exited MUST still answer. **(INV-1, INV-4)** *`test/ui/term-history.test.tsx`,
   `routes::inv4_a_history_read_needs_a_focused_viewer`, `e2e/attach.spec.ts`.*
+- **FR-ATT-15** — A **Read screen** button MUST sit beside Fit width. Pressing
+  it MUST put the visible text of the pane, trimmed of trailing blanks and
+  box-drawing runs, in a focusable `<pre role="region">` named "Terminal text,
+  as of {time}", and move focus to it. One snapshot per press: it MUST NOT
+  stream and MUST NOT use xterm's `screenReaderMode`. It reads the existing
+  buffer, so it resizes nothing (INV-1) and sends nothing (INV-2).
+  *`test/term-text.test.ts`, `e2e/attach.spec.ts`.* **(INV-1, INV-2, INV-17)**
 - **FR-ATT-14** — A **line to paste into** MUST sit under the terminal, in
   every layout. xterm reads typing and pastes through a hidden textarea behind
   the capture, so both need a hardware keyboard: a phone has no Cmd+V and
@@ -1279,6 +1286,13 @@ prompt. That is what makes the guards below non-negotiable rather than tidy.
   layout, not only in the widest: 24x24 at WCAG 2.2 AA, 44x44 where the pointer
   is coarse. *`e2e/responsive.spec.ts`, `scripts/audit-a11y.mjs`.* **(INV-17)**
 
+- **FR-UI-25** — Below 420px of viewport height, with any pointer, the top bar
+  MUST NOT be sticky, and below 320px the open agent MUST scroll as a whole, so a card
+  focused by Tab is not covered (WCAG 2.4.11) and the first answer option can
+  be scrolled to and hit at 320x256, 480x237 and 844x160. While a keyboard is
+  up the sheet keeps the visible rectangle's height.
+  *`e2e/responsive.spec.ts`, `scripts/audit-mobile.mjs`.* **(INV-17)**
+
 ### 10.2 Theme and colour
 
 - **FR-UI-6** — Theme (System / Light / Dark) and colour scheme (eight palettes)
@@ -1497,7 +1511,7 @@ unverified.
 | INV-14 — a notification is a transition | FR-NOTIFY-1 … FR-NOTIFY-6, FR-NOTIFY-8 … FR-NOTIFY-10, FR-CARD-10 |
 | INV-15 — a silent family is a question | FR-STATUS-4, FR-DEL-7 |
 | INV-16 — an answer names only what the transcript named | FR-ANS-1 … FR-ANS-7, FR-ANS-10 |
-| INV-17 — every shape is the whole app | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-UI-21, FR-ATT-14, FR-PRUNE-6 |
+| INV-17 — every shape | FR-UI-1, FR-UI-2, FR-UI-5, FR-UI-6, FR-UI-7, FR-UI-21, FR-UI-25, FR-ATT-14/15, FR-PRUNE-6 |
 | INV-18 — a link goes where the text says | FR-CHAT-11 |
 
 ---

@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
@@ -437,6 +437,29 @@ export function Terminal({ agent, onExit }: TerminalProps) {
     leaveHintId,
   })
 
+  const [snapshot, setSnapshot] = useState<{ text: string; time: string } | null>(null)
+  const snapshotRef = useRef<HTMLPreElement>(null)
+  const readScreenRef = useRef<HTMLButtonElement>(null)
+  const closeSnapshot = () => {
+    setSnapshot(null)
+    readScreenRef.current?.focus()
+  }
+  const readScreen = () => {
+    if (snapshot) {
+      closeSnapshot()
+      return
+    }
+    wrapRef.current?.scrollTo({ left: 0, top: 0 })
+    setSnapshot({
+      text: termRef.current?.visibleText() ?? '',
+      time: new Date().toLocaleTimeString([], { hour12: false }),
+    })
+  }
+  useLayoutEffect(() => {
+    if (snapshot) snapshotRef.current?.focus()
+  }, [snapshot])
+
+
   /**
    * Empty the box and hand back what was in it, or nothing.
    *
@@ -503,6 +526,25 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       onClick={coarse && !exited ? () => boxRef.current?.focus() : undefined}
     >
       <div ref={scaleRef} className={styles.scale} data-testid="term-scale" />
+      {snapshot && (
+        <pre
+          ref={snapshotRef}
+          className={styles.snapshot}
+          data-testid="term-text"
+          role="region"
+          aria-label={t('termTextLabel', { time: snapshot.time })}
+          tabIndex={0}
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => {
+            if (event.key !== 'Escape') return
+            event.preventDefault()
+            event.stopPropagation()
+            closeSnapshot()
+          }}
+        >
+          {snapshot.text}
+        </pre>
+      )}
     </div>
   )
 
@@ -553,6 +595,15 @@ export function Terminal({ agent, onExit }: TerminalProps) {
         */}
       {allowsSlashCommands(agent.agentKind) && <ShiftTabButton agent={agent} size="compact" />}
       <div className={styles.view}>
+        <Button
+          variant="compact"
+          data-testid="read-screen"
+          ref={readScreenRef}
+          aria-expanded={snapshot !== null}
+          onClick={readScreen}
+        >
+          {t('readScreen')}
+        </Button>
         {term && (term.overflowing || term.scaled || term.zoom === 'fit') && (
           <Button
             variant="compact"

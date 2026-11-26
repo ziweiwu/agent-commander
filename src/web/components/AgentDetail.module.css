@@ -510,3 +510,10 @@
     padding-inline: 10px;
   }
 }
+
+@media (max-height: 320px) and (max-width: 900px) {
+  :global(:root:not([data-keyboard='true'])) .sheet {
+    height: auto;
+    max-height: none;
+  }
+}

@@ -7,6 +7,7 @@
  * fed back on its own previous value — 0.83 on every screen size.
  */
 .host {
+  position: relative;
   width: 100%;
   min-width: 0;
   display: flex;
@@ -367,4 +368,29 @@
   .keybar {
     margin-top: 5px;
   }
+}
+
+.wrap:has(.snapshot) {
+  overflow: hidden;
+}
+.snapshot {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  box-sizing: border-box;
+  margin: 0;
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: pre;
+  user-select: text;
+}
+.snapshot:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }

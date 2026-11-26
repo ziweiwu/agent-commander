@@ -8,7 +8,7 @@
  * here is the consequence the user sees: frames arrive, the terminal is drawn
  * from the pane's own geometry, and the browser's width never travels back.
  */
-import { expect, test } from '@playwright/test'
+import { expect, type Page, test } from '@playwright/test'
 import { AGENT, card, openAgent } from './helpers.ts'
 
 test.describe('the terminal', () => {
@@ -22,6 +22,152 @@ test.describe('the terminal', () => {
     await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/\S/, {
       timeout: 15_000,
     })
+  })
+
+  test('Read screen puts the visible text in a focused region, once per press', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await expect(page.getByTestId('term-text')).toHaveCount(0)
+
+    await page.getByTestId('read-screen').click()
+
+    const region = page.getByRole('region', { name: /^Terminal text, as of \d\d:\d\d:\d\d$/ })
+    await expect(region).toContainText('Reading src/components/Header.astro')
+    await expect(region).toBeFocused()
+    await expect(region).not.toContainText('─')
+
+    await page.getByTestId('read-screen').click()
+    await expect(page.getByTestId('term-text')).toHaveCount(0)
+    await expect(page.getByTestId('read-screen')).toBeFocused()
+    await expect(page.getByTestId('read-screen')).toHaveAttribute('aria-expanded', 'false')
+  })
+
+  for (const size of [null, { width: 1280, height: 800 }]) {
+    test(`Read screen keeps the terminal width and the whole composer${size ? ' at 1280x800' : ''}`, async ({ page }) => {
+      if (size) await page.setViewportSize(size)
+      await openAgent(page, AGENT.idle)
+      await page.getByTestId('tab-attach').click()
+      await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+        timeout: 15_000,
+      })
+      const wrap = page.getByTestId('term-wrap')
+      const before = (await wrap.boundingBox())!
+      const inputBefore = (await page.getByTestId('term-compose-input').boundingBox())!
+
+      await page.getByTestId('read-screen').focus()
+      await page.keyboard.press('Enter')
+      const region = page.getByTestId('term-text')
+      await expect(region).toBeFocused()
+
+      await page.waitForTimeout(1000)
+      const after = (await wrap.boundingBox())!
+      expect(after.width).toBeCloseTo(before.width, 0)
+      expect(after.height).toBeCloseTo(before.height, 0)
+      const viewport = page.viewportSize()!
+      await page.getByTestId('term-compose-input').scrollIntoViewIfNeeded()
+      const input = (await page.getByTestId('term-compose-input').boundingBox())!
+      expect(input.x).toBeGreaterThanOrEqual(0)
+      expect(input.y).toBeGreaterThanOrEqual(0)
+      expect(input.x + input.width).toBeLessThanOrEqual(viewport.width)
+      expect(input.y + input.height).toBeLessThanOrEqual(viewport.height)
+      expect(input.height).toBeCloseTo(inputBefore.height, 0)
+      const box = (await region.boundingBox())!
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height)
+      const fit = await region.evaluate((el) => ({
+        scrolls: el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight,
+        overflowX: getComputedStyle(el).overflowX,
+        overflowY: getComputedStyle(el).overflowY,
+      }))
+      expect(fit.overflowX).toBe('auto')
+      expect(fit.overflowY).toBe('auto')
+    })
+  }
+
+  async function expectRegionOverTerminal(page: Page): Promise<void> {
+    await expect
+      .poll(async () => {
+        const wrap = (await page.getByTestId('term-wrap').boundingBox())!
+        const region = (await page.getByTestId('term-text').boundingBox())!
+        return [region.x - wrap.x, region.y - wrap.y, region.width - wrap.width, region.height - wrap.height].map(
+          (d) => Math.round(Math.abs(d)),
+        )
+      })
+      .toEqual([0, 0, 0, 0])
+  }
+
+  async function expectComposerInside(page: Page, band: { top: number; height: number }): Promise<void> {
+    const input = (await page.getByTestId('term-compose-input').boundingBox())!
+    const region = (await page.getByTestId('term-text').boundingBox())!
+    expect(input.y).toBeGreaterThanOrEqual(band.top - 1)
+    expect(input.y + input.height).toBeLessThanOrEqual(band.top + band.height + 1)
+    expect(region.y + region.height).toBeLessThanOrEqual(input.y + 1)
+  }
+
+  test('INV-17 the Read screen region follows the terminal through a resize', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await page.getByTestId('read-screen').click()
+    await expectRegionOverTerminal(page)
+
+    const start = page.viewportSize()!
+    for (const size of [
+      { width: start.height, height: start.width },
+      { width: 1280, height: 800 },
+      { width: 390, height: 600 },
+      start,
+    ]) {
+      await page.setViewportSize(size)
+      await expectRegionOverTerminal(page)
+      await page.getByTestId('term-compose-input').scrollIntoViewIfNeeded()
+      await expectComposerInside(page, { top: 0, height: size.height })
+    }
+  })
+
+  test('INV-17 the Read screen region stays above the composer when the keyboard opens', async ({ page, viewport }) => {
+    test.skip((viewport?.width ?? 0) > 900, 'the keyboard layout lives below 900px')
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await page.getByTestId('read-screen').click()
+    await expectRegionOverTerminal(page)
+
+    const band = { top: 0, height: Math.round(viewport!.height * 0.55) }
+    await page.evaluate(({ top, height }) => {
+      const root = document.documentElement
+      root.style.setProperty('--vvh', `${height}px`)
+      root.style.setProperty('--vvt', `${top}px`)
+      root.dataset.keyboard = 'true'
+    }, band)
+    await expectRegionOverTerminal(page)
+    await page.getByTestId('term-compose-input').scrollIntoViewIfNeeded()
+    await expectComposerInside(page, band)
+  })
+
+  test('Escape closes the Read screen region, returns to its button and stays on the agent', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    const url = page.url()
+    await page.getByTestId('read-screen').click()
+    await expect(page.getByTestId('term-text')).toBeFocused()
+
+    await page.keyboard.press('Escape')
+    await expect(page.getByTestId('term-text')).toHaveCount(0)
+    await expect(page.getByTestId('read-screen')).toBeFocused()
+    await expect(page.getByTestId('read-screen')).toHaveAttribute('aria-expanded', 'false')
+    await expect(page.getByTestId('term-wrap')).toBeVisible()
+    expect(page.url()).toBe(url)
   })
 
   test('INV-4 shows earlier output on request, one page per press', async ({ page }) => {

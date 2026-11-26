@@ -255,3 +255,79 @@ test.describe('an on-screen keyboard covers the keys, not the app', () => {
     expect(modal!.y + modal!.height).toBeLessThanOrEqual(PANNED_BAND.top + PANNED_BAND.height + 1)
   })
 })
+
+const SHORT_SHAPES = [
+  { name: '400% zoom', width: 320, height: 256 },
+  { name: 'a short wide window', width: 480, height: 237 },
+  { name: 'a letterbox', width: 844, height: 160 },
+  { name: 'a landscape phone', width: 844, height: 390 },
+  { name: 'a short window above the scroll cut', width: 480, height: 400 },
+]
+
+const UNSCROLLED_SHORT_SHAPES = SHORT_SHAPES.filter((shape) => shape.height > 320)
+
+test.describe('INV-17 the sheet topbar holds one row while the sheet does not scroll @desktop', () => {
+  for (const shape of UNSCROLLED_SHORT_SHAPES) {
+    test(`at ${shape.width}x${shape.height}, ${shape.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: shape.width, height: shape.height })
+      await page.goto(`/agent/${AGENT.plan}`)
+      await expect(page.locator('[data-sheet="true"]')).toBeAttached({ timeout: 15_000 })
+      const wrap = await page.evaluate(() => {
+        const topbar = document.querySelector('[data-sheet="true"] header')
+        return topbar ? getComputedStyle(topbar).flexWrap : 'missing'
+      })
+      expect(wrap).toBe('nowrap')
+    })
+  }
+})
+
+/** Whether the point at a box's centre belongs to that box, and is on screen. */
+async function centreIsReachable(page: Page, testId: string, nth: number): Promise<boolean> {
+  return page.evaluate(
+    ({ id, index }) => {
+      const target = document.querySelectorAll(`[data-testid="${id}"]`)[index]
+      if (!target) return false
+      const box = target.getBoundingClientRect()
+      const x = box.left + box.width / 2
+      const y = box.top + box.height / 2
+      if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) return false
+      const hit = document.elementFromPoint(x, y)
+      return hit !== null && target.contains(hit)
+    },
+    { id: testId, index: nth },
+  )
+}
+
+test.describe('INV-17 a short viewport can still reach the first answer option @desktop', () => {
+  for (const shape of SHORT_SHAPES) {
+    test(`at ${shape.width}x${shape.height}, ${shape.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: shape.width, height: shape.height })
+      await page.goto(`/agent/${AGENT.plan}`)
+      const first = page.getByTestId('answer-option').first()
+      await expect(first).toBeAttached({ timeout: 15_000 })
+      await first.scrollIntoViewIfNeeded()
+      await expect.poll(() => centreIsReachable(page, 'answer-option', 0)).toBe(true)
+      expect(await sidewaysOverflow(page)).toBeLessThanOrEqual(1)
+    })
+  }
+})
+
+test.describe('WCAG 2.4.11 a card focused by Tab is not under the top bar @desktop', () => {
+  test('at 320x256 every card Tab reaches has its centre uncovered', async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 256 })
+    await openFleet(page)
+    const covered: string[] = []
+    for (let step = 0; step < 60; step += 1) {
+      await page.keyboard.press('Tab')
+      const onCard = await page.evaluate(
+        () => document.activeElement?.getAttribute('data-testid') === 'agent-card',
+      )
+      if (!onCard) continue
+      const index = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="agent-card"]')].indexOf(document.activeElement as Element),
+      )
+      if (!(await centreIsReachable(page, 'agent-card', index))) covered.push(String(index))
+    }
+    expect(covered, `cards focused but covered or off screen: ${covered.join(', ')}`).toEqual([])
+  })
+})

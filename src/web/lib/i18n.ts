@@ -305,6 +305,8 @@ const EN = {
   /* terminal */
   fitWidth: 'Fit width',
   readable: 'Readable',
+  readScreen: 'Read screen',
+  termTextLabel: 'Terminal text, as of {time}',
   expand: 'Full screen',
   collapse: 'Exit full screen',
   termHint: 'Tap the terminal to type',
@@ -858,6 +860,8 @@ const ZH: Record<Key, string> = {
   yesterday: '昨天',
   fitWidth: '适应宽度',
   readable: '清晰模式',
+  readScreen: '读取屏幕',
+  termTextLabel: '终端文本，截至 {time}',
   expand: '全屏',
   collapse: '退出全屏',
   termHint: '点击终端即可输入',
