@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import type { RefObject } from 'react'
 import type { Agent, Frame } from '../../shared/types.ts'
 import { DESTRUCTIVE_KEYS } from '../../shared/types.ts'
@@ -451,8 +451,17 @@ export function Terminal({ agent, onExit }: TerminalProps) {
       time: new Date().toLocaleTimeString([], { hour12: false }),
     })
   }
-  useEffect(() => {
-    if (snapshot) snapshotRef.current?.focus()
+  useLayoutEffect(() => {
+    const region = snapshotRef.current
+    if (!snapshot || !region) return
+    const wrap = region.parentElement?.querySelector<HTMLElement>('[data-testid="term-wrap"]')
+    if (wrap) {
+      region.style.top = `${wrap.offsetTop}px`
+      region.style.left = `${wrap.offsetLeft}px`
+      region.style.width = `${wrap.offsetWidth}px`
+      region.style.height = `${wrap.offsetHeight}px`
+    }
+    region.focus()
   }, [snapshot])
 
 

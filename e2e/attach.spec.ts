@@ -45,6 +45,48 @@ test.describe('the terminal', () => {
     await expect(page.getByTestId('read-screen')).toHaveAttribute('aria-expanded', 'false')
   })
 
+  for (const size of [null, { width: 1280, height: 800 }]) {
+    test(`Read screen keeps the terminal width and the whole composer${size ? ' at 1280x800' : ''}`, async ({ page }) => {
+      if (size) await page.setViewportSize(size)
+      await openAgent(page, AGENT.idle)
+      await page.getByTestId('tab-attach').click()
+      await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+        timeout: 15_000,
+      })
+      const wrap = page.getByTestId('term-wrap')
+      const before = (await wrap.boundingBox())!
+      const inputBefore = (await page.getByTestId('term-compose-input').boundingBox())!
+
+      await page.getByTestId('read-screen').focus()
+      await page.keyboard.press('Enter')
+      const region = page.getByTestId('term-text')
+      await expect(region).toBeFocused()
+
+      await page.waitForTimeout(1000)
+      const after = (await wrap.boundingBox())!
+      expect(after.width).toBeCloseTo(before.width, 0)
+      expect(after.height).toBeCloseTo(before.height, 0)
+      const viewport = page.viewportSize()!
+      await page.getByTestId('term-compose-input').scrollIntoViewIfNeeded()
+      const input = (await page.getByTestId('term-compose-input').boundingBox())!
+      expect(input.x).toBeGreaterThanOrEqual(0)
+      expect(input.y).toBeGreaterThanOrEqual(0)
+      expect(input.x + input.width).toBeLessThanOrEqual(viewport.width)
+      expect(input.y + input.height).toBeLessThanOrEqual(viewport.height)
+      expect(input.height).toBeCloseTo(inputBefore.height, 0)
+      const box = (await region.boundingBox())!
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport.width)
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport.height)
+      const fit = await region.evaluate((el) => ({
+        scrolls: el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight,
+        overflowX: getComputedStyle(el).overflowX,
+        overflowY: getComputedStyle(el).overflowY,
+      }))
+      expect(fit.overflowX).toBe('auto')
+      expect(fit.overflowY).toBe('auto')
+    })
+  }
+
   test('INV-4 shows earlier output on request, one page per press', async ({ page }) => {
     await openAgent(page, AGENT.idle)
     await page.getByTestId('tab-attach').click()

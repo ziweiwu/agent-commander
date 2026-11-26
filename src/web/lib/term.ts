@@ -605,6 +605,7 @@ function outerHeightOfOthers(parent: HTMLElement, except: HTMLElement): number {
   for (const child of Array.from(parent.children)) {
     if (child === except || !(child instanceof HTMLElement)) continue
     const style = getComputedStyle(child)
+    if (style.position === 'absolute' || style.position === 'fixed') continue
     total += child.offsetHeight + pixels(style.marginTop) + pixels(style.marginBottom)
   }
   return total

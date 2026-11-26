@@ -52,6 +52,19 @@ test.describe('a focused scroll box shows its ring', () => {
     await expectRingPainted(page, scroll)
   })
 
+  test('the Read screen region, opened from the keyboard', async ({ page }) => {
+    await openAgent(page, AGENT.idle)
+    await page.getByTestId('tab-attach').click()
+    await expect(page.locator('[data-testid="terminal"] .xterm-rows')).toContainText(/Reading src/, {
+      timeout: 15_000,
+    })
+    await page.getByTestId('read-screen').focus()
+    await page.keyboard.press('Enter')
+    const region = page.getByTestId('term-text')
+    await expect(region).toBeFocused()
+    await expectRingPainted(page, region)
+  })
+
   test('the conversation keeps its ring off after a mouse click', async ({ page }) => {
     await page.goto(`/agent/${AGENT.permission}`)
     await expect(page.getByTestId('answer-card')).toBeVisible()
