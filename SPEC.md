@@ -547,9 +547,11 @@ over the list with a back control; on a wide one, a second column.
   one begun on a caught-up fleet never follows — what arrives while the reader
   is here, their own sends included, is not news. When nothing read is at or before `seenThrough` the transcript
   tail did not reach that far, so it MUST go at the top and say *at least*.
-  When the new part is taller than the view, the chat MUST open scrolled to the
-  divider, with *Jump to latest* for the rest. Nothing newer MUST mean no
-  divider. **(INV-11)** *`test/ui/new-since.test.tsx`,
+  The chat MUST open at the latest message and keep following it, however
+  much is new: the divider is a line to scroll up to, never a place the view is
+  parked, and it MUST NOT unpin the view. A pinned view MUST also follow content
+  that grows after it was drawn (a tool result, a code block, a late capture).
+  Nothing newer MUST mean no divider. **(INV-11)** *`test/ui/new-since.test.tsx`,
   `test/ui/new-since-visit.test.tsx`,
   `enrich::tests::f6_caught_up_only_after_the_first_pass_following_a_resume`.*
 

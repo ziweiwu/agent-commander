@@ -109,6 +109,11 @@ function followTarget(scroller: HTMLElement, answerSlot: HTMLElement | null): nu
   return intoTheCard ? scroller.scrollHeight : Math.min(scroller.scrollHeight, top)
 }
 
+function follow(scroller: HTMLElement, answerSlot: HTMLElement | null, written: { current: number | null }): void {
+  scroller.scrollTop = followTarget(scroller, answerSlot)
+  written.current = scroller.scrollTop
+}
+
 /** Whether any of an element is inside the part of its scroller on screen. */
 function partlyIn(element: HTMLElement, scroller: HTMLElement): boolean {
   const view = scroller.getBoundingClientRect()
@@ -210,7 +215,7 @@ function EmptyNotice({ agent }: { agent: Agent }) {
  * (INV-11). The counts stop where the agent had got when the visit began, and
  * say "at least" when the transcript tail did not reach back far enough.
  */
-function NewSinceLine({ divider, since, anchor }: { divider: Divider; since: number; anchor: React.Ref<HTMLDivElement> }) {
+function NewSinceLine({ divider, since }: { divider: Divider; since: number }) {
   const t = useTranslate()
   const lang = useLang()
   const replies = t(divider.replies === 1 ? 'newSinceReplyOne' : 'newSinceReplyMany', { n: divider.replies })
@@ -218,7 +223,6 @@ function NewSinceLine({ divider, since, anchor }: { divider: Divider; since: num
   const when = formatRelative(lang, relative(since))
   return (
     <div
-      ref={anchor}
       className={styles.daySep}
       data-testid="new-since"
       data-at-least={divider.atLeast || undefined}
@@ -497,8 +501,8 @@ export function Chat({ agent }: { agent: Agent }) {
   const visit = useStore((s) => s.visit)
   const ownVisit = visit?.sessionId === agent.sessionId ? visit : null
   const divider = useMemo(() => dividerFor(messages, ownVisit), [messages, ownVisit])
-  const dividerRef = useRef<HTMLDivElement>(null)
-  const dividerPlacedFor = useRef<string | null>(null)
+  const ownScrollTop = useRef<number | null>(null)
+  const listRef = useRef<HTMLDivElement>(null)
 
   const rows = useMemo(() => {
     const out: Array<{ key: string; day?: string; newSince?: true; message?: (typeof messages)[number] }> = []
@@ -527,30 +531,13 @@ export function Chat({ agent }: { agent: Agent }) {
    * re-runs this effect. It read as the status never arriving.
    *
    * Anything else that renders after the last message has to be listed here
-   * for the same reason.
+   * for the same reason. Opening always lands here: the "new since you last
+   * opened this" divider is a line in the transcript to scroll up to, never a
+   * place the view is parked.
    */
   useLayoutEffect(() => {
-    if (pinned && scrollRef.current) {
-      scrollRef.current.scrollTop = followTarget(scrollRef.current, answerRef.current)
-    }
+    if (pinned && scrollRef.current) follow(scrollRef.current, answerRef.current, ownScrollTop)
   }, [messages.length, busy, pinned, answering, handOff.shown])
-
-  /**
-   * Open at the divider when what is new is taller than the view, once per
-   * visit; "Jump to latest" covers the rest. Declared after the follow above
-   * so it has the last word on the first paint, and it unpins so the follow
-   * does not take the view straight back down.
-   */
-  useLayoutEffect(() => {
-    const line = dividerRef.current
-    const box = scrollRef.current
-    if (!line || !box || dividerPlacedFor.current === agent.sessionId) return
-    dividerPlacedFor.current = agent.sessionId
-    const top = line.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop
-    if (box.scrollHeight - top <= box.clientHeight) return
-    box.scrollTop = top
-    setPinned(false)
-  }, [divider, agent.sessionId])
 
   /**
    * Open a blocked agent with its question at the top of the conversation.
@@ -558,7 +545,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * The card is the conversation's last row, so the turn that led to the
    * question is one swipe up and its options are below it, inside the same
    * scroller. Placed once per question, after the transcript has landed, and
-   * declared after the follow and the divider so it has the last word: the
+   * declared after the follow so it has the last word: the
    * question is what a blocked agent is opened for. Only this scroller moves,
    * never the sheet or the page around it, which is why it is not
    * `scrollIntoView`. It runs on every pointer; only focus is desktop-only.
@@ -578,14 +565,19 @@ export function Chat({ agent }: { agent: Agent }) {
    * lands. An on-screen keyboard takes half the screen from this scroller,
    * and without this the last message — the one being replied to — went
    * under the composer on every keyboard open.
+   *
+   * The list is watched too: a tool result, a code block or a late pane
+   * capture grows it after the messages that hold it were drawn, which the
+   * message count never announces. A pinned view follows that growth.
    */
   useEffect(() => {
     const el = scrollRef.current
     if (!el || typeof ResizeObserver === 'undefined') return
     const observer = new ResizeObserver(() => {
-      if (pinned) el.scrollTop = followTarget(el, answerRef.current)
+      if (pinned) follow(el, answerRef.current, ownScrollTop)
     })
     observer.observe(el)
+    if (listRef.current) observer.observe(listRef.current)
     if (answerRef.current) observer.observe(answerRef.current)
     return () => observer.disconnect()
   }, [pinned, answering])
@@ -739,19 +731,21 @@ export function Chat({ agent }: { agent: Agent }) {
           data-overflow={answering ? scrollEdge : undefined}
           onScroll={(e) => {
             const el = e.currentTarget
-            setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < PIN_SLACK)
+            const ownWrite = ownScrollTop.current === el.scrollTop
+            ownScrollTop.current = null
+            if (!ownWrite) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < PIN_SLACK)
             const question = answerRef.current?.firstElementChild
             setQuestionOnScreen(question instanceof HTMLElement && partlyIn(question, el))
           }}
         >
-          <div className={styles.list} data-testid="chat-list">
+          <div ref={listRef} className={styles.list} data-testid="chat-list">
             {messages.length === 0 ? (
               <EmptyNotice agent={agent} />
             ) : (
               <>
                 {rows.map((row) => {
                   if (row.newSince && divider && ownVisit) {
-                    return <NewSinceLine key={row.key} divider={divider} since={ownVisit.seenThrough} anchor={dividerRef} />
+                    return <NewSinceLine key={row.key} divider={divider} since={ownVisit.seenThrough} />
                   }
                   return row.day ? (
                     <div key={row.key} className={styles.daySep}>
