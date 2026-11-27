@@ -545,7 +545,7 @@ export function Chat({ agent }: { agent: Agent }) {
    * The card is the conversation's last row, so the turn that led to the
    * question is one swipe up and its options are below it, inside the same
    * scroller. Placed once per question, after the transcript has landed, and
-   * declared after the follow and the divider so it has the last word: the
+   * declared after the follow so it has the last word: the
    * question is what a blocked agent is opened for. Only this scroller moves,
    * never the sheet or the page around it, which is why it is not
    * `scrollIntoView`. It runs on every pointer; only focus is desktop-only.
