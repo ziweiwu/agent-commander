@@ -1715,8 +1715,8 @@ in this app*, and every part of it is measured rather than guessed:
 - `test/ui/new-since.test.tsx` — the mark is on idle Claude cards only, beside
   the age, never amber, absent while stale; the heading counts it; the divider
   sits where the news begins, says *at least* at the top, is absent when
-  nothing is newer, holds while the record moves, and opens the view at itself
-  when the news is taller than it
+  nothing is newer, holds while the record moves, and leaves the view at the latest
+  message and following it however much is new
 - `test/ui/new-since-visit.test.tsx` — the divider is placed from the record
   as it stood before this tab's own focus moved it
 - `e2e/new-since.spec.ts` — a fixture that moves while its only tab is hidden

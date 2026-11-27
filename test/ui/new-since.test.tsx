@@ -162,7 +162,7 @@ describe('F6 the divider in Chat', () => {
     expect(line.compareDocumentPosition(firstMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
-  it('opens at the divider when what is new is taller than the view, and offers the way down', () => {
+  it('opens at the latest message when what is new is taller than the view, with the divider left above', () => {
     const DIVIDER_TOP_PX = 300
     const VIEW_PX = 400
     const CONTENT_PX = 2_000
@@ -174,8 +174,48 @@ describe('F6 the divider in Chat', () => {
     })
     useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false } })
     openChat()
-    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(DIVIDER_TOP_PX)
-    expect(screen.getByTestId('jump-to-latest')).toBeDefined()
+    expect(screen.getByTestId('new-since')).toBeDefined()
+    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(CONTENT_PX)
+    expect(screen.queryByTestId('jump-to-latest')).toBeNull()
+    act(() => {
+      laidOut(CONTENT_PX + 100, VIEW_PX)
+      useStore.setState({
+        messages: [...conversation(), ...buildMessages([{ id: 'newest', at: LATER + 1_000, kind: 'assistant', text: 'One more.' }])],
+      })
+    })
+    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(CONTENT_PX + 100)
+    vi.restoreAllMocks()
+    laidOut(0, 0)
+  })
+
+  it('follows content that grows after it was drawn while the view is pinned', () => {
+    const VIEW_PX = 400
+    const CONTENT_PX = 2_000
+    const GROWN_PX = 2_300
+    const callbacks: Array<() => void> = []
+    const watched: Element[] = []
+    const original = globalThis.ResizeObserver
+    Object.assign(globalThis, {
+      ResizeObserver: class {
+        constructor(callback: () => void) {
+          callbacks.push(callback)
+        }
+        observe(target: Element) {
+          watched.push(target)
+        }
+        unobserve() {}
+        disconnect() {}
+      },
+    })
+    laidOut(CONTENT_PX, VIEW_PX)
+    useStore.setState({ messages: conversation(), visit: { sessionId: 'x', seenThrough: SHOWN_AT, activityAt: LATER, following: false } })
+    openChat()
+    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(CONTENT_PX)
+    expect(watched).toContain(screen.getByTestId('chat-list'))
+    laidOut(GROWN_PX, VIEW_PX)
+    act(() => callbacks.forEach((callback) => callback()))
+    expect(screen.getByTestId('chat-scroll').scrollTop).toBe(GROWN_PX)
+    Object.assign(globalThis, { ResizeObserver: original })
     vi.restoreAllMocks()
     laidOut(0, 0)
   })
